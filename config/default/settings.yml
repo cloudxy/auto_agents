@@ -1,0 +1,8 @@
+# 应用基础配置 - 默认值
+
+# === 应用信息 ===
+APP_NAME: "Auto Agents"
+VERSION: "0.1.0"
+
+# === 环境标识 ===
+ENVIRONMENT: "local"  # local, dev, prod

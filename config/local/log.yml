@@ -1,0 +1,11 @@
+# 本地开发环境日志配置（覆盖 default）
+
+LOGGERS:
+  global:
+    level: "DEBUG"
+  
+  api:
+    level: "DEBUG"
+  
+  spider:
+    level: "DEBUG"

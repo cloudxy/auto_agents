@@ -1,0 +1,13 @@
+# JWT 认证配置
+
+JWT:
+  # 密钥（生产环境必须通过环境变量覆盖）
+  # 设置方式: export AUTO_AGENTS_JWT__SECRET_KEY="your-secret-key"
+  SECRET_KEY: "change-me-in-production"
+  
+  # 算法
+  ALGORITHM: "HS256"
+  
+  # Token 过期时间
+  ACCESS_TOKEN_EXPIRE_MINUTES: 30      # 访问令牌：30分钟
+  REFRESH_TOKEN_EXPIRE_DAYS: 7         # 刷新令牌：7天

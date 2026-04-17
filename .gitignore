@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# UV
+uv.lock
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+backend/logs/
+*.log
+
+# Runtime & Temp (不提交)
+runtime/
+temp/
+
+# Files (不提交，但保留目录结构)
+files/uploads/*
+files/downloads/*
+files/exports/*
+!files/uploads/.gitkeep
+!files/downloads/.gitkeep
+!files/exports/.gitkeep
+
+# Environment
+.env
+.env.local
+config/**/.env
+config/.secrets.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/

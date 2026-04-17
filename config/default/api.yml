@@ -1,0 +1,16 @@
+# API 服务配置
+
+API:
+  # 服务器配置
+  HOST: "127.0.0.1"
+  PORT: 9111
+  
+  # 调试模式
+  DEBUG: false
+  
+  # 注意：API 路由前缀由代码控制
+  # - 主路由: /api (在 backend/app/__init__.py 中定义)
+  # - 版本路由: /v1, /v2 (在 backend/app/api/__init__.py 中定义)
+  # - 最终路径: /api/v1/*, /api/v2/*
+  
+  # 注意：密钥配置在 jwt.yml 中

@@ -1,0 +1,9 @@
+# 本地开发环境配置
+
+DEBUG: true
+RELOAD: true
+
+# === Scrapy 调试 ===
+CONCURRENT_REQUESTS: 4
+DOWNLOAD_DELAY: 2
+LOG_LEVEL: "DEBUG"

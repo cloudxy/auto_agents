@@ -1,0 +1,18 @@
+# 官网配置 - 默认值
+
+OFFICIAL:
+  # 服务器配置
+  HOST: "127.0.0.1"
+  PORT: 9113
+  
+  # 基本信息
+  TITLE: "Auto Agents"
+  DESCRIPTION: "智能自动化代理平台"
+  KEYWORDS: "auto, agents, automation, AI"
+  
+  # === SEO 配置 ===
+  ENABLE_SSR: false
+  SITEMAP_ENABLED: false
+  
+  # === 静态资源配置 ===
+  STATIC_CACHE_MAX_AGE: 31536000  # 1年

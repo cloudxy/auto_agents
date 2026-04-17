@@ -1,0 +1,10 @@
+# MySQL 配置 - 开发环境
+MYSQL:
+  DEFAULT:
+    HOST: "127.0.0.1"
+    PORT: 3306
+    USER: "auto_agents_dev"
+    PASSWORD: ""  # 由 .env 提供
+    DB_NAME: "auto_agents_dev"
+    CHARSET: "utf8mb4"
+    COLLATION: "utf8mb4_unicode_ci"

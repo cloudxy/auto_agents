@@ -1,0 +1,27 @@
+# Scrapy 爬虫配置 - 默认值
+
+CONCURRENT_REQUESTS: 32
+DOWNLOAD_DELAY: 1
+LOG_LEVEL: "INFO"
+
+# === 爬虫通用配置 ===
+ROBOTSTXT_OBEY: false
+COOKIES_ENABLED: true
+RETRY_TIMES: 3
+RETRY_HTTP_CODES: [500, 502, 503, 504, 408, 429]
+
+# === 下载中间件 ===
+DOWNLOADER_MIDDLEWARES:
+  scrapy.downloadermiddlewares.useragent.UserAgentMiddleware: null
+  middlewares.AccountSessionMiddleware: 250
+  middlewares.FingerprintMiddleware: 300
+  middlewares.ProxyMiddleware: 350
+  middlewares.UserAgentMiddleware: 400
+  middlewares.RetryMiddleware: 550
+
+# === 管道配置 ===
+ITEM_PIPELINES:
+  scrapy_redis.pipelines.RedisPipeline: 100
+  pipelines.CleanPipeline: 200
+  pipelines.ValidatePipeline: 300
+  pipelines.StorePipeline: 400

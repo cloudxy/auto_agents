@@ -1,0 +1,11 @@
+# 生产环境日志配置（覆盖 default）
+
+LOGGERS:
+  global:
+    level: "WARNING"
+  
+  api:
+    level: "WARNING"
+  
+  spider:
+    level: "WARNING"

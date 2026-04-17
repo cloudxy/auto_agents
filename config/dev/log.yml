@@ -1,0 +1,11 @@
+# 开发环境日志配置（覆盖 default）
+
+LOGGERS:
+  global:
+    level: "INFO"
+  
+  api:
+    level: "INFO"
+  
+  spider:
+    level: "INFO"

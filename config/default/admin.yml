@@ -1,0 +1,20 @@
+# 管理后台配置 - 默认值
+
+ADMIN:
+  # 服务器配置
+  HOST: "127.0.0.1"
+  PORT: 9112
+  
+  # 基本信息
+  TITLE: "Auto Agents 管理后台"
+  LOGO: "/static/logo.png"
+
+  # === 分页配置 ===
+  PAGE_SIZE: 20
+  MAX_PAGE_SIZE: 100
+  
+  # === 导出配置 ===
+  EXPORT_MAX_ROWS: 10000
+  EXPORT_FORMATS:
+    - "csv"
+    - "xlsx"
