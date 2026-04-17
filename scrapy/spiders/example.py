@@ -1,7 +1,7 @@
 """Scrapy 示例爬虫 - 支持 API/Web/嗅探多模式采集"""
 from scrapy_redis.spiders import RedisSpider
-from ..items import ArticleItem
-from core.log_init import get_logger
+from items import BaseItem
+from platform_core.infra.log_init import get_logger
 
 logger = get_logger("spider")
 
@@ -34,7 +34,7 @@ class ExampleSpider(RedisSpider):
     def parse_api(self, response):
         """处理 API 响应"""
         data = response.json()
-        item = ArticleItem()
+        item = BaseItem()
         item['url'] = response.url
         item['title'] = f"API Response from {response.url}"
         item['content'] = str(data)  # 存储原始 JSON
@@ -43,7 +43,7 @@ class ExampleSpider(RedisSpider):
 
     def parse_html(self, response):
         """处理 HTML 页面"""
-        item = ArticleItem()
+        item = BaseItem()
         item['url'] = response.url
         item['title'] = response.css('title::text').get()
         item['content'] = ''.join(response.css('p::text').getall())

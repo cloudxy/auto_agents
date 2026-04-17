@@ -1,6 +1,6 @@
 """V2 根路由 - 展示与 V1 的差异"""
 from fastapi import APIRouter
-from backend.cors.log_init import get_logger
+from platform_core.infra.log_init import get_logger
 
 router = APIRouter()
 
