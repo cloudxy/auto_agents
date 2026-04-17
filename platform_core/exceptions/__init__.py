@@ -1,11 +1,11 @@
 """统一异常处理 - 导出所有异常类和处理器
 
 使用方式：
-    from backend.app.exceptions import BusinessException, NotFoundException
-    from backend.app.exceptions import register_exception_handlers
+    from platform_core.exceptions import BusinessException, NotFoundException
+    from platform_core.exceptions import register_exception_handlers
 """
-from backend.app.exceptions.base import AppException
-from backend.app.exceptions.business import (
+from platform_core.exceptions.base import AppException
+from platform_core.exceptions.business import (
     BusinessException,
     AuthenticationException,
     AuthorizationException,
@@ -14,7 +14,7 @@ from backend.app.exceptions.business import (
     RateLimitException,
     DatabaseException,
 )
-from backend.app.exceptions.handlers import register_exception_handlers
+from platform_core.exceptions.handlers import register_exception_handlers
 
 __all__ = [
     # 基类

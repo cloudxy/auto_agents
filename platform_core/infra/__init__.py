@@ -1,7 +1,7 @@
 """核心基础设施层 - 统一管理日志、数据库与存储初始化"""
-from core.log_init import init_log, get_logger
-from core.db_init import init_db, redis_client, get_async_db
-from core.storage_init import init_storage
+from platform_core.infra.log_init import init_log, get_logger
+from platform_core.infra.db_init import init_db, redis_client, get_async_db
+from platform_core.infra.storage_init import init_storage
 
 
 def initialize_app():

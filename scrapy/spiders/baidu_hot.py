@@ -1,7 +1,7 @@
 """百度热搜榜爬虫 - 采集 PC 端实时热点"""
 from scrapy_redis.spiders import RedisSpider
-from ..items import HotSearchItem
-from core.log_init import get_logger
+from items import HotSearchItem
+from platform_core.infra.log_init import get_logger
 
 logger = get_logger("spider")
 

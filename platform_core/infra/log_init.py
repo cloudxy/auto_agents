@@ -4,8 +4,8 @@ import sys
 from datetime import datetime
 
 # 确保根目录在路径中，以便读取 config
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from loguru import logger
 from config import settings
 
@@ -41,8 +41,9 @@ def init_log():
     """初始化所有日志处理器（数据驱动）"""
     logger.remove()
 
-    # 获取项目根目录
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    # 关键修复：强制获取项目根目录（platform_core 的上两级目录）
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    log_root = os.path.join(project_root, 'logs')
 
     loggers_cfg = getattr(settings, "LOGGERS", {})
     if not hasattr(loggers_cfg, "keys"):
@@ -54,7 +55,11 @@ def init_log():
 
         file_path = getattr(cfg, "FILE", getattr(cfg, "file", f"logs/{name}/{name}.log"))
         
+        # 如果是相对路径，强制转换为基于项目根目录 logs/ 的绝对路径
         if not os.path.isabs(file_path):
+            # 确保路径格式为 logs/xxx/xxx.log
+            if not file_path.startswith('logs/'):
+                file_path = f"logs/{file_path}" if not file_path.startswith('/') else file_path.lstrip('/')
             file_path = os.path.join(project_root, file_path)
         
         level = getattr(cfg, "LEVEL", getattr(cfg, "level", "INFO"))

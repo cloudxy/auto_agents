@@ -7,11 +7,11 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+# 确保根目录在路径中
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from loguru import logger
 from config import settings
-from backend.cors.log_init import get_logger
+from platform_core.infra.log_init import get_logger
 
 
 class StorageManager:
@@ -48,6 +48,7 @@ class StorageManager:
             f.write(expire_at.to_bytes(8, "big"))
             f.write(data)
 
+        logger = get_logger("global")
         logger.debug(f"Cache set: {key}")
         return str(cache_file)
 
@@ -65,22 +66,6 @@ class StorageManager:
                 cache_file.unlink()
                 return None
             return f.read()
-
-    def cache_delete(self, key: str) -> bool:
-        """删除缓存"""
-        cache_key = hashlib.md5(key.encode()).hexdigest()
-        cache_file = self.cache_dir / f"{cache_key}.cache"
-        if cache_file.exists():
-            cache_file.unlink()
-            return True
-        return False
-
-    def cache_clear(self) -> int:
-        """清空所有缓存"""
-        global_log = get_logger("global")
-        count = sum(1 for f in self.cache_dir.glob("*.cache") if f.unlink() is None or True)
-        global_log.info(f"Cache cleared: {count} files")
-        return count
 
     def save_upload(self, file_content: bytes, filename: str) -> str:
         """保存上传文件"""
@@ -132,18 +117,13 @@ class StorageManager:
         return str(filepath)
 
 
-# 全局单例
 _storage = None
 
-
 def get_storage() -> StorageManager:
-    """获取存储管理器单例"""
     global _storage
     if _storage is None:
         _storage = StorageManager()
     return _storage
 
-
 def init_storage():
-    """初始化存储模块（创建目录）"""
     return get_storage()

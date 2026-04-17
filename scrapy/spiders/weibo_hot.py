@@ -1,7 +1,7 @@
 """微博热搜榜爬虫 - 需登录态支持"""
 from scrapy_redis.spiders import RedisSpider
-from ..items import HotSearchItem
-from core.log_init import get_logger
+from items import HotSearchItem
+from platform_core.infra.log_init import get_logger
 
 logger = get_logger("spider")
 

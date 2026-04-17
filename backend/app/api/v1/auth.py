@@ -1,11 +1,11 @@
 """认证路由 - 使用统一参数接收器和响应格式"""
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.cors.db_init import get_async_db
+from platform_core.infra.db_init import get_async_db
 from backend.services.auth_service import AuthService
-from backend.cors.log_init import get_logger
-from backend.cors.db_init import redis_client
-from backend.app.exceptions import AuthenticationException, RateLimitException
+from platform_core.infra.log_init import get_logger
+from platform_core.infra.db_init import redis_client
+from platform_core.exceptions import AuthenticationException, RateLimitException
 from backend.schemas import LoginRequest, RegisterRequest  # 统一参数接收器
 from backend.app.responses import ApiResponse, ok
 

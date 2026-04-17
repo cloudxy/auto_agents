@@ -1,5 +1,5 @@
 """业务异常类 - 常见业务场景的预定义异常"""
-from backend.app.exceptions.base import AppException
+from platform_core.exceptions.base import AppException
 
 
 class BusinessException(AppException):

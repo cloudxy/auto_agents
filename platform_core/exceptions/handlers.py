@@ -2,8 +2,8 @@
 import uuid
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
-from backend.cors.log_init import get_logger
-from backend.app.exceptions.base import AppException
+from platform_core.infra.log_init import get_logger
+from platform_core.exceptions.base import AppException
 
 logger = get_logger("error")
 

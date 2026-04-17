@@ -1,10 +1,22 @@
 ---
-description: 全局架构哲学与价值观指南
+description: 架构哲学与演进规则 - 价值观、设计原则、演进方向
+trigger: always_on
 ---
 
 # 架构哲学
 
-> 当涉及项目架构设计时，遵循本规则。具体执行时查找对应 Skill。
+> 当涉及项目架构设计、分层、解耦、演进时，遵循本规则。具体执行时查找对应 Skill。
+
+## 激活信号（什么时候应用本规则）
+
+| 信号类型 | 具体表现 |
+|---------|---------|
+| **新建模块** | 创建新的 service / API / 爬虫 / 工具库 |
+| **改分层** | 修改目录结构、移动文件、调整 import 路径 |
+| **引入依赖** | 新加第三方库、新增模块间引用、跨子项目调用 |
+| **讨论边界** | 服务间通信、数据流、部署拓扑、技术栈选型 |
+| **涉及数据** | 定义 ORM 模型、Pydantic schema、API 契约 |
+| **涉及配置** | 环境变量、敏感信息、连接串、超时参数 |
 
 ## 核心价值观
 
@@ -20,6 +32,23 @@ description: 全局架构哲学与价值观指南
 | 反爬是生存底线 | 没有反爬策略的爬虫是 DDoS |
 | 数据质量先于数量 | 100 条干净数据 > 10000 条脏数据 |
 
+## 架构红线（可机械检查）
+
+上述价值观违规时，用 grep / 代码审查立即定位：
+
+| 信条 | 红线 | 检查命令 |
+|------|------|---------|
+| 配置即代码 | 禁止硬编码连接串、密钥、端口 | `grep -rE "(mysql\|postgres\|redis)://[^$\{]" backend/ scrapy/` |
+| 配置即代码 | 禁止在代码里写明文 password | `grep -rE 'password\s*=\s*"[^$]' backend/ scrapy/` |
+| 爬取与存储分离 | scrapy 禁止 import backend 内部 | `grep -rE "from (backend\|app)\." scrapy/` |
+| 爬虫不能直写主库 | scrapy 禁止使用 SQLAlchemy Session | `grep -rE "from sqlalchemy\|SessionLocal\|get_db" scrapy/` |
+| 反爬是底线 | 爬虫必须配 DOWNLOAD_DELAY | `grep -rE "DOWNLOAD_DELAY" scrapy/settings.py` |
+| 反爬是底线 | 爬虫必须配 USER_AGENT 轮换或中间件 | `grep -rE "USER_AGENT\|UserAgentMiddleware" scrapy/` |
+| 模型即契约 | API 层禁止直接 import ORM 模型 | `grep -rE "from.*\.models import" backend/app/api/` |
+| 模型即契约 | ORM 模型禁止 import Pydantic schema | `grep -rE "from.*\.schemas import" backend/models/` |
+| 数据流向不可逆 | 禁止循环 import（A→B→A） | `python -c "import backend.app"` 能否成功加载 |
+| 日志即证据 | service 方法必须有入口 logger | code review：每个 public 方法第一行 `logger.info` |
+
 ## 设计原则
 
 ### 为什么分层？
@@ -34,7 +63,7 @@ description: 全局架构哲学与价值观指南
 
 **解耦边界**：
 - **数据边界**：不共享数据库表，通过 API/MQ 传递数据
-- **依赖边界**：不直接 import 对方内部实现
+- **依赖边界**：不直接 import 对方内部实现，通过接口交互
 - **部署边界**：可独立启动、扩缩容、故障隔离
 
 ### 为什么 API 内外分离？
@@ -53,6 +82,12 @@ description: 全局架构哲学与价值观指南
 
 没有反爬策略的爬虫：对目标网站不尊重（等同于攻击）、对自己不负责（IP/账号被封）、对项目有风险（法律/技术风险）。
 
+## 演进方向
+
+本项目采用多项目架构，各子项目技术栈独立、依赖独立、可独立部署。
+
+演进路径：**直连 → 爬虫通过 Redis/MQ 发送数据 → 引入消息队列解耦 → 微服务化**
+
 ## 技术栈
 
 **后端**：FastAPI + SQLAlchemy + MySQL + Redis + Dynaconf + Loguru
@@ -68,8 +103,11 @@ description: 全局架构哲学与价值观指南
 |------|-------|
 | 创建服务模块 | `/new-svc` |
 | 创建爬虫 | `/new-spider` |
+| 创建数据模型 | `/new-model` |
+| 架构合规检查（10 条红线） | `/check-arch` |
+| 交付自检 | `/verify` |
 | 编码规范 | `/coding-style` |
 | 日志规范 | `/logging` |
 | 配置规范 | `/config` |
 | 部署配置 | `/deploy` |
-| CI/CD 配置 | `/cicd`
+| CI/CD 配置 | `/cicd` |

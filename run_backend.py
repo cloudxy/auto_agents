@@ -60,11 +60,14 @@ def main():
     
     # 导入依赖（在解析参数后，避免不必要的导入开销）
     import uvicorn
-    from core import initialize_app
+    from platform_core.infra import init_log, init_db, init_storage
     from backend.app import create_app
     
     # 1. 初始化基础设施（日志、数据库、存储）
-    initialize_app()
+    print("🚀 Initializing Platform Core...")
+    init_log()
+    init_db()
+    init_storage()
     
     # 2. 创建 FastAPI 应用
     app = create_app()
