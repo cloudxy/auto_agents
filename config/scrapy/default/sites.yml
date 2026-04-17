@@ -1,0 +1,49 @@
+# 爬虫站点配置中心 - 集中管理目标站点的连接与反爬策略
+# 
+# 结构说明：
+# - site_id: 站点唯一标识
+# - login: 登录相关配置
+# - anti_crawl: 反爬策略配置
+# - api_endpoints: API 端点列表
+
+sites:
+  baidu_hot:
+    name: "百度热搜榜"
+    base_url: "https://top.baidu.com"
+    anti_crawl:
+      fixed_ua: false
+      download_delay: 2
+
+  openweather:
+    name: "OpenWeatherMap API"
+    base_url: "https://api.openweathermap.org"
+    api_key: "YOUR_API_KEY_HERE" # 请在此处填入你的 Key
+    anti_crawl:
+      fixed_ua: true
+      download_delay: 0.5
+
+  weibo_hot:
+    name: "微博热搜榜"
+    base_url: "https://weibo.com"
+    login_required: true
+    anti_crawl:
+      fixed_ua: true
+      proxy_enabled: true
+      download_delay: 5
+
+  zhihu_feed:
+    name: "知乎推荐页"
+    base_url: "https://www.zhihu.com"
+    login_required: true
+    anti_crawl:
+      fixed_ua: true
+      download_delay: 3
+
+  dianping_home:
+    name: "大众点评首页"
+    base_url: "https://www.dianping.com"
+    login_required: true
+    anti_crawl:
+      fixed_ua: true
+      proxy_enabled: true
+      download_delay: 4

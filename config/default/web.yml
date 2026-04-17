@@ -1,0 +1,16 @@
+# Web 服务配置 - CORS 跨域配置
+# 注意：服务器端口配置在 api.yml 中
+
+CORS:
+  ORIGINS:
+    - "http://localhost:9112"      # 管理后台
+    - "http://localhost:9113"      # 官方网站
+  ALLOW_CREDENTIALS: true
+  ALLOW_METHODS:
+    - "GET"
+    - "POST"
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  ALLOW_HEADERS:
+    - "*"

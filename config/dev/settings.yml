@@ -1,0 +1,9 @@
+# 开发环境配置
+
+DEBUG: true
+RELOAD: false
+
+# === Scrapy 配置 ===
+CONCURRENT_REQUESTS: 8
+DOWNLOAD_DELAY: 1
+LOG_LEVEL: "INFO"

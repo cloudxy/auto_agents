@@ -1,0 +1,25 @@
+# 存储配置 - 默认值
+
+# === 文件存储路径 ===
+STORAGE_ROOT: "."
+CACHE_DIR: "runtime/cache"
+SESSIONS_DIR: "runtime/sessions"
+UPLOADS_DIR: "files/uploads"
+DOWNLOADS_DIR: "files/downloads"
+EXPORTS_DIR: "files/exports"
+TEMP_DIR: "temp"
+
+# === 上传限制 ===
+MAX_UPLOAD_SIZE: 10485760  # 10MB
+ALLOWED_EXTENSIONS:
+  - "jpg"
+  - "jpeg"
+  - "png"
+  - "gif"
+  - "pdf"
+  - "csv"
+  - "xlsx"
+
+# === 缓存配置 ===
+CACHE_TTL: 3600  # 1小时
+TEMP_MAX_AGE: 86400  # 24小时

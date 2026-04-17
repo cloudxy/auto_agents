@@ -1,0 +1,47 @@
+# 日志配置 - 默认值
+
+LOG_FORMAT: "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
+
+LOGGERS:
+  global:
+    file: "logs/global/app.log"
+    level: "INFO"
+    max_size: 100
+    retention: 30
+    console: true
+    rotate_hour: 3
+
+  api:
+    file: "logs/api/api.log"
+    level: "INFO"
+    max_size: 100
+    retention: 30
+    rotate_hour: 3
+
+  admin:
+    file: "logs/admin/admin.log"
+    level: "INFO"
+    max_size: 100
+    retention: 30
+    rotate_hour: 3
+
+  official:
+    file: "logs/official/official.log"
+    level: "INFO"
+    max_size: 100
+    retention: 30
+    rotate_hour: 3
+
+  error:
+    file: "logs/error/error.log"
+    level: "ERROR"
+    max_size: 100
+    retention: 90
+    rotate_hour: 3
+
+  spider:
+    file: "logs/spider/spider.log"
+    level: "INFO"
+    max_size: 100
+    retention: 30
+    rotate_hour: 3
