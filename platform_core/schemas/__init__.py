@@ -1,23 +1,23 @@
 """统一参数接收器 - 导出所有 Schema 类和验证器
 
 使用方式：
-    from backend.schemas import LoginRequest, RegisterRequest, PaginationQuery
-    from backend.schemas import validate_email, validate_phone
+    from platform_core.schemas import LoginRequest, RegisterRequest, PaginationQuery
+    from platform_core.schemas import validate_email, validate_phone
 """
-from backend.schemas.base import (
+from platform_core.schemas.base import (
     QueryParams,
     RequestBody,
     PaginationQuery,
     IdPathParams,
     SlugPathParams,
 )
-from backend.schemas.validators import (
+from platform_core.schemas.validators import (
     validate_email,
     validate_phone,
     validate_string_length,
     sanitize_input,
 )
-from backend.schemas.auth import (
+from platform_core.schemas.auth import (
     LoginRequest,
     RegisterRequest,
     UpdatePasswordRequest,

@@ -1,7 +1,7 @@
 """用户模型"""
 from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from sqlalchemy.sql import func
-from backend.models.base import Base
+from platform_core.models.base import Base
 
 
 class User(Base):

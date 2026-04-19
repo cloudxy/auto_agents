@@ -58,6 +58,7 @@ htmlcov/
 
 .claude/*
 .lingma/*
+.gemini/*
 ai_tool/*
 .idea/*
 

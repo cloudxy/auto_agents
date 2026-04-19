@@ -10,7 +10,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 # 导入模型
-from backend.models import Base  # noqa
+from platform_core.models import Base  # noqa
 
 config = context.config
 

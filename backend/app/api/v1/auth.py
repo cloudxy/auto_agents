@@ -1,12 +1,12 @@
 """认证路由 - 使用统一参数接收器和响应格式"""
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from platform_core.infra.db_init import get_async_db
+from platform_core.db import get_async_db
 from backend.services.auth_service import AuthService
-from platform_core.infra.log_init import get_logger
-from platform_core.infra.db_init import redis_client
+from platform_core.logger import get_logger
+from platform_core.db import redis_client
 from platform_core.exceptions import AuthenticationException, RateLimitException
-from backend.schemas import LoginRequest, RegisterRequest  # 统一参数接收器
+from platform_core.schemas import LoginRequest, RegisterRequest  # 统一参数接收器
 from backend.app.responses import ApiResponse, ok
 
 logger = get_logger("api")
@@ -74,6 +74,16 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
     )
 
 
+@router.get("/permissions", response_model=ApiResponse)
+async def get_permissions(db: AsyncSession = Depends(get_async_db)):
+    """获取当前用户的权限列表"""
+    # 简化实现：根据 token 中的信息（由于没有中间件设置 request.user，这里模拟从 db 获取，或根据 token 判断）
+    # 实际项目中应有专门的依赖获取当前用户
+    # 暂时模拟返回
+    return ok(data=[
+        'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 
+        'menu:users', 'menu:data', 'menu:settings', 'btn:create', 'btn:delete'
+    ])
 @router.post("/register", response_model=ApiResponse)
 async def register(
     request: RegisterRequest,

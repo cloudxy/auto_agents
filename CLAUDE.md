@@ -11,7 +11,7 @@ auto_agents/
 ├── platform_core/        # 共享基础设施层（日志、数据库、存储）
 ├── frontend/             # 前端官网（React）
 ├── admin/                # 后台管理系统（React）
-└── .lingma/              # 规则和技能库
+└── .claude/              # 规则和技能库
 ```
 
 ## 核心架构哲学
@@ -57,20 +57,26 @@ scrapy crawl {spider_name}
 
 ## 规则和技能
 
-使用 `.lingma/` 中的规则和技能：
+使用 `.claude/` 中的规则和技能：
 
 | 规则 | 描述 |
 |------|------|
 | `answer_rule` | 回答思维框架 - 解决问题优先 |
 | `project_rule` | 架构哲学、设计原则、演进方向 |
+| `pua` | 穷尽式问题解决引擎 |
 
 | 技能 | 描述 |
 |------|------|
 | `/new-svc` | 创建 FastAPI 服务模块 |
 | `/new-spider` | 创建 Scrapy 爬虫 |
+| `/new-model` | 创建 ORM + Pydantic 数据模型 |
+| `/check-arch` | 架构合规检查（10 条红线） |
+| `/verify` | 交付自检 |
 | `/coding-style` | 编码规范 |
 | `/logging` | 日志规范 |
 | `/config` | 配置规范 |
+| `/deploy` | Docker 部署配置 |
+| `/cicd` | GitHub Actions CI/CD |
 
 ## 项目状态
 
@@ -83,4 +89,4 @@ scrapy crawl {spider_name}
 - `run_backend.py` - 后端启动脚本
 - `backend/app/__init__.py` - FastAPI 应用工厂
 - `platform_core/infra.py` - 基础设施初始化
-- `.lingma/` - 规则和技能库
+- `.claude/` - 规则和技能库

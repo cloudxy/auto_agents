@@ -1,7 +1,7 @@
 """认证相关 Schema - 登录、注册等请求参数"""
 from pydantic import Field, field_validator
-from backend.schemas.base import RequestBody
-from backend.schemas.validators import validate_email
+from platform_core.schemas.base import RequestBody
+from platform_core.schemas.validators import validate_email
 
 
 class LoginRequest(RequestBody):

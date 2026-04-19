@@ -3,9 +3,6 @@ import os
 import sys
 from datetime import datetime
 
-# 确保根目录在路径中，以便读取 config
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from loguru import logger
 from config import settings
 
@@ -41,8 +38,8 @@ def init_log():
     """初始化所有日志处理器（数据驱动）"""
     logger.remove()
 
-    # 关键修复：强制获取项目根目录（platform_core 的上两级目录）
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    # 日志根目录：项目根 / logs
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     log_root = os.path.join(project_root, 'logs')
 
     loggers_cfg = getattr(settings, "LOGGERS", {})

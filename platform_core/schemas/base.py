@@ -6,7 +6,7 @@
 """
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
-from backend.schemas.validators import sanitize_input
+from platform_core.schemas.validators import sanitize_input
 
 
 class QueryParams(BaseModel):

@@ -1,6 +1,6 @@
 """根路由 API"""
 from fastapi import APIRouter
-from platform_core.infra.log_init import get_logger
+from platform_core.logger import get_logger
 
 router = APIRouter()
 

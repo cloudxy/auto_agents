@@ -1,9 +1,9 @@
 """健康检查接口"""
 from fastapi import APIRouter
-from platform_core.infra.db_init import mysql_session, redis_client
-from platform_core.infra.storage_init import get_storage
+from platform_core.db import mysql_session, redis_client
+from platform_core.storage import get_storage
 from sqlalchemy import text
-from platform_core.infra.log_init import get_logger
+from platform_core.logger import get_logger
 
 router = APIRouter()
 

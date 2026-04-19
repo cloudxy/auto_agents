@@ -1,7 +1,7 @@
 """Scrapy 示例爬虫 - 支持 API/Web/嗅探多模式采集"""
 from scrapy_redis.spiders import RedisSpider
 from items import BaseItem
-from platform_core.infra.log_init import get_logger
+from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 

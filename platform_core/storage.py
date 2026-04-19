@@ -1,17 +1,13 @@
 """存储初始化模块 - 缓存、文件、临时文件"""
 import os
-import sys
 import time
 import hashlib
 import tempfile
 from pathlib import Path
 from typing import Optional
 
-# 确保根目录在路径中
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from config import settings
-from platform_core.infra.log_init import get_logger
+from platform_core.logger import get_logger
 
 
 class StorageManager:

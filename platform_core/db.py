@@ -1,17 +1,13 @@
 """数据库初始化模块 - 统一管理所有 MySQL/Redis 连接（含 Async Session）"""
 import os
-import sys
-from typing import Dict, Any
+from typing import Dict
 import redis
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 from urllib.parse import quote_plus
 from config import settings
-
-# 导入根目录的日志工具
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from platform_core.infra.log_init import get_logger
+from platform_core.logger import get_logger
 
 
 class DBManager:
