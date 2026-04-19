@@ -1,7 +1,7 @@
 """Scrapy Utils - 账号会话持久化管理器 (Sync Version)"""
 import json
-from platform_core.infra.db_init import redis_client
-from platform_core.infra.log_init import get_logger
+from utils.redis_client import redis_client
+from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 

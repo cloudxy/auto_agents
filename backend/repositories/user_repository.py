@@ -2,8 +2,8 @@
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from backend.models.user import User
-from backend.repositories.base import BaseRepository
+from platform_core.models.user import User
+from platform_core.repository import BaseRepository
 
 
 class UserRepository(BaseRepository[User]):

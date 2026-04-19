@@ -1,7 +1,7 @@
 """Scrapy Pipelines - 数据清洗、验证与存储"""
 import re
 from scrapy.exceptions import DropItem
-from platform_core.infra.log_init import get_logger
+from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 

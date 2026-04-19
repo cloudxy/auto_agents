@@ -1,7 +1,7 @@
 """大众点评首页爬虫 - 高风控站点，需代理与会话保持"""
 from scrapy_redis.spiders import RedisSpider
 from items import BaseItem
-from platform_core.infra.log_init import get_logger
+from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 

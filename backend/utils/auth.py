@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import jwt
 import bcrypt
-from platform_core.infra.log_init import get_logger
+from platform_core.logger import get_logger
 from config import settings
 
 logger = get_logger("api")

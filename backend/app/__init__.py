@@ -50,3 +50,5 @@ def create_app():
     app.include_router(external_api_router, prefix="/external")
     
     return app
+
+app = create_app()

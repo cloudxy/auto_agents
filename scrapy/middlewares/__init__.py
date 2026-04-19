@@ -1,7 +1,7 @@
 """Scrapy Middlewares - 高可用反爬与账号会话管理"""
 import random
 import hashlib
-from platform_core.infra.log_init import get_logger
+from platform_core.logger import get_logger
 from scrapy.http import Cookies
 
 logger = get_logger("spider")
@@ -20,7 +20,7 @@ class AccountSessionMiddleware:
         if not account_id:
             return None
 
-        from scrapy.utils.session_manager import SessionManager
+        from utils.session_manager import SessionManager
         sm = SessionManager(account_id)
         session = sm.get_session()
         
