@@ -22,6 +22,13 @@ from platform_core.schemas.auth import (
     RegisterRequest,
     UpdatePasswordRequest,
 )
+from platform_core.schemas.spider import (
+    SpiderTaskResponse,
+    SpiderTaskListResponse,
+    SpiderTaskQuery,
+    RunSpiderRequest,
+    SpiderStatsResponse,
+)
 
 __all__ = [
     # 基类
@@ -39,4 +46,10 @@ __all__ = [
     "LoginRequest",
     "RegisterRequest",
     "UpdatePasswordRequest",
+    # 爬虫任务 Schema
+    "SpiderTaskResponse",
+    "SpiderTaskListResponse",
+    "SpiderTaskQuery",
+    "RunSpiderRequest",
+    "SpiderStatsResponse",
 ]
