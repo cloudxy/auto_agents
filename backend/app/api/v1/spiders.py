@@ -1,31 +1,39 @@
-"""爬虫相关接口"""
-from fastapi import APIRouter, Depends
+"""爬虫任务相关接口 —— API 层只做参数校验与 Service 编排，不碰 ORM/Session"""
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
-from platform_core.models.spider_task import SpiderTask as SpiderTaskModel
+
+from backend.services.spider_service import SpiderService
 from platform_core.db import get_async_db
-from platform_core.repository import BaseRepository
+from platform_core.schemas.spider import (
+    RunSpiderRequest,
+    SpiderTaskListResponse,
+    SpiderTaskResponse,
+)
 
 router = APIRouter()
 
-@router.get("/tasks")
-async def list_tasks(
-    skip: int = 0,
-    limit: int = 20,
-    status: Optional[str] = None,
-    session: AsyncSession = Depends(get_async_db)
-):
-    """获取爬虫任务列表（支持分页和筛选）"""
-    repo = BaseRepository(SpiderTaskModel, session)
-    # 简单实现：实际生产中应在 Repo 中增加 filter_by 逻辑
-    tasks = await repo.get_all(skip=skip, limit=limit)
-    return {"total": len(tasks), "items": tasks}
 
-@router.post("/run")
-async def run_spider(spider_name: str, session: AsyncSession = Depends(get_async_db)):
-    """运行爬虫任务"""
-    task = SpiderTaskModel(spider_name=spider_name, status="pending")
-    session.add(task)
-    await session.commit()
-    await session.refresh(task)
-    return {"message": f"Spider {spider_name} started", "task_id": task.id}
+def _service(session: AsyncSession = Depends(get_async_db)) -> SpiderService:
+    return SpiderService(session)
+
+
+@router.get("/tasks", response_model=SpiderTaskListResponse)
+async def list_tasks(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None, description="pending/running/completed/failed"),
+    service: SpiderService = Depends(_service),
+) -> SpiderTaskListResponse:
+    """获取爬虫任务列表（支持分页和筛选）"""
+    return await service.list_tasks(skip=skip, limit=limit, status=status)
+
+
+@router.post("/run", response_model=SpiderTaskResponse)
+async def run_spider(
+    payload: RunSpiderRequest,
+    service: SpiderService = Depends(_service),
+) -> SpiderTaskResponse:
+    """入队一次爬虫任务"""
+    return await service.enqueue(spider_name=payload.spider_name, params=payload.params)
