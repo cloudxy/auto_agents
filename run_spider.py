@@ -10,7 +10,7 @@ Scrapy 爬虫服务启动入口
     ./run_spider.py                            # 运行所有爬虫
 
 特性：
-- 自动检测 backend/.venv（项目共享同一套依赖），以它重启
+- 自动检测根 .venv（workspace 统一环境）并以它重启
 - --env 透传为 APP_ENV，config 层与 backend 一致
 - 本地 scrapy/ 目录加入 sys.path，不与 pip 的 scrapy 库冲突
 - SCRAPY_SETTINGS_MODULE=settings → scrapy/settings.py
@@ -20,7 +20,7 @@ import sys
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 SCRAPY_DIR = os.path.join(PROJECT_ROOT, "scrapy")
-VENV_PYTHON = os.path.join(PROJECT_ROOT, "backend", ".venv", "bin", "python3")
+VENV_PYTHON = os.path.join(PROJECT_ROOT, ".venv", "bin", "python3")
 
 
 def _reexec_with_venv():

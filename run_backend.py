@@ -9,7 +9,7 @@ Backend 后端服务启动入口
     ./run_backend.py --port 9200               # 临时覆盖端口
 
 特性：
-- 自动检测 backend/.venv 并以 venv 解释器重启
+- 自动检测根 .venv 并以 venv 解释器重启（workspace 统一环境）
 - --env 透传为 APP_ENV，驱动 config/<env>/*.yml 加载
 - 端口预检：若端口已占用，直接报错退出
 - 串行初始化：logger → db → storage → FastAPI app
@@ -19,11 +19,11 @@ import socket
 import sys
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-VENV_PYTHON = os.path.join(PROJECT_ROOT, "backend", ".venv", "bin", "python3")
+VENV_PYTHON = os.path.join(PROJECT_ROOT, ".venv", "bin", "python3")
 
 
 def _reexec_with_venv():
-    """若存在 backend/.venv 且当前不是它，切换到 venv Python 再跑。"""
+    """若存在根 .venv 且当前不是它，切换到 venv Python 再跑。"""
     if os.path.exists(VENV_PYTHON) and os.path.realpath(sys.executable) != os.path.realpath(VENV_PYTHON):
         os.execv(VENV_PYTHON, [VENV_PYTHON] + sys.argv)
 
