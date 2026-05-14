@@ -10,7 +10,7 @@ dist/
 build/
 
 # UV
-uv.lock
+# 根 uv.lock 应提交以保证可复现构建；子项目 lock 由 workspace 接管，不应存在
 
 # Node
 node_modules/

@@ -1,0 +1,20 @@
+[project]
+name = "auto-agents"
+version = "0.1.0"
+description = "Auto Agents 多应用混合平台（backend + scrapy + frontend），统一 venv 管理"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "auto-agents-backend",
+    "auto-agents-spider",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["backend", "scrapy"]
+
+[tool.uv.sources]
+auto-agents-backend = { workspace = true }
+auto-agents-spider = { workspace = true }
