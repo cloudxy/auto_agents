@@ -48,10 +48,10 @@ def list_spiders():
     settings = get_project_settings()
     spiders = sorted(SpiderLoader.from_settings(settings).list())
     print("\n" + "=" * 60)
-    print("🕷️  可用爬虫列表")
+    print("可用爬虫列表")
     print("=" * 60)
     if not spiders:
-        print("  ⚠️  未发现任何爬虫")
+        print(" 未发现任何爬虫")
     else:
         for name in spiders:
             print(f"  • {name}")
@@ -72,22 +72,22 @@ def run(spider_name: str | None, **kwargs):
 
     if spider_name:
         if spider_name not in available:
-            print(f"❌ 爬虫 '{spider_name}' 不存在")
-            print("💡 用 --list 查看可用爬虫")
+            print(f"爬虫 '{spider_name}' 不存在")
+            print("用 --list 查看可用爬虫")
             sys.exit(1)
-        print(f"🎯 运行爬虫: {spider_name}")
+        print(f"运行爬虫: {spider_name}")
         process.crawl(spider_name, **kwargs)
     else:
         if not available:
-            print("⚠️  未发现任何爬虫")
+            print("未发现任何爬虫")
             return
-        print(f"🎯 运行所有爬虫 ({len(available)} 个)")
+        print(f"运行所有爬虫 ({len(available)} 个)")
         for name in sorted(available):
             print(f"  • 加载: {name}")
             process.crawl(name, **kwargs)
 
     print("\n" + "=" * 60)
-    print("🚀 爬虫开始运行... (Ctrl+C 停止)")
+    print("爬虫开始运行... (Ctrl+C 停止)")
     print("=" * 60 + "\n")
     process.start()
 

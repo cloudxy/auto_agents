@@ -40,13 +40,13 @@ def _ensure_deps(app_path: str, skip: bool):
     node_modules = os.path.join(app_path, "node_modules")
     if skip or os.path.isdir(node_modules):
         return
-    print(f"📦 安装依赖: {os.path.basename(app_path)}")
+    print(f"安装依赖: {os.path.basename(app_path)}")
     subprocess.check_call(["npm", "install"], cwd=app_path)
 
 
 def start_app(app_relpath: str, port: int, app_name: str, env_name: str | None):
     full_path = os.path.join(PROJECT_ROOT, app_relpath)
-    print(f"🚀 Starting {app_name} on port {port}...")
+    print(f"Starting {app_name} on port {port}...")
 
     env = os.environ.copy()
     env["PORT"] = str(port)
@@ -67,7 +67,7 @@ def start_app(app_relpath: str, port: int, app_name: str, env_name: str | None):
             if line:
                 print(f"[{app_name}] {line.rstrip()}")
     except Exception as e:
-        print(f"❌ 启动 {app_name} 失败: {e}")
+        print(f"启动 {app_name} 失败: {e}")
 
 
 def main():
@@ -82,7 +82,7 @@ def main():
     args = parser.parse_args()
 
     if shutil.which("npm") is None:
-        print("❌ 未找到 npm，请先安装 Node.js")
+        print("未找到 npm，请先安装 Node.js")
         sys.exit(1)
 
     targets = []
@@ -98,7 +98,7 @@ def main():
     # 端口预检 + 依赖检查
     for rel, port, name in targets:
         if _port_in_use(port):
-            print(f"❌ 端口 {port} ({name}) 已被占用，启动终止")
+            print(f"端口 {port} ({name}) 已被占用，启动终止")
             sys.exit(1)
         _ensure_deps(os.path.join(PROJECT_ROOT, rel), args.skip_install)
 
@@ -112,7 +112,7 @@ def main():
         while any(t.is_alive() for t in threads):
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n🛑 停止前端服务...")
+        print("\n停止前端服务...")
 
 
 if __name__ == "__main__":

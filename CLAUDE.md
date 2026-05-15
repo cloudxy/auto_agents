@@ -111,7 +111,7 @@ uv run python run_frontend.py --all                # admin:3001 / official:3002
 
 正在进行的结构重构：
 - 异常处理、CORS、日志初始化等已统一收敛到 `platform_core`
-- Python 环境已收敛为 uv workspace 单一 `.venv`（原 `backend/.venv` 和 `scrapy/.venv` 已废弃）
+- Python 环境已收敛为 uv workspace 单一 `.venv`
 
 ## 关键文件
 

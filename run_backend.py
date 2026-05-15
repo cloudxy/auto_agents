@@ -65,11 +65,11 @@ def main():
         reload_mode = False
 
     if _port_in_use(host, port):
-        print(f"❌ 端口 {host}:{port} 已被占用，启动终止")
+        print(f"端口 {host}:{port} 已被占用，启动终止")
         sys.exit(1)
 
     # 初始化基础设施
-    print("🚀 Initializing Backend Core...")
+    print("Initializing Backend Core...")
     from platform_core import init_log, init_db, init_storage
     init_log()
     init_db()
@@ -79,12 +79,12 @@ def main():
     app = create_app()
 
     print("\n" + "=" * 60)
-    print("🚀 Auto Agents Backend API 已启动")
+    print("Auto Agents Backend API 已启动")
     print("=" * 60)
-    print(f"📍 服务地址: http://{host}:{port}")
-    print(f"📖 API 文档: http://{host}:{port}/api/docs")
-    print(f"🔧 热重载:   {'✅ 开启' if reload_mode else '❌ 关闭'}")
-    print(f"📊 环境:     {APP_ENV}")
+    print(f"服务地址: http://{host}:{port}")
+    print(f"API 文档: http://{host}:{port}/api/docs")
+    print(f"热重载:   {'开启' if reload_mode else '关闭'}")
+    print(f"环境:     {APP_ENV}")
     print("=" * 60 + "\n")
 
     import uvicorn
