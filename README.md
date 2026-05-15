@@ -110,16 +110,19 @@ auto_agents/
 │   ├── admin/                   # 后台管理（Ant Design + Zustand + React Query）
 │   └── official/                # 官方网站（Ant Design + Framer Motion）
 │
-├── .claude/                     # AI 协作层（详见后文章节）
-│   ├── IDENTITY.md              # 项目身份
-│   ├── SOUL.md                  # 项目性格
-│   ├── MEMORY.md                # 项目记忆索引
-│   ├── memory/                  # 记忆条目
-│   ├── agents/                  # 子代理定义（spider-doctor / arch-warden / memory-curator）
-│   ├── hooks/                   # 半自动进化 hook（inject / guard / suggest）
-│   ├── rules/                   # 硬约束（answer / project / pua）
-│   ├── skills/                  # 可调用技能（new-svc / new-spider / check-arch ...）
-│   └── settings.json            # hook 启用配置
+├── .agents/                    # 工具中立的 AI 资产（可被任何 IDE 复用）
+│   └── skills/                 # Skill 物理位置（new-svc / new-spider / check-arch ...）
+│
+├── .claude/                    # Claude Code 专属配置
+│   ├── IDENTITY.md             # 项目身份
+│   ├── SOUL.md                 # 项目性格
+│   ├── MEMORY.md               # 项目记忆索引
+│   ├── memory/                 # 记忆条目
+│   ├── agents/                 # 子代理定义（spider-doctor / arch-warden / memory-curator）
+│   ├── hooks/                  # 半自动进化 hook（inject / guard / suggest）
+│   ├── rules/                  # 硬约束（answer / project / pua）
+│   ├── skills -> ../.agents/skills   # symlink，让 Claude Code 自动发现机制照常工作
+│   └── settings.json           # hook 启用配置
 │
 ├── scripts/                     # 运维脚本（init-db / migrate / start / run-spider）
 ├── logs/                        # 运行时日志（按 logger 名分目录）
@@ -462,26 +465,33 @@ src/
 - **Claude** = 你正在对话的主 LLM，独占一个 context window
 - **Agents（子代理）** = `.claude/agents/*.md` 定义的"专项小弟"。主 Claude 用 `Task` 工具拉起它们，**每个子代理有隔离的 context window**，结束后只把摘要带回主对话 —— 既不污染主上下文，又能并行处理
 
-> 注意：项目名 `auto_agents` 是品牌词，指 Scrapy 爬虫这类"自动化工人"，**与 LLM Agent 完全无关**。本仓库零 LLM SDK 依赖。
+> 注意：项目名 `auto_agents` 是品牌词，指 Scrapy 爬虫这类"自动化工人"，**与 LLM Agent 完全无关**。本仓库目前不依赖任何 LLM SDK。
 
-### 五件套
+### 五件套 + 工具中立资产
+
+skills 物理放在 `.agents/skills/`（工具中立，可被任何 IDE 复用），通过 symlink 暴露给 `.claude/skills`，借鉴自 [warpdotdev/warp](https://github.com/warpdotdev/warp/tree/master/.claude) 的设计。
 
 ```
-.claude/
+.agents/                工具中立 AI 资产（任何 IDE 都可读）
+└── skills/             Skill 物理位置（new-svc / new-spider / new-model / check-arch / verify ...）
+
+.claude/                Claude Code 专属
 ├── IDENTITY.md         项目身份：Role / Mission / Expertise / Boundaries
 ├── SOUL.md             项目性格：5 条软偏好（悲观验证 / 延伸排查 / 沉默优于啰嗦 ...）
 ├── MEMORY.md           项目记忆索引（具体条目在 memory/）
 ├── memory/             长期知识条目（reference / troubleshooting / playbook / decision）
 ├── rules/              硬约束（answer_rule / project_rule / pua）
-├── skills/             可调用技能（new-svc / new-spider / new-model / check-arch / verify ...）
+├── skills -> ../.agents/skills    symlink → .agents/skills，Claude Code 自动发现 /slash 命令照常工作
 ├── agents/             子代理定义（见下）
 ├── hooks/              半自动进化脚本
 └── settings.json       启用 hooks
 ```
 
+未来如要接入 Cursor / Lingma / Gemini，只需在对应的 `.cursor/skills` / `.lingma/skills` 各自软链到 `../.agents/skills`，零迁移成本。
+
 | 文件类型 | 性质 | 谁能改 |
 |---------|------|--------|
-| `IDENTITY.md` `SOUL.md` `rules/*` `skills/*` `settings.json` | 长期契约 | **人类**（PreToolUse hook 拦截 AI 写入，要求确认） |
+| `IDENTITY.md` `SOUL.md` `rules/*` `.agents/skills/*` `settings.json` | 长期契约 | **人类**（PreToolUse hook 拦截 AI 写入 `.claude/skills` 与 `.agents/skills`，要求确认） |
 | `MEMORY.md` 索引 | 半契约 | AI 可改，PR review |
 | `memory/*.md` 条目 | 项目知识 | AI 产 diff，用户 apply 后入库 |
 | `settings.local.json` | 个人本地 | AI / 人类皆可（不入库） |
@@ -583,7 +593,6 @@ API Routes  →  Services  →  Repositories  →  Models
 | API 直接操作数据库 | 跨层穿透 | Service → Repository |
 | 关键路径无日志 | 出问题无法定位 | 入口处 `logger.info` |
 | 前端绕过 API 直连 DB | 安全/架构破坏 | 必须走 backend API |
-| 引入 anthropic/openai SDK | `auto_agents` 是品牌名非 AI 产品 | AI 协作走 `.claude/` |
 
 ---
 

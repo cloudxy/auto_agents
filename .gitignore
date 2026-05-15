@@ -58,7 +58,7 @@ htmlcov/
 
 .claude/*
 !.claude/rules/
-!.claude/skills/
+!.claude/skills
 !.claude/agents/
 !.claude/hooks/
 !.claude/memory/
