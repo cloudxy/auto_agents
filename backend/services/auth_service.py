@@ -3,8 +3,8 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories.user_repository import UserRepository
 from backend.utils.auth import verify_password, get_password_hash, create_access_token
-from backend.cors.log_init import get_logger
-from backend.app.exceptions import BusinessException
+from platform_core.logger import get_logger
+from platform_core.exceptions import BusinessException
 from pydantic import BaseModel
 
 logger = get_logger("api")

@@ -6,7 +6,7 @@
 - 限流保护（未来实现）
 """
 from fastapi import APIRouter, HTTPException
-from backend.cors.log_init import get_logger
+from platform_core.logger import get_logger
 import time
 
 router = APIRouter()

@@ -23,11 +23,11 @@ echo ""
 ENV=${1:-development}
 log_info "使用环境: $ENV"
 
-# 运行 Python 初始化脚本（使用 backend 独立环境）
-cd "$(dirname "$0")/../backend"
+# 运行 Python 初始化脚本（统一根 venv）
+cd "$(dirname "$0")/.."
 uv run python -c "
 import sys
-sys.path.insert(0, '.')
+sys.path.insert(0, 'backend')
 from app.utils.db_init import init_database
 init_database(env='$ENV')
 "

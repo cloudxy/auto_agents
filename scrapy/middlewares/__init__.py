@@ -1,7 +1,7 @@
 """Scrapy Middlewares - 高可用反爬与账号会话管理"""
 import random
 import hashlib
-from core.log_init import get_logger
+from platform_core.logger import get_logger
 from scrapy.http import Cookies
 
 logger = get_logger("spider")
@@ -20,15 +20,23 @@ class AccountSessionMiddleware:
         if not account_id:
             return None
 
-        # TODO: 这里需要调用 SessionManager 获取会话
-        # 由于 Scrapy 中间件是同步的，而 SessionManager 是异步的，
-        # 实际生产中建议使用 redis 同步客户端或在线程池中执行
+        from utils.session_manager import SessionManager
+        sm = SessionManager(account_id)
+        session = sm.get_session()
+        
+        if not session.get('is_logged_in'):
+            logger.warning(f"账号 [{account_id}] 会话失效，请重新登录")
+            return None
+
+        # 1. 强制使用账号绑定的 UA（指纹一致性）
+        if session.get('ua'):
+            request.headers['User-Agent'] = session['ua']
+        
+        # 2. 注入 Cookie
+        if session.get('cookies'):
+            request.cookies.update(session['cookies'])
+            
         logger.debug(f"应用账号 [{account_id}] 的会话指纹")
-        
-        # 示例：如果配置了固定 UA，则强制使用
-        if hasattr(spider, 'fixed_ua'):
-            request.headers['User-Agent'] = spider.fixed_ua
-        
         return None
 
 

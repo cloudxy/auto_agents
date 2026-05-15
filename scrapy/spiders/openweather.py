@@ -1,9 +1,10 @@
 """OpenWeatherMap API 爬虫 - 采集全球天气数据"""
 from scrapy import Request
 from scrapy_redis.spiders import RedisSpider
-from ..items import WeatherItem
-from config import settings
-from core.log_init import get_logger
+from items import WeatherItem
+from scrapy.utils.project import get_project_settings
+settings = get_project_settings()
+from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 
