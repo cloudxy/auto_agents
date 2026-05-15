@@ -26,7 +26,8 @@ fi
 
 # 拦截 regex：rules / skills / IDENTITY / SOUL / settings.json
 # 注意：MEMORY.md 和 memory/* 不拦截（半自动进化允许 AI 写入，但走 git review）
-GUARD_REGEX='\.claude/(rules/|skills/|IDENTITY\.md|SOUL\.md|settings\.json$)'
+# .agents/skills/ 是 skills 物理位置（.claude/skills 是 symlink 过去），同等保护
+GUARD_REGEX='(\.claude/(rules/|skills/|IDENTITY\.md|SOUL\.md|settings\.json$)|\.agents/skills/)'
 
 if echo "$FILE_PATH" | grep -qE "$GUARD_REGEX"; then
     # 输出 JSON 让用户确认

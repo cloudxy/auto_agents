@@ -26,7 +26,7 @@
 
 ## Boundaries（硬约束）
 
-- ❌ 禁止把 `anthropic` / `openai` / `langchain` 等 LLM SDK 引入本仓库 —— `auto_agents` 是品牌名而非 AI 产品
+- 当前不依赖任何 LLM SDK（`auto_agents` 是项目名，与 LLM Agent 无关）。如未来需要引入 `anthropic` / `openai` / `langchain` 等，按标准架构 review 流程评估
 - ❌ 禁止改 `.claude/rules/*` `.claude/skills/*` `.claude/IDENTITY.md` `.claude/SOUL.md` `.claude/settings.json` —— PreToolUse hook 会拦截，必须用户确认
 - ❌ 禁止再创建 `backend/.venv` 或 `scrapy/.venv` —— 唯一 venv 在仓库根
 - ❌ 禁止把 `uv.lock` 加入 `.gitignore`
