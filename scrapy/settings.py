@@ -1,9 +1,15 @@
-"""Scrapy 项目配置 - 高并发分布式采集系统"""
-import sys
-import os
+"""Scrapy 项目配置 - 高并发分布式采集系统
 
-# 添加项目根目录到路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+数据源：根目录 config/ 的 Dynaconf 实例（scrapy 和 backend 共享）
+数据出口：Redis 队列（scrapy-redis），禁止直连 MySQL
+"""
+import os
+import sys
+
+# 将项目根加入 sys.path，保证 `from config import settings` 能加载
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from config import settings as project_settings
 
@@ -13,7 +19,6 @@ SPIDER_MODULES = ["spiders"]
 NEWSPIDER_MODULE = "spiders"
 
 # === 动态加载站点配置 ===
-# 从 config/scrapy/default/sites.yml 中加载
 SITE_CONFIG = project_settings.get("SITES", {})
 
 # === 高并发配置 ===
@@ -24,12 +29,16 @@ DOWNLOAD_DELAY = project_settings.get("DOWNLOAD_DELAY", 1)
 RANDOMIZE_DOWNLOAD_DELAY = True
 DOWNLOAD_TIMEOUT = 30
 
-# === 反爬与风控 ===
-COOKIES_ENABLED = False
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# === 反爬与风控（红线必备） ===
+ROBOTSTXT_OBEY = project_settings.get("ROBOTSTXT_OBEY", False)
+COOKIES_ENABLED = project_settings.get("COOKIES_ENABLED", False)
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 # === 重试与异常处理 ===
-RETRY_TIMES = 3
+RETRY_TIMES = project_settings.get("RETRY_TIMES", 3)
 RETRY_HTTP_CODES = [500, 502, 503, 504, 408, 429]
 
 # === Scrapy-Redis 分布式调度 ===
@@ -41,7 +50,7 @@ REDIS_URL = project_settings.REDIS.DEFAULT.URL
 
 # === 中间件配置（按优先级排序）===
 DOWNLOADER_MIDDLEWARES = {
-    "middlewares.AccountSessionMiddleware": 250, # 优先处理账号会话
+    "middlewares.AccountSessionMiddleware": 250,
     "middlewares.FingerprintMiddleware": 300,
     "middlewares.ProxyMiddleware": 350,
     "middlewares.UserAgentMiddleware": 400,

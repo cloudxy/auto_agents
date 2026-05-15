@@ -1,9 +1,9 @@
 """V2 健康检查 - 增强的监控功能"""
 from fastapi import APIRouter
-from backend.cors.db_init import mysql_session, redis_client
-from backend.cors.storage_init import get_storage
+from platform_core.db import mysql_session, redis_client
+from platform_core.storage import get_storage
 from sqlalchemy import text
-from backend.cors.log_init import get_logger
+from platform_core.logger import get_logger
 import time
 
 router = APIRouter()

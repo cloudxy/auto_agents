@@ -1,7 +1,7 @@
 """知乎推荐页爬虫 - 需登录态与会话保持"""
 from scrapy_redis.spiders import RedisSpider
-from ..items import ZhihuFeedItem
-from core.log_init import get_logger
+from items import ZhihuFeedItem
+from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 

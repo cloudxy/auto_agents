@@ -6,7 +6,7 @@
 - 异步处理 webhook 事件
 """
 from fastapi import APIRouter, Request, HTTPException, Header
-from backend.cors.log_init import get_logger
+from platform_core.logger import get_logger
 import time
 
 router = APIRouter()

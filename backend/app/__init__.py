@@ -38,7 +38,7 @@ def create_app():
     app.add_middleware(RequestIDMiddleware)
 
     # 注册统一异常处理器
-    from backend.app.exceptions import register_exception_handlers
+    from platform_core.exceptions import register_exception_handlers
     register_exception_handlers(app)
 
     # 注册内部 API 路由（用于管理后台、前端、内部服务）
@@ -50,3 +50,5 @@ def create_app():
     app.include_router(external_api_router, prefix="/external")
     
     return app
+
+app = create_app()

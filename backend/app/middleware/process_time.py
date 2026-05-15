@@ -2,7 +2,7 @@
 import time
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from backend.cors.log_init import get_logger
+from platform_core.logger import get_logger
 
 logger = get_logger("api")
 

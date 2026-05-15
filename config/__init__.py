@@ -1,68 +1,68 @@
 """
-Dynaconf 配置管理 - 合并配置文件以简化目录结构
+Dynaconf 配置管理 - 根目录统一配置入口
+
+服务对象：
+- backend（FastAPI 应用）
+- scrapy（爬虫项目）
+- 任何需要统一配置的子项目
+
+加载顺序（后者覆盖前者）：
+1. default/*.yml            —— 通用默认
+2. scrapy/default/*.yml     —— 爬虫默认
+3. <env>/*.yml              —— 环境覆盖
+4. scrapy/<env>/*.yml       —— 爬虫环境覆盖
+5. <env>/.env               —— 敏感变量（密码、密钥）
+6. 环境变量 AUTO_AGENTS_*    —— 最高优先级
 """
 from dynaconf import Dynaconf
+from pathlib import Path
 import os
+import glob
 
-# 获取当前环境（默认本地开发环境）
 current_env = os.getenv("APP_ENV", "local")
 
-# 配置目录
-config_dir = os.path.dirname(os.path.abspath(__file__))
-default_config_dir = os.path.join(config_dir, "default")
-env_config_dir = os.path.join(config_dir, current_env)
+_config_dir = Path(__file__).resolve().parent
 
-# 配置文件
-settings_files = [
-    # === 默认配置 (Default) ===
-    os.path.join(default_config_dir, "settings.yml"),  # 全局通用配置
-    os.path.join(default_config_dir, "api.yml"),       # API 服务配置
-    os.path.join(default_config_dir, "web.yml"),       # Web 服务配置
-    os.path.join(default_config_dir, "log.yml"),       # 日志配置
-    os.path.join(default_config_dir, "jwt.yml"),       # JWT 认证配置
-    os.path.join(default_config_dir, "storage.yml"),   # 存储配置
-    os.path.join(default_config_dir, "admin.yml"),     # 管理后台配置
-    os.path.join(default_config_dir, "official.yml"),  # 官方网站配置
-    
-    # === Scrapy 爬虫专用配置 ===
-    os.path.join(config_dir, "scrapy", "default", "settings.yml"), # 爬虫基础配置
-    os.path.join(config_dir, "scrapy", "default", "sites.yml"),    # 站点采集规则
-    
-    # === 环境特定覆盖 (Environment Overrides) ===
-    os.path.join(env_config_dir, "settings.yml"),
-    os.path.join(env_config_dir, "mysql.yml"),
-    os.path.join(env_config_dir, "redis.yml"),
-    os.path.join(env_config_dir, "web.yml"),
-    os.path.join(env_config_dir, "log.yml"),
-    
-    # === Scrapy 环境特定覆盖 ===
-    os.path.join(config_dir, "scrapy", current_env, "settings.yml"),
-]
 
-# 初始化 Dynaconf
+def _collect_yaml(*relative_dirs):
+    """按给定子目录顺序收集所有 yml 文件，稳定排序后返回绝对路径列表。"""
+    files = []
+    for rel in relative_dirs:
+        d = _config_dir / rel
+        if d.is_dir():
+            files.extend(sorted(str(p) for p in d.glob("*.yml")))
+    return files
+
+
+settings_files = (
+    _collect_yaml("default")
+    + _collect_yaml("scrapy/default")
+    + _collect_yaml(current_env)
+    + _collect_yaml(f"scrapy/{current_env}")
+)
+
 settings = Dynaconf(
     envvar_prefix="AUTO_AGENTS",
     environments=False,
     settings_files=settings_files,
-    dotenv_path=os.path.join(env_config_dir, ".env"),
+    dotenv_path=str(_config_dir / current_env / ".env"),
     load_dotenv=True,
     merge_enabled=True,
     dotenv_override=True,
 )
 
-# 动态注入 Redis URL
+# 动态注入 Redis URL（供 scrapy-redis、aioredis 等直接用）
 for instance_key in settings.get("REDIS", {}).keys():
     cfg = settings.get(f"REDIS.{instance_key}", {})
     host = cfg.get("HOST", "127.0.0.1")
     port = cfg.get("PORT", 6379)
     db = cfg.get("DB", 0)
     password = cfg.get("PASSWORD", "")
-    
-    if password:
-        url = f"redis://:{password}@{host}:{port}/{db}"
-    else:
-        url = f"redis://{host}:{port}/{db}"
-    
-    settings.set(f"REDIS.{instance_key}.URL", url)
 
-__all__ = ["settings"]
+    auth = f":{password}@" if password else ""
+    settings.set(f"REDIS.{instance_key}.URL", f"redis://{auth}{host}:{port}/{db}")
+
+APP_ENV = current_env
+CONFIG_DIR = str(_config_dir)
+
+__all__ = ["settings", "APP_ENV", "CONFIG_DIR"]
