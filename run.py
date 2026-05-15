@@ -35,7 +35,7 @@ def _stream(process: subprocess.Popen, prefix: str):
 
 def _spawn(script: str, extra_args: list[str], prefix: str):
     cmd = [sys.executable, os.path.join(PROJECT_ROOT, script)] + extra_args
-    print(f"📡 Launching {prefix}: {' '.join(cmd)}")
+    print(f"Launching {prefix}: {' '.join(cmd)}")
     p = subprocess.Popen(
         cmd,
         cwd=PROJECT_ROOT,
@@ -54,13 +54,13 @@ def _port_ok(port: int, name: str) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.3)
         if s.connect_ex(("127.0.0.1", port)) == 0:
-            print(f"⚠️  端口 {port} ({name}) 已占用")
+            print(f"端口 {port} ({name}) 已占用")
             return False
     return True
 
 
 def _shutdown(_sig=None, _frame=None):
-    print("\n🛑 正在关闭所有子进程...")
+    print("\n正在关闭所有子进程...")
     for p in _processes:
         try:
             os.killpg(os.getpgid(p.pid), signal.SIGTERM)

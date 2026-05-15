@@ -1,6 +1,6 @@
 # Auto Agents
 
-> 多应用混合平台：**FastAPI 后端 + Scrapy 分布式爬虫 + React 双端（官网 / 后台管理）**，统一配置、统一基础设施、独立部署。
+> 多应用混合平台：**FastAPI 后端 + Scrapy 分布式爬虫 + React 双端（官网 / 后台管理）**，统一配置、统一基础设施、独立部署、AI 原生协作。
 
 ---
 
@@ -10,11 +10,12 @@
 - [项目结构](#项目结构)
 - [快速开始](#快速开始)
 - [启动入口](#启动入口)
-- [依赖管理](#依赖管理uv-workspace)
+- [依赖管理（uv workspace）](#依赖管理uv-workspace)
 - [配置管理](#配置管理)
 - [API 设计](#api-设计)
 - [爬虫体系](#爬虫体系)
 - [前端体系](#前端体系)
+- [AI 协作层（`.claude/`）](#ai-协作层claude)
 - [开发规范](#开发规范)
 - [运维脚本](#运维脚本)
 
@@ -34,6 +35,11 @@
                          └─────── config/ (Dynaconf) ──────┘
                                   │
                          default → <env> → .env → 环境变量
+
+         ┌────────────────────────────────────────────┐
+         │  .claude/  AI 协作层（IDENTITY / SOUL /     │
+         │            MEMORY / agents / hooks）        │
+         └────────────────────────────────────────────┘
 ```
 
 **核心原则**
@@ -42,9 +48,10 @@
 |--------|------|
 | 配置即代码 | 所有连接串、密钥、端口外置到 `config/`，按 `local/dev/prod` 隔离 |
 | 日志即证据 | Loguru 多 logger 路由（`global / api / admin / official / spider / error`） |
-| 独立部署优于耦合 | 本地开发统一 venv（uv workspace），部署时各子项目可独立 `uv sync --package` |
+| 独立部署优于耦合 | 本地统一 venv（uv workspace），部署时各子项目可独立 `uv sync --package` |
 | 爬取与存储分离 | 爬虫只采集清洗，**禁止直写主库**，通过 Redis 队列流向后端 |
-| 模型即契约 | ORM = 数据库契约（`platform_core/models`），Pydantic = 接口契约（`platform_core/schemas`），互不 import |
+| 模型即契约 | ORM 在 `platform_core/models`，Pydantic 在 `platform_core/schemas`，互不 import |
+| AI 协作即契约 | `.claude/IDENTITY+SOUL+rules+skills` 同样是项目长期契约，与代码一起 git review |
 
 详见 `.claude/rules/project_rule.md`。
 
@@ -54,21 +61,19 @@
 
 ```
 auto_agents/
-├── pyproject.toml               # uv workspace 根配置（members: backend, scrapy）
+├── pyproject.toml               # uv workspace 根（members: backend, scrapy）
 ├── uv.lock                      # 统一锁文件（提交到仓库）
 ├── .venv/                       # 统一虚拟环境（uv sync 自动创建）
 │
 ├── run.py                       # 统一编排器（all / backend / spider / frontend）
-├── run_backend.py               # 后端单独启动（自动切根 .venv）
-├── run_spider.py                # 爬虫单独启动（共用根 .venv）
+├── run_backend.py               # 后端单独启动
+├── run_spider.py                # 爬虫单独启动
 ├── run_frontend.py              # 前端单独启动（admin + official 并行）
 │
 ├── backend/                     # FastAPI 后端（workspace member）
 │   ├── app/
 │   │   ├── __init__.py          # create_app() 工厂
 │   │   ├── api/                 # 内部 API：/api/v1, /api/v2
-│   │   │   ├── v1/              # auth / spiders / admin / configs / health / root
-│   │   │   └── v2/              # 增强健康检查（含 db/storage 探针）
 │   │   ├── external_api/        # 外部 API：/external/v1（API Key 认证）
 │   │   ├── middleware/          # RequestID 中间件等
 │   │   └── responses/           # 统一响应模型
@@ -76,16 +81,16 @@ auto_agents/
 │   ├── repositories/            # 数据访问（继承 platform_core.repository）
 │   ├── alembic/                 # 数据库迁移
 │   ├── utils/                   # auth 工具等
-│   └── pyproject.toml           # 后端依赖声明（部署时可独立 sync）
+│   └── pyproject.toml           # 后端依赖声明（部署可独立 sync）
 │
 ├── scrapy/                      # Scrapy 分布式爬虫（workspace member）
 │   ├── settings.py              # 入口配置（从 config/ 注入参数）
-│   ├── spiders/                 # 爬虫实现（example/zhihu/dianping/openweather…）
-│   ├── middlewares/             # 反爬中间件（UA/代理/指纹/会话/重试）
+│   ├── spiders/                 # 爬虫实现（example/zhihu_feed/dianping_home/openweather）
+│   ├── middlewares/             # 反爬五件套（UA/代理/指纹/会话/重试）
 │   ├── pipelines/               # 清洗 → 校验 → 入库（Redis）
 │   ├── items/                   # 数据契约
 │   ├── utils/                   # session_manager / redis_client / logger
-│   └── pyproject.toml           # 爬虫依赖声明（部署时可独立 sync）
+│   └── pyproject.toml           # 爬虫依赖声明（部署可独立 sync）
 │
 ├── platform_core/               # 公共基础设施层（源码包，被 backend & scrapy 共享）
 │   ├── logger.py                # Loguru 多 logger 路由
@@ -99,19 +104,27 @@ auto_agents/
 ├── config/                      # Dynaconf 统一配置（backend & scrapy 共用）
 │   ├── default/                 # 通用默认（settings/api/web/log/jwt/storage/admin/official）
 │   ├── local/  dev/  prod/      # 环境覆盖（mysql/redis/web/log/settings + .env）
-│   └── scrapy/                  # 爬虫专属（按相同 default/local/dev/prod 分层）
-│       ├── default/             # settings.yml / sites.yml（站点反爬策略）
-│       └── <env>/
+│   └── scrapy/                  # 爬虫专属（同样按 default/local/dev/prod 分层）
 │
 ├── frontend/                    # 前端双端（React 19 + TS）
 │   ├── admin/                   # 后台管理（Ant Design + Zustand + React Query）
 │   └── official/                # 官方网站（Ant Design + Framer Motion）
 │
+├── .claude/                     # AI 协作层（详见后文章节）
+│   ├── IDENTITY.md              # 项目身份
+│   ├── SOUL.md                  # 项目性格
+│   ├── MEMORY.md                # 项目记忆索引
+│   ├── memory/                  # 记忆条目
+│   ├── agents/                  # 子代理定义（spider-doctor / arch-warden / memory-curator）
+│   ├── hooks/                   # 半自动进化 hook（inject / guard / suggest）
+│   ├── rules/                   # 硬约束（answer / project / pua）
+│   ├── skills/                  # 可调用技能（new-svc / new-spider / check-arch ...）
+│   └── settings.json            # hook 启用配置
+│
 ├── scripts/                     # 运维脚本（init-db / migrate / start / run-spider）
 ├── logs/                        # 运行时日志（按 logger 名分目录）
 ├── files/                       # 上传/下载/导出文件
-├── runtime/                     # 缓存、会话等运行时数据
-└── .claude/                     # 项目规则与技能（rules + skills）
+└── runtime/                     # 缓存、会话等运行时数据
 ```
 
 ---
@@ -126,42 +139,39 @@ auto_agents/
 | Node.js | 18+ | 前端 |
 | MySQL | 8.0+ | 主数据存储 |
 | Redis | 6+ | 队列调度 / 缓存 |
-| uv | 最新 | 依赖管理（推荐） |
+| uv | 最新 | Python 依赖管理 |
 
 ### 1. 安装依赖
 
 ```bash
-# Python 依赖：根目录一把梭，自动装齐 backend + scrapy 全部依赖到 .venv/
+# Python：根目录一把梭，自动装齐 backend + scrapy 全部依赖到 .venv/
 uv sync
 
 # 前端
-cd frontend/admin && npm install && cd ../..
+cd frontend/admin    && npm install && cd ../..
 cd frontend/official && npm install && cd ../..
 ```
 
-> 不再需要 `cd backend && uv sync`——uv workspace 已统一管理。给某个子项目加包用 `uv add --package auto-agents-backend <pkg>` 或 `uv add --package auto-agents-spider <pkg>`。
+> 不再需要 `cd backend && uv sync` —— uv workspace 已统一管理。给子项目加包用 `uv add --package auto-agents-backend <pkg>` 或 `uv add --package auto-agents-spider <pkg>`。
 
 ### 2. 初始化数据库
 
 ```bash
-# 创建库与用户
-bash scripts/init-db.sh
-
-# 执行迁移
-bash scripts/migrate.sh
+bash scripts/init-db.sh       # 创建库与用户
+bash scripts/migrate.sh       # 执行 Alembic 迁移
 ```
 
 ### 3. 启动
 
 ```bash
-# 一键启动后端 + 双前端
-python run.py all
+# 一键：后端 + 双前端
+uv run python run.py all
 
 # 或分别启动
-python run.py backend                       # 后端 → http://127.0.0.1:9111
-python run.py frontend --all                # 双前端 → 3001 / 3002
-python run.py spider --list                 # 列出可用爬虫
-python run.py spider --spider example       # 运行指定爬虫
+uv run python run.py backend                       # http://127.0.0.1:9111
+uv run python run.py frontend --all                # admin:3001 / official:3002
+uv run python run.py spider --list                 # 列出可用爬虫
+uv run python run.py spider --spider example
 ```
 
 ### 4. 访问
@@ -179,23 +189,23 @@ python run.py spider --spider example       # 运行指定爬虫
 
 ### `run.py` —— 统一编排器
 
-纯 orchestrator，fork 子进程统一日志、信号、关停。**不做依赖安装、不跑迁移**——那是 `scripts/` 的活。
+纯 orchestrator，fork 子进程统一日志、信号、关停。**不做依赖安装、不跑迁移** —— 那是 `scripts/` 的活。
 
 ```bash
-python run.py all                           # backend + 双前端
-python run.py all --env dev                 # 指定环境
-python run.py backend --no-reload           # 关闭热重载
-python run.py backend --port 9200           # 临时改端口
-python run.py spider --spider zhihu_feed
-python run.py frontend --app admin
+uv run python run.py all                           # backend + 双前端
+uv run python run.py all --env dev                 # 指定环境
+uv run python run.py backend --no-reload           # 关闭热重载
+uv run python run.py backend --port 9200           # 临时改端口
+uv run python run.py spider --spider zhihu_feed
+uv run python run.py frontend --app admin
 ```
 
 ### 单独入口
 
 | 脚本 | 用途 | 关键特性 |
 |------|------|----------|
-| `run_backend.py` | 启动 FastAPI | 自动切根 `.venv`、端口预检、串行初始化 logger→db→storage→app |
-| `run_spider.py` | 启动 Scrapy | 自动切根 `.venv`，注入 `sys.path`，`SCRAPY_SETTINGS_MODULE=settings`；支持 `--list / --spider <name>` |
+| `run_backend.py` | 启动 FastAPI | 端口预检、串行初始化 logger→db→storage→app |
+| `run_spider.py` | 启动 Scrapy | 注入 `sys.path`，`SCRAPY_SETTINGS_MODULE=settings`；支持 `--list / --spider <name>` |
 | `run_frontend.py` | 启动前端 | 端口预检、自动 `npm install`、并行启动、按应用名加日志前缀 |
 
 所有入口都接受 `--env {local,dev,prod}`，会透传为 `APP_ENV`（前端透传为 `REACT_APP_ENV`）。
@@ -204,34 +214,28 @@ python run.py frontend --app admin
 
 ## 依赖管理（uv workspace）
 
-本项目采用 **uv workspace** 统一管理 Python 依赖：根目录一个 `.venv`，`backend/` 和 `scrapy/` 作为 workspace member 各自保留 `pyproject.toml`，依赖声明分散、安装环境统一。
+根目录一个 `.venv`，`backend/` 和 `scrapy/` 作为 workspace member 各自保留 `pyproject.toml` —— 依赖声明分散、安装环境统一。
 
 ### 结构
 
 ```
 pyproject.toml          # 根：[tool.uv.workspace] members = ["backend", "scrapy"]
-uv.lock                 # 根：统一锁文件（提交到仓库）
+uv.lock                 # 根：统一锁文件（必须提交）
 .venv/                  # 根：统一虚拟环境
-backend/pyproject.toml  # 后端依赖声明（部署可独立 sync）
-scrapy/pyproject.toml   # 爬虫依赖声明（部署可独立 sync）
+backend/pyproject.toml  # 后端依赖声明
+scrapy/pyproject.toml   # 爬虫依赖声明
 platform_core/          # 源码包，不打包，由 sys.path 引入
 ```
 
 ### 常用命令
 
 ```bash
-# 一次装齐所有依赖（在仓库任意层级执行均可）
-uv sync
+uv sync                                          # 装齐所有依赖
 
-# 给 backend 加包
-uv add --package auto-agents-backend fastapi-pagination
+uv add --package auto-agents-backend  fastapi-pagination
+uv add --package auto-agents-spider   playwright
 
-# 给 scrapy 加包
-uv add --package auto-agents-spider playwright
-
-# 跑命令（自动用根 .venv）
-uv run python run_backend.py
-uv run python run_spider.py --spider example
+uv run python run_backend.py                     # 自动用根 .venv
 uv run alembic -c backend/alembic.ini upgrade head
 ```
 
@@ -240,19 +244,18 @@ uv run alembic -c backend/alembic.ini upgrade head
 虽然本地用统一 venv，**生产部署时仍可按子项目独立打包**：
 
 ```bash
-# 后端镜像
-uv sync --package auto-agents-backend --no-dev
-
-# 爬虫镜像
-uv sync --package auto-agents-spider --no-dev
+uv sync --package auto-agents-backend --no-dev   # 后端镜像
+uv sync --package auto-agents-spider  --no-dev   # 爬虫镜像
 ```
 
-子项目的 `pyproject.toml` 仍然是各自的依赖契约——workspace 只是本地开发的便利层。
+子项目的 `pyproject.toml` 是各自的依赖契约 —— workspace 只是本地开发的便利层。
 
-### 常见坑
+### 红线
 
-- 若 shell 残留 `VIRTUAL_ENV` 指向旧的 `backend/.venv`，`uv sync` 会困惑。先 `unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT`，或直接用 `uv run` 让 uv 自己接管。
-- `platform_core/` 不需要 pyproject——它通过 `sys.path` 被 backend / scrapy 引入，不参与打包。
+- ❌ 禁止再创建 `backend/.venv` 或 `scrapy/.venv`
+- ❌ 禁止 `cd backend && uv add ...`，改用 `uv add --package`
+- ❌ 禁止把 `uv.lock` 加入 `.gitignore`
+- ⚠️ shell 残留 `VIRTUAL_ENV` 指向旧子项目 venv 时，先 `unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT` 再 `uv sync`
 
 ---
 
@@ -276,12 +279,10 @@ uv sync --package auto-agents-spider --no-dev
 | `settings.yml` | APP_NAME / VERSION / ENVIRONMENT |
 | `api.yml` | API.HOST / PORT (9111) / DEBUG |
 | `web.yml` | CORS 白名单与策略 |
-| `log.yml` | 多 logger 路由（global/api/admin/official/spider/error） |
+| `log.yml` | 多 logger 路由（global / api / admin / official / spider / error） |
 | `storage.yml` | 缓存 / 上传 / 导出 / 临时目录 + 上传限制 |
 | `jwt.yml` | SECRET_KEY / 算法 / 过期时间 |
-| `admin.yml` | 后台管理端配置（端口 9112、分页、导出） |
-| `official.yml` | 官网配置（端口 9113、SEO） |
-| `mysql.yml` / `redis.yml` | 各环境覆盖（默认放在 `local/dev/prod/`） |
+| `admin.yml` `official.yml` | 双前端配置 |
 
 爬虫配置在 `config/scrapy/`，含 `settings.yml`（并发/延迟/中间件/管道）和 `sites.yml`（每个目标站点的反爬策略）。
 
@@ -301,11 +302,9 @@ APP_ENV                        # "local" / "dev" / "prod"
 ### 切换环境
 
 ```bash
-APP_ENV=dev  python run.py backend
-APP_ENV=prod python run.py all
+APP_ENV=dev  uv run python run.py backend
+uv run python run.py backend --env prod
 ```
-
-或用 `--env`：`python run.py backend --env prod`。
 
 ### 敏感信息
 
@@ -336,7 +335,6 @@ AUTO_AGENTS_JWT__SECRET_KEY=xxx
 | 模块 | 前缀 | 职责 |
 |------|------|------|
 | `auth.py` | `/auth` | 登录、刷新 token、登出 |
-| `root.py` | `/` | 根路由 |
 | `health.py` | `/health` | 存活探针 |
 | `spiders.py` | `/spiders` | 爬虫任务管理 |
 | `admin.py` | `/admin` | 后台管理接口 |
@@ -353,7 +351,7 @@ AUTO_AGENTS_JWT__SECRET_KEY=xxx
 
 1. 创建 `backend/app/api/v3/`
 2. 在 `backend/app/api/__init__.py` 注册
-3. 实现新版业务
+3. 实现新版业务（参考 `/new-svc` skill）
 
 ---
 
@@ -397,13 +395,12 @@ RedisPipeline (100) → CleanPipeline (200) → ValidatePipeline (300) → Store
 ### 创建新爬虫
 
 ```bash
-# 使用 Skill
-/new-spider
+/new-spider                                      # 推荐：用 skill 一键脚手架
 
 # 或手动
-# 1. scrapy/spiders/<name>.py 继承 scrapy.Spider
+# 1. scrapy/spiders/<name>.py 继承 scrapy.Spider 或 RedisSpider
 # 2. config/scrapy/default/sites.yml 加站点反爬配置
-# 3. python run.py spider --spider <name>
+# 3. uv run python run.py spider --spider <name>
 ```
 
 ### 高并发参数（`config/scrapy/default/settings.yml`）
@@ -415,6 +412,8 @@ RedisPipeline (100) → CleanPipeline (200) → ValidatePipeline (300) → Store
 | `DOWNLOAD_DELAY` | 1s | 下载延迟（**红线必备**） |
 | `RANDOMIZE_DOWNLOAD_DELAY` | true | 抖动 |
 | `RETRY_TIMES` | 3 | 重试次数 |
+
+爬虫失效（selector 失效 / 403/429 / 队列断流）请拉起 `.claude/agents/spider-doctor.md`（见下节）。
 
 ---
 
@@ -454,6 +453,80 @@ src/
 
 ---
 
+## AI 协作层（`.claude/`）
+
+本项目内置一套与 Claude Code 协作的"AI 原生"基础设施。它**不是项目运行依赖**，而是把 AI 协作规则、记忆、自动化拦截固化下来，让任何成员（或任何接手仓库的 AI）开箱即得统一行为。
+
+### Agents vs Claude（先澄清概念）
+
+- **Claude** = 你正在对话的主 LLM，独占一个 context window
+- **Agents（子代理）** = `.claude/agents/*.md` 定义的"专项小弟"。主 Claude 用 `Task` 工具拉起它们，**每个子代理有隔离的 context window**，结束后只把摘要带回主对话 —— 既不污染主上下文，又能并行处理
+
+> 注意：项目名 `auto_agents` 是品牌词，指 Scrapy 爬虫这类"自动化工人"，**与 LLM Agent 完全无关**。本仓库零 LLM SDK 依赖。
+
+### 五件套
+
+```
+.claude/
+├── IDENTITY.md         项目身份：Role / Mission / Expertise / Boundaries
+├── SOUL.md             项目性格：5 条软偏好（悲观验证 / 延伸排查 / 沉默优于啰嗦 ...）
+├── MEMORY.md           项目记忆索引（具体条目在 memory/）
+├── memory/             长期知识条目（reference / troubleshooting / playbook / decision）
+├── rules/              硬约束（answer_rule / project_rule / pua）
+├── skills/             可调用技能（new-svc / new-spider / new-model / check-arch / verify ...）
+├── agents/             子代理定义（见下）
+├── hooks/              半自动进化脚本
+└── settings.json       启用 hooks
+```
+
+| 文件类型 | 性质 | 谁能改 |
+|---------|------|--------|
+| `IDENTITY.md` `SOUL.md` `rules/*` `skills/*` `settings.json` | 长期契约 | **人类**（PreToolUse hook 拦截 AI 写入，要求确认） |
+| `MEMORY.md` 索引 | 半契约 | AI 可改，PR review |
+| `memory/*.md` 条目 | 项目知识 | AI 产 diff，用户 apply 后入库 |
+| `settings.local.json` | 个人本地 | AI / 人类皆可（不入库） |
+
+### 内置子代理
+
+| Agent | 触发场景 | 职责 |
+|-------|---------|------|
+| `spider-doctor` | "爬虫跑不出"、"selector 返回空"、"403/429" | 按概率从高到低诊断（selector → 反爬 → 队列 → pipeline），输出"已验证/已排除/缩小到"结构化报告 |
+| `arch-warden` | "准备提交"、"做 PR"、"check 架构" | 跑 `.claude/skills/check-arch` 的 10 条 grep 红线，给 verdict |
+| `memory-curator` | Stop hook 提示后用户确认；或周期性调用 | 整理 memory 去重、合并、归档，**产 diff 不直写** |
+
+### 半自动进化（hooks）
+
+`.claude/hooks/` 三个 shell 脚本通过 `.claude/settings.json` 启用，全部 **fail-open**（任何异常 exit 0，绝不阻塞工作流）：
+
+| Hook | 事件 | 作用 |
+|------|------|------|
+| `inject_context.sh` | UserPromptSubmit | 每次对话开头注入 IDENTITY Role+Mission + 最近 3 条 memory（< 1KB），让 AI 自动获取项目上下文 |
+| `guard_meta.sh` | PreToolUse (Write\|Edit) | 拦截对 `.claude/(rules\|skills\|IDENTITY\|SOUL\|settings.json)` 的写入，输出 `permissionDecision: ask` 强制人类确认 |
+| `suggest_memory.sh` | Stop | 扫 transcript 关键词（`坑 / pitfall / 约定 / 下次记住`），命中 ≥ 2 处时提示运行 `memory-curator` 归档 |
+
+进化闭环：
+
+```
+踩坑/约定出现 → Stop hook 提示 → 用户拉起 memory-curator
+              → 产出 memory diff → 用户 review + apply
+              → git commit → 团队共享生效
+```
+
+`rules/*` `skills/*` 和 IDENTITY/SOUL 等长期契约**禁止 AI 自主修改**（hook 拦截），保证项目行为可预测、可回滚。
+
+### 常用 Skill
+
+| Skill | 用途 |
+|-------|------|
+| `/new-svc` | 创建 FastAPI 服务模块 |
+| `/new-spider` | 创建 Scrapy 爬虫 |
+| `/new-model` | 配对生成 ORM + Pydantic Schema |
+| `/check-arch` | 扫描 10 条架构红线 |
+| `/verify` | 交付自检（强制 build/test/curl） |
+| `/coding-style` `/logging` `/config` `/deploy` `/cicd` | 各类规范 |
+
+---
+
 ## 开发规范
 
 ### 编码
@@ -480,26 +553,25 @@ API Routes  →  Services  →  Repositories  →  Models
 请求校验      业务编排         数据访问       数据契约
 ```
 
-- **上层可调下层，下层禁止反向调用**
-- **API 层禁止 import ORM**（用 Pydantic schema 隔离）
-- **ORM 禁止 import schema**（避免循环）
+- 上层可调下层，下层禁止反向调用
+- API 层禁止 import ORM（用 Pydantic schema 隔离）
+- ORM 禁止 import schema（避免循环）
 
-### 架构红线（自动检查）
+### 架构红线（10 条，可机械检查）
 
 ```bash
-# 一键扫描 10 条红线（grep + 静态分析）
-/check-arch
+/check-arch                                      # 一键扫描全部
 ```
 
 | 红线 | 检查 |
 |------|------|
-| 硬编码连接串/密钥 | `grep -rE "mysql\|redis://[^$]" backend/ scrapy/` |
+| 硬编码连接串/密钥 | `grep -rE "(mysql\|redis)://[^\$]" backend/ scrapy/` |
 | scrapy 反向 import backend | `grep -rE "from (backend\|app)\." scrapy/` |
 | 爬虫使用 SQLAlchemy Session | `grep -rE "SessionLocal\|get_db" scrapy/` |
 | 爬虫缺 DOWNLOAD_DELAY | `grep DOWNLOAD_DELAY scrapy/settings.py` |
 | API 直接 import ORM | `grep "from.*\.models import" backend/app/api/` |
-
-详见 `.claude/rules/project_rule.md` 与 `.claude/skills/check-arch/`。
+| ORM import Pydantic schema | `grep "from.*\.schemas import" platform_core/models/` |
+| ... | 完整 10 条见 `.claude/rules/project_rule.md` |
 
 ### 禁止清单
 
@@ -511,6 +583,7 @@ API Routes  →  Services  →  Repositories  →  Models
 | API 直接操作数据库 | 跨层穿透 | Service → Repository |
 | 关键路径无日志 | 出问题无法定位 | 入口处 `logger.info` |
 | 前端绕过 API 直连 DB | 安全/架构破坏 | 必须走 backend API |
+| 引入 anthropic/openai SDK | `auto_agents` 是品牌名非 AI 产品 | AI 协作走 `.claude/` |
 
 ---
 
@@ -531,26 +604,32 @@ API Routes  →  Services  →  Repositories  →  Models
 
 | 模块 | 技术 |
 |------|------|
-| 后端 | FastAPI 0.135 / SQLAlchemy 2.0 / PyMySQL / aiomysql / redis-py / Pydantic 2 / PyJWT / Loguru |
-| 爬虫 | Scrapy 2.15 / scrapy-redis / Selenium / DrissionPage |
-| 前端 | React 19 / TypeScript 4.9 / Ant Design 6 / React Router v7 / React Query / Zustand / Framer Motion |
-| 配置 | Dynaconf 3.2 |
+| 后端 | FastAPI ≥0.135 / SQLAlchemy 2 / PyMySQL / aiomysql / redis-py ≥7.4 / Pydantic 2 / PyJWT / Loguru |
+| 爬虫 | Scrapy ≥2.15 / scrapy-redis / Selenium / DrissionPage |
+| 前端 | React 19 / TypeScript / Ant Design 6 / React Router v7 / React Query / Zustand / Framer Motion |
+| 配置 | Dynaconf ≥3.2 |
 | 数据库 | MySQL 8 / Redis 6+ |
-| 包管理 | uv（Python） / npm（前端） |
-| 迁移 | Alembic 1.18 |
+| 包管理 | uv（Python workspace）/ npm（前端） |
+| 迁移 | Alembic ≥1.18 |
+| AI 协作 | Claude Code（`.claude/` 五件套） |
 
 ---
 
 ## 相关文档
 
-- 项目规则：`.claude/rules/project_rule.md`（架构哲学 + 10 条红线）
+- 项目身份：`.claude/IDENTITY.md`
+- 项目性格：`.claude/SOUL.md`
+- 项目记忆：`.claude/MEMORY.md` + `.claude/memory/`
+- 架构哲学 + 10 条红线：`.claude/rules/project_rule.md`
 - 回答规范：`.claude/rules/answer_rule.md`
 - 调试激励：`.claude/rules/pua.md`
-- 技能库：`.claude/skills/`（`new-svc / new-spider / new-model / check-arch / verify / coding-style / logging / config / deploy / cicd`）
-- 项目说明：`CLAUDE.md`
+- 子代理：`.claude/agents/{spider-doctor,arch-warden,memory-curator}.md`
+- 技能库：`.claude/skills/`
+- Claude 入口：`CLAUDE.md`
 
 ---
 
 **当前分支**：`feature/project-structure` —— 进行中的结构重构：
-- 异常处理、CORS、日志初始化等统一收敛到 `platform_core`
-- Python 环境收敛为 uv workspace 单一 `.venv`（原 `backend/.venv` 和 `scrapy/.venv` 已废弃）
+- 异常处理、CORS、日志初始化等已统一收敛到 `platform_core`
+- Python 环境收敛为 uv workspace 单一 `.venv`
+- 新增 `.claude/` AI 协作层（IDENTITY / SOUL / MEMORY / agents / hooks）
