@@ -1,0 +1,103 @@
+# Auto Agents CI - lint + test + arch-check + frontend build + docker validate
+#
+# 四阶段质量关卡（对齐 /cicd Skill 与 /verify Skill 的验证约定）：
+# 1. python-lint-test:  ruff lint + pytest（backend/tests）
+# 2. arch-check:        scripts/check-arch.sh 的 10 条架构红线
+# 3. frontend-build:    admin + official 两个 React 应用构建
+# 4. docker-validate:   Dockerfile 构建 + compose 语法校验
+#
+# 触发：推送任意分支 + 向 main 发起 PR
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  python-lint-test:
+    name: Python Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Ruff lint
+        run: uv run ruff check backend platform_core scripts
+
+      - name: Pytest
+        env:
+          APP_ENV: local
+        run: uv run pytest -x -q backend/tests
+
+  arch-check:
+    name: Architecture Red Lines (10 rules)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Run check-arch.sh
+        run: bash scripts/check-arch.sh
+
+  frontend-build:
+    name: Frontend Build (admin + official)
+    runs-on: ubuntu-latest
+    env:
+      # CRA 在 CI 环境默认把 warning 视为 error，构建阶段放宽
+      CI: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            frontend/admin/package-lock.json
+            frontend/official/package-lock.json
+
+      - name: Build admin
+        working-directory: frontend/admin
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build official
+        working-directory: frontend/official
+        run: |
+          npm ci
+          npm run build
+
+  docker-validate:
+    name: Docker Validate (build + compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml syntax
+        run: docker compose config --quiet
+
+      - name: Build Dockerfile
+        run: docker build -t auto-agents-backend .

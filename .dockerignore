@@ -1,0 +1,28 @@
+# Docker 构建上下文排除 - 缩小 context、避免泄漏敏感文件
+.git
+.github
+.venv
+.idea
+.qoder
+.agents
+.claude
+.gemini
+
+# 依赖与构建产物
+**/node_modules
+**/__pycache__
+frontend/admin/build
+frontend/official/build
+
+# 运行时数据与日志
+logs
+runtime
+temp
+backend/runtime
+backend/temp
+backend/files
+
+# 敏感配置（镜像内通过环境变量注入）
+config/local/.env
+config/dev/.env
+config/prod/.env

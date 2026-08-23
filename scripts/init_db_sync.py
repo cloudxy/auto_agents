@@ -34,9 +34,9 @@ def init_tables():
         print("开始同步表结构...")
         
         # 导入所有模型以确保它们被注册到 Base.metadata
-        from platform_core.models.user import User
-        from platform_core.models.spider_task import SpiderTask
-        from platform_core.models.system_config import SystemConfig
+        from platform_core.models.user import User  # noqa: F401  副作用导入：注册到 Base.metadata
+        from platform_core.models.spider_task import SpiderTask  # noqa: F401
+        from platform_core.models.system_config import SystemConfig  # noqa: F401
         
         # 创建所有表
         Base.metadata.create_all(bind=engine)

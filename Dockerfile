@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+# Auto Agents 镜像 - 多阶段构建（前端构建 + 后端运行时）
+#
+# 构建：docker build -t auto-agents-backend .
+# 运行：见 docker-compose.yml（本地联调含 MySQL + Redis）
+
+# ===== Stage 1: 前端构建（admin + official）=====
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /build/admin
+COPY frontend/admin/package.json frontend/admin/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/admin/ ./
+RUN CI=false npm run build
+
+WORKDIR /build/official
+COPY frontend/official/package.json frontend/official/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/official/ ./
+RUN CI=false npm run build
+
+# ===== Stage 2: 后端运行时 =====
+FROM python:3.13-slim AS backend
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+
+# uv workspace 解析需要根配置 + 全部成员 manifest
+COPY pyproject.toml uv.lock README.md ./
+COPY backend/pyproject.toml backend/
+COPY scrapy/pyproject.toml scrapy/
+RUN uv sync --package auto-agents-backend --no-dev --frozen
+
+# 应用源码（platform_core 为源码包，经 run_backend.py 注入 sys.path）
+COPY backend/ backend/
+COPY platform_core/ platform_core/
+COPY config/ config/
+COPY run_backend.py ./
+
+# 前端构建产物（静态资源，供后续 nginx/静态服务接入）
+COPY --from=frontend-builder /build/admin/build /app/frontend-dist/admin
+COPY --from=frontend-builder /build/official/build /app/frontend-dist/official
+
+ENV APP_ENV=prod
+EXPOSE 9111
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9111/api/v1/health', timeout=3)" || exit 1
+
+CMD ["uv", "run", "python", "run_backend.py", "--no-reload"]
