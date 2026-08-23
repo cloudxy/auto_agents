@@ -9,7 +9,7 @@
 - 不直接写 SQL、不直接 session.execute
 - 所有数据操作通过 Repository
 """
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

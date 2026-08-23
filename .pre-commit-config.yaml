@@ -1,0 +1,19 @@
+# 架构红线门禁 - 提交前自动执行 project_rule.md 的 10 条红线检查
+#
+# 安装：uv run pre-commit install
+# 手动触发：uv run pre-commit run check-arch --all-files
+#
+# 设计说明：
+# - 使用 local + system 语言，复用仓库内 scripts/check-arch.sh，
+#   保证本地提交与 CI 使用同一份检查逻辑（单一事实来源）
+# - check-arch.sh 退出码 = 违规数，非 0 即阻断提交
+
+repos:
+  - repo: local
+    hooks:
+      - id: check-arch
+        name: 架构合规检查（10 条红线）
+        entry: bash scripts/check-arch.sh
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -1,0 +1,56 @@
+# Auto Agents 本地联调栈 - backend + MySQL + Redis
+#
+# 用法：
+#   docker compose up --build      # 构建并启动全栈
+#   docker compose down            # 停止（保留数据卷）
+#   docker compose down -v         # 停止并清除数据卷
+#
+# 注意：密码为开发默认值（与 config/local/.env 对齐），严禁用于生产
+
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: "auto_agents"
+      MYSQL_USER: "auto_agents"
+      MYSQL_PASSWORD: "123456"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p123456"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass 123456
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "123456", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: .
+    command: ["uv", "run", "python", "run_backend.py", "--no-reload", "--env", "local"]
+    ports:
+      - "9111:9111"
+    environment:
+      APP_ENV: "local"
+      # Dynaconf 嵌套覆盖（双下划线分隔层级）：指向 compose 服务名
+      AUTO_AGENTS_MYSQL__DEFAULT__HOST: "mysql"
+      AUTO_AGENTS_REDIS__DEFAULT__HOST: "redis"
+      # db.py 直接读取的扁平变量（与 config/local/.env 对齐）
+      AUTO_AGENTS_MYSQL_DEFAULT_PASSWORD: "123456"
+      AUTO_AGENTS_REDIS_DEFAULT_PASSWORD: "123456"
+      AUTO_AGENTS_JWT__SECRET_KEY: "auto-agents-dev-secret-key-2026"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mysql_data:

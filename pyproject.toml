@@ -9,6 +9,15 @@ dependencies = [
     "auto-agents-spider",
 ]
 
+[dependency-groups]
+# 根级开发依赖：保证 `uv sync` + `uv run pytest` 在仓库任意层级可用（/verify 约定）
+dev = [
+    "pre-commit>=4.0.0",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.14.0",
+]
+
 [tool.uv]
 package = false
 
@@ -18,3 +27,21 @@ members = ["backend", "scrapy"]
 [tool.uv.sources]
 auto-agents-backend = { workspace = true }
 auto-agents-spider = { workspace = true }
+
+[tool.pytest.ini_options]
+# /verify Skill 约定的验证入口：uv run pytest -x -q backend/tests
+testpaths = ["backend/tests"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+# 最小 lint 范围：语法错误 + 未使用导入（存量代码逐步收紧）
+target-version = "py313"
+extend-exclude = [".venv", "node_modules", "runtime", "logs"]
+
+[tool.ruff.lint]
+select = ["E9", "F401"]
+
+[tool.ruff.lint.per-file-ignores]
+# 各包 __init__.py 的导出性导入不视为未使用
+"**/__init__.py" = ["F401"]
