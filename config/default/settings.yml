@@ -20,7 +20,7 @@ TASKS:
 SCHEDULER:
   ENABLED: true
   TICK_SECONDS: 30        # 扫描间隔（秒）
-  LOCK_TTL_SECONDS: 25    # 多实例互斥锁的过期时间（需小于 TICK_SECONDS）
+  LOCK_TTL_SECONDS: 25    # 多实例互斥锁的过期时间；实际生效值 = max(本值, 2×TICK_SECONDS)（schedule_service 兜底）
   QUIET_HOURS: []           # 静默时段，如 ["02:00-06:00"]，空列表 = 不启用
   QUEUE_DEPTH_WARN: 50      # 队列深度告警阈值（单级队列）
   DYNAMIC_PRIORITY: true    # 是否启用动态优先级（基于历史数据）

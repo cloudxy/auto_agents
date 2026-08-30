@@ -21,7 +21,6 @@
 import asyncio
 import json
 import time
-import uuid
 from datetime import datetime, timedelta
 
 import redis.asyncio as aioredis
@@ -42,6 +41,7 @@ from backend.services.newapi_api import (
 from backend.services.notify_service import NotifyService
 from config import settings
 from platform_core.logger import get_logger
+from platform_core.queues import distributed_lock
 
 logger = get_logger("api")
 
@@ -180,17 +180,16 @@ class ChannelSchedulerService:
     async def _tick_once(self) -> None:
         """单轮：抢锁 → 拉渠道 → 解析受管渠道 → 聚合用量 → 逐渠道处理（隔离）
 
-        锁在 finally 中释放（值比对后删除，早退路径同样释放，评审 m-1）；
+        锁走 platform_core.queues.distributed_lock 共享设施（唯一 token +
+        finally 原子释放，早退/异常路径同样释放，评审 m-1）；
         TTL 仅作进程崩溃兑底，正常运行靠主动释放。
         """
         lock_ttl = int(settings.get("NEWAPI.LOCK_TTL_SECONDS", 120) or 120)
-        lock_token = uuid.uuid4().hex
-        acquired = await self._redis.set(
-            NEWAPI_SCHEDULER_LOCK_KEY, lock_token, nx=True, ex=lock_ttl
-        )
-        if not acquired:
-            return  # 其他实例已在执行本轮
-        try:
+        async with distributed_lock(
+            self._redis, NEWAPI_SCHEDULER_LOCK_KEY, ttl=lock_ttl
+        ) as lock:
+            if lock is None:
+                return  # 其他实例已在执行本轮
             channels = await self._api.list_channels()
             if not channels:
                 logger.debug("new-api 渠道列表为空，本轮跳过")
@@ -242,17 +241,6 @@ class ChannelSchedulerService:
                     await self._process_channel(ch, cfg, usage)
                 except Exception as e:  # noqa: BLE001 单渠道隔离（蓝本缺陷④规避）
                     logger.error(f"渠道调度处理失败（已隔离）: channel_id={cid}, error={e}")
-        finally:
-            await self._release_lock(NEWAPI_SCHEDULER_LOCK_KEY, lock_token)
-
-    async def _release_lock(self, key: str, token: str) -> None:
-        """Redis 锁安全释放：get == token 才 del（防误删其他实例的锁，评审 m-1）"""
-        try:
-            current = await self._redis.get(key)
-            if current == token:
-                await self._redis.delete(key)
-        except Exception as e:  # noqa: BLE001 释放失败交由 TTL 兑底
-            logger.warning(f"Redis 锁释放失败（key={key}）: {e}")
 
     async def _process_channel(self, channel: dict, cfg: dict, usage: int) -> None:
         """单渠道状态机：启用超限→禁用；自动禁用冷却到期→恢复；人工禁用→不覆盖"""

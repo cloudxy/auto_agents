@@ -1,4 +1,4 @@
-"""Redis 队列约定 - Backend 与 Scrapy 共享的队列/键名常量
+"""Redis 队列约定 - Backend 与 Scrapy 共享的队列/键名常量 + 分布式锁设施
 
 数据闭环（阶段 0）：
 1. Backend enqueue() 把任务消息 rpush 到 TASK_QUEUE
@@ -12,7 +12,17 @@
 约定（红线）：
 - Scrapy 与 Backend 只通过本模块的键名 + Redis 通信，禁止互相 import
 """
-from typing import Final
+import asyncio
+import uuid
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, AsyncIterator, Final
+
+from platform_core.logger import get_logger
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+
+logger = get_logger("queues")
 
 # Backend → 消费者：任务分发队列（list，消息为 JSON 字符串）
 # 阶段 4.1：按优先级拆为三条队列，blpop 多键按序消费（high > normal > low）
@@ -66,6 +76,132 @@ PROXY_SCORES_KEY: Final[str] = "spider:proxy:scores"
 PROXY_STATS_KEY: Final[str] = "spider:proxy:stats"
 
 
+# ── 共享分布式锁设施（全仓库唯一锁样板定义处，禁止再手写锁样板） ──────
+# 语义：SET key token NX EX ttl 抢占 → Lua 原子释放/续期（GET==token 才 DEL/EXPIRE）。
+# 释放不用 GETDEL：它是无条件删除，锁过期被他人抢占时会误删别人的锁；
+# 也不用 GET+DEL：非原子，两步之间存在过期易主窗口，同样会误删。
+# 调用方：channel_probe / channel_scheduler / schedule 三处 tick 循环。
+
+# 原子释放（token 比对 DEL）
+_LOCK_RELEASE_LUA: Final[str] = (
+    "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+    "return redis.call('DEL', KEYS[1]) end return 0"
+)
+# 原子续期（token 比对 EXPIRE）
+_LOCK_RENEW_LUA: Final[str] = (
+    "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+    "return redis.call('EXPIRE', KEYS[1], ARGV[2]) end return 0"
+)
+
+
+class _LockHandle:
+    """已持有的锁句柄：唯一 token + 原子续期 + 原子释放
+
+    lost 属性：续期发现锁已丢失（TTL 过期被他人抢占 / Redis 故障）时置 True，
+    持有方应感知后立即退出本轮临界区（保守语义：宁可少跑，不可双跑）。
+    """
+
+    __slots__ = ("_redis", "_key", "_token", "_ttl", "_renewal_task", "lost")
+
+    def __init__(self, redis: "Redis", key: str, token: str, ttl: int):
+        self._redis = redis
+        self._key = key
+        self._token = token
+        self._ttl = ttl
+        self._renewal_task: asyncio.Task | None = None
+        self.lost = False
+
+    @property
+    def token(self) -> str:
+        """本次持有的唯一 token（uuid4 hex）"""
+        return self._token
+
+    async def renew(self) -> bool:
+        """原子续期：token 匹配才 EXPIRE。
+
+        返回 True=续期成功；False=锁已丢失或 Redis 异常（保守感知），
+        调用方应立即退出本轮临界区。
+        """
+        try:
+            ok = await self._redis.eval(_LOCK_RENEW_LUA, 1, self._key, self._token, self._ttl)
+            if not ok:
+                self.lost = True
+            return bool(ok)
+        except Exception as e:  # noqa: BLE001 Redis 故障按丢失处理（保守语义）
+            logger.warning(f"分布式锁续期失败（key={self._key}）: {e}")
+            self.lost = True
+            return False
+
+    async def release(self) -> None:
+        """原子释放：token 匹配才 DEL；释放失败交由 TTL 兑底（不向上抛）"""
+        if self._renewal_task is not None:
+            self._renewal_task.cancel()
+            try:
+                await self._renewal_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 退出路径兑底
+                pass
+            self._renewal_task = None
+        try:
+            await self._redis.eval(_LOCK_RELEASE_LUA, 1, self._key, self._token)
+        except Exception as e:  # noqa: BLE001 释放失败交由 TTL 兑底
+            logger.warning(f"分布式锁释放失败（key={self._key}，交由 TTL 兑底）: {e}")
+
+    def _start_auto_renewal(self, interval: float) -> None:
+        """启动后台续期任务（异常安全：renew 内部捕获一切异常，
+        续期失败置 lost 并让任务自然退出，绝不向上传播）"""
+
+        async def _renew_loop() -> None:
+            while True:
+                await asyncio.sleep(interval)
+                if not await self.renew():
+                    logger.warning(
+                        f"分布式锁后台续期失败，已标记 lost（key={self._key}）"
+                    )
+                    return  # 锁已丢失，续期任务退出；持有方通过 lost 感知
+
+        self._renewal_task = asyncio.create_task(_renew_loop())
+
+
+@asynccontextmanager
+async def distributed_lock(
+    redis: "Redis", key: str, ttl: int, *, renewal: float | None = None
+) -> AsyncIterator[_LockHandle | None]:
+    """共享分布式锁（异步上下文管理器）：未抢到 yield None，调用方早退跳过本轮。
+
+    用法（与三处 tick 循环的早退习惯一致）：
+        async with distributed_lock(redis, key, ttl=60) as lock:
+            if lock is None:
+                return  # 其他实例持有中，跳过本轮
+            ... 临界区 ...
+            if lock.lost:      # 可选：长临界区中检查锁是否仍归属自己
+                return
+
+    - 获取：SET key uuid4-token NX EX ttl；Redis 异常按未抢到处理（保守跳过）
+    - 释放：finally 中 Lua 原子释放（token 比对 DEL），早退/异常路径同样释放；
+      释放失败交由 TTL 兑底
+    - renewal：可选后台自动续期间隔（秒，须小于 ttl）；不传则不自动续期。
+      续期失败（锁易主/Redis 故障）→ lock.lost = True，持有方主动感知退出
+
+    redis 参数兼容 redis.asyncio.Redis（或任何实现 set/get/eval 的异步客户端）。
+    """
+    token = uuid.uuid4().hex
+    try:
+        acquired = await redis.set(key, token, nx=True, ex=ttl)
+    except Exception as e:  # noqa: BLE001 Redis 故障按未抢到处理，宁可不做不可双跑
+        logger.warning(f"分布式锁获取异常，本轮跳过（key={key}）: {e}")
+        acquired = False
+    if not acquired:
+        yield None
+        return
+    handle = _LockHandle(redis, key, token, ttl)
+    if renewal:
+        handle._start_auto_renewal(renewal)
+    try:
+        yield handle
+    finally:
+        await handle.release()
+
+
 __all__ = [
     "TASK_QUEUE_PREFIX",
     "TASK_QUEUE_PRIORITIES",
@@ -83,4 +219,5 @@ __all__ = [
     "TASK_CONTROL_KEY",
     "PROXY_SCORES_KEY",
     "PROXY_STATS_KEY",
+    "distributed_lock",
 ]
