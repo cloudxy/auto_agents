@@ -1,0 +1,25 @@
+# LLM 智能采集配置（阶段二：AI 规划 flow_generic 流程定义）
+#
+# 嵌套读取方式（与 settings.yml 的 TASKS/SCHEDULER 一致）：
+#   settings.get("LLM.ENABLED", False)
+# 环境变量覆盖（Dynaconf 双下划线嵌套约定，前缀见 config/__init__.py）：
+#   AUTO_AGENTS_LLM__ENABLED=true
+#   AUTO_AGENTS_LLM__MODEL=gpt-4o-mini
+#
+# 安全红线：API Key 不入 yml，仅在 config/<env>/.env 配置 LLM_API_KEY，
+# 服务层读取顺序：环境变量 LLM_API_KEY → settings LLM.API_KEY。
+LLM:
+  ENABLED: false              # 默认关闭（未配置 Key 时调用直接抛业务异常，测试环境友好）
+  PROVIDER: openai_compatible # OpenAI 兼容协议（chat/completions）
+  BASE_URL: "https://api.openai.com/v1"
+  MODEL: "gpt-4o-mini"
+  TEMPERATURE: 0.2            # 规划类任务低温稳定输出
+  TIMEOUT: 120                # 单次请求超时（秒）
+  MAX_RETRIES: 3              # 指数退避重试次数
+  MAX_TOKENS_BUDGET: 200000   # token 预算熔断阈值（累计用量超过即拒绝调用）
+  MAX_ITERATIONS: 2           # 试采失败自动修复迭代上限
+  # SSRF 加固开关（评审 M-1）：true 时服务层拒绝全部私网/环回 base_url
+  # （public untrusted 租户场景开启）；默认 false：本地 new-api(localhost:3000)/
+  # ollama 属文档化合法路径。云元数据端点（169.254.0.0/16 / metadata.*）
+  # 由 schema 层恒拒绝，不受本开关影响
+  PROVIDER_BLOCK_PRIVATE_URL: false
