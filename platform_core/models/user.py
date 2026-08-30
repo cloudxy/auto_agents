@@ -14,6 +14,8 @@ class User(Base):
     password_hash = Column(String(255), nullable=False, comment="密码哈希")
     is_active = Column(Boolean, default=True, comment="是否激活")
     is_admin = Column(Boolean, default=False, comment="是否管理员")
+    role = Column(String(20), nullable=False, default="operator", server_default="operator",
+                  comment="角色：admin(全权)/operator(操作)/viewer(只读)")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
 

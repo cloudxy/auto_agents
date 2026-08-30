@@ -27,7 +27,29 @@ from platform_core.schemas.spider import (
     SpiderTaskListResponse,
     SpiderTaskQuery,
     RunSpiderRequest,
+    SpiderResultResponse,
+    SpiderResultListResponse,
     SpiderStatsResponse,
+)
+from platform_core.schemas.ai_plan import (
+    FlowConfig,
+    SelectorRule,
+    PaginationConfig,
+    DetailConfig,
+    FilterRule,
+    AiPlanCreate,
+    AiPlanResponse,
+    AiPlanListResponse,
+    validate_selector_expr,
+)
+from platform_core.schemas.newapi import (
+    ProbeVerdict,
+    ChannelEventAction,
+    ChannelEventSource,
+    ChannelEventResponse,
+    ChannelEventListResponse,
+    ChannelProbeResultResponse,
+    ChannelProbeResultListResponse,
 )
 
 __all__ = [
@@ -51,5 +73,25 @@ __all__ = [
     "SpiderTaskListResponse",
     "SpiderTaskQuery",
     "RunSpiderRequest",
+    "SpiderResultResponse",
+    "SpiderResultListResponse",
     "SpiderStatsResponse",
+    # AI 采集计划 Schema（阶段二）
+    "FlowConfig",
+    "SelectorRule",
+    "PaginationConfig",
+    "DetailConfig",
+    "FilterRule",
+    "AiPlanCreate",
+    "AiPlanResponse",
+    "AiPlanListResponse",
+    "validate_selector_expr",
+    # new-api 渠道集成 Schema（阶段三）
+    "ProbeVerdict",
+    "ChannelEventAction",
+    "ChannelEventSource",
+    "ChannelEventResponse",
+    "ChannelEventListResponse",
+    "ChannelProbeResultResponse",
+    "ChannelProbeResultListResponse",
 ]
