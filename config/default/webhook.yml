@@ -1,0 +1,12 @@
+# Webhook 回调配置 - Backend 与 Scrapy 共享（同一 Dynaconf 实例）
+
+WEBHOOK:
+  # 签名密钥（生产环境必须通过环境变量覆盖）
+  # 设置方式: export AUTO_AGENTS_WEBHOOK__SECRET_KEY="your-secret-key"
+  SECRET_KEY: "change-me-in-production"
+
+  # 时间戳防重放：允许的最大时钟偏移（秒）
+  MAX_CLOCK_SKEW: 300
+
+  # Backend 回调地址（爬虫进程 → Backend，按环境部署形态调整）
+  CALLBACK_URL: "http://127.0.0.1:9111/external/v1/webhooks/spider/callback"

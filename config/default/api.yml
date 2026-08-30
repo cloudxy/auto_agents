@@ -14,3 +14,11 @@ API:
   # - 最终路径: /api/v1/*, /api/v2/*
   
   # 注意：密钥配置在 jwt.yml 中
+
+# 公开数据 API 配置（第三方系统拉取采集结果）
+# 鉴权统一入口：backend/app/external_api/v1/webhooks.py validate_api_key
+# 推荐使用新键 EXTERNAL_API.API_KEYS（config/default/external_api.yml）；
+# 下方旧单 key 仅作过渡期兼容（非空时并入有效密钥列表），迁移后可移除。
+# 环境变量覆盖: AUTO_AGENTS_EXTERNAL_API__API_KEY="your-key"（deprecated）
+EXTERNAL_API:
+  API_KEY: ""  # deprecated（过渡期兼容旧部署）：非空并入有效密钥；新部署请配 EXTERNAL_API.API_KEYS
