@@ -1,11 +1,11 @@
 /**
  * new-api 中转站只读运维服务 - /newapi 端点封装（阶段三）
  *
- * 响应为后端 Pydantic 直出（无 ApiResponse 信封），与 services/llm.ts 解包方式一致。
- * 三端点全只读：overview（远程渠道+本地统计，可能降级 available=false）、
- * events / probe-results（本地表分页，始终可用）。
+ * 响应为后端统一信封（ADR-001）：overview 为 ApiResponse，
+ * events / probe-results 为 PaginatedResponse（data.items/total），
+ * service 层统一解包 data，页面组件拿到的仍是裸结构。
  */
-import api from './api'
+import api, { unwrap } from './api'
 
 /** 渠道状态常量（与 new-api model/channel.go 语义对齐） */
 export const CHANNEL_STATUS = {
@@ -77,10 +77,13 @@ export interface ChannelProbeResultItem {
   created_at?: string | null
 }
 
-/** 分页列表（后端 Pydantic 直出） */
+/** 分页列表（信封 data 载荷；page/page_size/total_pages 为分页信封附赠字段） */
 export interface PagedResponse<T> {
   total: number
   items: T[]
+  page?: number
+  page_size?: number
+  total_pages?: number
 }
 
 /** 分页查询参数 */
@@ -91,20 +94,19 @@ export interface PagedQuery {
 }
 
 /** 中转站总览（渠道列表 + 本地统计；远程降级时仍 200） */
-export const fetchNewapiOverview = (): Promise<NewapiOverview> => {
-  return api.get('/newapi/overview') as unknown as Promise<NewapiOverview>
-}
+export const fetchNewapiOverview = (): Promise<NewapiOverview> =>
+  api.get('/newapi/overview').then((res) => unwrap<NewapiOverview>(res))
 
 /** 渠道启停事件分页（时间倒序） */
-export const fetchNewapiEvents = (params: PagedQuery): Promise<PagedResponse<ChannelEventItem>> => {
-  return api.get('/newapi/events', { params }) as unknown as Promise<PagedResponse<ChannelEventItem>>
-}
+export const fetchNewapiEvents = (params: PagedQuery): Promise<PagedResponse<ChannelEventItem>> =>
+  api
+    .get('/newapi/events', { params })
+    .then((res) => unwrap<PagedResponse<ChannelEventItem>>(res))
 
 /** 探针结果分页（时间倒序） */
 export const fetchNewapiProbeResults = (
   params: PagedQuery
-): Promise<PagedResponse<ChannelProbeResultItem>> => {
-  return api.get('/newapi/probe-results', {
-    params,
-  }) as unknown as Promise<PagedResponse<ChannelProbeResultItem>>
-}
+): Promise<PagedResponse<ChannelProbeResultItem>> =>
+  api
+    .get('/newapi/probe-results', { params })
+    .then((res) => unwrap<PagedResponse<ChannelProbeResultItem>>(res))

@@ -1,38 +1,43 @@
-"""系统配置接口 - 管理网站基础信息（读需登录，写仅管理员）"""
+"""系统配置接口 - 管理网站基础信息（读需登录，写仅管理员）
+
+响应契约：统一 ApiResponse 信封（ADR-001）。
+"""
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
 from backend.app.api.deps import CurrentUser, require_admin, require_login
+from backend.app.responses import ApiResponse, ok, updated
 from backend.services.config_service import ConfigService
 from platform_core.db import get_async_db
 
 router = APIRouter()
 
-@router.get("/")
+
+@router.get("/", response_model=ApiResponse[dict])
 async def get_configs(
     session: AsyncSession = Depends(get_async_db),
     _user: CurrentUser = Depends(require_login),
-):
-    """获取所有系统配置"""
+) -> ApiResponse[dict]:
+    """获取所有系统配置（信封 data 为 {key: value} 字典）"""
     service = ConfigService(session)
-    return await service.get_all_configs()
+    return ok(await service.get_all_configs())
 
 
 class ConfigUpdate(BaseModel):
     value: str
 
-@router.put("/{key}")
+@router.put("/{key}", response_model=ApiResponse)
 async def update_config(
     key: str,
     data: ConfigUpdate,
     session: AsyncSession = Depends(get_async_db),
     user: CurrentUser = Depends(require_admin),
-):
+) -> ApiResponse:
     """更新单个配置项（仅管理员，写入审计；set_config 内部已提交业务事务，
     审计记录由 record_audit 单独提交）"""
     service = ConfigService(session)
     await service.set_config(key, data.value)
     await record_audit(session, user, "config.update", key)
-    return {"message": "Config updated"}
+    return updated(message=f"配置 {key} 已更新")

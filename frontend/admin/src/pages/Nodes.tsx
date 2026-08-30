@@ -35,9 +35,10 @@ const Nodes: React.FC = () => {
   const loadNodes = useCallback(async (showSpin = true) => {
     if (showSpin) setLoading(true)
     try {
-      const res: any = await api.get('/spiders/nodes')
-      setNodes(res.items || [])
-      setTotal(res.total || 0)
+      const res = await api.get<{ items: WorkerNode[]; total: number }>('/spiders/nodes')
+      // /spiders/nodes 带 ApiResponse 信封（ADR-001），需解包 data
+      setNodes(res.data?.items || [])
+      setTotal(res.data?.total || 0)
     } catch (error) {
       message.error('获取节点列表失败')
     } finally {
@@ -57,7 +58,7 @@ const Nodes: React.FC = () => {
       title: '状态',
       key: 'online',
       width: 90,
-      render: (_: any, record: WorkerNode) =>
+      render: (_: unknown, record: WorkerNode) =>
         record.online
           ? <Badge status="success" text="在线" />
           : <Badge status="error" text="离线" />,
@@ -65,7 +66,7 @@ const Nodes: React.FC = () => {
     {
       title: '节点',
       key: 'worker_id',
-      render: (_: any, record: WorkerNode) => (
+      render: (_: unknown, record: WorkerNode) => (
         <Space direction="vertical" size={0}>
           <Text strong><ClusterOutlined style={{ marginRight: 6 }} />{record.worker_id}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
@@ -77,7 +78,7 @@ const Nodes: React.FC = () => {
     {
       title: '承载爬虫',
       key: 'spiders',
-      render: (_: any, record: WorkerNode) =>
+      render: (_: unknown, record: WorkerNode) =>
         record.spiders.length
           ? record.spiders.map((s) => <Tag key={s} color="cyan">{s}</Tag>)
           : <Text type="secondary">-</Text>,
@@ -85,7 +86,7 @@ const Nodes: React.FC = () => {
     {
       title: '当前任务',
       key: 'active_tasks',
-      render: (_: any, record: WorkerNode) => {
+      render: (_: unknown, record: WorkerNode) => {
         const running = record.active_tasks.filter((t) => t.task_id)
         if (!running.length) return <Text type="secondary">空闲</Text>
         return running.map((t) => (

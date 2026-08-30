@@ -5,6 +5,12 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { Form, Input, Button, Card, message, Divider, Spin } from 'antd'
 import api from '../services/api'
 
+/** 表单值契约（与 initialValues 的字段一致） */
+interface SiteConfigValues {
+  site_title: string
+  site_description?: string
+}
+
 const Settings: React.FC = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
@@ -12,9 +18,9 @@ const Settings: React.FC = () => {
 
   const fetchConfigs = useCallback(async () => {
     try {
-      // /configs/ 直接返回 {key: value} 字典（无 ApiResponse 包装）
-      const res: any = await api.get('/configs/')
-      form.setFieldsValue(res)
+      // /configs/ 信封 data 为 {key: value} 字典（ADR-001），需解包 data
+      const res = await api.get<Record<string, unknown>>('/configs/')
+      form.setFieldsValue(res.data || {})
     } catch (error) {
       message.error('获取配置失败')
     } finally {
@@ -26,14 +32,13 @@ const Settings: React.FC = () => {
     fetchConfigs()
   }, [fetchConfigs])
 
-  const onFinish = async (values: any) => {
+  const onFinish = async (values: SiteConfigValues) => {
     setLoading(true)
     try {
-      // 遍历所有字段进行更新
-      const keys = Object.keys(values)
+      // 遍历所有字段进行更新（entries 避免字符串索引触发 TS7053）
       await Promise.all(
-        keys.map(key => 
-          api.put(`/configs/${key}`, { value: values[key] })
+        Object.entries(values).map(([key, value]) =>
+          api.put(`/configs/${key}`, { value })
         )
       )
       message.success('系统配置已成功保存')

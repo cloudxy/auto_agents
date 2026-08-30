@@ -41,4 +41,21 @@ api.interceptors.response.use(
   }
 )
 
+/**
+ * 统一响应信封（与后端 ApiResponse / PaginatedResponse 对齐，ADR-001）
+ * 拦截器已剥掉 axios 层的 response，这里拿到的是整个信封体，
+ * 业务载荷在 data 字段。
+ */
+export interface ApiEnvelope<T> {
+  success: boolean
+  code: string
+  message: string
+  data: T
+  request_id?: string | null
+}
+
+/** 从信封中解出业务载荷（service 层统一出口） */
+export const unwrap = <T,>(envelope: unknown): T =>
+  (envelope as ApiEnvelope<T>).data
+
 export default api

@@ -1,4 +1,4 @@
-"""阶段二单测 - LLM 供应商管理（加密 / 单激活互斥 / 掩码 / 兜底顺序 / 权限 / 连通性）
+"""LLM 供应商管理单测（加密 / 单激活互斥 / 掩码 / 兜底顺序 / 权限 / 连通性）
 
 约定：不连真实 MySQL/Redis，Repository 用 AsyncMock/MagicMock 桩；
 连通性测试 mock httpx.AsyncClient；
@@ -41,21 +41,11 @@ from platform_core.schemas.llm_provider import (
     is_private_base_url,
     mask_api_key,
 )
+from stubs import fake_settings as _fake_settings  # 共享桩（唯一定义处见 stubs.py）
 
 # 测试专用 Fernet 主密钥（模块级生成一次，monkeypatch 注入环境变量）
 _FERNET_KEY = Fernet.generate_key().decode()
 _PLAIN_KEY = "sk-test-plain-1234567890"
-
-
-def _fake_settings(**kv) -> MagicMock:
-    """settings.get(key, default) 桩"""
-
-    def _get(key, default=None):
-        return kv.get(key, default)
-
-    m = MagicMock()
-    m.get.side_effect = _get
-    return m
 
 
 def _provider(**overrides) -> SimpleNamespace:
@@ -393,7 +383,7 @@ class TestResolveRuntimeConfig:
         assert cfg.api_key == "env-key"
 
     def test_resolve_config_from_settings_shape(self, monkeypatch):
-        """兜底配置形状：字段与阶段一 _llm_chat 读取项一一对应"""
+        """兜底配置形状：字段与 _llm_chat 读取项一一对应"""
         monkeypatch.delenv("LLM_API_KEY", raising=False)
         with patch("backend.services.ai_planner_service.settings", _fake_settings(
                 **{"LLM.ENABLED": True, "LLM.BASE_URL": "http://x/v1/",
@@ -699,9 +689,11 @@ class TestApiEndpoints:
         resp = llm_client.get("/api/v1/llm/providers")
         assert resp.status_code == 200
         body = resp.json()
-        assert isinstance(body, list)
-        assert body[0]["api_key_masked"] == "***cdef"
-        assert "api_key" not in body[0]  # 明文字段不存在于契约
+        assert body["success"] is True
+        items = body["data"]
+        assert isinstance(items, list)
+        assert items[0]["api_key_masked"] == "***cdef"
+        assert "api_key" not in items[0]  # 明文字段不存在于契约
 
     def test_active_endpoint_none_returns_404(self, llm_client, monkeypatch):
         async def fake_active(self):
@@ -726,7 +718,9 @@ class TestApiEndpoints:
         resp = llm_client.post("/api/v1/llm/providers",
                                json={"name": "p", "base_url": "https://x/v1", "model": "m"})
         assert resp.status_code == 200
-        assert resp.json()["name"] == "p"
+        body = resp.json()
+        assert body["success"] is True and body["code"] == "CREATED"
+        assert body["data"]["name"] == "p"
 
     def test_create_endpoint_rejects_operator(self, llm_client, app):
         """写操作仅 admin：operator 403"""
@@ -748,7 +742,7 @@ class TestApiEndpoints:
         assert resp.status_code == 403
 
     def test_test_endpoint_shape(self, llm_client, monkeypatch):
-        """POST /llm/providers/{id}/test 返回 {ok, latency_ms, model, error}"""
+        """POST /llm/providers/{id}/test 信封 data={ok, latency_ms, model, error}（ADR-001）"""
         from platform_core.schemas.llm_provider import LlmProviderTestResponse
 
         async def fake_test(self, provider_id):
@@ -759,8 +753,9 @@ class TestApiEndpoints:
         resp = llm_client.post("/api/v1/llm/providers/1/test")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["ok"] is False and body["latency_ms"] == 12
-        assert body["model"] == "m" and body["error"] == "HTTP 401"
+        assert body["success"] is True
+        assert body["data"]["ok"] is False and body["data"]["latency_ms"] == 12
+        assert body["data"]["model"] == "m" and body["data"]["error"] == "HTTP 401"
 
     def test_activate_endpoint_admin_ok(self, llm_client, monkeypatch):
         async def fake_activate(self, provider_id):
@@ -774,4 +769,4 @@ class TestApiEndpoints:
         monkeypatch.setattr("backend.app.api.v1.llm_providers.record_audit", AsyncMock())
         resp = llm_client.put("/api/v1/llm/providers/1/activate")
         assert resp.status_code == 200
-        assert resp.json()["is_active"] is True
+        assert resp.json()["data"]["is_active"] is True

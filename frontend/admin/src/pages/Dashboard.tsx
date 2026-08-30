@@ -60,12 +60,12 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     Promise.all([
-      api.get('/admin/stats').then((res: any) => setStats(res.data as Stats)),
+      api.get<Stats>('/admin/stats').then((res) => setStats(res.data)),
       // 获取最近完成的任务列表，取第一个查质量报告
-      api.get('/spiders/tasks', { params: { status: 'completed', limit: 5 } })
-        .then((res: any) => {
+      api.get<{ items: { id: number }[] }>('/spiders/tasks', { params: { status: 'completed', limit: 5 } })
+        .then((res) => {
           const tasks = res.data?.items || []
-          setRecentTaskIds(tasks.map((t: any) => t.id))
+          setRecentTaskIds(tasks.map((t) => t.id))
         })
         .catch(() => {}),
     ])
@@ -77,8 +77,8 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     if (recentTaskIds.length === 0) return
     const taskId = recentTaskIds[0]
-    api.get(`/spiders/tasks/${taskId}/quality`)
-      .then((res: any) => setQualityData(res.data as QualityReport))
+    api.get<QualityReport>(`/spiders/tasks/${taskId}/quality`)
+      .then((res) => setQualityData(res.data))
       .catch(() => {})
   }, [recentTaskIds])
 

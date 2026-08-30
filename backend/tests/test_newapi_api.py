@@ -1,4 +1,4 @@
-"""阶段三单测 - new-api 管控 API（admin 渠道健康页只读端点）
+"""new-api 管控 API 单测（admin 渠道健康页只读端点）
 
 约定：不连真实 MySQL/new-api，TestClient 走 conftest 的 app fixture
 （get_current_user 全局 override 为 admin）；分层打桩：
@@ -23,6 +23,7 @@ from backend.repositories.newapi_repository import (
     ChannelEventRepository,
     ChannelProbeResultRepository,
 )
+from stubs import fake_settings as _fake_settings  # 共享桩（唯一定义处见 stubs.py）
 
 # overview 端点路径（v1 前缀）
 OVERVIEW_URL = "/api/v1/newapi/overview"
@@ -41,17 +42,6 @@ _RAW_CHANNEL = {
 }
 
 _ENABLED_SETTINGS = {"NEWAPI.ENABLED": True, "NEWAPI.BASE_URL": "http://newapi.test"}
-
-
-def _fake_settings(**kv) -> MagicMock:
-    """settings.get(key, default) 桩"""
-    m = MagicMock()
-
-    def _get(key, default=None):
-        return kv.get(key, default)
-
-    m.get.side_effect = _get
-    return m
 
 
 class _FakeClient:
@@ -109,7 +99,7 @@ class TestOverviewAggregation:
         )
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
-        body = resp.json()
+        body = resp.json()["data"]
         assert body["available"] is True
         assert body["total"] == 1
         channel = body["channels"][0]
@@ -144,7 +134,7 @@ class TestOverviewAggregation:
         )
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
-        body = resp.json()
+        body = resp.json()["data"]
         channel = body["channels"][0]
         assert channel["id"] == 9 and channel["name"] == ""
         assert channel["status"] == 0 and channel["extra"] == {}
@@ -169,7 +159,7 @@ class TestOverviewAggregation:
         )
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
-        body = resp.json()
+        body = resp.json()["data"]
         assert body["available"] is True
         assert [c["id"] for c in body["channels"]] == [5]
         assert body["total"] == 1
@@ -196,7 +186,7 @@ class TestOverviewAggregation:
         )
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
-        body = resp.json()
+        body = resp.json()["data"]
         assert body["events_24h"] == 2
         assert body["latest_batch_verdicts"] == {}
         verdict_mock.assert_not_awaited()
@@ -222,7 +212,7 @@ class TestOverviewDegradation:
         )
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
-        body = resp.json()
+        body = resp.json()["data"]
         assert body["available"] is False
         assert "unreachable" in body["reason"]
         assert body["channels"] == [] and body["total"] == 0
@@ -255,7 +245,7 @@ class TestOverviewDegradation:
         )
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
-        body = resp.json()
+        body = resp.json()["data"]
         assert body["available"] is False
         assert "unreachable" in body["reason"]
 
@@ -277,7 +267,7 @@ class TestOverviewDegradation:
         )
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
-        body = resp.json()
+        body = resp.json()["data"]
         assert body["available"] is False
         assert body["reason"] == "newapi disabled"
         client_spy.assert_not_called()
@@ -307,7 +297,7 @@ def _probe_stub(**overrides) -> SimpleNamespace:
 
 class TestPagination:
     def test_events_pagination_and_filter(self, api_client, monkeypatch):
-        """page/page_size → skip/limit 换算 + channel_id 透传；Pydantic 契约直出"""
+        """page/page_size → skip/limit 换算 + channel_id 透传；分页信封 data.items"""
         list_mock = AsyncMock(return_value=[_event_stub()])
         count_mock = AsyncMock(return_value=23)
         monkeypatch.setattr(ChannelEventRepository, "list_events", list_mock)
@@ -316,7 +306,7 @@ class TestPagination:
         assert resp.status_code == 200
         list_mock.assert_awaited_once_with(skip=10, limit=5, channel_id=7)
         count_mock.assert_awaited_once_with(channel_id=7)
-        body = resp.json()
+        body = resp.json()["data"]
         assert body["total"] == 23
         assert body["items"][0]["id"] == 11
         assert body["items"][0]["action"] == "disabled"
@@ -331,7 +321,10 @@ class TestPagination:
         resp = api_client.get(EVENTS_URL)
         assert resp.status_code == 200
         list_mock.assert_awaited_once_with(skip=0, limit=20, channel_id=None)
-        assert resp.json() == {"total": 0, "items": []}
+        body = resp.json()
+        assert body["success"] is True
+        assert body["data"] == {"total": 0, "items": [], "page": 1, "page_size": 20,
+                                "total_pages": 0}
 
     def test_probe_results_pagination_and_verdict_enum(self, api_client, monkeypatch):
         """探针结果分页：verdict str→枚举 / scores dict 透传 / batch_id 保留"""
@@ -342,7 +335,7 @@ class TestPagination:
         resp = api_client.get(PROBE_RESULTS_URL, params={"page": 2, "page_size": 10})
         assert resp.status_code == 200
         list_mock.assert_awaited_once_with(skip=10, limit=10, channel_id=None)
-        body = resp.json()
+        body = resp.json()["data"]
         assert body["total"] == 1
         item = body["items"][0]
         assert item["verdict"] == "spoofed"
