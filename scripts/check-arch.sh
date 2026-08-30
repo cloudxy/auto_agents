@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# 架构合规检查 - project_rule.md 10 条红线的机械化扫描
+# 架构合规检查 - project_rule.md 架构红线 + 核心代码边界的机械化扫描
 #
 # 用法：
 #   bash scripts/check-arch.sh          # 从任意目录调用（自动定位仓库根）
 #
 # 退出码：0 = 全部通过；非 0 = 违规总数（上限 255）
 # 与 /check-arch Skill 的检查命令保持一致，供 pre-commit 与 CI 复用。
+#
+# 规则分两组：
+#   R1-R10  架构红线（配置/安全/反爬/模型/日志）
+#   B1-B3   核心代码边界（模块依赖方向）
 
 set -uo pipefail
 
@@ -31,8 +35,8 @@ report() {
     fi
 }
 
-echo "架构合规检查（10 条红线）"
-echo "=========================="
+echo "架构合规检查（10 条红线 + 3 条边界）"
+echo "======================================"
 
 # --- 配置即代码 ---
 report "R1" "硬编码连接串" \
@@ -92,10 +96,26 @@ for f in backend/services/*.py; do
 done
 report "R10" "service 方法入口缺 logger" "${R10_OUTPUT%$'\n'}"
 
+# --- 核心代码边界（模块依赖方向） ---
+echo ""
+echo "--- 核心代码边界 ---"
+
+# B1: platform_core 只依赖 config，禁止反向依赖 backend / scrapy
+report "B1" "platform_core → backend/scrapy 反向依赖" \
+    "$(grep -rnE "${GREP_EXCLUDES[@]}" '^(from|import) (backend|scrapy)' platform_core/ 2>/dev/null || true)"
+
+# B2: backend 禁止直接 import scrapy（应通过 Redis 队列 / API 解耦）
+report "B2" "backend → scrapy 直接依赖" \
+    "$(grep -rnE "${GREP_EXCLUDES[@]}" '^(from|import) scrapy' backend/ 2>/dev/null || true)"
+
+# B3: config 是最底层，禁止 import 任何业务模块
+report "B3" "config → 业务模块反向依赖" \
+    "$(grep -rnE "${GREP_EXCLUDES[@]}" '^(from|import) (backend|scrapy|platform_core)' config/ 2>/dev/null || true)"
+
 # --- 汇总 ---
 echo ""
 if [ "$VIOLATIONS" -eq 0 ]; then
-    echo "✓ 架构合规检查通过（10/10 项）"
+    echo "✓ 架构合规检查通过（10 红线 + 3 边界，全部通过）"
     exit 0
 else
     echo "共 $VIOLATIONS 处违规，请按 /check-arch Step 3 路由修复"

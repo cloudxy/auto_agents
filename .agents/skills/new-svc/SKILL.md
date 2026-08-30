@@ -1,6 +1,14 @@
 ---
 name: new-svc
-description: 创建 FastAPI 服务模块
+description: >-
+  创建 FastAPI 服务模块。当用户需要新增业务模块、创建 CRUD 接口、
+  或为后端添加新的 API 路由与数据模型时触发。
+  适用于从零搭建完整服务层（Router + Service + Repository + ORM + Schema），
+  以及需要配对生成数据模型与接口契约、并正确注册到 API 版本路由的场景。
+trigger: >-
+  新增业务模块、创建 CRUD 接口、添加 API 路由与数据模型、
+  从零搭建完整服务层（Router + Service + Repository + ORM + Schema）、
+  注册到 API 版本路由
 ---
 
 # 创建 FastAPI 服务模块
@@ -36,86 +44,14 @@ platform_core/
 
 ### Step 3: 代码模板
 
-#### ORM 模型（`platform_core/models/{module}.py`）
+完整模板见 [references/code-templates.md](references/code-templates.md)，包含：
 
-```python
-from sqlalchemy import Column, Integer, DateTime
-from sqlalchemy.sql import func
-
-from platform_core.models.base import Base
-
-
-class {Module}(Base):
-    """{模块中文名}"""
-    __tablename__ = "{table_name}"
-
-    id = Column(Integer, primary_key=True, comment="ID")
-    # 每个字段必须有 comment
-    created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
-```
-
-记得在 `platform_core/models/__init__.py` 的 `__all__` 中注册。
-
-#### Pydantic 模型（`platform_core/schemas/{module}.py`）
-
-```python
-from datetime import datetime
-
-from pydantic import BaseModel, ConfigDict
-
-
-class {Module}Create(BaseModel):
-    """创建请求"""
-    pass
-
-
-class {Module}Update(BaseModel):
-    """更新请求，可选字段用 Optional"""
-    pass
-
-
-class {Module}Out(BaseModel):
-    """响应对象"""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    created_at: datetime
-```
-
-#### Service（`backend/services/{module}_service.py`）
-
-```python
-from platform_core import get_logger
-
-logger = get_logger("api")
-
-
-class {Module}Service:
-    """{模块中文名}业务层"""
-
-    async def get_by_id(self, id: int):
-        logger.info(f"查询{模块中文名}, id={id}")
-        # ...
-
-    async def create(self, data: dict):
-        logger.info(f"创建{模块中文名}")
-        # ...
-```
-
-#### Router（`backend/app/api/v1/{module}.py`）
-
-```python
-from fastapi import APIRouter
-
-router = APIRouter()
-
-
-@router.get("/{id}")
-async def get_{module}(id: int):
-    """获取详情"""
-    pass
-```
+| 组件 | 文件路径 | 说明 |
+|------|---------|------|
+| ORM 模型 | `platform_core/models/{module}.py` | 数据库契约（Base 继承） |
+| Pydantic 模型 | `platform_core/schemas/{module}.py` | 接口契约（Create/Update/Out） |
+| Service | `backend/services/{module}_service.py` | 业务层（logger + 异步） |
+| Router | `backend/app/api/v1/{module}.py` | 路由层（APIRouter） |
 
 ### Step 4: 注册路由
 
@@ -127,3 +63,40 @@ router.include_router({module}.router, prefix="/{module}", tags=["{模块中文�
 ```
 
 最终路径会是 `/api/v1/{module}/...`（前缀 `/api` 由 `backend/app/__init__.py` 注入，`/v1` 由 `backend/app/api/__init__.py` 注入）。
+
+## 预期产出物
+
+完成后**必须**存在以下文件，缺少任何一个 = 未完成：
+
+```
+✅ 文件清单
+platform_core/models/{module}.py              # ORM 模型（已注册到 __init__.py __all__）
+platform_core/schemas/{module}.py             # Pydantic Schema（Create / Update / Out）
+backend/services/{module}_service.py          # Service 业务层
+backend/repositories/{module}_repository.py   # Repository 数据访问层
+backend/app/api/v1/{module}.py                # Router 路由层
+backend/app/api/v1/__init__.py                # 已 include_router 注册
+```
+
+## 验证步骤
+
+生成代码后，**必须**依次执行以下验证（调用 `/verify`）：
+
+```bash
+# 1. 后端测试
+uv run pytest -x -q backend/tests
+
+# 2. 架构红线 R7/R8（API 不 import ORM，ORM 不 import Schema）
+grep -rnE "from.*\.models import" backend/app/api/
+grep -rnE "from.*\.schemas import" platform_core/models/
+# 期望：两条输出均为空
+
+# 3. 模块可导入
+uv run python -c "from platform_core.models.{module} import {Module}; from platform_core.schemas.{module} import {Module}Out; print('OK')"
+
+# 4. 服务启动 + 健康检查
+uv run python run_backend.py --no-reload &
+sleep 3 && curl -sS localhost:9111/api/v1/health | jq
+```
+
+全部通过后调用 `/check-arch` 做完整架构扫描。

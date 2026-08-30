@@ -1,6 +1,9 @@
 ---
 name: new-model
 description: 配对生成 SQLAlchemy ORM + Pydantic Schema，强制"模型即契约"红线（ORM 与 Schema 不互相 import）
+trigger: >-
+  创建数据模型、新增数据库表、新建实体类、ORM + Schema 配对生成、
+  /new-svc 流程中自动生成底层数据契约
 ---
 
 # 创建数据模型
@@ -31,94 +34,17 @@ description: 配对生成 SQLAlchemy ORM + Pydantic Schema，强制"模型即契
 
 ### Step 2: 生成 ORM 模型
 
-路径：`platform_core/models/{module}.py`
-
-```python
-from sqlalchemy import Column, Integer, String, DateTime
-from sqlalchemy.sql import func
-
-from platform_core.models.base import Base
-
-
-class {Module}(Base):
-    __tablename__ = "{module}"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    # <业务字段>
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-```
-
-**红线自检**：生成前 grep 当前文件有无 Pydantic 引用：
-
-```bash
-grep -nE "from.*\.schemas import|from pydantic" platform_core/models/{module}.py
-# 期望输出：空
-```
+路径：`platform_core/models/{module}.py`。模板及红线自检命令见 [references/code-templates.md](references/code-templates.md)「ORM 模型模板」章节。
 
 记得把新模型注册到 `platform_core/models/__init__.py` 的 `__all__`。
 
 ### Step 3: 生成 Pydantic Schema
 
-路径：`platform_core/schemas/{module}.py`
-
-```python
-from datetime import datetime
-from typing import Optional
-
-from pydantic import BaseModel, ConfigDict
-
-
-class {Module}Base(BaseModel):
-    # <公共字段>
-    pass
-
-
-class {Module}Create({Module}Base):
-    # <创建必填字段>
-    pass
-
-
-class {Module}Update(BaseModel):
-    # <更新可选字段>
-    pass
-
-
-class {Module}Out({Module}Base):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    created_at: datetime
-    updated_at: datetime
-```
-
-**红线自检**：生成前 grep 有无 ORM 引用：
-
-```bash
-grep -nE "from.*\.models import|from sqlalchemy" platform_core/schemas/{module}.py
-# 期望输出：空
-```
+路径：`platform_core/schemas/{module}.py`。模板见 [references/code-templates.md](references/code-templates.md)「Pydantic Schema 模板」章节。
 
 ### Step 4: 生成转换函数（契约桥梁）
 
-路径：`backend/services/{module}_converter.py`（或在 service 内部内联）
-
-```python
-from platform_core.schemas.{module} import {Module}Create, {Module}Out
-from platform_core.models.{module} import {Module}
-
-
-def orm_to_out(obj: {Module}) -> {Module}Out:
-    return {Module}Out.model_validate(obj)
-
-
-def create_to_orm(data: {Module}Create) -> {Module}:
-    return {Module}(**data.model_dump())
-```
-
-**关键约束**：`backend/services/` 是**唯一允许**同时 import ORM 和 Schema 的目录。它是两个契约之间的翻译官（爬虫绝不允许这样做——`scrapy/` 禁止 import platform_core.models 配合 Session 写入）。
+路径：`backend/services/{module}_converter.py`（或在 service 内部内联）。模板及关键约束见 [references/code-templates.md](references/code-templates.md)「转换函数模板」章节。
 
 ### Step 5: 自动跑 check-arch 红线扫描
 
@@ -146,37 +72,47 @@ uv run alembic -c backend/alembic.ini revision --autogenerate -m "add {module} t
 
 ### Step 7: 交付自检
 
-调用 `/verify`：
-- `uv run pytest -x -q platform_core/tests`（如果有测试）
-- 加载测试：`uv run python -c "from platform_core.models.{module} import {Module}; from platform_core.schemas.{module} import {Module}Out"`
+按下方「验证步骤」章节执行全部验证，禁止跳过。
 
-## 输出约定
+## 预期产出物
 
-完成后贴三段证据（对齐 `answer_rule.md`：用工具验证，不要用嘴验证）：
+完成后**必须**存在以下文件，缺少任何一个 = 未完成：
 
 ```
-=== 新增文件 ===
-platform_core/models/{module}.py
-platform_core/schemas/{module}.py
-backend/services/{module}_converter.py
-
-=== 红线 R7/R8 ===
-（两条 grep 输出为空，表示通过）
-
-=== 加载测试 ===
-python -c "from ... import ..."
-（无报错 = 可导入）
-
-=== 迁移（如有） ===
-backend/alembic/versions/xxxx_add_{module}_table.py
+✅ 文件清单
+platform_core/models/{module}.py              # ORM 模型（已注册到 __init__.py __all__）
+platform_core/schemas/{module}.py             # Pydantic Schema（Base / Create / Update / Out）
+backend/services/{module}_converter.py        # 契约桥梁转换函数（可选，如内联在 service 中则免）
 ```
 
-## 常见反模式（避免）
+如使用 Alembic，额外产出：
 
-- ❌ 一个文件里同时定义 ORM 和 Pydantic（"反正都是 model"）
-- ❌ API router 里直接 `return db_obj`（FastAPI 会把 ORM 序列化，绕过 Schema 契约）
-- ❌ Service 层用 Pydantic 当 DTO 传到仓储层，仓储层再当 ORM 用
-- ❌ Update schema 复用 Create schema（Update 字段应全部 Optional）
+```
+backend/alembic/versions/xxxx_add_{module}_table.py  # 迁移脚本（必须人工审核）
+```
+
+## 验证步骤
+
+生成代码后，**必须**依次执行以下验证（调用 `/verify`）：
+
+```bash
+# 1. 架构红线 R7/R8（API 不 import ORM，ORM 不 import Schema）
+grep -rnE "from.*\.models import" backend/app/api/
+grep -rnE "from.*\.schemas import" platform_core/models/
+# 期望：两条输出均为空
+
+# 2. 模块可导入
+uv run python -c "from platform_core.models.{module} import {Module}; from platform_core.schemas.{module} import {Module}Out; print('OK')"
+
+# 3. 数据契约测试（如有）
+uv run pytest -x -q platform_core/tests
+```
+
+全部通过后调用 `/check-arch` 做完整架构扫描。
+
+## 常见反模式
+
+见 [references/code-templates.md](references/code-templates.md)「常见反模式」章节。
 
 ## 相关 Rule / Skill
 

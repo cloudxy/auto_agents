@@ -1,11 +1,14 @@
 ---
 name: check-arch
-description: 架构合规检查 - 一键扫描 project_rule.md 的 10 条红线违规，输出违规文件:行号报告
+description: 架构合规检查 - 一键扫描 10 条架构红线 + 3 条核心代码边界，输出违规文件:行号报告
+trigger: >-
+  架构合规检查、扫描硬编码、提交前自检、PR Review、怀疑分层边界被破坏、
+  /verify 交付自检后的第二道关卡
 ---
 
 # 架构合规检查
 
-把 `project_rule.md` 的 10 条架构红线打包成一次性扫描器。用于把"纸面红线"变成"机械可执行"。
+把 `project_rule.md` 的 10 条架构红线 + 3 条核心代码边界打包成一次性扫描器。用于把"纸面红线"变成"机械可执行"。
 
 ## 触发场景
 
@@ -17,75 +20,28 @@ description: 架构合规检查 - 一键扫描 project_rule.md 的 10 条红线�
 
 ## 执行流程
 
-### Step 1: 按信条运行 10 条红线扫描
+### Step 1: 按信条运行 10 条红线 + 3 条边界扫描
 
-一次 Bash 批量执行，路径相对项目根目录。
+一次 Bash 批量执行，路径相对项目根目录。完整命令见 [references/scan-commands.md](references/scan-commands.md)，按信条分组：
 
-#### 配置即代码
+**架构红线（R1-R10）：**
 
-```bash
-# R1: 硬编码连接串
-echo "=== R1: 硬编码连接串 ==="
-grep -rnE "(mysql|postgres|redis)://[^\$\{]" backend/ scrapy/ 2>/dev/null | grep -vE "\.env\.example|README"
+| 信条 | 规则 |
+|------|------|
+| 配置即代码 | R1 硬编码连接串、R2 明文 password |
+| 爬取与存储分离 | R3 scrapy→backend 反向依赖、R4 scrapy 使用 SQLAlchemy |
+| 反爬是底线 | R5 DOWNLOAD_DELAY、R6 USER_AGENT 轮换 |
+| 模型即契约 | R7 API 层 import models、R8 models 反向 import schemas |
+| 数据流向不可逆 | R9 循环 import |
+| 日志即证据 | R10 service 方法入口缺 logger |
 
-# R2: 明文 password
-echo "=== R2: 明文 password ==="
-grep -rnE 'password\s*=\s*"[^$]' backend/ scrapy/ 2>/dev/null | grep -vE "example|test_"
-```
+**核心代码边界（B1-B3）：**
 
-#### 爬取与存储分离
-
-```bash
-# R3: scrapy 禁止 import backend 内部
-echo "=== R3: scrapy → backend 反向依赖 ==="
-grep -rnE "^(from|import) (backend|app)\." scrapy/ 2>/dev/null
-
-# R4: scrapy 禁止使用 SQLAlchemy Session（platform_core.models 仅作只读契约，禁止配 Session 写入）
-echo "=== R4: scrapy 使用 SQLAlchemy ==="
-grep -rnE "from sqlalchemy|SessionLocal|mysql_session|get_async_db" scrapy/ 2>/dev/null
-```
-
-#### 反爬是底线
-
-```bash
-# R5: DOWNLOAD_DELAY 必配
-echo "=== R5: DOWNLOAD_DELAY ==="
-grep -E "DOWNLOAD_DELAY" scrapy/settings.py 2>/dev/null || echo "❌ 缺失 DOWNLOAD_DELAY"
-
-# R6: USER_AGENT 轮换
-echo "=== R6: USER_AGENT 轮换 ==="
-grep -rnE "USER_AGENT|UserAgentMiddleware" scrapy/ 2>/dev/null | head -5 || echo "❌ 缺失 USER_AGENT 配置"
-```
-
-#### 模型即契约
-
-```bash
-# R7: API 层禁止 import ORM 模型
-echo "=== R7: API 层 import models ==="
-grep -rnE "from.*\.models import" backend/app/api/ 2>/dev/null
-
-# R8: ORM 模型禁止 import Pydantic schema
-echo "=== R8: models 反向 import schemas ==="
-grep -rnE "from.*\.schemas import" platform_core/models/ 2>/dev/null
-```
-
-#### 数据流向不可逆
-
-```bash
-# R9: 循环 import 检测
-echo "=== R9: 循环 import ==="
-python -c "import backend.app" 2>&1 | grep -iE "circular|cannot import name" || echo "✓ 无循环 import"
-```
-
-#### 日志即证据
-
-```bash
-# R10: service 公共方法入口必须有 logger（启发式扫描）
-echo "=== R10: service 方法入口缺 logger ==="
-for f in backend/services/*.py; do
-  awk '/^(async )?def [a-z]/ {name=$0; getline; if ($0 !~ /logger\./) print FILENAME":"NR-1": "name}' "$f"
-done 2>/dev/null
-```
+| 边界 | 规则 | 依赖方向 |
+|------|------|----------|
+| B1 | `platform_core/` 禁止 import `backend/` 或 `scrapy/` | platform_core → config（单向） |
+| B2 | `backend/` 禁止 import `scrapy/` | backend ⇏ scrapy（通过 Redis 队列解耦） |
+| B3 | `config/` 禁止 import `backend/`、`scrapy/`、`platform_core/` | config 是最底层，无上层依赖 |
 
 ### Step 2: 汇总违规报告
 
@@ -98,26 +54,30 @@ R1 硬编码连接串         backend/core/db.py:15        mysql://root:xxx@...
 R3 scrapy→backend       scrapy/spiders/x.py:3        from backend.models ...
 R5 缺失 DELAY           scrapy/settings.py:-         未配置 DOWNLOAD_DELAY
 R10 service 缺 logger   backend/services/user.py:12  def create_user(...)
+B1 platform_core 反向依赖 platform_core/xxx.py:1    from backend.yyy import zzz
 
-共 4 处违规，按优先级修复：R3 (架构级) > R1/R2 (安全) > R5/R6 (运行时) > R10 (可观测)
+共 5 处违规，按优先级修复：B1/B2 (边界级) > R3/R4 (架构级) > R1/R2 (安全) > R5/R6 (运行时) > R10 (可观测)
 ```
 
 若无违规：
 
 ```
-✓ 架构合规检查通过（10/10 项）
+✓ 架构合规检查通过（10 红线 + 3 边界，全部通过）
 ```
 
 ### Step 3: 按违规类型路由到修复 skill
 
 | 违规 | 修复指引 |
-|------|---------|
+|------|--------|
 | R1 / R2 | `/config`：改为 `settings.MYSQL.HOST` 形式，敏感信息入 `.env` |
 | R3 / R4 | `project_rule.md` "为什么爬虫不能直写主库"：改用 HTTP / MQ 交互 |
 | R5 / R6 | `/new-spider`：拷贝反爬配置模板 |
 | R7 / R8 | `/new-model`：用 converter 做 ORM↔Schema 的单向转换 |
 | R9 | 找环路中间节点，引入抽象层或延迟 import |
 | R10 | `/logging`：public 方法第一行 `logger.info("...")` |
+| B1 | `platform_core/` 只能依赖 `config/`，抽取共享接口或上移到 `backend/` |
+| B2 | `backend/` 与 `scrapy/` 通过 Redis 队列 / HTTP API 解耦，禁止直接 import |
+| B3 | `config/` 是最底层配置层，禁止反向依赖业务模块 |
 
 ## 输出约定
 
@@ -129,6 +89,6 @@ R10 service 缺 logger   backend/services/user.py:12  def create_user(...)
 
 | 依赖 | 用途 |
 |------|------|
-| `project_rule.md` | 10 条红线定义的来源 |
+| `project_rule.md` | 10 条红线 + 核心边界定义的来源 |
 | `/verify` | 交付自检的第一道关卡，本 skill 是第二道 |
 | `/config` / `/logging` / `/new-spider` / `/new-model` | 违规的修复路径 |
