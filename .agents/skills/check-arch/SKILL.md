@@ -1,6 +1,6 @@
 ---
 name: check-arch
-description: 架构合规检查 - 一键扫描 10 条架构红线 + 3 条核心代码边界，输出违规文件:行号报告
+description: 架构合规检查 - 一键扫描 11 条架构红线 + 3 条核心代码边界，输出违规文件:行号报告
 trigger: >-
   架构合规检查、扫描硬编码、提交前自检、PR Review、怀疑分层边界被破坏、
   /verify 交付自检后的第二道关卡
@@ -8,7 +8,7 @@ trigger: >-
 
 # 架构合规检查
 
-把 `project_rule.md` 的 10 条架构红线 + 3 条核心代码边界打包成一次性扫描器。用于把"纸面红线"变成"机械可执行"。
+把 `project_rule.md` 的 11 条架构红线 + 3 条核心代码边界打包成一次性扫描器。用于把"纸面红线"变成"机械可执行"。
 
 ## 触发场景
 
@@ -20,7 +20,7 @@ trigger: >-
 
 ## 执行流程
 
-### Step 1: 按信条运行 10 条红线 + 3 条边界扫描
+### Step 1: 按信条运行 11 条红线 + 3 条边界扫描
 
 一次 Bash 批量执行，路径相对项目根目录。完整命令见 [references/scan-commands.md](references/scan-commands.md)，按信条分组：
 
@@ -89,6 +89,6 @@ B1 platform_core 反向依赖 platform_core/xxx.py:1    from backend.yyy import 
 
 | 依赖 | 用途 |
 |------|------|
-| `project_rule.md` | 10 条红线 + 核心边界定义的来源 |
+| `project_rule.md` | 11 条红线 + 核心边界定义的来源 |
 | `/verify` | 交付自检的第一道关卡，本 skill 是第二道 |
 | `/config` / `/logging` / `/new-spider` / `/new-model` | 违规的修复路径 |

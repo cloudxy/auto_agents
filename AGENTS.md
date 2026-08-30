@@ -21,7 +21,7 @@
 - `uv.lock` 必须提交（可复现性保证），禁止加入 `.gitignore`
 - `platform_core/` 是源码包，经 `sys.path` 引入，不打包、不进 workspace
 
-## 架构红线 + 核心边界（10 红线 + 3 边界，机械可检查）
+## 架构红线 + 核心边界（11 红线（R1-R11） + 3 边界，机械可检查）
 
 详见 `.claude/rules/project_rule.md`；提交前会自动执行 `scripts/check-arch.sh`
 （pre-commit hook + CI）。核心约束：
@@ -30,6 +30,7 @@
 - 爬虫禁止 import backend、禁止直写主库（走 Redis 队列）
 - 爬虫必须配反爬（DOWNLOAD_DELAY + USER_AGENT 轮换）
 - API 层禁止直接 import ORM 模型；ORM 禁止 import Pydantic schema（模型即契约）
+- async 上下文禁止同步 `redis_client()` 链式直调，统一走 `get_async_redis()`（R11 异步优先）
 - 核心边界：`platform_core/` 只依赖 `config/`（B1）；`backend/` 禁止 import `scrapy/`（B2）；`config/` 不依赖任何业务模块（B3）
 
 ## 关键文件索引

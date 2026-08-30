@@ -631,7 +631,7 @@ API Routes  →  Services  →  Repositories  →  Models
 - 项目身份：`.claude/IDENTITY.md`
 - 项目性格：`.claude/SOUL.md`
 - 项目记忆：`.claude/MEMORY.md` + `.claude/memory/`
-- 架构哲学 + 10 条红线：`.claude/rules/project_rule.md`
+- 架构哲学 + 11 条红线：`.claude/rules/project_rule.md`
 - 回答规范：`.claude/rules/answer_rule.md`
 - 调试激励：`.claude/rules/pua.md`
 - 子代理：`.claude/agents/{spider-doctor,arch-warden,memory-curator}.md`

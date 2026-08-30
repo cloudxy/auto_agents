@@ -68,6 +68,14 @@ for f in backend/services/*.py; do
 done 2>/dev/null
 ```
 
+## 异步优先
+
+```bash
+# R11: async 上下文禁止同步 redis_client() 链式直调（阻塞事件循环，统一走 get_async_redis）
+echo "=== R11: 同步 redis_client() 直调 ==="
+grep -rnE 'redis_client\([^)]*\)\.' backend/ 2>/dev/null
+```
+
 ## 核心代码边界（模块依赖方向）
 
 ```bash

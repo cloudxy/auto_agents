@@ -97,7 +97,7 @@ uv run python run_frontend.py --all                # admin:3001 / official:3002
 | `/new-svc` | 创建 FastAPI 服务模块 |
 | `/new-spider` | 创建 Scrapy 爬虫 |
 | `/new-model` | 创建 ORM + Pydantic 数据模型 |
-| `/check-arch` | 架构合规检查（10 条红线） |
+| `/check-arch` | 架构合规检查（11 条红线） |
 | `/verify` | 交付自检 |
 | `/coding-style` | 编码规范 |
 | `/logging` | 日志规范 |
