@@ -15,6 +15,14 @@ class SpiderTaskRepository(BaseRepository[SpiderTask]):
     def __init__(self, session: AsyncSession):
         super().__init__(model=SpiderTask, session=session)
 
+    async def get_by_ids(self, ids: List[int]) -> List[SpiderTask]:
+        """按 ID 列表批查任务（WHERE id IN），消除逐条 get_by_id 的 N+1"""
+        if not ids:
+            return []
+        stmt = select(SpiderTask).where(SpiderTask.id.in_(ids))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def list_tasks(
         self,
         skip: int = 0,

@@ -29,8 +29,8 @@ def updated(data: Any = None, message: str = "更新成功") -> ApiResponse:
     return ok(data=data, message=message, code="UPDATED")
 
 
-def deleted(message: str = "删除成功") -> ApiResponse:
-    return ok(data=None, message=message, code="DELETED")
+def deleted(data: Any = None, message: str = "删除成功") -> ApiResponse:
+    return ok(data=data, message=message, code="DELETED")
 
 
 def err(message: str = "操作失败", code: str = "ERROR", data: Any = None) -> ApiResponse:

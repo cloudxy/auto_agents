@@ -14,8 +14,12 @@ import type { ColumnsType } from 'antd/es/table'
 import api from '../services/api'
 import SpiderLogs from './SpiderLogs'
 import { usePermission } from '../hooks/usePermission'
+import type { Dayjs } from 'dayjs'
 
 const { Text } = Typography
+
+/** RangePicker 值契约（antd 泛型缺失场景的手写对齐） */
+type RangeValue = [Dayjs | null, Dayjs | null] | null
 
 interface AuditLogItem {
   id: number
@@ -36,7 +40,7 @@ const AuditLogsTab: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [userFilter, setUserFilter] = useState('')
   const [actionFilter, setActionFilter] = useState('')
-  const [range, setRange] = useState<any>(null)
+  const [range, setRange] = useState<RangeValue>(null)
 
   const buildQuery = useCallback(() => ({
     user: userFilter.trim() || undefined,
@@ -50,7 +54,7 @@ const AuditLogsTab: React.FC = () => {
     if (showSpin) setLoading(true)
     try {
       // /admin/audit-logs 带 ApiResponse 信封，需解包 data
-      const res: any = await api.get('/admin/audit-logs', {
+      const res = await api.get<{ items: AuditLogItem[]; total: number }>('/admin/audit-logs', {
         params: { skip: (p - 1) * 20, limit: 20, ...buildQuery() },
       })
       setRows(res.data?.items || [])
@@ -88,7 +92,7 @@ const AuditLogsTab: React.FC = () => {
   ]
 
   if (!isAdmin) {
-    return <Alert type="warning" showIcon message="审计日志仅管理员可查看" />
+    return <Alert type="warning" showIcon title="审计日志仅管理员可查看" />
   }
 
   return (

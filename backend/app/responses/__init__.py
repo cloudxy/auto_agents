@@ -13,6 +13,8 @@ from backend.app.responses.api import (
 from backend.app.responses.paginated import (
     PaginatedData,
     PaginatedResponse,
+    paginated,
+    paginated_from_offset,
 )
 
 __all__ = [
@@ -25,4 +27,6 @@ __all__ = [
     # 分页响应
     "PaginatedData",
     "PaginatedResponse",
+    "paginated",
+    "paginated_from_offset",
 ]

@@ -40,7 +40,7 @@ export const menuConfig: MenuItem[] = [
     children: [
       { key: '/spiders/tasks', label: '任务列表', permission: 'menu:spiders.tasks' },
       { key: '/spiders/logs', label: '运行日志', permission: 'menu:spiders.logs' },
-      { key: '/spiders/nodes', label: '节点', permission: 'menu:spiders' }
+      { key: '/spiders/nodes', label: '节点', permission: 'menu:spiders.nodes' }
     ]
   },
   {

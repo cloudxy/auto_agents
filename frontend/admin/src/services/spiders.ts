@@ -1,7 +1,11 @@
 /**
  * 爬虫模块服务 - 任务/注册表/日志/删除 API 封装
+ *
+ * 响应为后端统一信封（ADR-001）：分页端点 tasks/results 为 PaginatedResponse
+ * （data.items/total），其余为 ApiResponse；service 层统一解包 data，
+ * 页面组件拿到的仍是裸结构。例外：exportResults 为二进制流下载（白名单，不解包）。
  */
-import api from './api'
+import api, { unwrap } from './api'
 
 export interface SpiderParamField {
   name: string
@@ -93,15 +97,17 @@ export interface SpiderFile {
   title?: string | null
 }
 
-/** 爬虫注册表（新增任务弹窗的数据源；后端 SPIDER_TYPES 未登记 flow 类型时前端兜底补齐） */
-export const fetchRegistry = (): Promise<SpiderRegistry> => {
-  return (api.get('/spiders/registry') as unknown as Promise<SpiderRegistry>).then((reg) => {
-    if (reg.types && !reg.types.some((t) => t.type === 'flow')) {
-      reg.types = [...reg.types, FLOW_TYPE_FALLBACK]
-    }
-    return reg
-  })
-}
+/** 爬虫注册表（新增任务弹窗的数据源；后端 SPIDER_TYPES 未登记 flow 类型时前端兖底补齐） */
+export const fetchRegistry = (): Promise<SpiderRegistry> =>
+  api
+    .get('/spiders/registry')
+    .then((res) => unwrap<SpiderRegistry>(res))
+    .then((reg) => {
+      if (reg.types && !reg.types.some((t) => t.type === 'flow')) {
+        reg.types = [...reg.types, FLOW_TYPE_FALLBACK]
+      }
+      return reg
+    })
 
 /** flow 类型表单定义（与 plan_json 的 flow 契约对齐：selectors/pagination/detail/filters） */
 export const FLOW_TYPE_FALLBACK: SpiderTypeInfo = {
@@ -116,48 +122,42 @@ export const FLOW_TYPE_FALLBACK: SpiderTypeInfo = {
   ],
 }
 
-/** 任务列表（分页，可选优先级筛选） */
+/** 任务列表（分页信封 data：{items, total, page, page_size, total_pages}，可选优先级筛选） */
 export const fetchTasks = (
   skip = 0,
   limit = 20,
   priority?: string
-): Promise<{ total: number; items: Task[] }> => {
-  return api.get('/spiders/tasks', {
-    params: { skip, limit, ...(priority ? { priority } : {}) },
-  }) as unknown as Promise<{
-    total: number
-    items: Task[]
-  }>
-}
+): Promise<{ total: number; items: Task[] }> =>
+  api
+    .get('/spiders/tasks', {
+      params: { skip, limit, ...(priority ? { priority } : {}) },
+    })
+    .then((res) => unwrap<{ total: number; items: Task[] }>(res))
 
 /** 提交新任务（params 为 JSON 字符串，priority 可选：high/normal/low，默认 normal） */
 export const runSpider = (
   spider_name: string,
   params: string,
   priority: 'high' | 'normal' | 'low' = 'normal'
-): Promise<Task> => {
-  return api.post('/spiders/run', { spider_name, params, priority }) as unknown as Promise<Task>
-}
+): Promise<Task> =>
+  api
+    .post('/spiders/run', { spider_name, params, priority })
+    .then((res) => unwrap<Task>(res))
 
 /** 删除任务（级联删除采集结果） */
-export const deleteTask = (taskId: number): Promise<{ task_id: number; removed_results: number }> => {
-  return api.delete(`/spiders/tasks/${taskId}`) as unknown as Promise<{
-    task_id: number
-    removed_results: number
-  }>
-}
+export const deleteTask = (taskId: number): Promise<{ task_id: number; removed_results: number }> =>
+  api
+    .delete(`/spiders/tasks/${taskId}`)
+    .then((res) => unwrap<{ task_id: number; removed_results: number }>(res))
 
 /** 控制运行中的任务：暂停/恢复/终止（A4） */
 export const controlTask = (
   taskId: number,
   action: 'pause' | 'resume' | 'stop'
-): Promise<{ task_id: number; action: string; message: string }> => {
-  return api.post(`/spiders/tasks/${taskId}/control`, { action }) as unknown as Promise<{
-    task_id: number
-    action: string
-    message: string
-  }>
-}
+): Promise<{ task_id: number; action: string; message: string }> =>
+  api
+    .post(`/spiders/tasks/${taskId}/control`, { action })
+    .then((res) => unwrap<{ task_id: number; action: string; message: string }>(res))
 
 /** 任务运行日志（尾部 N 行，支持关键词搜索和级别过滤） */
 export const fetchTaskLogs = (
@@ -169,37 +169,34 @@ export const fetchTaskLogs = (
   const params: Record<string, unknown> = { lines }
   if (keyword) params.keyword = keyword
   if (level) params.level = level
-  return api.get(`/spiders/tasks/${taskId}/logs`, { params }) as unknown as Promise<TaskLogResponse>
+  return api
+    .get(`/spiders/tasks/${taskId}/logs`, { params })
+    .then((res) => unwrap<TaskLogResponse>(res))
 }
 
-/** 任务采集结果（分页） */
+/** 任务采集结果（分页信封 data） */
 export const fetchResults = (
   taskId: number,
   skip = 0,
   limit = 50
-): Promise<{ total: number; items: SpiderResult[] }> => {
-  return api.get(`/spiders/results/${taskId}`, { params: { skip, limit } }) as unknown as Promise<{
-    total: number
-    items: SpiderResult[]
-  }>
-}
+): Promise<{ total: number; items: SpiderResult[] }> =>
+  api
+    .get(`/spiders/results/${taskId}`, { params: { skip, limit } })
+    .then((res) => unwrap<{ total: number; items: SpiderResult[] }>(res))
 
 /** 任务额外存储目标状态（4.2：目标清单 / redis 缓存条数 / csv 落盘路径） */
-export const fetchTaskStore = (taskId: number): Promise<TaskStoreStatus> => {
-  return api.get(`/spiders/tasks/${taskId}/store`) as unknown as Promise<TaskStoreStatus>
-}
+export const fetchTaskStore = (taskId: number): Promise<TaskStoreStatus> =>
+  api.get(`/spiders/tasks/${taskId}/store`).then((res) => unwrap<TaskStoreStatus>(res))
 
-/** 代码爬虫文件清单（4.4：只读元数据 + 启停状态） */
-export const fetchSpiderFiles = (): Promise<{ total: number; items: SpiderFile[] }> => {
-  return api.get('/spiders/files') as unknown as Promise<{ total: number; items: SpiderFile[] }>
-}
+/** 代码爬虫文件清单（4.4：只读元数据 + 启停状态；data={total, items}） */
+export const fetchSpiderFiles = (): Promise<{ total: number; items: SpiderFile[] }> =>
+  api.get('/spiders/files').then((res) => unwrap<{ total: number; items: SpiderFile[] }>(res))
 
 /** 启停代码爬虫（4.4：写 spider_definitions.enabled，后端仅 admin） */
-export const updateDefinition = (name: string, enabled: boolean): Promise<SpiderFile> => {
-  return api.patch(`/spiders/definitions/${name}`, { enabled }) as unknown as Promise<SpiderFile>
-}
+export const updateDefinition = (name: string, enabled: boolean): Promise<SpiderFile> =>
+  api.patch(`/spiders/definitions/${name}`, { enabled }).then((res) => unwrap<SpiderFile>(res))
 
-/** 结果导出（blob 下载，自动携带鉴权 Token） */
+/** 结果导出（blob 下载，自动携带鉴权 Token；二进制流白名单，不解信封） */
 export const exportResults = async (taskId: number, format: 'csv' | 'json'): Promise<Blob> => {
   const res = await api.get(`/spiders/results/${taskId}/export`, {
     params: { format },
@@ -213,9 +210,8 @@ export const exportResults = async (taskId: number, format: 'csv' | 'json'): Pro
 export const updateTask = (
   taskId: number,
   payload: { params?: string; priority?: 'high' | 'normal' | 'low' }
-): Promise<Task> => {
-  return api.patch(`/spiders/tasks/${taskId}`, payload) as unknown as Promise<Task>
-}
+): Promise<Task> =>
+  api.patch(`/spiders/tasks/${taskId}`, payload).then((res) => unwrap<Task>(res))
 
 // ---------------- 跨任务结果检索（数据中心）----------------
 export interface SearchResultQuery {
@@ -239,21 +235,18 @@ export const searchResults = (
   if (query.keyword) params.keyword = query.keyword
   if (query.start_time) params.start_time = query.start_time
   if (query.end_time) params.end_time = query.end_time
-  return api.get('/spiders/results', { params }) as unknown as Promise<{
-    total: number
-    items: SpiderResult[]
-  }>
+  return api
+    .get('/spiders/results', { params })
+    .then((res) => unwrap<{ total: number; items: SpiderResult[] }>(res))
 }
 
 /** 删除单条采集结果（数据中心清理；仅管理员） */
 export const deleteResult = (
   resultId: number
-): Promise<{ result_id: number; deleted: boolean }> => {
-  return api.delete(`/spiders/results/${resultId}`) as unknown as Promise<{
-    result_id: number
-    deleted: boolean
-  }>
-}
+): Promise<{ result_id: number; deleted: boolean }> =>
+  api
+    .delete(`/spiders/results/${resultId}`)
+    .then((res) => unwrap<{ result_id: number; deleted: boolean }>(res))
 
 // ---------------- 爬虫定义完整 CRUD（阶段一）----------------
 export interface SpiderDefinition {
@@ -272,33 +265,30 @@ export const createDefinition = (payload: {
   title: string
   type: string
   description?: string
-}): Promise<SpiderDefinition> => {
-  return api.post('/spiders/definitions', payload) as unknown as Promise<SpiderDefinition>
-}
+}): Promise<SpiderDefinition> =>
+  api.post('/spiders/definitions', payload).then((res) => unwrap<SpiderDefinition>(res))
 
 /** 编辑爬虫定义元信息（标题/描述；仅管理员） */
 export const updateDefinitionMeta = (
   name: string,
   payload: { title?: string; description?: string }
-): Promise<SpiderDefinition> => {
-  return api.patch(`/spiders/definitions/${name}/meta`, payload) as unknown as Promise<SpiderDefinition>
-}
+): Promise<SpiderDefinition> =>
+  api
+    .patch(`/spiders/definitions/${name}/meta`, payload)
+    .then((res) => unwrap<SpiderDefinition>(res))
 
 /** 删除爬虫定义（存在历史任务引用时后端拒绝；仅管理员） */
 export const deleteDefinition = (
   name: string
-): Promise<{ name: string; deleted: boolean }> => {
-  return api.delete(`/spiders/definitions/${name}`) as unknown as Promise<{
-    name: string
-    deleted: boolean
-  }>
-}
+): Promise<{ name: string; deleted: boolean }> =>
+  api
+    .delete(`/spiders/definitions/${name}`)
+    .then((res) => unwrap<{ name: string; deleted: boolean }>(res))
 
 // ---------------- 定时调度 ----------------
-/** 调度计划列表 */
-export const fetchSchedules = (): Promise<{ total: number; items: SpiderSchedule[] }> => {
-  return api.get('/spiders/schedules') as unknown as Promise<{ total: number; items: SpiderSchedule[] }>
-}
+/** 调度计划列表（data={total, items}，非分页） */
+export const fetchSchedules = (): Promise<{ total: number; items: SpiderSchedule[] }> =>
+  api.get('/spiders/schedules').then((res) => unwrap<{ total: number; items: SpiderSchedule[] }>(res))
 
 /** 创建调度计划 */
 export const createSchedule = (payload: {
@@ -306,27 +296,25 @@ export const createSchedule = (payload: {
   cron_expr: string
   params?: string | null
   enabled?: boolean
-}): Promise<SpiderSchedule> => {
-  return api.post('/spiders/schedules', payload) as unknown as Promise<SpiderSchedule>
-}
+}): Promise<SpiderSchedule> =>
+  api.post('/spiders/schedules', payload).then((res) => unwrap<SpiderSchedule>(res))
 
 /** 更新调度计划（启停/改表达式） */
 export const updateSchedule = (
   scheduleId: number,
   payload: { cron_expr?: string; params?: string | null; enabled?: boolean }
-): Promise<SpiderSchedule> => {
-  return api.patch(`/spiders/schedules/${scheduleId}`, payload) as unknown as Promise<SpiderSchedule>
-}
+): Promise<SpiderSchedule> =>
+  api
+    .patch(`/spiders/schedules/${scheduleId}`, payload)
+    .then((res) => unwrap<SpiderSchedule>(res))
 
 /** 删除调度计划 */
 export const deleteSchedule = (
   scheduleId: number
-): Promise<{ schedule_id: number; spider_name: string }> => {
-  return api.delete(`/spiders/schedules/${scheduleId}`) as unknown as Promise<{
-    schedule_id: number
-    spider_name: string
-  }>
-}
+): Promise<{ schedule_id: number; spider_name: string }> =>
+  api
+    .delete(`/spiders/schedules/${scheduleId}`)
+    .then((res) => unwrap<{ schedule_id: number; spider_name: string }>(res))
 
 // ---------------- 告警规则 ----------------
 export interface AlertRule {
@@ -343,10 +331,9 @@ export interface AlertRule {
   created_at?: string | null
 }
 
-/** 告警规则列表 */
-export const fetchAlertRules = (): Promise<AlertRule[]> => {
-  return api.get('/spiders/alert-rules') as unknown as Promise<AlertRule[]>
-}
+/** 告警规则列表（data=[...]） */
+export const fetchAlertRules = (): Promise<AlertRule[]> =>
+  api.get('/spiders/alert-rules').then((res) => unwrap<AlertRule[]>(res))
 
 /** 创建告警规则 */
 export const createAlertRule = (payload: {
@@ -358,9 +345,8 @@ export const createAlertRule = (payload: {
   severity?: string
   channels?: string[] | null
   enabled?: boolean
-}): Promise<AlertRule> => {
-  return api.post('/spiders/alert-rules', payload) as unknown as Promise<AlertRule>
-}
+}): Promise<AlertRule> =>
+  api.post('/spiders/alert-rules', payload).then((res) => unwrap<AlertRule>(res))
 
 /** 更新告警规则 */
 export const updateAlertRule = (
@@ -373,17 +359,14 @@ export const updateAlertRule = (
     channels?: string[] | null
     enabled?: boolean
   }
-): Promise<AlertRule> => {
-  return api.patch(`/spiders/alert-rules/${ruleId}`, payload) as unknown as Promise<AlertRule>
-}
+): Promise<AlertRule> =>
+  api.patch(`/spiders/alert-rules/${ruleId}`, payload).then((res) => unwrap<AlertRule>(res))
 
 /** 删除告警规则 */
-export const deleteAlertRule = (ruleId: number): Promise<{ rule_id: number; deleted: boolean }> => {
-  return api.delete(`/spiders/alert-rules/${ruleId}`) as unknown as Promise<{
-    rule_id: number
-    deleted: boolean
-  }>
-}
+export const deleteAlertRule = (ruleId: number): Promise<{ rule_id: number; deleted: boolean }> =>
+  api
+    .delete(`/spiders/alert-rules/${ruleId}`)
+    .then((res) => unwrap<{ rule_id: number; deleted: boolean }>(res))
 
 // ---------------- 任务模板（C1）----------------
 export interface TaskTemplate {
@@ -396,10 +379,9 @@ export interface TaskTemplate {
   created_at?: string | null
 }
 
-/** 模板列表 */
-export const fetchTemplates = (): Promise<TaskTemplate[]> => {
-  return api.get('/spiders/templates') as unknown as Promise<TaskTemplate[]>
-}
+/** 模板列表（data=[...]） */
+export const fetchTemplates = (): Promise<TaskTemplate[]> =>
+  api.get('/spiders/templates').then((res) => unwrap<TaskTemplate[]>(res))
 
 /** 创建模板 */
 export const createTemplate = (payload: {
@@ -407,9 +389,8 @@ export const createTemplate = (payload: {
   spider_name: string
   params?: string | null
   priority?: string
-}): Promise<TaskTemplate> => {
-  return api.post('/spiders/templates', payload) as unknown as Promise<TaskTemplate>
-}
+}): Promise<TaskTemplate> =>
+  api.post('/spiders/templates', payload).then((res) => unwrap<TaskTemplate>(res))
 
 /** 更新模板 */
 export const updateTemplate = (
@@ -420,19 +401,17 @@ export const updateTemplate = (
     params?: string | null
     priority?: string
   }
-): Promise<TaskTemplate> => {
-  return api.patch(`/spiders/templates/${templateId}`, payload) as unknown as Promise<TaskTemplate>
-}
+): Promise<TaskTemplate> =>
+  api
+    .patch(`/spiders/templates/${templateId}`, payload)
+    .then((res) => unwrap<TaskTemplate>(res))
 
 /** 删除模板 */
-export const deleteTemplate = (templateId: number): Promise<{ id: number; deleted: boolean }> => {
-  return api.delete(`/spiders/templates/${templateId}`) as unknown as Promise<{
-    id: number
-    deleted: boolean
-  }>
-}
+export const deleteTemplate = (templateId: number): Promise<{ id: number; deleted: boolean }> =>
+  api
+    .delete(`/spiders/templates/${templateId}`)
+    .then((res) => unwrap<{ id: number; deleted: boolean }>(res))
 
 /** 从模板创建并运行任务 */
-export const runFromTemplate = (templateId: number): Promise<Task> => {
-  return api.post(`/spiders/templates/${templateId}/run`) as unknown as Promise<Task>
-}
+export const runFromTemplate = (templateId: number): Promise<Task> =>
+  api.post(`/spiders/templates/${templateId}/run`).then((res) => unwrap<Task>(res))

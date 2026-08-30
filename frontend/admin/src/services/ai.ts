@@ -1,10 +1,11 @@
 /**
  * AI 采集计划服务 - /ai 端点封装（阶段二）
  *
- * 响应为后端 Pydantic 直出（无 ApiResponse 信封），与 services/spiders.ts 解包方式一致。
+ * 响应为后端统一信封（ADR-001）：plans 列表为 PaginatedResponse（data.items/total），
+ * 其余为 ApiResponse；service 层统一解包 data，页面组件拿到的仍是裸结构。
  * 状态机：draft → planning →（draft，含 flow 产物）→ testing →（试采通过保持 testing，可注册）→ registered；任意阶段可 failed。
  */
-import api from './api'
+import api, { unwrap } from './api'
 
 /** 字段提取规则（selector_engine 消费格式） */
 export interface FlowSelector {
@@ -115,43 +116,36 @@ export const isLatestTestPassed = (plan: AiPlan | null): boolean => {
 export const createAiPlan = (payload: {
   target_url: string
   html_snippet?: string
-}): Promise<AiPlan> => {
-  return api.post('/ai/plans', payload) as unknown as Promise<AiPlan>
-}
+}): Promise<AiPlan> => api.post('/ai/plans', payload).then((res) => unwrap<AiPlan>(res))
 
-/** 计划分页列表（可按状态过滤） */
+/** 计划分页列表（分页信封 data，可按状态过滤） */
 export const fetchAiPlans = (params: {
   skip?: number
   limit?: number
   status?: string
-} = {}): Promise<{ total: number; items: AiPlan[] }> => {
-  return api.get('/ai/plans', { params }) as unknown as Promise<{
-    total: number
-    items: AiPlan[]
-  }>
-}
+} = {}): Promise<{ total: number; items: AiPlan[] }> =>
+  api
+    .get('/ai/plans', { params })
+    .then((res) => unwrap<{ total: number; items: AiPlan[] }>(res))
 
 /** 计划快照（状态机进度查询，轮询用） */
-export const fetchAiPlan = (planId: number): Promise<AiPlan> => {
-  return api.get(`/ai/plans/${planId}`) as unknown as Promise<AiPlan>
-}
+export const fetchAiPlan = (planId: number): Promise<AiPlan> =>
+  api.get(`/ai/plans/${planId}`).then((res) => unwrap<AiPlan>(res))
 
 /** 触发 LLM 规划（后台执行，立即返回 planning 快照） */
-export const triggerAiPlan = (planId: number): Promise<AiPlan> => {
-  return api.post(`/ai/plans/${planId}/plan`) as unknown as Promise<AiPlan>
-}
+export const triggerAiPlan = (planId: number): Promise<AiPlan> =>
+  api.post(`/ai/plans/${planId}/plan`).then((res) => unwrap<AiPlan>(res))
 
 /** 触发 flow_generic 试采（后台执行含自动修复迭代，立即返回快照） */
-export const triggerAiTest = (planId: number): Promise<AiPlan> => {
-  return api.post(`/ai/plans/${planId}/test`) as unknown as Promise<AiPlan>
-}
+export const triggerAiTest = (planId: number): Promise<AiPlan> =>
+  api.post(`/ai/plans/${planId}/test`).then((res) => unwrap<AiPlan>(res))
 
 /** 注册为爬虫定义（校验最近试采通过；source=ai_generated，type=flow） */
-export const registerAiPlan = (planId: number): Promise<AiPlan> => {
-  return api.post(`/ai/plans/${planId}/register`) as unknown as Promise<AiPlan>
-}
+export const registerAiPlan = (planId: number): Promise<AiPlan> =>
+  api.post(`/ai/plans/${planId}/register`).then((res) => unwrap<AiPlan>(res))
 
 /** 删除 AI 采集计划（仅管理员；规划/试采进行中后端拒绝） */
-export const deleteAiPlan = (planId: number): Promise<{ id: number; deleted: boolean }> => {
-  return api.delete(`/ai/plans/${planId}`) as unknown as Promise<{ id: number; deleted: boolean }>
-}
+export const deleteAiPlan = (planId: number): Promise<{ id: number; deleted: boolean }> =>
+  api
+    .delete(`/ai/plans/${planId}`)
+    .then((res) => unwrap<{ id: number; deleted: boolean }>(res))

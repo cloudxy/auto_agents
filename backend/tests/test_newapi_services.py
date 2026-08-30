@@ -1,4 +1,4 @@
-"""阶段三单测 - new-api 渠道调度器 + 真伪探针服务
+"""new-api 渠道调度器 + 真伪探针服务单测
 
 约定：不连真实 MySQL/Redis/new-api，外部依赖全部打桩：
 - new-api 管理 API / 采集 API：httpx.MockTransport（验证 HTTP 契约）或 Fake 客户端
@@ -52,50 +52,11 @@ from backend.services.newapi_api import (
 )
 from platform_core.models.channel_event import ChannelEvent
 from platform_core.models.channel_probe_result import ChannelProbeResult
+from stubs import FakeRedis as _FakeRedis  # 共享桩（唯一定义处见 stubs.py）
+from stubs import fake_settings as _fake_settings
 
 
 # ---------------- 测试桩 ----------------
-def _fake_settings(**kv) -> MagicMock:
-    """settings.get(key, default) 桩（另带 REDIS.DEFAULT.URL 属性链）"""
-    m = MagicMock()
-
-    def _get(key, default=None):
-        return kv.get(key, default)
-
-    m.get.side_effect = _get
-    m.REDIS.DEFAULT.URL = "redis-fake-url"
-    return m
-
-
-class _FakeRedis:
-    """内存 Redis（调度器/探针用到的子集语义）"""
-
-    def __init__(self):
-        self.strings: dict = {}
-        self.hashes: dict = {}
-
-    async def set(self, key, value, nx=False, ex=None):
-        if nx and key in self.strings:
-            return False
-        self.strings[key] = value
-        return True
-
-    async def get(self, key):
-        return self.strings.get(key)
-
-    async def delete(self, key):
-        return self.strings.pop(key, None) is not None
-
-    async def hgetall(self, key):
-        return dict(self.hashes.get(key, {}))
-
-    async def hset(self, key, field, value):
-        self.hashes.setdefault(key, {})[field] = value
-
-    async def aclose(self):
-        pass
-
-
 class _FakeApiClient:
     """new-api 客户端桩（记录启停调用）"""
 
@@ -470,14 +431,18 @@ class TestSchedulerLockAndGuards:
 
     @pytest.mark.asyncio
     async def test_release_lock_only_deletes_own_token(self):
-        """值比对：token 不匹配（已被他实例接管）时不删除"""
+        """值比对（token 不匹配不删）语义已迁移至共享锁设施：
+        见 test_distributed_lock.py 的释放原子性/续期失败用例；
+        此处仅验证锁被他人持有时抢占失败不覆盖原值（yield None 早退）"""
+        from platform_core.queues import distributed_lock
+
         redis = _FakeRedis()
-        svc = _scheduler(redis, _FakeApiClient())
         redis.strings[sched_mod.NEWAPI_SCHEDULER_LOCK_KEY] = "other-token"
-        await svc._release_lock(sched_mod.NEWAPI_SCHEDULER_LOCK_KEY, "my-token")
+        async with distributed_lock(
+            redis, sched_mod.NEWAPI_SCHEDULER_LOCK_KEY, ttl=60
+        ) as lock:
+            assert lock is None
         assert redis.strings[sched_mod.NEWAPI_SCHEDULER_LOCK_KEY] == "other-token"
-        await svc._release_lock(sched_mod.NEWAPI_SCHEDULER_LOCK_KEY, "other-token")
-        assert sched_mod.NEWAPI_SCHEDULER_LOCK_KEY not in redis.strings
 
     @pytest.mark.asyncio
     async def test_state_missing_rebuilds_with_default_cooldown(self):

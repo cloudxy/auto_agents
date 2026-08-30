@@ -27,7 +27,7 @@ const Users: React.FC = () => {
     setLoading(true)
     try {
       // /admin/users 带 ApiResponse 信封，需解包 data
-      const res: any = await api.get('/admin/users', {
+      const res = await api.get<{ items: UserItem[]; total: number }>('/admin/users', {
         params: { skip: (p - 1) * pageSize, limit: pageSize }
       })
       setUsers(res.data?.items || [])
@@ -49,7 +49,7 @@ const Users: React.FC = () => {
     {
       title: '用户',
       key: 'username',
-      render: (_: any, record: UserItem) => (
+      render: (_: unknown, record: UserItem) => (
         <Space>
           <Avatar size="small" icon={<UserOutlined />} />
           {record.username}
@@ -61,7 +61,7 @@ const Users: React.FC = () => {
       title: '角色',
       key: 'role',
       width: 100,
-      render: (_: any, record: UserItem) => {
+      render: (_: unknown, record: UserItem) => {
         // role 为后端新契约；旧数据回退 is_admin 判断
         const role = record.role || (record.is_admin ? 'admin' : 'operator')
         if (role === 'admin') return <Tag color="gold">管理员</Tag>
@@ -73,7 +73,7 @@ const Users: React.FC = () => {
       title: '状态',
       key: 'is_active',
       width: 100,
-      render: (_: any, record: UserItem) =>
+      render: (_: unknown, record: UserItem) =>
         record.is_active
           ? <Tag color="green">已激活</Tag>
           : <Tag color="red">未激活</Tag>,
