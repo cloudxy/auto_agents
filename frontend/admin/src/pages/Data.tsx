@@ -22,8 +22,13 @@ import type { SpiderResult, SpiderInfo } from '../services/spiders'
 import { usePermission } from '../hooks/usePermission'
 import { ResultDrawer } from '../components/spider/ResultDrawer'
 import type { Task, SpiderMap } from '../components/spider/types'
+import { apiErrorMessage } from '../utils/errorMessage'
+import type { Dayjs } from 'dayjs'
 
 const { Text } = Typography
+
+/** RangePicker 值契约（antd 泛型缺失场景的手写对齐） */
+type RangeValue = [Dayjs | null, Dayjs | null] | null
 
 interface StatsData {
   total_tasks: number
@@ -75,7 +80,7 @@ const Data: React.FC = () => {
 
   // 筛选条件
   const [spiderName, setSpiderName] = useState<string | undefined>(undefined)
-  const [range, setRange] = useState<any>(null)
+  const [range, setRange] = useState<RangeValue>(null)
   const [keyword, setKeyword] = useState('')
 
   // 结果表格
@@ -90,7 +95,7 @@ const Data: React.FC = () => {
   const loadStats = useCallback(async () => {
     try {
       // /admin/stats 带 ApiResponse 信封，需解包 data
-      const res: any = await api.get('/admin/stats')
+      const res = await api.get<StatsData>('/admin/stats')
       setStats(res.data)
     } catch (error) {
       message.error('获取统计数据失败')
@@ -153,8 +158,8 @@ const Data: React.FC = () => {
       await deleteResult(row.id)
       message.success(`结果 #${row.id} 已删除`)
       loadResults(page, false)
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || '删除失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '删除失败'))
     }
   }
 
@@ -175,8 +180,8 @@ const Data: React.FC = () => {
       link.click()
       URL.revokeObjectURL(url)
       message.success(`已导出 ${items.length} 条结果（CSV，当前筛选条件前 100 条）`)
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || '导出失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '导出失败'))
     }
   }
 
@@ -207,7 +212,7 @@ const Data: React.FC = () => {
     { title: '采集时间', dataIndex: 'created_at', key: 'created_at', width: 170 },
     {
       title: '操作', key: 'action', width: 140,
-      render: (_: any, record: SpiderResult) => (
+      render: (_: unknown, record: SpiderResult) => (
         <Space size="small">
           <Button
             type="link" size="small" icon={<EyeOutlined />}

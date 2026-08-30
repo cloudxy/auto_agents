@@ -6,6 +6,7 @@ import { Drawer, Table, Button, Space, Tag, Tooltip, Typography, message } from 
 import { DownloadOutlined } from '@ant-design/icons'
 import { fetchResults, exportResults, fetchTaskStore } from '../../services/spiders'
 import type { Task, SpiderResult, TaskStoreStatus, SpiderMap } from './types'
+import { apiErrorMessage } from '../../utils/errorMessage'
 
 const { Text } = Typography
 
@@ -64,8 +65,8 @@ export const ResultDrawer: React.FC<ResultDrawerProps> = ({ task, spiderMap, onC
       link.click()
       URL.revokeObjectURL(url)
       message.success(`已导出任务 #${task.id} 的结果（${format.toUpperCase()}）`)
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || '导出失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '导出失败'))
     }
   }
 

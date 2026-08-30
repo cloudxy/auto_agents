@@ -17,6 +17,7 @@ import {
   fetchTemplates,
 } from '../services/spiders'
 import { usePermission } from '../hooks/usePermission'
+import { apiErrorMessage } from '../utils/errorMessage'
 import type { SpiderMap, Task, SpiderRegistry, TaskTemplate } from '../components/spider/types'
 
 import { TaskList } from '../components/spider/TaskList'
@@ -125,8 +126,8 @@ const Spiders: React.FC = () => {
       const res = await deleteTask(task.id)
       message.success(`任务 #${res.task_id} 已删除（级联清理 ${res.removed_results} 条结果）`)
       loadTasks(false)
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '删除失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '删除失败'))
     }
   }
 
@@ -137,8 +138,8 @@ const Spiders: React.FC = () => {
       const res = await controlTask(task.id, action)
       message.success(res.message || `任务 #${task.id} 已${actionLabels[action]}`)
       await loadTasks(false)
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || `${actionLabels[action]}失败`)
+    } catch (error) {
+      message.error(apiErrorMessage(error, `${actionLabels[action]}失败`))
     }
   }
 

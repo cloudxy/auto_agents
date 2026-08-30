@@ -14,6 +14,7 @@ import {
 import { renderParamFields, collectParams } from './formUtils'
 import type { SpiderRegistry, SpiderMap } from './types'
 import type { SpiderSchedule as SpiderScheduleType } from '../../services/spiders'
+import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
 
 const { Text } = Typography
 
@@ -83,9 +84,9 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
       message.success('定时任务已创建')
       setModalOpen(false)
       loadSchedules()
-    } catch (error: any) {
-      if (error?.errorFields) return
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '创建定时任务失败')
+    } catch (error) {
+      if (isFormValidateError(error)) return
+      message.error(apiErrorMessage(error, '创建定时任务失败'))
     } finally {
       setSubmitting(false)
     }
@@ -96,8 +97,8 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
       await updateSchedule(schedule.id, { enabled })
       message.success(enabled ? '定时任务已启用' : '定时任务已停用')
       loadSchedules()
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '操作失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '操作失败'))
     }
   }
 
@@ -106,8 +107,8 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
       await deleteSchedule(schedule.id)
       message.success(`定时任务已删除（${spiderMap[schedule.spider_name]?.title || schedule.spider_name}）`)
       loadSchedules()
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '删除失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '删除失败'))
     }
   }
 
@@ -146,7 +147,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
       title: '操作',
       key: 'action',
       width: 140,
-      render: (_: any, record: SpiderScheduleType) => (
+      render: (_: unknown, record: SpiderScheduleType) => (
         <Space size="small">
           {canCreate && (
             <Button type="link" size="small" icon={<PlayCircleOutlined />} onClick={() => onRunTask(record.spider_name)}>

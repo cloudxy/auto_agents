@@ -67,7 +67,7 @@ export const TaskList: React.FC<TaskListProps> = ({
       title: '类型',
       key: 'type',
       width: 110,
-      render: (_: any, record: Task) => {
+      render: (_: unknown, record: Task) => {
         const type = spiderMap[record.spider_name]?.type
         if (!type) return '-'
         const meta = TYPE_META[type] || { label: type, color: 'default' }
@@ -113,7 +113,7 @@ export const TaskList: React.FC<TaskListProps> = ({
       title: '操作',
       key: 'action',
       width: 380,
-      render: (_: any, record: Task) => (
+      render: (_: unknown, record: Task) => (
         <Space size="small" wrap>
           {canCreate && (
             <Button

@@ -8,6 +8,7 @@ import React, { useEffect, useState } from 'react'
 import { Modal, Form, Select, Input, Alert, message } from 'antd'
 import { updateTask } from '../../services/spiders'
 import type { Task } from './types'
+import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
 
 export interface TaskEditModalProps {
   visible: boolean
@@ -52,9 +53,9 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({
       message.success(`任务 #${task.id} 已更新`)
       onCancel()
       onSubmitSuccess(updated)
-    } catch (error: any) {
-      if (error?.errorFields) return
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '更新失败')
+    } catch (error) {
+      if (isFormValidateError(error)) return
+      message.error(apiErrorMessage(error, '更新失败'))
     } finally {
       setSubmitting(false)
     }
@@ -74,7 +75,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({
     >
       <Alert
         type="info" showIcon style={{ marginBottom: 16 }}
-        message="仅待执行（pending/queued）任务可编辑；运行中/已结束的任务后端将拒绝修改。"
+        title="仅待执行（pending/queued）任务可编辑；运行中/已结束的任务后端将拒绝修改。"
       />
       <Form form={form} layout="vertical" preserve={false}>
         <Form.Item name="priority" label="优先级" tooltip="高优先级任务在同爬虫队列中优先被消费">

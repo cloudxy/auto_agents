@@ -12,6 +12,7 @@ import {
 } from '../../services/spiders'
 import { PRIORITY_META } from './types'
 import type { TaskTemplate, Task, SpiderMap } from './types'
+import { apiErrorMessage } from '../../utils/errorMessage'
 
 const { Text } = Typography
 
@@ -50,8 +51,8 @@ export const TemplateTab: React.FC<TemplateTabProps> = ({
       const task = await runFromTemplate(template.id)
       message.success(`任务 #${task.id} 已从模板创建，正在排队执行`)
       onRunFromTemplate(task)
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '创建任务失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '创建任务失败'))
     }
   }
 
@@ -60,8 +61,8 @@ export const TemplateTab: React.FC<TemplateTabProps> = ({
       await deleteTemplate(template.id)
       message.success(`模板"${template.name}"已删除`)
       loadTemplates()
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '删除失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '删除失败'))
     }
   }
 
@@ -89,7 +90,7 @@ export const TemplateTab: React.FC<TemplateTabProps> = ({
       title: '操作',
       key: 'action',
       width: 180,
-      render: (_: any, record: TaskTemplate) => (
+      render: (_: unknown, record: TaskTemplate) => (
         <Space size="small">
           {canCreate && (
             <Button

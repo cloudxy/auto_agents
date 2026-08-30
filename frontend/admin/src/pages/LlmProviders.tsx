@@ -30,6 +30,7 @@ import {
 } from '../services/llm'
 import type { LlmProvider, LlmProviderPayload, LlmTestResult } from '../services/llm'
 import { usePermission } from '../hooks/usePermission'
+import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
 
 const { Text } = Typography
 
@@ -144,9 +145,9 @@ const LlmProviders: React.FC = () => {
       }
       setModalOpen(false)
       refreshAll()
-    } catch (error: any) {
-      if (error?.errorFields) return // 表单校验失败
-      message.error(error?.response?.data?.message || (editing ? '更新供应商失败' : '创建供应商失败'))
+    } catch (error) {
+      if (isFormValidateError(error)) return // 表单校验失败
+      message.error(apiErrorMessage(error, editing ? '更新供应商失败' : '创建供应商失败'))
     } finally {
       setSubmitting(false)
     }
@@ -159,8 +160,8 @@ const LlmProviders: React.FC = () => {
       await activateLlmProvider(row.id)
       message.success(`已激活供应商「${row.name}」`)
       refreshAll()
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || '激活失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '激活失败'))
     } finally {
       setActivatingId(null)
     }
@@ -176,13 +177,13 @@ const LlmProviders: React.FC = () => {
       } else {
         message.error(`「${row.name}」连通失败：${res.error || '未知错误'}`)
       }
-    } catch (error: any) {
+    } catch (error) {
       // HTTP 层异常（超时/5xx）也落为失败结果，供行内 Tooltip 展示
       const failed: LlmTestResult = {
         ok: false,
         latency_ms: null,
         model: null,
-        error: error?.response?.data?.message || error?.message || '请求异常',
+        error: apiErrorMessage(error, '请求异常'),
       }
       setTestResults((prev) => ({ ...prev, [row.id]: failed }))
       message.error(`「${row.name}」连通失败：${failed.error}`)
@@ -196,8 +197,8 @@ const LlmProviders: React.FC = () => {
       await deleteLlmProvider(row.id)
       message.success(`供应商「${row.name}」已删除`)
       refreshAll()
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || '删除失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '删除失败'))
     }
   }
 
@@ -241,7 +242,7 @@ const LlmProviders: React.FC = () => {
     },
     {
       title: '操作', key: 'action', width: 320,
-      render: (_: any, record: LlmProvider) => {
+      render: (_: unknown, record: LlmProvider) => {
         const res = testResults[record.id]
         return (
           <Space size={0} wrap>

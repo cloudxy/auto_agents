@@ -24,6 +24,7 @@ import {
   createDefinition, updateDefinitionMeta, deleteDefinition,
 } from '../../services/spiders'
 import type { SpiderFile, SpiderInfo } from '../../services/spiders'
+import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
 
 const { Text } = Typography
 
@@ -117,8 +118,8 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
       await updateDefinition(row.name, enabled)
       message.success(`${row.title || row.name} 已${enabled ? '启用' : '停用'}`)
       loadRows()
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '启停失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '启停失败'))
     }
   }
 
@@ -135,9 +136,9 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
       message.success(`定义 ${def.name} 已登记（来源 manual）`)
       setCreateOpen(false)
       loadRows()
-    } catch (error: any) {
-      if (error?.errorFields) return
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '登记失败')
+    } catch (error) {
+      if (isFormValidateError(error)) return
+      message.error(apiErrorMessage(error, '登记失败'))
     } finally {
       setCreating(false)
     }
@@ -155,9 +156,9 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
       message.success(`定义 ${editRow.name} 元信息已更新`)
       setEditRow(null)
       loadRows()
-    } catch (error: any) {
-      if (error?.errorFields) return
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '更新失败')
+    } catch (error) {
+      if (isFormValidateError(error)) return
+      message.error(apiErrorMessage(error, '更新失败'))
     } finally {
       setEditing(false)
     }
@@ -168,9 +169,9 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
       await deleteDefinition(row.name)
       message.success(`定义 ${row.name} 已删除`)
       loadRows()
-    } catch (error: any) {
+    } catch (error) {
       // 被任务引用时后端返回业务错误，透出具体提示
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '删除失败')
+      message.error(apiErrorMessage(error, '删除失败'))
     }
   }
 
@@ -195,7 +196,7 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
     },
     {
       title: '类型', key: 'type', width: 110,
-      render: (_: any, record: DefinitionRow) => {
+      render: (_: unknown, record: DefinitionRow) => {
         if (!record.registered) return <Tag>未登记</Tag>
         const meta = TYPE_META[record.type || ''] || { label: record.type || '-', color: 'default' }
         return <Tag color={meta.color}>{meta.label}</Tag>
@@ -203,7 +204,7 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
     },
     {
       title: '启用', key: 'enabled', width: 90,
-      render: (_: any, record: DefinitionRow) => (
+      render: (_: unknown, record: DefinitionRow) => (
         <Switch
           checked={!!record.enabled}
           size="small"
@@ -214,7 +215,7 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
     },
     {
       title: '操作', key: 'action', width: 150,
-      render: (_: any, record: DefinitionRow) =>
+      render: (_: unknown, record: DefinitionRow) =>
         record.registered && isAdmin ? (
           <Space size="small">
             <Button

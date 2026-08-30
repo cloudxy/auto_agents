@@ -12,6 +12,7 @@ import {
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule,
 } from '../../services/spiders'
 import type { AlertRule, SpiderRegistry, SpiderMap } from './types'
+import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
 
 const { Text } = Typography
 
@@ -92,9 +93,9 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
       }
       setModalOpen(false)
       loadAlertRules()
-    } catch (error: any) {
-      if (error?.errorFields) return
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '操作失败')
+    } catch (error) {
+      if (isFormValidateError(error)) return
+      message.error(apiErrorMessage(error, '操作失败'))
     } finally {
       setSubmitting(false)
     }
@@ -105,8 +106,8 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
       await updateAlertRule(rule.id, { enabled })
       message.success(enabled ? '规则已启用' : '规则已停用')
       loadAlertRules()
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '操作失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '操作失败'))
     }
   }
 
@@ -115,8 +116,8 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
       await deleteAlertRule(rule.id)
       message.success(`告警规则"${rule.name}"已删除`)
       loadAlertRules()
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '删除失败')
+    } catch (error) {
+      message.error(apiErrorMessage(error, '删除失败'))
     }
   }
 
@@ -158,7 +159,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
     },
     {
       title: '操作', key: 'action', width: 140,
-      render: (_: any, record: AlertRule) => (
+      render: (_: unknown, record: AlertRule) => (
         <Space size="small">
           {isAdmin && (
             <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openModal(record)}>

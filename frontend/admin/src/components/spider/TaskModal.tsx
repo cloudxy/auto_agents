@@ -6,6 +6,7 @@ import { Modal, Form, Radio, Select, Switch, message } from 'antd'
 import type { SpiderRegistry, TaskTemplate, SpiderMap, Task } from './types'
 import { renderParamFields, collectParams } from './formUtils'
 import { runSpider } from '../../services/spiders'
+import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
 
 export interface TaskModalProps {
   visible: boolean
@@ -58,9 +59,9 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       message.success(`任务 #${task.id} 已提交，正在排队执行`)
       onCancel()
       onSubmitSuccess(task)
-    } catch (error: any) {
-      if (error?.errorFields) return
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '提交任务失败')
+    } catch (error) {
+      if (isFormValidateError(error)) return
+      message.error(apiErrorMessage(error, '提交任务失败'))
     } finally {
       setSubmitting(false)
     }

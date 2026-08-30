@@ -6,6 +6,7 @@ import { Form, Input, Button, Card, message, Typography, Checkbox } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
+import { apiErrorMessage } from '../utils/errorMessage'
 
 const { Title } = Typography
 
@@ -15,10 +16,10 @@ const Login: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
 
-  // 获取登录前的页面路径
-  const from = (location.state as any)?.from?.pathname || '/dashboard'
+  // 获取登录前的页面路径（react-router location.state 类型宽松，显式窄化）
+  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/dashboard'
 
-  const onFinish = async (values: any) => {
+  const onFinish = async (values: { username: string; password: string; remember_me?: boolean }) => {
     setLoading(true)
     try {
       await login({
@@ -28,9 +29,9 @@ const Login: React.FC = () => {
       })
       message.success('登录成功')
       navigate(from, { replace: true })
-    } catch (error: any) {
+    } catch (error) {
       // 后端统一异常格式为 {success, code, message}
-      message.error(error.response?.data?.message || '登录失败，请检查用户名和密码')
+      message.error(apiErrorMessage(error, '登录失败，请检查用户名和密码'))
     } finally {
       setLoading(false)
     }

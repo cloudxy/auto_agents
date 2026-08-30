@@ -6,6 +6,7 @@ import { Modal, Form, Input, Typography, message } from 'antd'
 import { createTemplate } from '../../services/spiders'
 import { PRIORITY_META } from './types'
 import type { Task, SpiderMap } from './types'
+import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
 
 const { Text } = Typography
 
@@ -43,9 +44,9 @@ export const TemplateModal: React.FC<TemplateModalProps> = ({
       message.success('已收藏为模板')
       onCancel()
       onSubmitSuccess()
-    } catch (error: any) {
-      if (error?.errorFields) return
-      message.error(error?.response?.data?.message || error?.response?.data?.detail || '创建模板失败')
+    } catch (error) {
+      if (isFormValidateError(error)) return
+      message.error(apiErrorMessage(error, '创建模板失败'))
     } finally {
       setSubmitting(false)
     }

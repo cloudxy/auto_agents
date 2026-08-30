@@ -160,15 +160,21 @@ export const renderParamFields = (fields?: SpiderParamField[]) =>
     )
   )
 
+/** 表单草稿行（antd validateFields 返回 any，显式窄化以通过 noImplicitAny） */
+interface SelectorRowDraft { name?: unknown; type?: string; expr?: unknown }
+interface FilterRowDraft { field?: unknown; op?: string; value?: unknown }
+interface PaginationDraft { selector?: unknown; type?: string; max_pages?: unknown }
+interface DetailDraft { list_selector?: unknown; url_selector?: unknown }
+
 /** 从表单值收集任务参数对象（与后端 params 契约一致） */
 export const collectParams = (
-  values: Record<string, any>,
+  values: Record<string, unknown>,
   fields?: SpiderParamField[]
-): Record<string, any> | string => {
-  const paramsObj: Record<string, any> = {}
+): Record<string, unknown> | string => {
+  const paramsObj: Record<string, unknown> = {}
   for (const field of fields || []) {
     if (field.kind === 'pagination') {
-      const p = values.param_pagination || {}
+      const p = (values.param_pagination || {}) as PaginationDraft
       const selector = String(p.selector || '').trim()
       if (selector) {
         paramsObj.pagination = { selector, type: p.type || 'css', max_pages: Number(p.max_pages) || 10 }
@@ -176,13 +182,13 @@ export const collectParams = (
       continue
     }
     if (field.kind === 'detail') {
-      const d = values.param_detail || {}
+      const d = (values.param_detail || {}) as DetailDraft
       const listSelector = String(d.list_selector || '').trim()
       const urlSelector = String(d.url_selector || '').trim()
       const rows = Array.isArray(values.param_detail_selectors)
-        ? values.param_detail_selectors
-            .filter((r: any) => r && String(r.name || '').trim() && String(r.expr || '').trim())
-            .map((r: any) => ({ name: String(r.name).trim(), type: r.type || 'css', expr: String(r.expr).trim() }))
+        ? (values.param_detail_selectors as SelectorRowDraft[])
+            .filter((r) => r && String(r.name || '').trim() && String(r.expr || '').trim())
+            .map((r) => ({ name: String(r.name).trim(), type: r.type || 'css', expr: String(r.expr).trim() }))
         : []
       if (listSelector && urlSelector) {
         paramsObj.detail = { list_selector: listSelector, url_selector: urlSelector, ...(rows.length ? { selectors: rows } : {}) }
@@ -191,9 +197,9 @@ export const collectParams = (
     }
     if (field.kind === 'filters') {
       const rows = Array.isArray(values.param_filters)
-        ? values.param_filters
-            .filter((r: any) => r && String(r.field || '').trim() && String(r.value || '').trim())
-            .map((r: any) => ({ field: String(r.field).trim(), op: r.op || 'contains', value: String(r.value).trim() }))
+        ? (values.param_filters as FilterRowDraft[])
+            .filter((r) => r && String(r.field || '').trim() && String(r.value || '').trim())
+            .map((r) => ({ field: String(r.field).trim(), op: r.op || 'contains', value: String(r.value).trim() }))
         : []
       if (rows.length) paramsObj.filters = rows
       continue
@@ -204,9 +210,9 @@ export const collectParams = (
       paramsObj[field.name] = String(raw).split('\n').map((s) => s.trim()).filter(Boolean)
     } else if (field.kind === 'selectors') {
       const rows = Array.isArray(raw)
-        ? raw
-            .filter((r: any) => r && String(r.name || '').trim() && String(r.expr || '').trim())
-            .map((r: any) => ({ name: String(r.name).trim(), type: r.type || 'css', expr: String(r.expr).trim() }))
+        ? (raw as SelectorRowDraft[])
+            .filter((r) => r && String(r.name || '').trim() && String(r.expr || '').trim())
+            .map((r) => ({ name: String(r.name).trim(), type: r.type || 'css', expr: String(r.expr).trim() }))
         : []
       if (field.required && rows.length === 0) {
         return `请至少添加一条${field.label}`
