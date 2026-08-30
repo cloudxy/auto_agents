@@ -79,3 +79,6 @@ storage/
 docs/*
 # 发布公告随仓库提交（其余 docs 内容不入库）
 !docs/release-notes-2026-08-30.md
+# ADR 决策记录与迁移演练报告随仓库提交
+!docs/adr/
+!docs/migration-drill-2026-08-30.md
