@@ -3,8 +3,10 @@
 运行模型（随 FastAPI lifespan 启动，见 backend/app/__init__.py）：
 - _dispatch_loop：blpop spider:task_queue → 任务置 running → 写活跃任务关联 →
   把 start URL 投递到 `<spider_name>:start_urls`（scrapy-redis 消费）
-- _ingest_loop：blpop spider:item_queue → 批量 accumulate + 定期 flush →
+- _ingest_loop：lpop 批量拉取 spider:item_queue → 批量 accumulate + 定期 flush →
   bulk insert + result_count 批量累加（单次 commit）
+- _retry_loop：扫 spider:retry_zset 到期成员（score=到期时间戳）→
+  zrem 原子抢占 → 重新投递主优先级队列（失败重试退避 1s→5s→15s）
 
 失败策略：
 - 单条消息处理失败只记日志，不中断循环（队列消费不丢循环）
@@ -14,6 +16,7 @@ import asyncio
 import hashlib
 import json
 import os
+import time
 from typing import List, Optional
 
 import redis.asyncio as aioredis
@@ -43,11 +46,21 @@ from backend.services.spider_service import (
     extract_store_targets,
     resolve_spider_log_path,
 )
+from backend.services.spider_task_service import RETRY_ZSET_KEY
 
 logger = get_logger("api")
 
 # blpop 超时（秒）：超时后回到循环顶部检查运行开关，保证可优雅退出
 _BLPOP_TIMEOUT = 5
+
+# 期 3：ingest 批量化 —— 单次 lpop 拉取条数（替代逐条 blpop 的 Redis round-trip）
+_INGEST_POP_COUNT = 20
+# 无新消息时的休眠秒数：保证定期 flush 节奏 + 避免 lpop 空转烧 CPU
+# （原 blpop timeout=1 同等语义：无消息时最多约该间隔才做一次 flush 检查）
+_INGEST_IDLE_SLEEP = 0.2
+# 重试 ZSET 扫描节奏（秒）与单次最多搬运条数
+_RETRY_SCAN_INTERVAL = 1.0
+_RETRY_BATCH = 100
 
 
 def extract_start_urls(params: Optional[str]) -> List[str]:
@@ -153,9 +166,11 @@ class SpiderTaskConsumer:
         self._loops = [
             asyncio.create_task(self._dispatch_loop(), name="spider-task-dispatch"),
             asyncio.create_task(self._ingest_loop(), name="spider-item-ingest"),
+            asyncio.create_task(self._retry_loop(), name="spider-retry-scan"),
         ]
         logger.info(
-            f"队列消费者已启动: tasks={[task_queue(p) for p in TASK_QUEUE_PRIORITIES]}, items={ITEM_QUEUE}"
+            f"队列消费者已启动: tasks={[task_queue(p) for p in TASK_QUEUE_PRIORITIES]}, "
+            f"items={ITEM_QUEUE}, retry_zset={RETRY_ZSET_KEY}"
         )
 
     async def _purge_legacy_active_keys(self) -> None:
@@ -311,17 +326,78 @@ class SpiderTaskConsumer:
             logger.error(f"任务置 failed 失败: task_id={task_id}, error={e}")
 
     # ------------------------------------------------------------------
+    # 失败重试延迟扫描（期 3）：ZSET 到期成员重新入主队列
+    # ------------------------------------------------------------------
+    async def _retry_loop(self) -> None:
+        """重试扫描循环：每 tick 扫到期成员，与 dispatch/ingest 并行的独立小节
+
+        入队侧：SpiderTaskService._reenqueue 失败重试时 ZADD（score=到期时间戳）。
+        出队侧：本循环 zrangebyscore 取到期成员 → zrem 原子抢占 → rpush 主队列。
+        """
+        while self._running:
+            try:
+                await self._scan_retry_zset()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 扫描失败只记日志，不中断循环
+                logger.error(f"重试扫描异常: {e}")
+            await asyncio.sleep(self._RETRY_SCAN_INTERVAL)
+
+    async def _scan_retry_zset(self) -> None:
+        """扫描到期成员并重新入主队列（zrem 抢占防多实例重复入队）"""
+        now = time.time()
+        due = await self._redis.zrangebyscore(
+            RETRY_ZSET_KEY, "-inf", now, start=0, num=self._RETRY_BATCH
+        )
+        if not due:
+            return
+        for raw in due:
+            # zrem 原子抢占：多实例部署时同一到期成员只被一个消费者搬走
+            removed = await self._redis.zrem(RETRY_ZSET_KEY, raw)
+            if not removed:
+                continue  # 已被其他实例抢占
+            try:
+                msg = json.loads(raw)
+                queue_key = task_queue(str(msg.get("priority") or "normal"))
+                await self._redis.rpush(queue_key, raw)
+                logger.info(
+                    f"重试任务到期重新入队: task_id={msg.get('task_id')}, queue={queue_key}"
+                )
+            except Exception as e:  # noqa: BLE001
+                # 入队失败回滚 ZSET（延迟 5s 再试），防消息丢失
+                try:
+                    await self._redis.zadd(RETRY_ZSET_KEY, {raw: time.time() + 5})
+                except Exception as rollback_err:  # noqa: BLE001
+                    # 回滚也失败（M-2 评审修复）：消息已被 zrem 移除且无法恢复，
+                    # DB 兜底置 failed（对齐 SpiderTaskService._reenqueue 投递失败
+                    # 置 failed 语义），避免任务永远停留在 running/pending 悬挂
+                    logger.error(
+                        f"重试任务重新入队失败且回滚 ZSET 失败，任务置 failed 兜底: "
+                        f"error={e}, rollback_error={rollback_err}"
+                    )
+                    task_id = None
+                    try:
+                        task_id = json.loads(raw).get("task_id")
+                    except (TypeError, ValueError):
+                        pass
+                    await self._fail_task(task_id, "重试重新入队失败（消息丢失）")
+
+    # ------------------------------------------------------------------
     # 结果回流：批量 accumulate + 定期 flush（高吞吐优化）
     # ------------------------------------------------------------------
     _BATCH_SIZE = 50          # 单次 flush 最大条数
     _FLUSH_INTERVAL = 2.0     # 秒：无新消息时最长等待
+    _POP_COUNT = _INGEST_POP_COUNT   # 单次 lpop 拉取条数（期 3 批量化）
+    _IDLE_SLEEP = _INGEST_IDLE_SLEEP  # 无新消息时休眠秒数
+    _RETRY_SCAN_INTERVAL = _RETRY_SCAN_INTERVAL  # 重试扫描周期（秒）
+    _RETRY_BATCH = _RETRY_BATCH  # 单次扫描到期成员上限
 
     async def _ingest_loop(self) -> None:
-        """批量结果回流循环 — accumulate + 定期 flush
+        """批量结果回流循环 — lpop 批量拉取 + accumulate + 定期 flush
 
-        与旧版逐条 commit 不同：消息先 accumulate 到内存批次，
-        达到 batch_size 或 flush_interval 后统一 bulk insert + 单次 commit，
-        显著减少 DB round-trip 和连接池竞争。
+        与旧版逐条 blpop 不同：单次 lpop(count=N) 批量弹出，减少 Redis
+        round-trip；消息先 accumulate 到内存批次，达到 batch_size 或
+        flush_interval 后统一 bulk insert + 单次 commit。
         """
         batch: list[dict] = []
         batch_counts: dict[int, int] = {}  # task_id → count
@@ -329,10 +405,9 @@ class SpiderTaskConsumer:
 
         while self._running:
             try:
-                # 短 timeout：保证定期 flush，不被 blpop 阻塞
-                result = await self._redis.blpop(ITEM_QUEUE, timeout=1)
-                if result:
-                    _, raw = result
+                # 批量弹出（count=N）：一次往返取多条，显著减少逐条 blpop 的往返开销
+                raws = await self._redis.lpop(ITEM_QUEUE, count=self._POP_COUNT)
+                for raw in raws or []:
                     try:
                         message = json.loads(raw)
                     except (TypeError, ValueError):
@@ -357,7 +432,20 @@ class SpiderTaskConsumer:
                     batch_counts.clear()
                     last_flush = now
 
+                if not raws:
+                    # 无新消息：短暂休眠保持定期 flush 节奏，避免 lpop 空转
+                    await asyncio.sleep(self._IDLE_SLEEP)
+
             except asyncio.CancelledError:
+                # 关停路径：先尝试 flush 当前批次防丢数据（flush 自身失败仅记日志，
+                # 也要 re-raise CancelledError，保证关停路径不吞取消信号）
+                if batch:
+                    try:
+                        await self._flush_batch(batch, batch_counts)
+                        batch.clear()
+                        batch_counts.clear()
+                    except Exception as e:  # noqa: BLE001 flush 失败不阻断取消传播
+                        logger.error(f"关停 flush 残余批次失败: {e}")
                 raise
             except Exception as e:  # noqa: BLE001
                 logger.error(f"ingest 循环异常: {e}")
@@ -377,9 +465,23 @@ class SpiderTaskConsumer:
 
         单次 session 完成所有操作，最后统一 commit；
         增量去重（B5）和多存储镜像（4.2）均在此处理。
+
+        counts 入参仅为兼容旧签名保留，实际不使用：flush 入口按本批
+        messages 一次性重算计数（m-5 评审修复），保证 flush 失败重试
+        幂等（去重扣减不跨轮次累计，详见下方注释）。
         """
         if not messages:
             return
+
+        # ── 0. 按本批 messages 一次性重算计数（m-5 评审修复）──
+        # 调用方的 counts 在 flush 失败重试场景下会被上一轮的去重扣减污染
+        # （失败 → 同一批次连同已扣减的 counts 原样重试），继续在其上扣减
+        # 会让重试轮次重复扣减、唯一未去重结果的计数被错误归零；
+        # 本地按 messages 重算是幂等基准，调用方 dict 保持只读。
+        counts = {}
+        for msg in messages:
+            tid = msg["task_id"]
+            counts[tid] = counts.get(tid, 0) + 1
 
         async with AsyncSession(self._engine()) as session:
             # ── 1. 加载批次内涉及的 task params（增量去重 + 多存储目标）──

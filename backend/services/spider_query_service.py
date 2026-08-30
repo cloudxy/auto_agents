@@ -8,21 +8,37 @@
 - store_status：多存储目标状态查询
 - stats：聚合运行统计（供 /admin/stats）
 
-设计说明：
-- 子 Service 通过 __getattr__ 将未知属性委托给父 Facade（SpiderService），
-  确保测试 patch backend.services.spider_service.<name> 能正确生效。
+设计说明（期 4 Facade 退役后独立化）：
+- 自持 session / repo / result_repo；模块级直引 settings / get_async_redis /
+  共享工具（测试 patch 目标：backend.services.spider_query_service.<name>）。
+- 期 4 R11 收口：_task_log_offset / store_status 的同步 redis_client 直调
+  全部改 get_async_redis + await，check-arch 文件级豁免同步移除。
 """
 import asyncio
 import csv
 import io
 import json
 import os
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.repositories.spider_result_repository import SpiderResultRepository
+from backend.repositories.spider_task_repository import SpiderTaskRepository
+from backend.services.spider_common import (
+    _PROJECT_ROOT,
+    _STORE_TARGET_ENUM,
+    _read_task_log_sync,
+    extract_store_targets,
+    resolve_spider_log_path,
+)
+from config import settings
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
-from platform_core.queues import TASK_RESULTS_KEY
+from platform_core.queues import TASK_LOG_OFFSET_KEY, TASK_RESULTS_KEY
+from platform_core.redis_async import get_async_redis
 from platform_core.schemas.spider import (
     DailyPoint,
     SpiderResultListResponse,
@@ -34,25 +50,17 @@ from platform_core.schemas.spider import (
     TopSpider,
 )
 
-# 从 spider_service 导入共享工具（不会被测试 patch）
-from backend.services.spider_service import (
-    _PROJECT_ROOT,
-    _read_task_log_sync,
-)
-
 logger = get_logger("api")
 
 
 class SpiderQueryService:
     """结果查询 / 统计 / 日志 / 质量 / 存储状态"""
 
-    def __init__(self, parent):
-        """parent: SpiderService Facade 实例"""
-        self._parent = parent
-
-    def __getattr__(self, name):
-        """委托未知属性到父 Facade"""
-        return getattr(self._parent, name)
+    def __init__(self, session: AsyncSession):
+        """独立 Service：自持会话与仓储（期 4 Facade 退役）"""
+        self.session = session
+        self.repo = SpiderTaskRepository(session)
+        self.result_repo = SpiderResultRepository(session)
 
     async def list_results(
         self,
@@ -77,6 +85,76 @@ class SpiderQueryService:
         "id", "task_id", "spider_name", "url", "title", "content",
         "source", "item_type", "extra", "created_at",
     )
+
+    @staticmethod
+    def _export_row(r) -> dict:
+        """ORM 结果行 -> 导出字典（列与全量导出保持一致）"""
+        return {
+            "id": r.id,
+            "task_id": r.task_id,
+            "spider_name": r.spider_name,
+            "url": r.url,
+            "title": r.title,
+            "content": r.content,
+            "source": r.source,
+            "item_type": r.item_type,
+            "extra": r.extra,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+
+    async def export_results(
+        self, task_id: int, fmt: str
+    ) -> Tuple[AsyncIterator[bytes], str, str]:
+        """导出任务全部采集结果（csv / json）—— 流式分批产出
+
+        任务存在性与格式校验在返回前同步完成；正文按 id 游标分批拉取
+        （iter_by_task）并增量编码为字节块，内存峰值恒为单批常量级，
+        避免大任务导出全量载入。返回 (字节块异步迭代器, 文件名, media_type)，
+        由 API 层以 StreamingResponse 下发，导出格式与列与全量导出逐字节一致。
+        """
+        task = await self.repo.get_by_id(task_id)
+        if task is None:
+            raise NotFoundException("爬虫任务")
+        if fmt not in ("csv", "json"):
+            raise BusinessException("导出格式仅支持 csv/json")
+
+        filename = f"task_{task_id}_results.{fmt}"
+        media_type = "application/json" if fmt == "json" else "text/csv"
+        logger.info(f"导出任务结果(流式): task_id={task_id}, fmt={fmt}")
+        return self._iter_export_chunks(task_id, fmt), filename, media_type
+
+    async def _iter_export_chunks(
+        self, task_id: int, fmt: str
+    ) -> AsyncIterator[bytes]:
+        """按 id 游标分批拉取结果并增量编码（csv 带 BOM 头；json 保持 indent=2 数组格式）"""
+        if fmt == "csv":
+            yield b"\xef\xbb\xbf"  # utf-8-sig BOM（Excel 兼容）
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=self._EXPORT_COLUMNS)
+            writer.writeheader()
+            yield buf.getvalue().encode("utf-8")
+            buf.seek(0)
+            buf.truncate(0)
+        else:
+            yield b"["
+            first = True
+
+        async for r in self.result_repo.iter_by_task(task_id):
+            row = self._export_row(r)
+            if fmt == "csv":
+                writer.writerow(row)
+                yield buf.getvalue().encode("utf-8")
+                buf.seek(0)
+                buf.truncate(0)
+            else:
+                part = json.dumps(row, ensure_ascii=False, indent=2)
+                yield (b"\n" if first else b",\n")
+                first = False
+                # 与 json.dumps(rows, indent=2) 逐字节对齐：元素整体缩进 2 空格
+                yield ("  " + part.replace("\n", "\n  ")).encode("utf-8")
+
+        if fmt == "json":
+            yield b"\n]" if not first else b"]"  # 空结果：与 json.dumps([], indent=2) 对齐
 
     async def search_results(
         self,
@@ -115,48 +193,6 @@ class SpiderQueryService:
         await self.session.commit()
         return {"id": result_id, "deleted": True}
 
-    async def export_results(self, task_id: int, fmt: str) -> Tuple[bytes, str, str]:
-        """导出任务全部采集结果（csv / json）"""
-        task = await self.repo.get_by_id(task_id)
-        if task is None:
-            raise NotFoundException("爬虫任务")
-        if fmt not in ("csv", "json"):
-            raise BusinessException("导出格式仅支持 csv/json")
-
-        items = await self.result_repo.all_by_task(task_id)
-        rows = []
-        for r in items:
-            rows.append(
-                {
-                    "id": r.id,
-                    "task_id": r.task_id,
-                    "spider_name": r.spider_name,
-                    "url": r.url,
-                    "title": r.title,
-                    "content": r.content,
-                    "source": r.source,
-                    "item_type": r.item_type,
-                    "extra": r.extra,
-                    "created_at": r.created_at.isoformat() if r.created_at else None,
-                }
-            )
-
-        filename = f"task_{task_id}_results.{fmt}"
-        if fmt == "json":
-            content = json.dumps(rows, ensure_ascii=False, indent=2).encode("utf-8")
-            media_type = "application/json"
-        else:
-            buf = io.StringIO()
-            writer = csv.DictWriter(buf, fieldnames=self._EXPORT_COLUMNS)
-            writer.writeheader()
-            for row in rows:
-                writer.writerow(row)
-            content = buf.getvalue().encode("utf-8-sig")
-            media_type = "text/csv"
-
-        logger.info(f"导出任务结果: task_id={task_id}, fmt={fmt}, rows={len(rows)}")
-        return content, filename, media_type
-
     async def get_task_quality(self, task_id: int) -> TaskQualityReportResponse:
         """查询任务的质量报告：平均分/最低分/最高分/四档分布"""
         task = await self.repo.get_by_id(task_id)
@@ -191,10 +227,10 @@ class SpiderQueryService:
             raise NotFoundException("爬虫任务")
         await self.session.refresh(task)
 
-        log_path = self.resolve_spider_log_path()
+        log_path = resolve_spider_log_path()
         content_lines: list[str] = []
         if log_path and os.path.isfile(log_path):
-            offset = self._task_log_offset(task_id)
+            offset = await self._task_log_offset(task_id)
             tail = max(1, min(lines, 500))
             content_lines = await asyncio.to_thread(
                 _read_task_log_sync, log_path, offset, tail, keyword, level
@@ -206,9 +242,24 @@ class SpiderQueryService:
             lines=content_lines,
         )
 
-    def _task_log_offset(self, task_id: int) -> Optional[int]:
-        """读取任务日志起始偏移量（通过委托访问）"""
-        return self._parent._task_log_offset(task_id)
+    async def _task_log_offset(self, task_id: int) -> Optional[int]:
+        """读取任务日志起始偏移量（期 4 R11 收口：同步 redis_client 改异步门面）
+
+        原为 Facade 静态方法（同步 redis_client 直调 .get，行内豁免 allow-sync-redis）；
+        调用方 task_logs 本就在 async 上下文，改 get_async_redis + await 后
+        连同 check-arch R11 的行内豁免与文件级豁免一并清零。
+        """
+        try:
+            raw = await get_async_redis().get(TASK_LOG_OFFSET_KEY.format(task_id=task_id))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"读取任务日志偏移量失败: task_id={task_id}, error={e}")
+            return None
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
 
     async def store_status(self, task_id: int) -> TaskStoreStatusResponse:
         """查询任务的额外存储目标状态"""
@@ -220,7 +271,8 @@ class SpiderQueryService:
         redis_count: Optional[int] = None
         if targets:
             try:
-                redis_count = self.redis_client().llen(TASK_RESULTS_KEY.format(task_id=task_id))
+                # 期 4 R11 收口：原同步 redis_client 直调 llen 阻塞事件循环，改异步门面
+                redis_count = await get_async_redis().llen(TASK_RESULTS_KEY.format(task_id=task_id))
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"读取结果缓存条数失败: task_id={task_id}, error={e}")
         csv_path: Optional[str] = None
@@ -269,15 +321,14 @@ class SpiderQueryService:
 
     def _store_dir(self) -> str:
         """csv 落盘目录"""
-        rel = self.settings.get("STORAGE.DIR", "storage/exports") or "storage/exports"
+        rel = settings.get("STORAGE.DIR", "storage/exports") or "storage/exports"
         return rel if os.path.isabs(rel) else os.path.abspath(os.path.join(_PROJECT_ROOT, rel))
 
     def _store_targets(self, task) -> list[str]:
         """生效的额外存储目标"""
-        from backend.services.spider_service import _STORE_TARGET_ENUM, extract_store_targets
         targets = extract_store_targets(getattr(task, "params", None))
         if not targets:
-            default = self.settings.get("STORAGE.EXTRA_TARGETS", []) or []
+            default = settings.get("STORAGE.EXTRA_TARGETS", []) or []
             if isinstance(default, str):
                 default = [default]
             targets = [t for t in default if t in _STORE_TARGET_ENUM]

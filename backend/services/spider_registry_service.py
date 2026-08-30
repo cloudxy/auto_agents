@@ -7,15 +7,23 @@
 - list_nodes：Worker 节点心跳扫描
 - list/create/update/delete_template + create_task_from_template：模板管理
 
-设计说明：
-- 子 Service 通过 __getattr__ 将未知属性委托给父 Facade（SpiderService），
-  确保测试 patch backend.services.spider_service.<name> 能正确生效。
+设计说明（期 4 Facade 退役后独立化）：
+- 自持 session / repo；模块级直引 settings / get_async_redis / Repository /
+  _SPIDERS_DIR（测试 patch 目标：backend.services.spider_registry_service.<name>）。
 """
 import os
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.repositories.spider_definition_repository import SpiderDefinitionRepository
+from backend.repositories.spider_task_repository import SpiderTaskRepository
+from backend.repositories.task_template_repository import TaskTemplateRepository
+from backend.services.spider_common import _SPIDERS_DIR
+from config import settings
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
 from platform_core.queues import ACTIVE_TASK_KEY, WORKER_HEARTBEAT_PREFIX
+from platform_core.redis_async import get_async_redis
 from platform_core.schemas.spider import (
     DefinitionCreateRequest,
     DefinitionUpdateMetaRequest,
@@ -39,13 +47,10 @@ logger = get_logger("api")
 class SpiderRegistryService:
     """注册表 / 文件管理 / Worker 节点 / 模板"""
 
-    def __init__(self, parent):
-        """parent: SpiderService Facade 实例"""
-        self._parent = parent
-
-    def __getattr__(self, name):
-        """委托未知属性到父 Facade"""
-        return getattr(self._parent, name)
+    def __init__(self, session: AsyncSession):
+        """独立 Service：自持会话与仓储（期 4 Facade 退役）"""
+        self.session = session
+        self.repo = SpiderTaskRepository(session)
 
     # ------------------------------------------------------------------
     # 爬虫注册表（类型表单走配置；爬虫清单 DB 优先、配置兜底）
@@ -53,8 +58,8 @@ class SpiderRegistryService:
     async def registry(self) -> SpiderRegistryResponse:
         """返回爬虫类型表单定义 + 可调度爬虫清单"""
         logger.debug("构建爬虫注册表")
-        types_cfg = self.settings.get("SPIDER_TYPES", {}) or {}
-        spiders_cfg = self.settings.get("SPIDERS", {}) or {}
+        types_cfg = settings.get("SPIDER_TYPES", {}) or {}
+        spiders_cfg = settings.get("SPIDERS", {}) or {}
 
         types = []
         for type_key, tcfg in types_cfg.items():
@@ -79,7 +84,7 @@ class SpiderRegistryService:
         # 爬虫清单：DB 优先，查询失败或空表回退配置种子
         spiders: list[SpiderInfo] | None = None
         try:
-            definitions = await self.SpiderDefinitionRepository(self.session).list_enabled()
+            definitions = await SpiderDefinitionRepository(self.session).list_enabled()
             if definitions:
                 spiders = [
                     SpiderInfo(
@@ -116,13 +121,13 @@ class SpiderRegistryService:
         logger.info("扫描代码爬虫文件清单")
         definitions: dict = {}
         try:
-            defs = await self.SpiderDefinitionRepository(self.session).get_all(limit=500)
+            defs = await SpiderDefinitionRepository(self.session).get_all(limit=500)
             definitions = {d.name: d for d in defs}
         except Exception as e:  # noqa: BLE001
             logger.warning(f"爬虫定义读取失败，文件清单不含启停状态: {e}")
 
         items: list[SpiderFileResponse] = []
-        spiders_dir = self._SPIDERS_DIR
+        spiders_dir = _SPIDERS_DIR
         if os.path.isdir(spiders_dir):
             for fname in sorted(os.listdir(spiders_dir)):
                 if not fname.endswith(".py") or fname == "__init__.py":
@@ -151,7 +156,7 @@ class SpiderRegistryService:
     async def update_definition(self, name: str, enabled: bool) -> SpiderDefinitionResponse:
         """启停代码爬虫"""
         logger.info(f"更新爬虫定义启停: name={name}, enabled={enabled}")
-        repo = self.SpiderDefinitionRepository(self.session)
+        repo = SpiderDefinitionRepository(self.session)
         definition = await repo.get_by_name(name)
         if definition is None:
             raise NotFoundException("爬虫定义")
@@ -168,7 +173,7 @@ class SpiderRegistryService:
     ) -> SpiderDefinitionResponse:
         """新建爬虫定义（来源标记默认 manual；AI 注册传 ai_generated；名称唯一）"""
         logger.info(f"新建爬虫定义: name={payload.name}, type={payload.type}, source={source}")
-        repo = self.SpiderDefinitionRepository(self.session)
+        repo = SpiderDefinitionRepository(self.session)
         existing = await repo.get_by_name(payload.name)
         if existing is not None:
             raise BusinessException(f"爬虫定义 '{payload.name}' 已存在（id={existing.id}）")
@@ -189,7 +194,7 @@ class SpiderRegistryService:
     ) -> SpiderDefinitionResponse:
         """编辑爬虫定义元信息（标题/描述，不含启停与名称）"""
         logger.info(f"编辑爬虫定义元信息: name={name}, fields={list(payload.model_dump(exclude_unset=True).keys())}")
-        repo = self.SpiderDefinitionRepository(self.session)
+        repo = SpiderDefinitionRepository(self.session)
         definition = await repo.get_by_name(name)
         if definition is None:
             raise NotFoundException("爬虫定义")
@@ -208,7 +213,7 @@ class SpiderRegistryService:
         引用检查；rowcount=0 时二次查询区分「定义不存在」与「被引用拒绝」。
         """
         logger.info(f"删除爬虫定义: name={name}")
-        repo = self.SpiderDefinitionRepository(self.session)
+        repo = SpiderDefinitionRepository(self.session)
         deleted = await repo.delete_if_unreferenced(name)
         if deleted:
             await self.session.commit()
@@ -227,32 +232,65 @@ class SpiderRegistryService:
     # Worker 节点心跳（2.2）
     # ------------------------------------------------------------------
     async def list_nodes(self) -> WorkerNodeListResponse:
-        """扫描 Worker 心跳键，返回在线节点及其各爬虫的活跃任务"""
+        """扫描 Worker 心跳键，返回在线节点及其各爬虫的活跃任务
+
+        期 3 优化：
+        - Redis 全异步化（scan_iter 异步迭代 / hgetall / smembers 均 await）
+        - 消除逐 task get_by_id 的 N+1：先汇总全部活跃 task_id，
+          一次 WHERE id IN (...) 批查（repo.get_by_ids）后回填状态
+        """
         logger.info("查询 Worker 节点列表")
-        items: list[WorkerNodeResponse] = []
         try:
-            client = self.redis_client()
-            keys = list(client.scan_iter(match=f"{WORKER_HEARTBEAT_PREFIX}*", count=100))
+            client = get_async_redis()
+            keys = [
+                k async for k in client.scan_iter(
+                    match=f"{WORKER_HEARTBEAT_PREFIX}*", count=100
+                )
+            ]
         except Exception as e:  # noqa: BLE001
             logger.warning(f"扫描节点心跳失败（返回空列表）: {e}")
             return WorkerNodeListResponse(total=0, items=[])
 
+        # 第一遍：读心跳 + 收集各爬虫活跃 task_id（spider → task_ids）
+        nodes: list[tuple[str, dict, list[str], list[tuple[str, list[int]]]]] = []
+        all_task_ids: set[int] = set()
         for key in keys:
-            data = client.hgetall(key) or {}
+            data = await client.hgetall(key) or {}
             worker_id = str(key).removeprefix(WORKER_HEARTBEAT_PREFIX)
             spiders = [s for s in str(data.get("spiders", "")).split(",") if s]
 
-            active_tasks: list[WorkerActiveTask] = []
+            spider_task_ids: list[tuple[str, list[int]]] = []
             for spider_name in spiders:
                 task_ids = sorted(
-                    int(v) for v in client.smembers(ACTIVE_TASK_KEY.format(spider_name=spider_name))
+                    int(v)
+                    for v in await client.smembers(
+                        ACTIVE_TASK_KEY.format(spider_name=spider_name)
+                    )
                 )
+                spider_task_ids.append((spider_name, task_ids))
+                all_task_ids.update(task_ids)
+            nodes.append((worker_id, data, spiders, spider_task_ids))
+
+        # 批查任务状态（一次 WHERE id IN，替代逐 task get_by_id 的 N+1 轮询路径）
+        tasks_map: dict[int, object] = {}
+        if all_task_ids:
+            tasks = await self.repo.get_by_ids(sorted(all_task_ids))
+            tasks_map = {t.id: t for t in tasks}
+
+        # 第二遍：用批查结果构建响应
+        items: list[WorkerNodeResponse] = []
+        for worker_id, data, spiders, spider_task_ids in nodes:
+            active_tasks: list[WorkerActiveTask] = []
+            for spider_name, task_ids in spider_task_ids:
                 if task_ids:
                     for task_id in task_ids:
-                        task = await self.repo.get_by_id(task_id)
-                        status = task.status if task else None
+                        task = tasks_map.get(task_id)
                         active_tasks.append(
-                            WorkerActiveTask(spider_name=spider_name, task_id=task_id, status=status)
+                            WorkerActiveTask(
+                                spider_name=spider_name,
+                                task_id=task_id,
+                                status=task.status if task else None,
+                            )
                         )
                 else:
                     active_tasks.append(
@@ -279,14 +317,14 @@ class SpiderRegistryService:
     async def list_templates(self) -> list[TaskTemplateResponse]:
         """获取所有任务模板"""
         logger.debug("获取任务模板列表")
-        repo = self.TaskTemplateRepository(self.session)
+        repo = TaskTemplateRepository(self.session)
         items = await repo.list_all()
         return [TaskTemplateResponse.model_validate(item) for item in items]
 
     async def create_template(self, payload: dict, created_by: int | None = None) -> TaskTemplateResponse:
         """创建任务模板（名称唯一性校验）"""
         logger.info(f"创建任务模板: name={payload.get('name')}")
-        repo = self.TaskTemplateRepository(self.session)
+        repo = TaskTemplateRepository(self.session)
         existing = await repo.get_by_name(payload["name"])
         if existing:
             raise BusinessException(f"模板名称 '{payload['name']}' 已存在")
@@ -298,7 +336,7 @@ class SpiderRegistryService:
     async def update_template(self, template_id: int, payload: dict) -> TaskTemplateResponse:
         """更新任务模板"""
         logger.info(f"更新任务模板: id={template_id}")
-        repo = self.TaskTemplateRepository(self.session)
+        repo = TaskTemplateRepository(self.session)
         item = await repo.get_by_id(template_id)
         if item is None:
             raise NotFoundException("任务模板")
@@ -314,7 +352,7 @@ class SpiderRegistryService:
     async def delete_template(self, template_id: int) -> dict:
         """删除任务模板"""
         logger.info(f"删除任务模板: id={template_id}")
-        repo = self.TaskTemplateRepository(self.session)
+        repo = TaskTemplateRepository(self.session)
         item = await repo.get_by_id(template_id)
         if item is None:
             raise NotFoundException("任务模板")
@@ -325,11 +363,13 @@ class SpiderRegistryService:
     async def create_task_from_template(self, template_id: int) -> SpiderTaskResponse:
         """从模板创建并运行任务"""
         logger.info(f"从模板创建任务: template_id={template_id}")
-        repo = self.TaskTemplateRepository(self.session)
+        repo = TaskTemplateRepository(self.session)
         template = await repo.get_by_id(template_id)
         if template is None:
             raise NotFoundException("任务模板")
-        return await self._task_svc.enqueue(
+        # 局部构造（无状态）：避免 registry → task 顶层互相依赖
+        from backend.services.spider_task_service import SpiderTaskService
+        return await SpiderTaskService(self.session).enqueue(
             spider_name=template.spider_name,
             params=template.params,
             priority=template.priority or "normal",
