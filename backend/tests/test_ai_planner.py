@@ -1,9 +1,9 @@
-"""阶段二单测 - AI 智能采集核心（规划 / 试采自动修复 / 注册 / FlowConfig 契约 / API 权限）
+"""AI 智能采集核心单测（规划 / 试采自动修复 / 注册 / FlowConfig 契约 / API 权限）
 
 约定：不连真实 MySQL/Redis，Repository/SpiderService 用 AsyncMock/MagicMock 桩；
 LLM 调用 mock AiPlannerService._llm_chat；enqueue mock SpiderService 实例；
 试采终态轮询数据源 mock _read_task_snapshot（独立短事务 session，不连 DB）。
-patch 点：backend.services.ai_planner_service.<name>（与既有 phase 测试一致）。
+patch 点：backend.services.ai_planner_service.<name>。
 覆盖：
 - 规划：成功落 plan_json/generated_params（html_snippet 优先不抓网页）/ 无 snippet 抓取 /
   FlowConfig 校验失败置 failed / LLM 未启用明确报错
@@ -37,6 +37,7 @@ from platform_core.schemas.ai_plan import (
     validate_selector_expr,
 )
 from platform_core.schemas.spider import TaskQualityReportResponse
+from stubs import fake_settings as _fake_settings  # 共享桩（唯一定义处见 stubs.py）
 
 # 合法 LLM 输出（与 flow_generic 契约对齐）
 GOOD_LLM_JSON = json.dumps({
@@ -54,17 +55,6 @@ _GENERATED = {"urls": ["https://example.com/list"], "selectors": _FLOW["selector
               "pagination": _FLOW["pagination"]}
 _HISTORY_PASS = [{"iteration": 0, "task_id": 9, "status": "completed",
                   "result_count": 3, "passed": True, "reason": "ok"}]
-
-
-def _fake_settings(**kv) -> MagicMock:
-    """settings.get(key, default) 桩"""
-
-    def _get(key, default=None):
-        return kv.get(key, default)
-
-    m = MagicMock()
-    m.get.side_effect = _get
-    return m
 
 
 def _plan(**overrides) -> MagicMock:
@@ -822,7 +812,8 @@ class TestApiEndpoints:
         resp = ai_client.post("/api/v1/ai/plans", json={"target_url": "https://a.b/c"})
         assert resp.status_code == 200
         body = resp.json()
-        assert body["status"] == "draft" and body["created_by"] == "test-admin"
+        assert body["success"] is True
+        assert body["data"]["status"] == "draft" and body["data"]["created_by"] == "test-admin"
 
     def test_create_plan_rejects_bad_url(self, ai_client):
         resp = ai_client.post("/api/v1/ai/plans", json={"target_url": "ftp://x"})
@@ -837,7 +828,10 @@ class TestApiEndpoints:
         monkeypatch.setattr(AiPlannerService, "list_plans", fake_list)
         resp = ai_client.get("/api/v1/ai/plans")
         assert resp.status_code == 200
-        assert resp.json() == {"total": 0, "items": []}
+        body = resp.json()
+        assert body["success"] is True
+        assert body["data"] == {"total": 0, "items": [], "page": 1, "page_size": 20,
+                                "total_pages": 0}
 
     def test_trigger_plan_endpoint(self, ai_client, monkeypatch):
         async def fake_launch(self, plan_id):
@@ -846,7 +840,7 @@ class TestApiEndpoints:
         monkeypatch.setattr("backend.app.api.v1.ai.record_audit", AsyncMock())
         resp = ai_client.post("/api/v1/ai/plans/1/plan")
         assert resp.status_code == 200
-        assert resp.json()["status"] == "planning"
+        assert resp.json()["data"]["status"] == "planning"
 
     def test_delete_plan_endpoint_admin_only(self, ai_client, monkeypatch):
         async def fake_delete(self, plan_id):
@@ -855,7 +849,9 @@ class TestApiEndpoints:
         monkeypatch.setattr("backend.app.api.v1.ai.record_audit", AsyncMock())
         resp = ai_client.delete("/api/v1/ai/plans/1")
         assert resp.status_code == 200
-        assert resp.json() == {"id": 1, "deleted": True}
+        body = resp.json()
+        assert body["success"] is True and body["code"] == "DELETED"
+        assert body["data"] == {"id": 1, "deleted": True}
 
     def test_register_endpoint_rejects_operator(self, ai_client, app):
         """M3：register 端点仅 admin，operator 调用被拒 403"""
@@ -888,7 +884,7 @@ class TestApiEndpoints:
         assert admin_override is not None  # conftest 已 override 为 admin
         resp = ai_client.post("/api/v1/ai/plans/1/register")
         assert resp.status_code == 200
-        assert resp.json()["status"] == "registered"
+        assert resp.json()["data"]["status"] == "registered"
 
 
 # ---------------- 启动对账（评审 M-2：无条件置 failed，消除宽限窗口盲区） ----------------

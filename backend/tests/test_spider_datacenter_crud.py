@@ -1,20 +1,25 @@
-"""阶段 6 单测 - 后端 CRUD 缺口补齐（定义完整 CRUD / 入队注册表校验 / 任务可编辑 / 数据中心与审计查询）
+"""后端 CRUD 与数据中心查询测试（定义完整 CRUD / 入队注册表校验 / 任务可编辑 / 数据中心与审计查询）
 
 约定：不连真实 MySQL/Redis，Repository/Redis 用 AsyncMock/MagicMock 桩；
-patch 点与既有 phase 测试一致（backend.services.spider_service.<name>）。
+patch 点：各子 Service 真实模块路径（期 4 Facade 退役：
+task 域 backend.services.spider_task_service.* / query 域
+backend.services.spider_query_service.* / registry 域
+backend.services.spider_registry_service.*）。
 覆盖：
 - 定义 CRUD：创建（source=manual）/ 重名拒绝 / 元信息编辑 /
   原子条件删除（m1：引用拒绝、成功、缺失；DELETE NOT EXISTS rowcount 语义）
-- 入队注册表校验：DB 停用拒绝 / DB 无记录 yml 兑底放行 / DB+YML 均无拒绝 / DB 异常跳过校验
+- 入队注册表校验：DB 停用拒绝 / DB 无记录 yml 兜底放行 / DB+YML 均无拒绝 / DB 异常跳过校验
 - 任务可编辑（B1/M1 回归）：pending 改优先级（LREM+rpush 队列搬迁）/
   仅改参数同队列消息更新（读队列断言）/ params+priority 同改跨队列搬迁 /
-  LREM 未命中不重投 / rpush 失败 lpush 补偿 / 补偿失败任务置 failed / running 拒绝
+  LREM 未命中不重投 / rpush 失败 lpush 补偿 / 补偿失败任务置 failed / running 拒绝 /
+  LREM 未命中且任务在重试等待期 → 重试 ZSET 内搬迁（m-1）
 - 控制端点契约（M2 回归）：缺 body 返回 422
 - 跨任务结果查询：过滤参数透传与响应构造 / 结果删除（缺失拒绝、成功）
 - 审计日志查询：过滤参数透传 / 响应构造
 - 调度创建：DB 停用拒绝（DB 优先校验）
 """
 import json
+import time
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,7 +27,9 @@ import pytest
 
 from backend.services.audit_service import AuditService
 from backend.services.schedule_service import ScheduleService
-from backend.services.spider_service import SpiderService
+from backend.services.spider_query_service import SpiderQueryService
+from backend.services.spider_registry_service import SpiderRegistryService
+from backend.services.spider_task_service import SpiderTaskService
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.schemas.spider import (
     DefinitionCreateRequest,
@@ -43,25 +50,43 @@ def _msg(task_id: int, spider_name: str, params: str) -> str:
 
 
 class _FakeQueueRedis:
-    """极简 Redis list 语义桩：内存维护优先级队列，支持读队列内容断言"""
+    """极简 Redis list + zset 语义桩（异步）：内存维护优先级队列与重试 ZSET，支持读断言"""
 
     def __init__(self):
         self.queues: dict = {}
+        self.zsets: dict = {}
 
-    def rpush(self, key, value):
+    async def rpush(self, key, value):
         self.queues.setdefault(key, []).append(value)
         return 1
 
-    def lpush(self, key, value):
+    async def lpush(self, key, value):
         self.queues.setdefault(key, []).insert(0, value)
         return 1
 
-    def lrem(self, key, count, value):
+    async def lrem(self, key, count, value):
         q = self.queues.get(key, [])
         if value in q:
             q.remove(value)
             return 1
         return 0
+
+    async def zscan(self, key, cursor=0, count=None):
+        members = list(self.zsets.get(key, {}).items())
+        return 0, members
+
+    async def zrem(self, key, *members):
+        z = self.zsets.get(key, {})
+        removed = 0
+        for m in members:
+            if m in z:
+                del z[m]
+                removed += 1
+        return removed
+
+    async def zadd(self, key, mapping):
+        self.zsets.setdefault(key, {}).update(mapping)
+        return len(mapping)
 
     def items(self, key):
         return list(self.queues.get(key, []))
@@ -70,25 +95,47 @@ class _FakeQueueRedis:
 class _RpushBrokenRedis(_FakeQueueRedis):
     """rpush 恒失败（M1：LREM 成功后投递新队列失败）"""
 
-    def rpush(self, key, value):
+    async def rpush(self, key, value):
         raise ConnectionError("redis rpush down")
 
 
 class _CompensationBrokenRedis(_RpushBrokenRedis):
     """rpush 与 lpush 均失败（M1：补偿回队列也失败）"""
 
-    def lpush(self, key, value):
+    async def lpush(self, key, value):
         raise ConnectionError("redis lpush down")
 
 
-def _service() -> SpiderService:
-    svc = SpiderService.__new__(SpiderService)
+def _task_service() -> SpiderTaskService:
+    """任务域桩：enqueue / update_task"""
+    svc = SpiderTaskService.__new__(SpiderTaskService)
     svc.session = MagicMock()
     svc.session.commit = AsyncMock()
     svc.session.refresh = AsyncMock()
     svc.repo = MagicMock()
     svc.result_repo = MagicMock()
     svc.notifier = MagicMock()
+    return svc
+
+
+def _query_service() -> SpiderQueryService:
+    """查询域桩：search_results / delete_result"""
+    svc = SpiderQueryService.__new__(SpiderQueryService)
+    svc.session = MagicMock()
+    svc.session.commit = AsyncMock()
+    svc.session.refresh = AsyncMock()
+    svc.repo = MagicMock()
+    svc.result_repo = MagicMock()
+    return svc
+
+
+def _registry_service() -> SpiderRegistryService:
+    """注册表域桩：定义 CRUD（repo = 任务仓储，供引用计数检查）"""
+    svc = SpiderRegistryService.__new__(SpiderRegistryService)
+    svc.session = MagicMock()
+    svc.session.commit = AsyncMock()
+    svc.session.refresh = AsyncMock()
+    svc.repo = MagicMock()
     return svc
 
 
@@ -121,14 +168,14 @@ def _task(**overrides) -> MagicMock:
 class TestDefinitionCrud:
     @pytest.mark.asyncio
     async def test_create_success_marks_manual_source(self):
-        svc = _service()
+        svc = _registry_service()
         created = _definition(id=99)
         created.name = "new_spider"
         repo = MagicMock()
         repo.get_by_name = AsyncMock(return_value=None)
         repo.create = AsyncMock(return_value=created)
 
-        with patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo):
+        with patch("backend.services.spider_registry_service.SpiderDefinitionRepository", return_value=repo):
             resp = await svc.create_definition(
                 DefinitionCreateRequest(name="new_spider", title="新爬虫", type="api")
             )
@@ -141,11 +188,11 @@ class TestDefinitionCrud:
 
     @pytest.mark.asyncio
     async def test_create_rejects_duplicate_name(self):
-        svc = _service()
+        svc = _registry_service()
         repo = MagicMock()
         repo.get_by_name = AsyncMock(return_value=_definition(id=5))
 
-        with patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo):
+        with patch("backend.services.spider_registry_service.SpiderDefinitionRepository", return_value=repo):
             with pytest.raises(BusinessException):
                 await svc.create_definition(
                     DefinitionCreateRequest(name="example", title="重复", type="web")
@@ -154,13 +201,13 @@ class TestDefinitionCrud:
 
     @pytest.mark.asyncio
     async def test_update_meta_writes_fields(self):
-        svc = _service()
+        svc = _registry_service()
         updated = _definition(id=5, title="新标题")
         repo = MagicMock()
         repo.get_by_name = AsyncMock(return_value=_definition(id=5))
         repo.update = AsyncMock(return_value=updated)
 
-        with patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo):
+        with patch("backend.services.spider_registry_service.SpiderDefinitionRepository", return_value=repo):
             resp = await svc.update_definition_meta(
                 "example", DefinitionUpdateMetaRequest(title="新标题")
             )
@@ -170,11 +217,11 @@ class TestDefinitionCrud:
 
     @pytest.mark.asyncio
     async def test_update_meta_missing_raises(self):
-        svc = _service()
+        svc = _registry_service()
         repo = MagicMock()
         repo.get_by_name = AsyncMock(return_value=None)
 
-        with patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo):
+        with patch("backend.services.spider_registry_service.SpiderDefinitionRepository", return_value=repo):
             with pytest.raises(NotFoundException):
                 await svc.update_definition_meta(
                     "ghost", DefinitionUpdateMetaRequest(title="x")
@@ -183,13 +230,13 @@ class TestDefinitionCrud:
     @pytest.mark.asyncio
     async def test_delete_rejected_when_tasks_exist(self):
         """m1 回归：原子条件删除 rowcount=0 且定义存在 → 被引用拒绝（先插任务再删的等价态）"""
-        svc = _service()
+        svc = _registry_service()
         repo = MagicMock()
         repo.delete_if_unreferenced = AsyncMock(return_value=False)
         repo.get_by_name = AsyncMock(return_value=_definition(id=5))
         svc.repo.count_by_spider = AsyncMock(return_value=3)
 
-        with patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo):
+        with patch("backend.services.spider_registry_service.SpiderDefinitionRepository", return_value=repo):
             with pytest.raises(BusinessException):
                 await svc.delete_definition("example")
 
@@ -199,12 +246,12 @@ class TestDefinitionCrud:
     @pytest.mark.asyncio
     async def test_delete_success_when_unreferenced(self):
         """m1 回归：原子条件删除 rowcount=1 → 删除成功（无需二次查询）"""
-        svc = _service()
+        svc = _registry_service()
         repo = MagicMock()
         repo.delete_if_unreferenced = AsyncMock(return_value=True)
         repo.get_by_name = AsyncMock(return_value=_definition(id=5))
 
-        with patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo):
+        with patch("backend.services.spider_registry_service.SpiderDefinitionRepository", return_value=repo):
             result = await svc.delete_definition("example")
 
         assert result == {"name": "example", "deleted": True}
@@ -214,12 +261,12 @@ class TestDefinitionCrud:
     @pytest.mark.asyncio
     async def test_delete_missing_raises(self):
         """m1 回归：原子条件删除 rowcount=0 且定义不存在 → NotFoundException"""
-        svc = _service()
+        svc = _registry_service()
         repo = MagicMock()
         repo.delete_if_unreferenced = AsyncMock(return_value=False)
         repo.get_by_name = AsyncMock(return_value=None)
 
-        with patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo):
+        with patch("backend.services.spider_registry_service.SpiderDefinitionRepository", return_value=repo):
             with pytest.raises(NotFoundException):
                 await svc.delete_definition("ghost")
 
@@ -228,16 +275,16 @@ class TestDefinitionCrud:
 class TestEnqueueRegistryValidation:
     @pytest.mark.asyncio
     async def test_rejected_when_disabled_in_db(self):
-        svc = _service()
+        svc = _task_service()
         repo = MagicMock()
         repo.get_by_name = AsyncMock(return_value=_definition(enabled=False))
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
         fake_redis.scard.return_value = 0
 
         with (
-            patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo),
-            patch("backend.services.spider_service.redis_client", return_value=fake_redis),
-            patch("backend.services.spider_service.settings") as fake_settings,
+            patch("backend.services.spider_task_service.SpiderDefinitionRepository", return_value=repo),
+            patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis),
+            patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
             with pytest.raises(BusinessException):
@@ -248,18 +295,18 @@ class TestEnqueueRegistryValidation:
 
     @pytest.mark.asyncio
     async def test_fallback_to_yml_seed_when_db_missing(self):
-        svc = _service()
+        svc = _task_service()
         repo = MagicMock()
         repo.get_by_name = AsyncMock(return_value=None)
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
         fake_redis.scard.return_value = 0
         task = _task(id=40)
         svc.repo.create = AsyncMock(return_value=task)
 
         with (
-            patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo),
-            patch("backend.services.spider_service.redis_client", return_value=fake_redis),
-            patch("backend.services.spider_service.settings") as fake_settings,
+            patch("backend.services.spider_task_service.SpiderDefinitionRepository", return_value=repo),
+            patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis),
+            patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.side_effect = lambda k, d=None: (
                 2 if k == "SPIDER_MAX_CONCURRENT_PER_SPIDER"
@@ -271,15 +318,15 @@ class TestEnqueueRegistryValidation:
 
     @pytest.mark.asyncio
     async def test_rejected_when_unregistered_in_db_and_yml(self):
-        svc = _service()
+        svc = _task_service()
         repo = MagicMock()
         repo.get_by_name = AsyncMock(return_value=None)
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
 
         with (
-            patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo),
-            patch("backend.services.spider_service.redis_client", return_value=fake_redis),
-            patch("backend.services.spider_service.settings") as fake_settings,
+            patch("backend.services.spider_task_service.SpiderDefinitionRepository", return_value=repo),
+            patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis),
+            patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.side_effect = lambda k, d=None: (
                 2 if k == "SPIDER_MAX_CONCURRENT_PER_SPIDER"
@@ -293,18 +340,18 @@ class TestEnqueueRegistryValidation:
     @pytest.mark.asyncio
     async def test_db_error_skips_validation(self):
         """DB 故障不阻断入队主流程（跳过注册表校验）"""
-        svc = _service()
+        svc = _task_service()
         repo = MagicMock()
         repo.get_by_name = AsyncMock(side_effect=RuntimeError("db down"))
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
         fake_redis.scard.return_value = 0
         task = _task(id=41)
         svc.repo.create = AsyncMock(return_value=task)
 
         with (
-            patch("backend.services.spider_service.SpiderDefinitionRepository", return_value=repo),
-            patch("backend.services.spider_service.redis_client", return_value=fake_redis),
-            patch("backend.services.spider_service.settings") as fake_settings,
+            patch("backend.services.spider_task_service.SpiderDefinitionRepository", return_value=repo),
+            patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis),
+            patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
             resp = await svc.enqueue("example")
@@ -320,15 +367,15 @@ class TestUpdateTask:
 
     @pytest.mark.asyncio
     async def test_priority_change_relocates_queue(self):
-        svc = _service()
+        svc = _task_service()
         task = self._pending()
         updated = _task(id=12, status="pending", priority="high")
         svc.repo.get_by_id = AsyncMock(return_value=task)
         svc.repo.update = AsyncMock(return_value=updated)
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
         fake_redis.lrem.return_value = 1
 
-        with patch("backend.services.spider_service.redis_client", return_value=fake_redis):
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
             resp = await svc.update_task(12, priority="high")
 
         assert resp.priority == "high"
@@ -346,21 +393,64 @@ class TestUpdateTask:
 
     @pytest.mark.asyncio
     async def test_no_repush_when_lrem_misses(self):
-        """LREM 未命中（消息已被消费/从未投递）时不重投，避免重复消费"""
-        svc = _service()
+        """LREM 未命中且重试 ZSET 也无成员（已消费/从未投递）时不重投，避免重复消费"""
+        svc = _task_service()
         svc.repo.get_by_id = AsyncMock(return_value=self._pending())
         svc.repo.update = AsyncMock(return_value=_task(id=12, priority="high"))
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
         fake_redis.lrem.return_value = 0
 
-        with patch("backend.services.spider_service.redis_client", return_value=fake_redis):
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
             await svc.update_task(12, priority="high")
 
         fake_redis.rpush.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_lrem_miss_relocates_retry_zset_member(self):
+        """m-1 回归：LREM 未命中且任务在重试等待期 → ZSET 内搬迁为新 params/priority"""
+        svc = _task_service()
+        svc.repo.get_by_id = AsyncMock(return_value=self._pending())
+        svc.repo.update = AsyncMock(
+            return_value=_task(id=12, priority="high", params=NEW_PARAMS)
+        )
+        fake_redis = _FakeQueueRedis()
+        retry_msg = json.dumps(
+            {"task_id": 12, "spider_name": "example", "params": OLD_PARAMS,
+             "priority": "normal"},
+            ensure_ascii=False,
+        )
+        due_score = time.time() + 5
+        fake_redis.zsets["spider:retry_zset"] = {retry_msg: due_score}
+
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+            await svc.update_task(12, params=NEW_PARAMS, priority="high")
+
+        zset = fake_redis.zsets["spider:retry_zset"]
+        assert len(zset) == 1  # 旧成员被替换，不产生双成员
+        ((new_raw, score),) = zset.items()
+        payload = json.loads(new_raw)
+        assert payload["params"] == NEW_PARAMS      # 编辑后的 params 写回重试消息
+        assert payload["priority"] == "high"        # 新优先级写回重试消息（供扫描侧选队）
+        assert score == due_score                    # 到期时刻保持不变（不重置退避）
+        assert fake_redis.items("spider:task_queue:high") == []  # 不重复投主队列
+
+    @pytest.mark.asyncio
+    async def test_lrem_miss_without_retry_member_keeps_queues_untouched(self):
+        """m-1 回归：LREM 与重试 ZSET 均未命中（已消费/从未投递）→ 不动队列不写 ZSET"""
+        svc = _task_service()
+        svc.repo.get_by_id = AsyncMock(return_value=self._pending())
+        svc.repo.update = AsyncMock(return_value=_task(id=12, priority="high"))
+        fake_redis = _FakeQueueRedis()
+
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+            await svc.update_task(12, priority="high")
+
+        assert fake_redis.items("spider:task_queue:high") == []
+        assert fake_redis.zsets.get("spider:retry_zset", {}) == {}
+
+    @pytest.mark.asyncio
     async def test_running_task_rejected(self):
-        svc = _service()
+        svc = _task_service()
         svc.repo.get_by_id = AsyncMock(return_value=_task(id=13, status="running"))
 
         with pytest.raises(BusinessException):
@@ -370,13 +460,13 @@ class TestUpdateTask:
     @pytest.mark.asyncio
     async def test_params_only_change_updates_queue_message(self):
         """B1 回归：仅改 params 时同队列消息同步更新为新 params（读队列内容断言）"""
-        svc = _service()
+        svc = _task_service()
         svc.repo.get_by_id = AsyncMock(return_value=self._pending())
         svc.repo.update = AsyncMock(return_value=_task(id=12, params=NEW_PARAMS))
         fake_redis = _FakeQueueRedis()
         fake_redis.queues["spider:task_queue:normal"] = [_msg(12, "example", OLD_PARAMS)]
 
-        with patch("backend.services.spider_service.redis_client", return_value=fake_redis):
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
             await svc.update_task(12, params=NEW_PARAMS)
 
         kwargs = svc.repo.update.call_args.kwargs
@@ -388,7 +478,7 @@ class TestUpdateTask:
     @pytest.mark.asyncio
     async def test_params_and_priority_change_relocates_message(self):
         """B1 回归：params+priority 同改时消息出现在新队列且 params 为新值"""
-        svc = _service()
+        svc = _task_service()
         svc.repo.get_by_id = AsyncMock(return_value=self._pending())
         svc.repo.update = AsyncMock(
             return_value=_task(id=12, priority="high", params=NEW_PARAMS)
@@ -396,7 +486,7 @@ class TestUpdateTask:
         fake_redis = _FakeQueueRedis()
         fake_redis.queues["spider:task_queue:normal"] = [_msg(12, "example", OLD_PARAMS)]
 
-        with patch("backend.services.spider_service.redis_client", return_value=fake_redis):
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
             await svc.update_task(12, params=NEW_PARAMS, priority="high")
 
         assert fake_redis.items("spider:task_queue:normal") == []
@@ -405,13 +495,13 @@ class TestUpdateTask:
     @pytest.mark.asyncio
     async def test_rpush_failure_compensates_back_to_source_queue(self):
         """M1 回归：LREM 成功后 rpush 失败 → 旧消息 lpush 补偿回原队列，不丢失"""
-        svc = _service()
+        svc = _task_service()
         svc.repo.get_by_id = AsyncMock(return_value=self._pending())
         svc.repo.update = AsyncMock(return_value=_task(id=12, priority="high"))
         fake_redis = _RpushBrokenRedis()
         fake_redis.queues["spider:task_queue:normal"] = [_msg(12, "example", OLD_PARAMS)]
 
-        with patch("backend.services.spider_service.redis_client", return_value=fake_redis):
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
             await svc.update_task(12, priority="high")
 
         # 旧消息回到原队列、新队列为空；补偿成功不置 failed（repo.update 仅编辑一次）
@@ -421,14 +511,14 @@ class TestUpdateTask:
 
     @pytest.mark.asyncio
     async def test_compensation_failure_marks_task_failed(self):
-        """M1 回归：补偿回队列也失败 → 任务置 failed 并抛 BusinessException（对齐 enqueue 兑底）"""
-        svc = _service()
+        """M1 回归：补偿回队列也失败 → 任务置 failed 并抛 BusinessException（对齐 enqueue 兜底）"""
+        svc = _task_service()
         svc.repo.get_by_id = AsyncMock(return_value=self._pending())
         svc.repo.update = AsyncMock(return_value=_task(id=12, priority="high"))
         fake_redis = _CompensationBrokenRedis()
         fake_redis.queues["spider:task_queue:normal"] = [_msg(12, "example", OLD_PARAMS)]
 
-        with patch("backend.services.spider_service.redis_client", return_value=fake_redis):
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
             with pytest.raises(BusinessException):
                 await svc.update_task(12, priority="high")
 
@@ -445,7 +535,7 @@ class TestUpdateTask:
 
     @pytest.mark.asyncio
     async def test_missing_task_raises(self):
-        svc = _service()
+        svc = _task_service()
         svc.repo.get_by_id = AsyncMock(return_value=None)
 
         with pytest.raises(NotFoundException):
@@ -464,7 +554,7 @@ class TestControlEndpointContract:
 class TestSearchResults:
     @pytest.mark.asyncio
     async def test_search_results_passes_filters_and_builds_response(self):
-        svc = _service()
+        svc = _query_service()
         row = {
             "id": 7, "task_id": 9, "spider_name": "example", "url": "https://a.b",
             "title": "标题", "content": None, "source": None, "item_type": None,
@@ -489,7 +579,7 @@ class TestSearchResults:
 
     @pytest.mark.asyncio
     async def test_search_results_without_spider_queries_all(self):
-        svc = _service()
+        svc = _query_service()
         svc.result_repo.query_by_spider = AsyncMock(return_value=([], 0))
 
         resp = await svc.search_results()  # 跨任务全量
@@ -500,7 +590,7 @@ class TestSearchResults:
 
     @pytest.mark.asyncio
     async def test_delete_result_missing_raises(self):
-        svc = _service()
+        svc = _query_service()
         svc.result_repo.get_by_id = AsyncMock(return_value=None)
 
         with pytest.raises(NotFoundException):
@@ -508,7 +598,7 @@ class TestSearchResults:
 
     @pytest.mark.asyncio
     async def test_delete_result_success(self):
-        svc = _service()
+        svc = _query_service()
         svc.result_repo.get_by_id = AsyncMock(return_value=MagicMock(id=7))
         svc.result_repo.delete = AsyncMock(return_value=True)
 
