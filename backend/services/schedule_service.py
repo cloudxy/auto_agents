@@ -28,7 +28,7 @@ from config import settings
 from platform_core.db import get_manager
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
-from platform_core.queues import SCHEDULER_LOCK_KEY, TASK_QUEUE_PRIORITIES, task_queue
+from platform_core.queues import SCHEDULER_LOCK_KEY, TASK_QUEUE_PRIORITIES, distributed_lock, task_queue
 from platform_core.schemas.spider import (
     ScheduleRequest,
     ScheduleUpdateRequest,
@@ -201,17 +201,40 @@ class SpiderScheduler:
             await asyncio.sleep(tick)
 
     async def _tick_once(self) -> None:
-        """单轮扫描：抢锁 → 查到期计划 → 触发入队 → 推进触发时刻"""
-        lock_ttl = int(settings.get("SCHEDULER.LOCK_TTL_SECONDS", 25))
-        acquired = await self._redis.set(SCHEDULER_LOCK_KEY, "1", nx=True, ex=lock_ttl)
-        if not acquired:
-            return  # 其他实例已在执行本轮
-        now = datetime.now()
-        async with AsyncSession(self._engine()) as session:
-            repo = SpiderScheduleRepository(session)
-            due_list = await repo.list_due(now)
-            for schedule in due_list:
-                await self._fire(session, repo, schedule, now)
+        """单轮扫描：抢锁 → 查到期计划 → 触发入队 → 推进触发时刻
+
+        锁走 platform_core.queues.distributed_lock 共享设施：唯一 token +
+        finally 原子释放（原实现固定值 "1" 且无 finally 释放，临界区内
+        崩溃会残留到 TTL 过期）。TTL 必须大于 tick（原默认 25s < tick 30s，
+        长轮次未完成锁即过期，多实例可能双跑）；config/default 中显式
+        配置 25 会覆盖代码默认值，故代码侧按 2×tick 钳制保证不变量。
+
+        m-5 评审修复（长轮次锁丢失防护）：启用 renewal 后台自动续期
+        （间隔 lock_ttl/3，须小于 ttl），并在轮次循环内检查 lock.lost
+        ——续期失败（锁易主 / Redis 故障）主动退出本轮，宁可少跑不可双跑。
+        """
+        tick = float(settings.get("SCHEDULER.TICK_SECONDS", 30))
+        min_ttl = int(tick * 2)
+        lock_ttl = max(
+            int(settings.get("SCHEDULER.LOCK_TTL_SECONDS", min_ttl) or 0), min_ttl
+        )
+        async with distributed_lock(
+            self._redis, SCHEDULER_LOCK_KEY, ttl=lock_ttl, renewal=lock_ttl / 3
+        ) as lock:
+            if lock is None:
+                return  # 其他实例已在执行本轮
+            now = datetime.now()
+            async with AsyncSession(self._engine()) as session:
+                repo = SpiderScheduleRepository(session)
+                due_list = await repo.list_due(now)
+                for schedule in due_list:
+                    # 续期失败（锁易主/Redis 故障）：主动退出本轮，防多实例双跑
+                    if lock.lost:
+                        logger.warning(
+                            "调度锁已丢失（续期失败），提前退出本轮扫描"
+                        )
+                        return
+                    await self._fire(session, repo, schedule, now)
 
     async def _fire(self, session, repo, schedule, now: datetime) -> None:
         """触发一条到期计划：入队任务并推进触发时刻

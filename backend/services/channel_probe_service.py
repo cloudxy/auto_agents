@@ -28,11 +28,15 @@ from backend.services.newapi_api import (
 from backend.services.notify_service import NotifyService
 from config import settings
 from platform_core.logger import get_logger
+from platform_core.queues import distributed_lock
 
 logger = get_logger("api")
 
 # 有参考渠道时，同题答案平均相似度低于该阈值判 spoofed（正品同模型应高度一致）
 _REF_SIMILARITY_SPOOF_THRESHOLD = 0.15
+
+# 探针巡检间隔默认值（秒，1 天）：start() 日志与 _tick_loop() 两处共用
+_PROBE_INTERVAL_DEFAULT = 86400
 
 # 常见模型家族关键词（身份矛盾启发式：答案提及他族模型名即视为矛盾信号）
 _KNOWN_MODEL_FAMILIES: dict[str, tuple[str, ...]] = {
@@ -294,7 +298,10 @@ class ChannelProbeService:
         self._api = NewapiApiClient()
         self._running = True
         self._loop_task = asyncio.create_task(self._tick_loop(), name="newapi-channel-probe")
-        interval = int(settings.get("NEWAPI.PROBE_INTERVAL_SECONDS", 86400) or 86400)
+        interval = int(
+            settings.get("NEWAPI.PROBE_INTERVAL_SECONDS", _PROBE_INTERVAL_DEFAULT)
+            or _PROBE_INTERVAL_DEFAULT
+        )
         logger.info(f"渠道真伪探针已启动: interval={interval}s")
 
     async def stop(self) -> None:
@@ -313,7 +320,10 @@ class ChannelProbeService:
         logger.info("渠道真伪探针已停止")
 
     async def _tick_loop(self) -> None:
-        interval = int(settings.get("NEWAPI.PROBE_INTERVAL_SECONDS", 86400) or 86400)
+        interval = int(
+            settings.get("NEWAPI.PROBE_INTERVAL_SECONDS", _PROBE_INTERVAL_DEFAULT)
+            or _PROBE_INTERVAL_DEFAULT
+        )
         while self._running:
             try:
                 await self._tick_once()
@@ -327,18 +337,19 @@ class ChannelProbeService:
     async def _tick_once(self) -> None:
         """单批：抢锁 → 载问题集 → 参考渠道基线 → 逐目标渠道探针（隔离）
 
-        锁在 finally 中释放（值比对后删除，早退路径同样释放，评审 m-1）；
+        锁走 platform_core.queues.distributed_lock 共享设施（唯一 token +
+        finally 原子释放，早退/异常路径同样释放，评审 m-1）；
         TTL 仅作进程崩溃兑底，正常运行靠主动释放。
         """
         lock_ttl = int(settings.get("NEWAPI.PROBE_LOCK_TTL_SECONDS", 21600) or 21600)
-        lock_token = uuid.uuid4().hex
-        acquired = await self._redis.set(
-            NEWAPI_PROBE_LOCK_KEY, lock_token, nx=True, ex=lock_ttl
-        )
-        if not acquired:
-            return  # 其他实例已在执行本批
-        try:
-            questions = _load_questions(str(settings.get("NEWAPI.PROBE_QUESTIONS_FILE", "") or ""))
+        async with distributed_lock(
+            self._redis, NEWAPI_PROBE_LOCK_KEY, ttl=lock_ttl
+        ) as lock:
+            if lock is None:
+                return  # 其他实例已在执行本批
+            questions = _load_questions(
+                str(settings.get("NEWAPI.PROBE_QUESTIONS_FILE", "") or "")
+            )
             channels = await self._api.list_channels()
             if not channels:
                 logger.debug("new-api 渠道列表为空，探针本轮跳过")
@@ -371,17 +382,6 @@ class ChannelProbeService:
                     logger.error(
                         f"渠道探针失败（已隔离）: channel_id={target.get('id')}, error={e}"
                     )
-        finally:
-            await self._release_lock(NEWAPI_PROBE_LOCK_KEY, lock_token)
-
-    async def _release_lock(self, key: str, token: str) -> None:
-        """Redis 锁安全释放：get == token 才 del（防误删其他实例的锁，评审 m-1）"""
-        try:
-            current = await self._redis.get(key)
-            if current == token:
-                await self._redis.delete(key)
-        except Exception as e:  # noqa: BLE001 释放失败交由 TTL 兑底
-            logger.warning(f"Redis 锁释放失败（key={key}）: {e}")
 
     def _resolve_reference(self, channels: list[dict]) -> dict | None:
         """解析参考渠道（PROBE_REFERENCE_CHANNEL 支持渠道 id 或名称）"""

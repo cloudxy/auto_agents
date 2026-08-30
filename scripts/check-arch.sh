@@ -8,7 +8,7 @@
 # 与 /check-arch Skill 的检查命令保持一致，供 pre-commit 与 CI 复用。
 #
 # 规则分两组：
-#   R1-R10  架构红线（配置/安全/反爬/模型/日志）
+#   R1-R11  架构红线（配置/安全/反爬/模型/日志/异步 Redis）
 #   B1-B3   核心代码边界（模块依赖方向）
 
 set -uo pipefail
@@ -35,7 +35,7 @@ report() {
     fi
 }
 
-echo "架构合规检查（10 条红线 + 3 条边界）"
+echo "架构合规检查（11 条红线 + 3 条边界）"
 echo "======================================"
 
 # --- 配置即代码 ---
@@ -96,6 +96,13 @@ for f in backend/services/*.py; do
 done
 report "R10" "service 方法入口缺 logger" "${R10_OUTPUT%$'\n'}"
 
+# --- 异步 Redis 收口（期 3 → 期 4 全域生效）---
+# R11: async 上下文禁止同步 redis_client() 链式直调（网络 IO 阻塞事件循环）。
+# 期 4 豁免清零：原行内豁免（spider_service._task_log_offset）与文件级豁免
+# （spider_query_service.py）均已异步化（get_async_redis + await），无残留。
+R11_OUTPUT="$(grep -rnE "${GREP_EXCLUDES[@]}" 'redis_client\([^)]*\)\.' backend/ 2>/dev/null || true)"
+report "R11" "backend 同步 redis_client() 直调（阻塞事件循环）" "$R11_OUTPUT"
+
 # --- 核心代码边界（模块依赖方向） ---
 echo ""
 echo "--- 核心代码边界 ---"
@@ -115,7 +122,7 @@ report "B3" "config → 业务模块反向依赖" \
 # --- 汇总 ---
 echo ""
 if [ "$VIOLATIONS" -eq 0 ]; then
-    echo "✓ 架构合规检查通过（10 红线 + 3 边界，全部通过）"
+    echo "✓ 架构合规检查通过（11 红线 + 3 边界，全部通过）"
     exit 0
 else
     echo "共 $VIOLATIONS 处违规，请按 /check-arch Step 3 路由修复"
