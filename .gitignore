@@ -82,3 +82,4 @@ docs/*
 # ADR 决策记录与迁移演练报告随仓库提交
 !docs/adr/
 !docs/migration-drill-2026-08-30.md
+!docs/evolution-roadmap-phase5-triggers.md
