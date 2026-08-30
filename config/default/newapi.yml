@@ -1,0 +1,32 @@
+# New API 中转站集成配置（阶段三：deploy/newapi 独立部署的中转站对接）
+#
+# 嵌套读取方式（与 config/default/llm.yml 等既有风格一致）：
+#   settings.get("NEWAPI.ENABLED", False)
+# 环境变量覆盖（Dynaconf 双下划线嵌套约定，前缀见 config/__init__.py）：
+#   AUTO_AGENTS_NEWAPI__ENABLED=true
+#   AUTO_AGENTS_NEWAPI__SCHEDULER_ENABLED=true
+#
+# 职责边界：渠道调度器（用量上限→下线→冷却→自动上线）与渠道真伪探针由
+# 本项目 backend 内置服务实现，不使用外部 channel-scheduler.py 脚本；
+# 中转站部署编排见 deploy/newapi/（独立目录、独立网络，不并入根 compose）。
+#
+# 安全红线：ACCESS_TOKEN / DB_DSN 为敏感项，不落本 yml，
+# 经 config/<env>/.env 或环境变量覆盖：
+#   AUTO_AGENTS_NEWAPI__ACCESS_TOKEN=...（new-api 管理员 AccessToken）
+#   AUTO_AGENTS_NEWAPI__DB_DSN=mysql+aiomysql://user:pass@host:port/new-api-db
+NEWAPI:
+  ENABLED: false                    # 总开关：new-api 中转站集成（关闭时调度/探针均不运行）
+  SCHEDULER_ENABLED: false          # 渠道调度器开关（巡检渠道用量→超限禁用→冷却到期自动启用）
+  PROBE_ENABLED: false              # 渠道真伪探针开关（知识截止/reasoning_tokens/延迟等行为指纹体检）
+  BASE_URL: "http://localhost:3000" # 中转站入口（与 deploy/newapi 发布端口一致；HTTPS 反代后为域名）
+  INTERVAL_SECONDS: 300             # 调度器巡检间隔（秒），默认 5 分钟
+  PROBE_INTERVAL_SECONDS: 86400     # 真伪探针巡检间隔（秒），默认 1 天
+  PROBE_REFERENCE_CHANNEL: null     # 参考渠道（确认为 original 的渠道 id 或名称；探针对比基准）
+  PROBE_QUESTIONS_FILE: null        # 可选：自定义探针问题 JSON 路径（null=内置默认问题集）
+  ADMIN_USER_ID: "1"                # new-api 管理员用户 ID（管理 API New-Api-User 头，与原脚本蓝本默认一致）
+  PROBE_API_KEY: null               # 中转站 API Key（sk-，探针调 /v1/chat/completions 用；null=回退 ACCESS_TOKEN；敏感项走 .env）
+
+  # ── 渠道调度默认值（渠道级差异走 Redis hash newapi:channel:cfg:{id}：limit_quota/window_hours/cooldown_seconds）──
+  DEFAULT_WINDOW_QUOTA: 0           # 全局默认窗口用量上限（quota 单位；0=不启用全局默认，仅调度 Redis 配置过的渠道）
+  DEFAULT_COOLDOWN_SECONDS: 3600    # 全局默认冷却时长（秒）：超限下线后多久自动恢复上线
+  DEFAULT_WINDOW_HOURS: 24          # 全局默认用量统计窗口（小时）：logs 表聚合口径，与原蓝本 hours_window 一致
