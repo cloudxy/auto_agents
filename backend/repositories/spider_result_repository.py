@@ -1,4 +1,5 @@
 """爬虫结果数据访问层 - 封装所有 SpiderResult 相关的数据库操作"""
+from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import List, Optional, Tuple
 
@@ -9,6 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_core.models.spider_result import SpiderResult
 from platform_core.models.spider_task import SpiderTask
 from platform_core.repository import BaseRepository
+
+# keyword LIKE '%kw%' 检索护栏：前导通配符无法命中任何索引，行数上百万后
+# 深翻页会退化为全表扫描 + filesort。开启 keyword 过滤时，单次检索最多允许
+# 访问前 KEYWORD_SEARCH_MAX_ROWS 行（与分页参数冲突时取 min）；超出窗口的
+# 翻页直接返回空列表（total 仍为真实计数），防止深分页拖垮数据库。
+KEYWORD_SEARCH_MAX_ROWS = 200
+
+# 导出流式分批大小：export 按主键 id 游标逐批拉取，单批行数上限，
+# 将导出过程的内存峰值从「全表行数」压到单批常量级。
+EXPORT_BATCH_SIZE = 5000
 
 
 class SpiderResultRepository(BaseRepository[SpiderResult]):
@@ -41,7 +52,7 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
         return int(result.scalar() or 0)
 
     async def all_by_task(self, task_id: int) -> List[SpiderResult]:
-        """按任务查询全部结果（导出用，不分页）"""
+        """按任务查询全部结果（一次性载入，仅限小任务场景；导出请用 iter_by_task）"""
         stmt = (
             select(SpiderResult)
             .where(SpiderResult.task_id == task_id)
@@ -49,6 +60,34 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def iter_by_task(
+        self,
+        task_id: int,
+        batch_size: int = EXPORT_BATCH_SIZE,
+    ) -> AsyncIterator[SpiderResult]:
+        """按 id 游标分批产出任务全部结果（导出流式用，避免 all() 全量载入内存）
+
+        以 (task_id, id > last_id) 为游标逐批 ORDER BY id ASC 拉取，
+        内存占用恒定为单批 batch_size 行（默认 EXPORT_BATCH_SIZE）。
+        """
+        last_id = 0
+        while True:
+            stmt = (
+                select(SpiderResult)
+                .where(
+                    SpiderResult.task_id == task_id,
+                    SpiderResult.id > last_id,
+                )
+                .order_by(SpiderResult.id.asc())
+                .limit(batch_size)
+            )
+            rows = (await self.session.execute(stmt)).scalars().all()
+            if not rows:
+                break
+            for row in rows:
+                yield row
+            last_id = rows[-1].id
 
     async def create_for_task(self, **kwargs) -> SpiderResult:
         """落库一条结果并原子累加任务的 result_count"""
@@ -98,6 +137,10 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
         """按爬虫名称分页查询结果（返回 dict 列表，非 ORM 对象）
 
         阶段 6 扩展：spider_name 可选（跨任务全量查询），keyword 模糊匹配 title/url/content。
+
+        keyword 深翻页护栏：LIKE '%kw%' 无法命中索引，检索窗口硬上限为
+        KEYWORD_SEARCH_MAX_ROWS（与分页参数冲突时取 min）；超出窗口的翻页
+        返回空列表（total 仍为真实计数），防止深分页全表扫描。
         """
         filters = []
         if spider_name:
@@ -126,10 +169,18 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
             await self.session.execute(count_query)
         ).scalar() or 0
 
+        offset = (page - 1) * page_size
+        limit = page_size
+        if keyword:
+            # 深翻页护栏：检索窗口整体限制在 KEYWORD_SEARCH_MAX_ROWS 行内
+            if offset >= KEYWORD_SEARCH_MAX_ROWS:
+                return [], total
+            limit = min(limit, KEYWORD_SEARCH_MAX_ROWS - offset)
+
         query = (
             query.order_by(SpiderResult.created_at.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+            .offset(offset)
+            .limit(limit)
         )
         result = await self.session.execute(query)
         rows = result.scalars().all()
