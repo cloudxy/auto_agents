@@ -22,10 +22,21 @@ os.environ.setdefault("APP_ENV", "local")
 
 @pytest.fixture(scope="session")
 def app():
-    """FastAPI 应用实例（含异常处理器与全量路由）"""
-    from backend.app import create_app
+    """FastAPI 应用实例（含异常处理器与全量路由）
 
-    return create_app()
+    测试环境全局 override 鉴权依赖：端点测试默认以 admin 身份通过，
+    RBAC 守卫自身的 401/403 分支由 test_rbac_audit.py 直接单测。
+    """
+    from backend.app import create_app
+    from backend.app.api.deps import CurrentUser, get_current_user
+
+    application = create_app()
+
+    async def _override_current_user():
+        return CurrentUser(id=1, username="test-admin", role="admin")
+
+    application.dependency_overrides[get_current_user] = _override_current_user
+    return application
 
 
 @pytest.fixture(scope="session")

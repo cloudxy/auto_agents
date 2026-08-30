@@ -12,7 +12,7 @@ async def health():
     """基础健康检查"""
     logger = get_logger("api")
     logger.debug("Health check accessed")
-    return {"status": "ok"}
+    return {"status": "healthy"}
 
 @router.get("/db")
 async def health_db():
