@@ -23,3 +23,11 @@ ALLOWED_EXTENSIONS:
 # === 缓存配置 ===
 CACHE_TTL: 3600  # 1小时
 TEMP_MAX_AGE: 86400  # 24小时
+
+# === 数据源多存储（阶段 4.2）===
+# 采集结果除 MySQL 外的额外存储目标；任务 params 的 store_to 可覆盖本默认值。
+# 已实现：redis（任务级结果缓存，7 天过期）/ csv（终态后落盘）；mongo/es 预留枚举不实现。
+STORAGE:
+  EXTRA_TARGETS: []
+  DIR: "storage/exports"
+  REDIS_RESULT_TTL: 604800  # 7 天

@@ -1,7 +1,7 @@
 """用户数据访问层 - 封装所有 User 相关的数据库操作"""
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 from platform_core.models.user import User
 from platform_core.repository import BaseRepository
 
@@ -50,3 +50,22 @@ class UserRepository(BaseRepository[User]):
             .limit(limit)
         )
         return result.scalars().all()
+
+    async def list_users(
+        self,
+        skip: int = 0,
+        limit: int = 20
+    ) -> list[User]:
+        """分页查询全部用户（最新优先，供用户管理页陈列）"""
+        result = await self.session.execute(
+            select(User)
+            .order_by(User.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def count_users(self) -> int:
+        """用户总数"""
+        result = await self.session.execute(select(func.count(User.id)))
+        return int(result.scalar() or 0)

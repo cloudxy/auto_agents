@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from platform_core.exceptions import (
     BusinessException,
     NotFoundException,
+    RateLimitException,
     register_exception_handlers,
 )
 
@@ -29,6 +30,10 @@ def _make_test_app() -> FastAPI:
     @app.get("/raise-unhandled")
     async def raise_unhandled():
         raise RuntimeError("boom")
+
+    @app.get("/raise-rate-limit")
+    async def raise_rate_limit():
+        raise RateLimitException(message="请求过快", retry_after=120)
 
     return app
 
@@ -109,4 +114,19 @@ class TestUnhandledExceptionResponse:
         body = resp.json()
         assert body["success"] is False
         assert body["code"] == "INTERNAL_SERVER_ERROR"
+        assert "request_id" in body
+
+
+class TestRateLimitExceptionResponse:
+    """RateLimitException 响应契约（429 + retry_after in data）"""
+
+    def test_rate_limit_exception_response_shape(self):
+        client = TestClient(_make_test_app())
+        resp = client.get("/raise-rate-limit")
+        assert resp.status_code == 429
+        body = resp.json()
+        assert body["success"] is False
+        assert body["code"] == "RATE_LIMITED"
+        assert body["message"] == "请求过快"
+        assert body["data"]["retry_after"] == 120
         assert "request_id" in body

@@ -61,17 +61,23 @@ class AuthService:
             return None
         
         logger.info(f"用户认证成功: {username}")
+        role = getattr(user, "role", None)
         return {
             "id": user.id,
             "username": user.username,
             "email": user.email,
-            "is_admin": user.is_admin
+            "is_admin": user.is_admin,
+            "role": role or ("admin" if user.is_admin else "operator"),
         }
 
     async def create_token(self, user_data: dict) -> TokenResponse:
         """创建访问令牌"""
         access_token = create_access_token(
-            data={"sub": user_data["username"], "user_id": user_data["id"]}
+            data={
+                "sub": user_data["username"],
+                "user_id": user_data["id"],
+                "role": user_data.get("role", "operator"),
+            }
         )
         
         logger.info(f"生成 Token | user={user_data['username']}")
@@ -122,6 +128,8 @@ class AuthService:
         )
         
         await self.session.commit()  # 事务提交由 Service 控制
+        # commit 后实例过期，必须 refresh 再读属性（否则异步上下文惰性加载抛 MissingGreenlet）
+        await self.session.refresh(new_user)
         
         logger.info(f"用户注册成功: {username}")
         return {

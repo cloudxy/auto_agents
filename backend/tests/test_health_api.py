@@ -11,7 +11,7 @@ class TestRootEndpoints:
 
     def test_v1_health_returns_200(self, client):
         """/verify Skill 约定的后端健康检查端点"""
-        resp = client.get("/api/v1/health")
+        resp = client.get("/api/v1/health/")
         assert resp.status_code == 200
         assert resp.json() == {"status": "healthy"}
 
