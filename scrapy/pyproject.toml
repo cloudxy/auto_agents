@@ -12,6 +12,7 @@ dependencies = [
     "dynaconf>=3.2.13",
     "drissionpage>=4.1.1.2",
     "selenium>=4.43.0",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]
