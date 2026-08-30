@@ -1,4 +1,4 @@
-"""阶段 4.1 单测 - 任务优先级 + 并发控制（活跃键 SET 化 / meta 归属）
+"""任务优先级与并发控制测试（活跃键 SET 化 / meta 归属）
 
 约定：不连真实 MySQL/Redis，Repository/Redis 用 AsyncMock/MagicMock 桩。
 覆盖：
@@ -9,8 +9,10 @@
 - 终态/删除后 SREM 释放槽位
 - scrapy 侧：队列条目解析、TaskAttribution 中间件、StorePipeline SET 兜底
 """
+import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,7 +25,8 @@ SCRAPY_DIR = PROJECT_ROOT / "scrapy"
 if str(SCRAPY_DIR) not in sys.path:
     sys.path.insert(0, str(SCRAPY_DIR))
 
-from backend.services.spider_service import SpiderService  # noqa: E402
+from backend.services.spider_task_service import SpiderTaskService  # noqa: E402
+from backend.services.spider_task_service import _SIDE_EFFECT_TASKS  # noqa: E402
 from backend.tasks.consumer import SpiderTaskConsumer  # noqa: E402
 from platform_core.queues import (  # noqa: E402
     LEGACY_ACTIVE_TASK_PREFIX,
@@ -33,15 +36,24 @@ from platform_core.queues import (  # noqa: E402
 )
 
 
-def _service() -> SpiderService:
-    svc = SpiderService.__new__(SpiderService)
+def _service() -> SpiderTaskService:
+    svc = SpiderTaskService.__new__(SpiderTaskService)
     svc.session = MagicMock()
     svc.session.commit = AsyncMock()
     svc.session.refresh = AsyncMock()
     svc.repo = MagicMock()
     svc.result_repo = MagicMock()
     svc.notifier = MagicMock()
+    svc.notifier.notify_task_finished = AsyncMock()
     return svc
+
+
+async def _drain_side_effects() -> None:
+    """等待 finish_task spawn 的终态副作用后台任务完成（终态副作用已后台化）"""
+    pending = [t for t in _SIDE_EFFECT_TASKS if not t.done()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    await asyncio.sleep(0)
 
 
 def _task(**overrides) -> MagicMock:
@@ -80,12 +92,12 @@ class TestEnqueueConcurrency:
     @pytest.mark.asyncio
     async def test_enqueue_rejected_when_slots_full(self):
         svc = _service()
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
         fake_redis.scard.return_value = 2  # 默认上限 2，已满
 
         with (
-            patch("backend.services.spider_service.redis_client", return_value=fake_redis),
-            patch("backend.services.spider_service.settings") as fake_settings,
+            patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis),
+            patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
             from platform_core.exceptions import BusinessException
@@ -96,14 +108,14 @@ class TestEnqueueConcurrency:
     @pytest.mark.asyncio
     async def test_enqueue_allowed_after_slot_released(self):
         svc = _service()
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
         fake_redis.scard.return_value = 1  # 释放一个槽位后未满
 
         task = _task(id=9)
         svc.repo.create = AsyncMock(return_value=task)
         with (
-            patch("backend.services.spider_service.redis_client", return_value=fake_redis),
-            patch("backend.services.spider_service.settings") as fake_settings,
+            patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis),
+            patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
             resp = await svc.enqueue("example", params='{"urls": ["https://a.b"]}', priority="high")
@@ -118,14 +130,14 @@ class TestEnqueueConcurrency:
     @pytest.mark.asyncio
     async def test_enqueue_redis_down_allows_through(self):
         svc = _service()
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
         fake_redis.scard.side_effect = ConnectionError("redis down")
 
         task = _task(id=10)
         svc.repo.create = AsyncMock(return_value=task)
         with (
-            patch("backend.services.spider_service.redis_client", return_value=fake_redis),
-            patch("backend.services.spider_service.settings") as fake_settings,
+            patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis),
+            patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
             resp = await svc.enqueue("example")
@@ -139,10 +151,11 @@ class TestEnqueueConcurrency:
         finished = _task(id=7, status="completed", result_count=3)
         svc.repo.update = AsyncMock(return_value=finished)
         svc.notifier.notify_task_finished = AsyncMock()
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
 
-        with patch("backend.services.spider_service.redis_client", return_value=fake_redis):
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
             await svc.finish_task(7, "completed")
+            await _drain_side_effects()  # patch 块内 drain：避免副作用触碰真实依赖
         fake_redis.srem.assert_called_once_with("spider:active_tasks:example", 7)
 
 
@@ -326,3 +339,85 @@ class TestScrapyAttribution:
         pipe.process_item(item, spider)
         pushed = json.loads(pipe.redis.rpush.call_args.args[1])
         assert pushed["task_id"] is None  # 多成员防误关联
+
+
+# ---------------- 重试 ZSET 到期出队（ZSET 延迟退避） ----------------
+class TestRetryZsetScan:
+    """consumer._scan_retry_zset：到期成员原子抢占后重新入主队列
+
+    入队侧 ZADD（score=到期时间戳）→ 出队侧 zrangebyscore 扫到期 →
+    zrem 原子抢占（防多实例重复入队）→ 按优先级 rpush 主队列。
+    """
+
+    @staticmethod
+    def _consumer(fake_redis) -> SpiderTaskConsumer:
+        consumer = SpiderTaskConsumer()
+        consumer._redis = fake_redis
+        return consumer
+
+    @staticmethod
+    def _retry_message(task_id: int, priority: str) -> str:
+        return json.dumps(
+            {"task_id": task_id, "spider_name": "example", "params": "{}", "priority": priority}
+        )
+
+    @pytest.mark.asyncio
+    async def test_due_members_requeued_to_priority_queues(self):
+        fake_redis = AsyncMock()
+        high_raw = self._retry_message(11, "high")
+        normal_raw = self._retry_message(12, "normal")
+        fake_redis.zrangebyscore.return_value = [high_raw, normal_raw]
+        fake_redis.zrem.side_effect = [1, 1]  # 两次抢占都成功
+
+        await self._consumer(fake_redis)._scan_retry_zset()
+
+        # 扫描窗口：-inf ~ 当前时间，限量 _RETRY_BATCH
+        fake_redis.zrangebyscore.assert_awaited_once()
+        args = fake_redis.zrangebyscore.await_args.args
+        assert args[0] == "spider:retry_zset" and args[1] == "-inf"
+        assert args[2] == pytest.approx(time.time(), abs=5)
+        # 各自入对应优先级主队列，载荷原样透传
+        pushed = [c.args for c in fake_redis.rpush.await_args_list]
+        assert ("spider:task_queue:high", high_raw) in pushed
+        assert ("spider:task_queue:normal", normal_raw) in pushed
+
+    @pytest.mark.asyncio
+    async def test_contended_member_skipped_without_requeue(self):
+        """zrem 返回 0：成员已被其他实例抢占，本地不得重复入队"""
+        fake_redis = AsyncMock()
+        raw = self._retry_message(13, "low")
+        fake_redis.zrangebyscore.return_value = [raw]
+        fake_redis.zrem.return_value = 0
+
+        await self._consumer(fake_redis)._scan_retry_zset()
+
+        fake_redis.rpush.assert_not_awaited()
+        fake_redis.zadd.assert_not_awaited()  # 抢占失败不算入队失败，不回滚
+
+    @pytest.mark.asyncio
+    async def test_requeue_failure_rolls_back_with_delay(self):
+        """rpush 失败：回滚 ZADD（+5s 再试）防消息丢失"""
+        fake_redis = AsyncMock()
+        raw = self._retry_message(14, "normal")
+        fake_redis.zrangebyscore.return_value = [raw]
+        fake_redis.zrem.return_value = 1
+        fake_redis.rpush.side_effect = ConnectionError("redis down")
+
+        await self._consumer(fake_redis)._scan_retry_zset()
+
+        fake_redis.zadd.assert_awaited_once()
+        zset_key, mapping = fake_redis.zadd.await_args.args
+        assert zset_key == "spider:retry_zset"
+        ((rolled_raw, score),) = mapping.items()
+        assert rolled_raw == raw
+        assert 4 < score - time.time() <= 6  # 回滚延迟 5s
+
+    @pytest.mark.asyncio
+    async def test_no_due_members_is_noop(self):
+        fake_redis = AsyncMock()
+        fake_redis.zrangebyscore.return_value = []
+
+        await self._consumer(fake_redis)._scan_retry_zset()
+
+        fake_redis.zrem.assert_not_awaited()
+        fake_redis.rpush.assert_not_awaited()

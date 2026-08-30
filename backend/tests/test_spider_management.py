@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.services.spider_service import SpiderService, resolve_spider_log_path
+from backend.services.spider_common import resolve_spider_log_path
+from backend.services.spider_task_service import SpiderTaskService
 from platform_core.exceptions import BusinessException, NotFoundException
 
 
@@ -16,7 +17,7 @@ class TestSpiderRegistryEndpoint:
     def test_registry_returns_types_and_spiders(self, client):
         resp = client.get("/api/v1/spiders/registry")
         assert resp.status_code == 200
-        body = resp.json()
+        body = resp.json()["data"]
 
         type_keys = {t["type"] for t in body["types"]}
         assert {"api", "web"} <= type_keys
@@ -28,7 +29,7 @@ class TestSpiderRegistryEndpoint:
 
     def test_registry_fields_drive_dynamic_form(self, client):
         """类型的 fields 必须带 name/label/kind（前端动态表单契约）"""
-        body = client.get("/api/v1/spiders/registry").json()
+        body = client.get("/api/v1/spiders/registry").json()["data"]
         for t in body["types"]:
             assert t["fields"], f"类型 {t['type']} 缺少字段定义"
             for f in t["fields"]:
@@ -40,13 +41,14 @@ class TestSpiderRegistryEndpoint:
 
 
 class TestDeleteTask:
-    """SpiderService.delete_task 状态机规则"""
+    """SpiderTaskService.delete_task 状态机规则"""
 
     def _service(self):
-        svc = SpiderService(session=MagicMock())
+        svc = SpiderTaskService.__new__(SpiderTaskService)
+        svc.session = MagicMock()
+        svc.session.commit = AsyncMock()
         svc.repo = MagicMock()
         svc.result_repo = MagicMock()
-        svc.session.commit = AsyncMock()
         return svc
 
     @pytest.mark.asyncio
@@ -73,8 +75,8 @@ class TestDeleteTask:
         svc.result_repo.delete_by_task = AsyncMock(return_value=3)
         svc.repo.delete = AsyncMock(return_value=True)
 
-        with patch("backend.services.spider_service.redis_client") as mock_redis:
-            mock_redis.return_value.get.return_value = None
+        fake_redis = AsyncMock()
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
             result = await svc.delete_task(7)
 
         assert result == {"task_id": 7, "removed_results": 3}
@@ -90,10 +92,11 @@ class TestDeleteTask:
         svc.result_repo.delete_by_task = AsyncMock(return_value=0)
         svc.repo.delete = AsyncMock(return_value=True)
 
-        with patch("backend.services.spider_service.redis_client") as mock_redis:
+        fake_redis = AsyncMock()
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
             await svc.delete_task(5)
             # 活跃键为 SET：从集合中移除被删任务（容忍 Redis 异常）
-            mock_redis.return_value.srem.assert_called_once_with(
+            fake_redis.srem.assert_awaited_once_with(
                 "spider:active_tasks:example", 5
             )
 
@@ -109,6 +112,6 @@ class TestTaskLogPathResolution:
 
     def test_malicious_path_rejected(self):
         spider_cfg = {"FILE": "../../etc/passwd"}
-        with patch("backend.services.spider_service.settings") as mock_settings:
+        with patch("backend.services.spider_common.settings") as mock_settings:
             mock_settings.LOGGERS = {"spider": spider_cfg}
             assert resolve_spider_log_path() is None

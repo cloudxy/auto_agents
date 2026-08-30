@@ -1,4 +1,4 @@
-"""阶段 4.4 单测 - 代码爬虫文件管理（只读清单 + 启停）
+"""代码爬虫文件管理测试（只读清单 + 启停）
 
 约定：不连真实 MySQL，Repository 用 AsyncMock 桩；文件扫描用 tmp 目录。
 覆盖：文件清单扫描、未登记爬虫展示、启停写库、未登记定义 404。
@@ -13,18 +13,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.services.spider_service import SpiderService  # noqa: E402
+from backend.services.spider_registry_service import SpiderRegistryService  # noqa: E402
 from platform_core.exceptions import NotFoundException  # noqa: E402
 
 
-def _service() -> SpiderService:
-    svc = SpiderService.__new__(SpiderService)
+def _service() -> SpiderRegistryService:
+    svc = SpiderRegistryService.__new__(SpiderRegistryService)
     svc.session = MagicMock()
     svc.session.commit = AsyncMock()
     svc.session.refresh = AsyncMock()
     svc.repo = MagicMock()
-    svc.result_repo = MagicMock()
-    svc.notifier = MagicMock()
     return svc
 
 
@@ -51,9 +49,9 @@ class TestSpiderFiles:
         repo = MagicMock()
         repo.get_all = AsyncMock(return_value=definitions)
         with (
-            patch("backend.services.spider_service._SPIDERS_DIR", str(spiders_dir)),
+            patch("backend.services.spider_registry_service._SPIDERS_DIR", str(spiders_dir)),
             patch(
-                "backend.services.spider_service.SpiderDefinitionRepository",
+                "backend.services.spider_registry_service.SpiderDefinitionRepository",
                 return_value=repo,
             ),
         ):
@@ -76,9 +74,9 @@ class TestSpiderFiles:
         repo.get_all = AsyncMock(return_value=[])  # 无任何登记
 
         with (
-            patch("backend.services.spider_service._SPIDERS_DIR", str(spiders_dir)),
+            patch("backend.services.spider_registry_service._SPIDERS_DIR", str(spiders_dir)),
             patch(
-                "backend.services.spider_service.SpiderDefinitionRepository",
+                "backend.services.spider_registry_service.SpiderDefinitionRepository",
                 return_value=repo,
             ),
         ):
@@ -95,9 +93,9 @@ class TestSpiderFiles:
         repo.get_all = AsyncMock(side_effect=ConnectionError("db down"))
 
         with (
-            patch("backend.services.spider_service._SPIDERS_DIR", str(spiders_dir)),
+            patch("backend.services.spider_registry_service._SPIDERS_DIR", str(spiders_dir)),
             patch(
-                "backend.services.spider_service.SpiderDefinitionRepository",
+                "backend.services.spider_registry_service.SpiderDefinitionRepository",
                 return_value=repo,
             ),
         ):
@@ -119,7 +117,7 @@ class TestUpdateDefinition:
         repo.update = AsyncMock(return_value=definition)
 
         with patch(
-            "backend.services.spider_service.SpiderDefinitionRepository",
+            "backend.services.spider_registry_service.SpiderDefinitionRepository",
             return_value=repo,
         ):
             resp = await svc.update_definition("example", False)
@@ -135,7 +133,7 @@ class TestUpdateDefinition:
         repo.get_by_name = AsyncMock(return_value=None)
 
         with patch(
-            "backend.services.spider_service.SpiderDefinitionRepository",
+            "backend.services.spider_registry_service.SpiderDefinitionRepository",
             return_value=repo,
         ):
             with pytest.raises(NotFoundException):

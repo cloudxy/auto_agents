@@ -1,4 +1,4 @@
-"""阶段 4.3 单测 - 通知渠道扩展（email / dingtalk / wechat_work）
+"""通知渠道扩展测试（email / dingtalk / wechat_work）
 
 约定：不连真实 SMTP/外部服务，aiosmtplib/httpx 用 MagicMock 桩。
 覆盖：三个新渠道发送路径、加签、未配置跳过、未知渠道告警回归、文案渲染。

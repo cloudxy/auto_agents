@@ -1,4 +1,4 @@
-"""阶段 2.3 单测 - RBAC 角色守卫 + 操作审计
+"""RBAC 角色守卫 + 操作审计单测
 
 覆盖：
 - effective_role 角色解析（is_admin 兼容）

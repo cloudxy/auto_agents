@@ -1,4 +1,4 @@
-"""阶段 3 单测 - 3.1 通用爬虫配置化采集
+"""通用爬虫配置化采集测试 - extract_selectors 与 generic 爬虫
 
 覆盖：
 - extract_selectors 参数解析
@@ -6,7 +6,7 @@
 - generic 爬虫选择器提取（css/xpath/regex、非法规则跳过、无字段丢弃）
 - 注册表含 custom 类型与 generic 爬虫
 
-约定：与前两阶段一致不连真实 MySQL/Redis；scrapy 侧代码经 importlib 加载
+约定：不连真实 MySQL/Redis；scrapy 侧代码经 importlib 加载
 （B2 红线：backend 包内不允许行首 `import scrapy`，测试亦遵守）。
 """
 import json
@@ -98,7 +98,7 @@ async def test_dispatch_wraps_urls_with_selectors():
 
 @pytest.mark.asyncio
 async def test_dispatch_plain_urls_without_selectors():
-    """普通类型任务载荷不带 selectors（阶段 4.1 起统一 JSON 包装并携带 task_id）"""
+    """普通类型任务载荷不带 selectors（统一 JSON 包装并携带 task_id）"""
     consumer = SpiderTaskConsumer()
     consumer._redis = AsyncMock()
     consumer._engine = MagicMock()
@@ -118,7 +118,7 @@ async def test_dispatch_plain_urls_without_selectors():
     assert key == "example:start_urls"
     entry = json.loads(payload)
     assert entry["url"] == "https://example.com"
-    assert entry["task_id"] == 2  # 结果归属走请求 meta（阶段 4.1）
+    assert entry["task_id"] == 2  # 结果归属走请求 meta
     assert "selectors" not in entry
 
 
@@ -300,14 +300,14 @@ async def test_registry_db_first():
     """spider_definitions 有数据时清单来自 DB（非配置）"""
     from types import SimpleNamespace
 
-    from backend.services.spider_service import SpiderService
+    from backend.services.spider_registry_service import SpiderRegistryService
 
-    svc = SpiderService.__new__(SpiderService)
+    svc = SpiderRegistryService.__new__(SpiderRegistryService)
     svc.session = MagicMock()
     definition = SimpleNamespace(
         name="db_only_spider", title="仅存于 DB", type="web", description="db"
     )
-    with patch("backend.services.spider_service.SpiderDefinitionRepository") as repo_cls:
+    with patch("backend.services.spider_registry_service.SpiderDefinitionRepository") as repo_cls:
         repo_cls.return_value.list_enabled = AsyncMock(return_value=[definition])
         resp = await svc.registry()
 
@@ -318,11 +318,11 @@ async def test_registry_db_first():
 @pytest.mark.asyncio
 async def test_registry_fallback_to_config_on_db_error():
     """DB 异常时清单回退配置种子"""
-    from backend.services.spider_service import SpiderService
+    from backend.services.spider_registry_service import SpiderRegistryService
 
-    svc = SpiderService.__new__(SpiderService)
+    svc = SpiderRegistryService.__new__(SpiderRegistryService)
     svc.session = MagicMock()
-    with patch("backend.services.spider_service.SpiderDefinitionRepository") as repo_cls:
+    with patch("backend.services.spider_registry_service.SpiderDefinitionRepository") as repo_cls:
         repo_cls.return_value.list_enabled = AsyncMock(side_effect=RuntimeError("db down"))
         resp = await svc.registry()
 
@@ -332,7 +332,7 @@ async def test_registry_fallback_to_config_on_db_error():
 
 def test_registry_contains_custom_type_and_generic(client):
     """注册表端点含 custom 类型与 generic 爬虫（DB 种子或配置兜底均可）"""
-    body = client.get("/api/v1/spiders/registry").json()
+    body = client.get("/api/v1/spiders/registry").json()["data"]
     type_map = {t["type"]: t for t in body["types"]}
     assert "custom" in type_map
     selector_field = next(

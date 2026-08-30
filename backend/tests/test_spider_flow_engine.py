@@ -1,4 +1,4 @@
-"""阶段 5.1 单测 - 流程采集引擎 flow_generic（分页/详情页/过滤）
+"""流程采集引擎测试 - flow_generic（分页/详情页/过滤）
 
 约定：不连真实 MySQL/Redis，Repository/Redis 用 AsyncMock/MagicMock 桩；
 爬虫解析用 scrapy HtmlResponse 构造响应链。
@@ -23,11 +23,8 @@ SCRAPY_DIR = PROJECT_ROOT / "scrapy"
 if str(SCRAPY_DIR) not in sys.path:
     sys.path.insert(0, str(SCRAPY_DIR))
 
-from backend.services.spider_service import (  # noqa: E402
-    FLOW_SPIDER_NAME,
-    SpiderService,
-    extract_flow,
-)
+from backend.services.spider_common import FLOW_SPIDER_NAME, extract_flow  # noqa: E402
+from backend.services.spider_task_service import SpiderTaskService  # noqa: E402
 from backend.tasks.consumer import SpiderTaskConsumer  # noqa: E402
 
 _LIST_HTML = """
@@ -74,8 +71,8 @@ def _response(url: str, html: str, meta: dict):
     return HtmlResponse(url=url, request=req, body=html.encode(), encoding="utf-8")
 
 
-def _service() -> SpiderService:
-    svc = SpiderService.__new__(SpiderService)
+def _service() -> SpiderTaskService:
+    svc = SpiderTaskService.__new__(SpiderTaskService)
     svc.session = MagicMock()
     svc.session.commit = AsyncMock()
     svc.session.refresh = AsyncMock()
@@ -137,14 +134,14 @@ class TestEnqueueFlowNormalization:
     @pytest.mark.asyncio
     async def test_flow_task_normalized_to_flow_generic(self):
         svc = _service()
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
         fake_redis.scard.return_value = 0
         svc.repo.create = AsyncMock(return_value=_task(id=30, spider_name=FLOW_SPIDER_NAME))
 
         params = json.dumps({"urls": ["https://a.b"], "filters": [{"field": "t", "op": "equals", "value": "x"}]})
         with (
-            patch("backend.services.spider_service.redis_client", return_value=fake_redis),
-            patch("backend.services.spider_service.settings") as fake_settings,
+            patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis),
+            patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
             await svc.enqueue("generic", params=params)
@@ -156,13 +153,13 @@ class TestEnqueueFlowNormalization:
     @pytest.mark.asyncio
     async def test_plain_task_keeps_original_spider(self):
         svc = _service()
-        fake_redis = MagicMock()
+        fake_redis = AsyncMock()
         fake_redis.scard.return_value = 0
         svc.repo.create = AsyncMock(return_value=_task(id=31, spider_name="generic"))
 
         with (
-            patch("backend.services.spider_service.redis_client", return_value=fake_redis),
-            patch("backend.services.spider_service.settings") as fake_settings,
+            patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis),
+            patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
             await svc.enqueue("generic", params=json.dumps({"urls": ["https://a.b"]}))

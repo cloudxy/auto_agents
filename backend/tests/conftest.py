@@ -16,6 +16,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# 确保 tests 目录在 sys.path（共享桩模块 stubs.py 的显式导入依赖）
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 # 固定测试环境为 local（必须在导入 config 之前设置）
 os.environ.setdefault("APP_ENV", "local")
 
