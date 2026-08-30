@@ -1,11 +1,15 @@
-"""认证路由 - 登录 / 注册 / 权限查询（使用 Schema 参数接收器 + ApiResponse 统一响应）"""
-from fastapi import APIRouter, Depends
+"""认证路由 - 登录 / 注册 / 权限查询（使用 Schema 参数接收器 + ApiResponse 统一响应）
+
+限流计数器统一走异步 Redis 门面 get_async_redis（期 3 收口：登录/注册路径
+此前直调同步 redis_client 阻塞事件循环，注释自证历史误用）。
+"""
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from platform_core.db import get_async_db
 from backend.services.auth_service import AuthService
 from backend.app.api.deps import CurrentUser, get_current_user
 from platform_core.logger import get_logger
-from platform_core.db import redis_client
+from platform_core.redis_async import get_async_redis
 from platform_core.exceptions import AuthenticationException, RateLimitException
 from platform_core.schemas import LoginRequest, RegisterRequest  # 统一参数接收器
 from backend.app.responses import ApiResponse, ok
@@ -17,13 +21,12 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 
 async def check_login_rate_limit(username: str):
     """检查登录频率限制（每用户 15 分钟内最多 5 次失败）"""
-    redis = redis_client()
+    redis = get_async_redis()
     key = f"login_fail:{username}"
 
-    # redis_client() 返回同步客户端，直接调用（历史版本误用 await 会抛 TypeError）
-    fail_count = redis.get(key)
+    fail_count = await redis.get(key)
     if fail_count and int(fail_count) >= 5:
-        ttl = redis.ttl(key)
+        ttl = await redis.ttl(key)
         raise RateLimitException(
             message=f"登录失败次数过多，请{ttl // 60}分钟后再试",
             retry_after=ttl
@@ -32,12 +35,49 @@ async def check_login_rate_limit(username: str):
 
 async def record_login_failure(username: str):
     """记录登录失败（Redis 计数器）"""
-    redis = redis_client()
+    redis = get_async_redis()
     key = f"login_fail:{username}"
 
-    # 同步客户端：直接调用
-    redis.incr(key)
-    redis.expire(key, 900)  # 15 分钟过期
+    await redis.incr(key)
+    await redis.expire(key, 900)  # 15 分钟过期
+
+
+# 注册限流（防批量注册滥用）：与 login_fail 同构的 Redis 计数器模式，
+# 按来源 IP 限制（注册不存在"失败重试"语义，成功失败均计数）
+_REGISTER_WINDOW_SECONDS = 900   # 15 分钟窗口（与 login_fail 一致）
+_REGISTER_MAX_ATTEMPTS = 5       # 每窗口每 IP 最多 5 次注册请求
+
+
+async def check_register_rate_limit(client_ip: str):
+    """检查注册频率限制（每 IP 15 分钟内最多 5 次注册请求，模式与 login 限流一致）"""
+    redis = get_async_redis()
+    key = f"register_fail:{client_ip}"
+
+    # Redis 故障行为与 check_login_rate_limit 一致
+    attempt_count = await redis.get(key)
+    if attempt_count and int(attempt_count) >= _REGISTER_MAX_ATTEMPTS:
+        ttl = await redis.ttl(key)
+        raise RateLimitException(
+            message=f"注册请求过于频繁，请{ttl // 60}分钟后再试",
+            retry_after=ttl
+        )
+
+
+async def record_register_attempt(client_ip: str):
+    """记录一次注册请求（Redis 计数器）
+
+    m-4 评审修复：INCR+EXPIRE 两次独立往返改为 pipeline 原子提交。
+    原写法在两步之间进程崩溃 / 连接中断时会留下无 TTL 的永久计数器，
+    累计到阈值后该 IP 被永久限流（只能手工清键）；pipeline 保证
+    INCR 与 EXPIRE 同批提交，窗口计数始终带过期时间。
+    """
+    redis = get_async_redis()
+    key = f"register_fail:{client_ip}"
+
+    pipe = redis.pipeline(transaction=True)
+    pipe.incr(key)
+    pipe.expire(key, _REGISTER_WINDOW_SECONDS)
+    await pipe.execute()
 
 
 @router.post("/login", response_model=ApiResponse)
@@ -103,18 +143,24 @@ async def get_permissions(user: CurrentUser = Depends(get_current_user)):
 @router.post("/register", response_model=ApiResponse)
 async def register(
     request: RegisterRequest,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    http_request: Request = None,
 ):
     """用户注册
     
     Args:
         request: 注册请求（自动验证 username/email/password）
         db: 数据库会话
+        http_request: 原始请求（取来源 IP 做限流维度）
     
     Returns:
         ApiResponse: 包含 user_id 的响应
     """
     logger.info(f"注册请求 | username={request.username}")
+    client_ip = (http_request.client.host if http_request and http_request.client else "unknown")
+    # 检查注册频率限制（请求到达即计数，成功失败均计入防刷）
+    await check_register_rate_limit(client_ip)
+    await record_register_attempt(client_ip)
     
     auth_service = AuthService(db)
     user = await auth_service.register_user(
