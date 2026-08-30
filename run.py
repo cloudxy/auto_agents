@@ -130,11 +130,15 @@ def main():
         _port_ok(9111, "Backend") or _port_ok(3001, "Admin") or _port_ok(3002, "Official")
         be = ["--no-reload"]
         fe = ["--all"]
+        sp = []
         if args.env:
             be += ["--env", args.env]
             fe += ["--env", args.env]
+            sp += ["--env", args.env]
         _spawn("run_backend.py", be, "Backend")
         time.sleep(2)  # 给 backend 起来的时间
+        # 常驻爬虫 Worker：监听各 <spider>:start_urls，消费管理后台投递的任务（数据闭环的执行端）
+        _spawn("run_spider.py", sp, "Spider")
         _spawn("run_frontend.py", fe, "Frontend")
         print("\n✅ 全栈已启动 (Ctrl+C 停止)\n")
 

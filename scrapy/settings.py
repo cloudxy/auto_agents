@@ -20,6 +20,8 @@ NEWSPIDER_MODULE = "spiders"
 
 # === 动态加载站点配置 ===
 SITE_CONFIG = project_settings.get("SITES", {})
+# 爬虫侧站点配置（数据源 config/scrapy/default/sites.yml），供 spider 读取 api_key 等
+SPIDER_SITES = project_settings.get("SITES", {})
 
 # === 高并发配置 ===
 CONCURRENT_REQUESTS = project_settings.get("CONCURRENT_REQUESTS", 32)
@@ -41,6 +43,11 @@ USER_AGENT = (
 RETRY_TIMES = project_settings.get("RETRY_TIMES", 3)
 RETRY_HTTP_CODES = [500, 502, 503, 504, 408, 429]
 
+# === 代理池（配置化，默认关闭；见 config/scrapy/*/settings.yml） ===
+PROXY_ENABLED = project_settings.get("PROXY_ENABLED", False)
+PROXY_LIST = project_settings.get("PROXY_LIST", []) or []
+PROXY_REDIS_KEY = project_settings.get("PROXY_REDIS_KEY", "") or ""
+
 # === Scrapy-Redis 分布式调度 ===
 SCHEDULER = "scrapy_redis.scheduler.Scheduler"
 DUPEFILTER_CLASS = "scrapy_redis.dupefilter.RFPDupeFilter"
@@ -54,7 +61,14 @@ DOWNLOADER_MIDDLEWARES = {
     "middlewares.FingerprintMiddleware": 300,
     "middlewares.ProxyMiddleware": 350,
     "middlewares.UserAgentMiddleware": 400,
+    "middlewares.TaskControlMiddleware": 542,
     "middlewares.RetryMiddleware": 550,
+    "middlewares.playwright_dm.PlaywrightMiddleware": 590,
+}
+
+# 任务归属：把响应 meta 的 task_id 注入 Item（阶段 4.1，并发结果精确归属）
+SPIDER_MIDDLEWARES = {
+    "middlewares.TaskAttributionSpiderMiddleware": 543,
 }
 
 # === 管道配置 ===
@@ -62,8 +76,38 @@ ITEM_PIPELINES = {
     "scrapy_redis.pipelines.RedisPipeline": 100,
     "pipelines.CleanPipeline": 200,
     "pipelines.ValidatePipeline": 300,
+    "pipelines.quality.QualityCheckPipeline": 350,
     "pipelines.StorePipeline": 400,
 }
+
+# === 数据质量监控（B1）===
+# 映射 config 的 QUALITY_CHECK 段（config/default/settings.yml）到 scrapy Settings。
+# 注意：Scrapy Settings 不支持嵌套 dict 的点号读取（settings.get("QUALITY_CHECK.ENABLED")
+# 会静默回退默认值），因此必须用平铺键 QUALITY_CHECK_*，quality 管道同步读平铺键。
+# config 缺失时默认启用（与 config 默认值 true 及既有默认行为一致）。
+QUALITY_CHECK_ENABLED = project_settings.get("QUALITY_CHECK.ENABLED", True)
+QUALITY_CHECK_REQUIRED_FIELDS = list(
+    project_settings.get("QUALITY_CHECK.REQUIRED_FIELDS", ["url"])
+)
+QUALITY_CHECK_CORE_FIELDS = list(
+    project_settings.get("QUALITY_CHECK.CORE_FIELDS", ["url", "title", "content"])
+)
+
+# === 扩展配置 ===
+# 爬虫关闭时向 Backend 回调任务终态（数据闭环最后一步）
+EXTENSIONS = {
+    "extensions.SpiderCloseWebhook": 100,
+    "extensions.IdleAutoClose": 110,
+}
+
+# 空闲自动收尾（秒）：>0 时单次任务模式下连续空闲即以 finished 收尾；0=禁用（常驻 Worker）
+IDLE_CLOSE_SECONDS = project_settings.get("SPIDER_IDLE_CLOSE_SECONDS", 0)
+
+# === Playwright 动态渲染（可选依赖，默认关闭）===
+PLAYWRIGHT_ENABLED = project_settings.get("PLAYWRIGHT.ENABLED", False)
+PLAYWRIGHT_MAX_PAGES = project_settings.get("PLAYWRIGHT.MAX_PAGES", 2)
+PLAYWRIGHT_TIMEOUT = project_settings.get("PLAYWRIGHT.TIMEOUT", 30)
+PLAYWRIGHT_BROWSER = project_settings.get("PLAYWRIGHT.BROWSER", "chromium")
 
 # === 日志配置 ===
 LOG_LEVEL = project_settings.get("LOG_LEVEL", "INFO")
