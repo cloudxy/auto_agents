@@ -1,16 +1,33 @@
-# 架构红线门禁 - 提交前自动执行 project_rule.md 的 10 条红线检查
+# 提交前自动质量门禁 - 对齐 CI 四阶段管道
 #
 # 安装：uv run pre-commit install
-# 手动触发：uv run pre-commit run check-arch --all-files
+# 手动触发：uv run pre-commit run --all-files
 #
 # 设计说明：
-# - 使用 local + system 语言，复用仓库内 scripts/check-arch.sh，
+# - 使用 local + system 语言，复用仓库内工具和脚本，
 #   保证本地提交与 CI 使用同一份检查逻辑（单一事实来源）
 # - check-arch.sh 退出码 = 违规数，非 0 即阻断提交
+# - ruff 仅检查暂存的 Python 文件（快速反馈）
+# - pytest 运行完整 backend/tests 套件（与 CI 对齐）
 
 repos:
   - repo: local
     hooks:
+      - id: ruff-lint
+        name: Ruff Lint（Python 代码检查）
+        entry: uv run ruff check --force-exclude
+        language: system
+        types: [python]
+        require_serial: true
+
+      - id: pytest
+        name: Pytest（后端测试套件）
+        entry: env PYTHONDONTWRITEBYTECODE=1 uv run pytest -x -q backend/tests
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
       - id: check-arch
         name: 架构合规检查（10 条红线）
         entry: bash scripts/check-arch.sh

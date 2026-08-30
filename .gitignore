@@ -70,6 +70,12 @@ htmlcov/
 .lingma/*
 .gemini/*
 ai_tool/*
+.qoder/
 .idea/*
 
+# 运行期导出数据（storage/exports 等由 STORAGE 配置指向）
+storage/
+
 docs/*
+# 发布公告随仓库提交（其余 docs 内容不入库）
+!docs/release-notes-2026-08-30.md

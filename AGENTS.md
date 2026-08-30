@@ -21,7 +21,7 @@
 - `uv.lock` 必须提交（可复现性保证），禁止加入 `.gitignore`
 - `platform_core/` 是源码包，经 `sys.path` 引入，不打包、不进 workspace
 
-## 架构红线（10 条，机械可检查）
+## 架构红线 + 核心边界（10 红线 + 3 边界，机械可检查）
 
 详见 `.claude/rules/project_rule.md`；提交前会自动执行 `scripts/check-arch.sh`
 （pre-commit hook + CI）。核心约束：
@@ -30,6 +30,7 @@
 - 爬虫禁止 import backend、禁止直写主库（走 Redis 队列）
 - 爬虫必须配反爬（DOWNLOAD_DELAY + USER_AGENT 轮换）
 - API 层禁止直接 import ORM 模型；ORM 禁止 import Pydantic schema（模型即契约）
+- 核心边界：`platform_core/` 只依赖 `config/`（B1）；`backend/` 禁止 import `scrapy/`（B2）；`config/` 不依赖任何业务模块（B3）
 
 ## 关键文件索引
 
@@ -40,6 +41,7 @@
 - `platform_core/exceptions/` — 统一异常体系 + FastAPI handler
 - `config/__init__.py` — Dynaconf 加载入口（多层合并）
 - `scripts/check-arch.sh` — 架构红线扫描（退出码 = 违规数）
+- `.claude/hooks/*.sh` — Claude Code Hook 脚本（运行时依赖：bash >= 3.2 + grep/sed/awk；jq 可选）
 
 ## 快速开始
 
@@ -48,7 +50,7 @@ uv sync                                    # 安装依赖（含测试工具链�
 uv run python run.py all                   # 后端 + 双前端一把梭
 uv run pytest -x -q backend/tests          # 后端测试
 bash scripts/check-arch.sh                 # 架构合规检查
-uv run pre-commit install                  # 安装提交门禁（一次性）
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push  # 安装门禁（ruff+arch 提交时，pytest 推送时）
 ```
 
 环境切换：所有入口接受 `--env {local,dev,prod}`；本地联调全栈可用

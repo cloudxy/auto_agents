@@ -607,6 +607,8 @@ API Routes  →  Services  →  Repositories  →  Models
 | `scripts/run-spider.sh <name>` | 启动指定爬虫 |
 | `scripts/start_frontend.sh` | 同时启动 admin + official |
 
+运维/部署：new-api 网关（渠道调度/探针依赖）部署编排见 [deploy/newapi/README.md](deploy/newapi/README.md)。
+
 ---
 
 ## 技术栈速查
