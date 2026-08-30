@@ -1,6 +1,6 @@
 """OpenWeatherMap API 爬虫 - 采集全球天气数据"""
 from scrapy import Request
-from scrapy_redis.spiders import RedisSpider
+from spiders.base import TaskAwareRedisSpider
 from items import WeatherItem
 from scrapy.utils.project import get_project_settings
 settings = get_project_settings()
@@ -8,14 +8,16 @@ from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 
-class OpenWeatherSpider(RedisSpider):
+class OpenWeatherSpider(TaskAwareRedisSpider):
     name = "openweather"
     redis_key = "openweather:start_urls"
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # 从配置中心获取 API Key
-        self.api_key = settings.SPIDER_SITES.get('openweather', {}).get('api_key', '')
+        # 从配置中心获取 API Key（防御式读取，配置缺失时降级为空串）
+        sites = settings.get("SPIDER_SITES", {}) or {}
+        site = sites.get('openweather', {}) or {}
+        self.api_key = site.get('api_key', '') if hasattr(site, "get") else ''
 
     def start_requests(self):
         if not self.api_key or self.api_key == "YOUR_API_KEY_HERE":

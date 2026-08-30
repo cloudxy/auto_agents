@@ -1,2 +1,5 @@
 # 爬虫环境特定配置 (Local)
 # 覆盖 default/settings.yml 中的值
+
+# 本地单次任务模式：空闲 30s 自动收尾（便于验证任务终态流转）
+SPIDER_IDLE_CLOSE_SECONDS: 30
