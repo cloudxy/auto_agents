@@ -95,3 +95,12 @@ export const correctSkillMeta = (name: string, payload: CorrectionPayload): Prom
   tier: string | null
 }> =>
   api.put(`/skills/${encodeURIComponent(name)}/meta`, payload).then((r) => unwrap(r.data))
+
+export const listManifests = (): Promise<Record<string, string[]>> =>
+  api.get('/skills/manifests').then((r) => unwrap<Record<string, string[]>>(r.data))
+
+export const updateManifest = (tool: string, names: string[]): Promise<{ tool: string; names: string[] }> =>
+  api.put('/skills/manifests', { tool, names }).then((r) => unwrap(r.data))
+
+export const syncAdapters = (): Promise<{ ok: boolean; returncode: number; output: string }> =>
+  api.post('/skills/sync-adapters').then((r) => unwrap(r.data))
