@@ -71,6 +71,8 @@ class LlmRuntimeConfig:
     enabled: bool
     source: str
     provider_id: Optional[int] = None
+    # B-M3：消费面经此路由到协议适配器（兜底路径恒 openai_compatible）
+    protocol: str = "openai_compatible"
 
 
 def resolve_config_from_settings() -> LlmRuntimeConfig:
@@ -552,6 +554,7 @@ class LlmProviderService:
                     enabled=True,
                     source=f"provider:{active.id}",
                     provider_id=int(active.id),
+                    protocol=str(active.provider_type or "openai_compatible"),
                 )
             logger.warning(
                 "激活的 LLM 供应商配置不完整（密钥缺失/解密失败/base_url/model 为空），"
