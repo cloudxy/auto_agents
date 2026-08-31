@@ -5,6 +5,7 @@
 扫描只写"内容派生字段"（title/description/content_hash/raw_meta/sync_state），
 已入库行的人工治理字段（score/tier/category/status...）永不被扫描覆盖。
 """
+import asyncio
 import hashlib
 import os
 from datetime import date, datetime, timezone
@@ -16,6 +17,7 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_core.exceptions import AuthorizationException, ValidationException
 from platform_core.logger import get_logger
 from platform_core.models.skill import Skill, SkillJob, SkillReview
 
@@ -309,6 +311,65 @@ class SkillService:
             self._append_changelog(row, "system | 补导出 meta.yaml")
             await self.session.flush()
         return ok
+
+    # ---------- 适配器矩阵（A-P3-2） ----------
+
+    async def list_manifests(self) -> dict[str, list[str]]:
+        """读全部 manifests/<tool>.yaml（每行一个 `- <name>` 的纯文本约定）"""
+        manifests_dir = self._library_root() / "manifests"
+        result: dict[str, list[str]] = {}
+        if not manifests_dir.is_dir():
+            return result
+        for path in sorted(manifests_dir.glob("*.yaml")):
+            names = [
+                line[2:].strip()
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.startswith("- ")
+            ]
+            result[path.stem] = names
+        return result
+
+    async def update_manifest(self, tool: str, names: list[str]) -> dict:
+        """写 manifests/<tool>.yaml：保留注释头，`- <name>` 行格式不变（adapters 零改动）"""
+        import re as _re
+
+        if not _re.fullmatch(r"[a-z0-9][a-z0-9\-]+", tool):
+            raise ValidationException(message=f"工具名不合法: {tool}", field="tool")
+        manifests_dir = self._library_root() / "manifests"
+        manifests_dir.mkdir(parents=True, exist_ok=True)
+        path = manifests_dir / f"{tool}.yaml"
+        header = ""
+        if path.exists():
+            header = "".join(
+                line + "\n" for line in path.read_text(encoding="utf-8").splitlines()
+                if not line.startswith("- ")
+            )
+        body = "".join(f"- {name}\n" for name in names)
+        path.write_text(header + body, encoding="utf-8")
+        return {"tool": tool, "names": names}
+
+    async def sync_adapters(self) -> dict:
+        """触发 sync.sh（subprocess，cwd=LIBRARY_ROOT；受 SKILLS.ADAPTER_SYNC.ENABLED 约束）"""
+        from config import settings
+
+        if not settings.get("SKILLS.ADAPTER_SYNC.ENABLED", False):
+            raise AuthorizationException(message="适配器同步未启用（SKILLS.ADAPTER_SYNC.ENABLED=false）")
+        root = self._library_root()
+        script = root / "sync.sh"
+        if not script.exists():
+            raise ValidationException(message=f"sync.sh 不存在: {script}", field="url")
+        proc = await asyncio.create_subprocess_exec(
+            "bash", str(script),
+            cwd=str(root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await proc.communicate()
+        output = (stdout or b"").decode("utf-8", errors="replace")
+        ok = proc.returncode == 0
+        if not ok:
+            logger.error(f"适配器同步失败 | rc={proc.returncode} out={output[:500]}")
+        return {"ok": ok, "returncode": proc.returncode, "output": output[:2000]}
 
     def _library_root(self) -> Path:
         from config import settings

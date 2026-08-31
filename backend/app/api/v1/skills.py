@@ -82,6 +82,40 @@ async def import_skill_from_url(
     return ok(data=result)
 
 
+@router.get("/manifests")
+async def get_manifests(
+    user: CurrentUser = Depends(require_login),
+    service: SkillService = Depends(_service),
+):
+    """启用矩阵读取（tool → 已启用技能名列表）"""
+    return ok(data=await service.list_manifests())
+
+
+@router.put("/manifests")
+async def put_manifest(
+    body: dict,
+    user: CurrentUser = Depends(require_admin),
+    service: SkillService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """启用矩阵写入（保留 `- name` 行格式与注释头，adapters 零改动）"""
+    result = await service.update_manifest(str(body.get("tool") or ""), list(body.get("names") or []))
+    await record_audit(session, user, "skill.manifest.update", f"manifest#{result['tool']}")
+    return ok(data=result)
+
+
+@router.post("/sync-adapters")
+async def sync_adapters(
+    user: CurrentUser = Depends(require_admin),
+    service: SkillService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """触发 sync.sh 分发（受 SKILLS.ADAPTER_SYNC.ENABLED 开关约束）"""
+    result = await service.sync_adapters()
+    await record_audit(session, user, "skill.adapters.sync", "adapters", detail={"ok": result["ok"]})
+    return ok(data=result)
+
+
 @router.get("/jobs")
 async def list_skill_jobs(
     page: int = Query(1, ge=1),

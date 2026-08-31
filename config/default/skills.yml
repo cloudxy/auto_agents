@@ -16,3 +16,6 @@ SKILLS:
     PROMPT_VERSION: "v1"
     # 评分独立预算（0=不限）；与 AI 采集规划的 LLM.MAX_TOKENS_BUDGET 互不挤占
     MAX_TOKENS_BUDGET: 0
+  # 允许后端 subprocess 执行 sync.sh（仅本地单机部署语义；关闭时 sync 端点拒绝）
+  ADAPTER_SYNC:
+    ENABLED: false

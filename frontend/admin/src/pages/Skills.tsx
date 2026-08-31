@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import {
   Alert, Button, Drawer, Form, Input, InputNumber, message, Modal, Select,
-  Space, Table, Tag, Typography,
+  Space, Table, Tabs, Tag, Typography,
 } from 'antd'
 import { ReloadOutlined, SyncOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
@@ -17,6 +17,7 @@ import {
   correctSkillMeta, getSkillDetail, listSkills, scanSkills,
   type CorrectionPayload, type ScanSummary, type SkillDetail, type SkillItem,
 } from '../services/skills'
+import SkillsMatrix from './SkillsMatrix'
 
 const { Text, Paragraph } = Typography
 
@@ -123,6 +124,14 @@ const Skills: React.FC<{ canEdit?: boolean; canAdmin?: boolean }> = ({ canEdit =
 
   return (
     <div>
+      <Tabs
+        defaultActiveKey="library"
+        items={[
+          {
+            key: 'library',
+            label: '技能库',
+            children: (
+              <>
       {!canEdit && (
         <Alert type="info" showIcon style={{ marginBottom: 12 }} message="当前角色只读（矫正需 operator 及以上）" />
       )}
@@ -213,6 +222,16 @@ const Skills: React.FC<{ canEdit?: boolean; canAdmin?: boolean }> = ({ canEdit =
           </Form.Item>
         </Form>
       </Modal>
+              </>
+            ),
+          },
+          {
+            key: 'matrix',
+            label: '适配器矩阵',
+            children: <SkillsMatrix skillNames={items.map((i) => i.name)} canAdmin={canAdmin} />,
+          },
+        ]}
+      />
     </div>
   )
 }
