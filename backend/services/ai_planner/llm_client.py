@@ -31,6 +31,10 @@ logger = get_logger("api")
 # LLM 重试退避基数（指数：1s/2s/4s...）
 _RETRY_BASE_DELAY = 1.0
 
+# B-M3：anthropic/gemini 经适配器构造请求时对话 max_tokens 缺省（openai 兼容路径
+# 不注入该字段——保持与历史 payload 字节级一致）
+_BUSINESS_MAX_TOKENS = 4096
+
 # 进程级 token 用量累计（跨请求熔断；按 provider 维度计数，兜底路径统一记在
 # "config" 名下；单实例假设：多副本部署时预算无法跨进程聚合，需外部聚合方案）
 _TOKEN_USAGE: dict[str, int] = {}
@@ -141,6 +145,29 @@ async def _resolve_llm_runtime_config() -> LlmRuntimeConfig:
         return _facade.resolve_config_from_settings()
 
 
+
+def _normalize_usage(protocol: str, data: dict) -> dict[str, int]:
+    """三协议 usage 归一化：openai {prompt/completion/total}；anthropic
+    {input_tokens/output_tokens}；gemini {usageMetadata{promptTokenCount/
+    candidatesTokenCount/totalTokenCount}} → 统一 {prompt, completion, total}"""
+    usage = data.get("usage") or {}
+    if protocol == "anthropic":
+        prompt = int(usage.get("input_tokens") or 0)
+        completion = int(usage.get("output_tokens") or 0)
+        return {"prompt": prompt, "completion": completion, "total": prompt + completion}
+    if protocol == "google_gemini":
+        meta = data.get("usageMetadata") or {}
+        prompt = int(meta.get("promptTokenCount") or 0)
+        completion = int(meta.get("candidatesTokenCount") or meta.get("candidateTokenCount") or 0)
+        total = int(meta.get("totalTokenCount") or (prompt + completion))
+        return {"prompt": prompt, "completion": completion, "total": total}
+    return {
+        "prompt": int(usage.get("prompt_tokens") or 0),
+        "completion": int(usage.get("completion_tokens") or 0),
+        "total": int(usage.get("total_tokens") or 0),
+    }
+
+
 async def llm_chat(
     messages: list[dict],
     *,
@@ -177,9 +204,21 @@ async def llm_chat(
     budget = budget_override if budget_override is not None else int(
         _facade.settings.get("LLM.MAX_TOKENS_BUDGET", 200000)
     )
-    payload = {"model": cfg.model, "messages": messages, "temperature": cfg.temperature}
-    headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}
-    url = f"{cfg.base_url}/chat/completions"
+    protocol = getattr(cfg, "protocol", "openai_compatible") or "openai_compatible"
+    if protocol == "openai_compatible":
+        # 历史路径原样构造（零回归硬约束：payload 不新增字段）
+        payload = {"model": cfg.model, "messages": messages, "temperature": cfg.temperature}
+        headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}
+        url = f"{cfg.base_url}/chat/completions"
+        adapter = None
+    else:
+        from backend.services.llm_protocol import get_adapter as _get_adapter
+
+        adapter = _get_adapter(protocol)
+        _req = adapter.build_chat(
+            cfg.base_url, cfg.api_key, cfg.model, messages, max_tokens=_BUSINESS_MAX_TOKENS
+        )
+        url, headers, payload = _req.url, _req.headers, _req.json_payload
     # token 用量按 provider 维度计数（兜底路径统一记在 "config" 名下）；调用方可覆盖维度
     dim = f"provider:{cfg.provider_id}" if cfg.provider_id is not None else "config"
     usage_dim = usage_dim or dim
@@ -212,10 +251,14 @@ async def llm_chat(
                     resp = await client.post(url, json=payload, headers=headers)
                     resp.raise_for_status()
             data = resp.json()
-            content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+            if adapter is None:
+                content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+            else:
+                content = adapter.parse_chat(data)
             if not content:
                 raise ValueError("LLM 响应缺少 content")
-            used = int((data.get("usage") or {}).get("total_tokens") or 0)
+            norm = _normalize_usage(protocol, data)
+            used = norm["total"]
             if used:
                 _facade._TOKEN_USAGE[usage_dim] = _facade._TOKEN_USAGE.get(usage_dim, 0) + used
                 logger.info(
@@ -224,12 +267,11 @@ async def llm_chat(
                 )
                 # P0-3 用量持久化：Redis 日/月计数（内部失败不影响主路径；
                 # 测试态为 no-op，保持纯内存语义）
-                usage_info = data.get("usage") or {}
                 await record_usage(
                     dim=usage_dim,
                     model=cfg.model,
-                    prompt_tokens=int(usage_info.get("prompt_tokens") or 0),
-                    completion_tokens=int(usage_info.get("completion_tokens") or 0),
+                    prompt_tokens=norm["prompt"],
+                    completion_tokens=norm["completion"],
                     total_tokens=used,
                 )
             return content
