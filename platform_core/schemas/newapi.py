@@ -126,3 +126,36 @@ class NewapiOverviewResponse(BaseModel):
         default_factory=dict,
         description="最近批次 verdict 分布：original/spoofed/offline 计数",
     )
+
+
+# ---------------- 渠道调度配置（4.2 接线：管理面 → Redis hash → 调度器） ----------------
+
+
+class ChannelConfigInfo(BaseModel):
+    """渠道额度调度配置（与 newapi:channel:cfg:{id} hash 字段一一对应）"""
+
+    limit_quota: int = Field(..., ge=0, description="窗口用量上限（quota 单位；0 = 显式关闭该渠道调度）")
+    window_hours: int = Field(24, ge=1, le=720, description="用量统计窗口（小时）")
+    cooldown_seconds: int = Field(3600, ge=60, le=604800, description="超限下线后的冷却时长（秒）")
+
+
+class ChannelWithConfigResponse(NewapiChannelResponse):
+    """渠道快照 + 调度配置合并视图（GET /newapi/channels）"""
+
+    config: Optional[ChannelConfigInfo] = Field(
+        None, description="渠道级配置（Redis hash，未配置为 null）"
+    )
+    effective: ChannelConfigInfo = Field(
+        ..., description="生效配置（渠道级 > 全局默认）"
+    )
+    effective_source: str = Field(
+        "none", description="生效来源：channel（渠道级）/ global（全局默认）/ none（未纳管）"
+    )
+
+
+class ChannelConfigUpdateResult(BaseModel):
+    """配置写入/清除结果"""
+
+    channel_id: int = Field(..., description="new-api 渠道 ID")
+    cleared: bool = Field(False, description="true = 已清除渠道级配置（回退全局默认）")
+    config: Optional[ChannelConfigInfo] = Field(None, description="清除前/写入后的配置")
