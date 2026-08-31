@@ -1,46 +1,73 @@
 /**
- * TaskModal - 新增/编辑任务弹窗（动态表单 + 从模板创建）
+ * TaskModal - 新增/编辑任务弹窗（动态表单 + 从模板创建 + 参数回填）
+ *
+ * U1-2（2026-08-31）：
+ * - "重跑任务 / 手动运行调度 / 从模板创建"完整回填 params（含模板保存的参数）；
+ * - 表单未覆盖的扩展键（store_to/render_js 等）以原 params 为基底 merge，不丢失。
  */
 import React, { useState } from 'react'
 import { Modal, Form, Radio, Select, Switch, message } from 'antd'
 import type { SpiderRegistry, TaskTemplate, SpiderMap, Task } from './types'
-import { renderParamFields, collectParams } from './formUtils'
+import { renderParamFields, collectParams, paramsToFormValues, parseParamsJson } from './formUtils'
 import { runSpider } from '../../services/spiders'
 import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
+
+/** 参数回填预设：来自任务行"运行"、调度"手动运行"或模板 */
+export interface TaskPreset {
+  spiderName?: string
+  params?: string | null
+  priority?: 'high' | 'normal' | 'low' | string | null
+}
 
 export interface TaskModalProps {
   visible: boolean
   registry: SpiderRegistry
   spiderMap: SpiderMap
   templates: TaskTemplate[]
+  preset?: TaskPreset | null
   onSubmitSuccess: (task: Task) => void
   onCancel: () => void
 }
 
 export const TaskModal: React.FC<TaskModalProps> = ({
-  visible, registry, spiderMap, templates,
+  visible, registry, spiderMap, templates, preset,
   onSubmitSuccess, onCancel,
 }) => {
   const [selectedType, setSelectedType] = useState<string>('web')
   const [submitting, setSubmitting] = useState(false)
+  // 基底参数（表单未覆盖的扩展键回填用）；用户手切类型/爬虫时清空防串键
+  const [baseParams, setBaseParams] = useState<Record<string, unknown>>({})
   const [form] = Form.useForm()
 
   const currentType = registry.types.find((t) => t.type === selectedType)
   const spidersOfType = registry.spiders.filter((s) => s.type === selectedType)
 
-  const open = (presetSpider?: string) => {
-    form.resetFields()
-    if (presetSpider && spiderMap[presetSpider]) {
-      setSelectedType(spiderMap[presetSpider].type)
-      form.setFieldsValue({ spider_name: presetSpider })
-    } else {
+  /** 回填入口：设置类型 + 爬虫 + 优先级 + 参数表单值 + 基底参数 */
+  const applyPreset = (p: TaskPreset | null | undefined) => {
+    setBaseParams({})
+    if (!p?.spiderName || !spiderMap[p.spiderName]) {
       setSelectedType('web')
+      return
     }
+    const spiderType = spiderMap[p.spiderName].type
+    setSelectedType(spiderType)
+    const fields = registry.types.find((t) => t.type === spiderType)?.fields
+    const paramsObj = parseParamsJson(p.params)
+    setBaseParams(paramsObj)
+    form.setFieldsValue({
+      spider_name: p.spiderName,
+      priority: (p.priority as string) || 'normal',
+      ...paramsToFormValues(paramsObj, fields),
+    })
   }
 
   // Expose open method via ref-like pattern: call open when visible changes
   React.useEffect(() => {
-    if (visible) open()
+    if (visible) {
+      form.resetFields()
+      applyPreset(preset)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible])
 
   const onSubmitTask = async () => {
@@ -51,11 +78,17 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         message.error(collected)
         return
       }
+      // 基底 merge：保留表单未覆盖的扩展键（API 直建任务的 store_to/render_js 等）
+      const merged: Record<string, unknown> = { ...baseParams, ...collected }
       if (values.incremental) {
-        collected.incremental = true
+        merged.incremental = true
       }
       setSubmitting(true)
-      const task = await runSpider(values.spider_name, JSON.stringify(collected), values.priority || 'normal')
+      const task = await runSpider(
+        values.spider_name,
+        JSON.stringify(merged),
+        values.priority || 'normal'
+      )
       message.success(`任务 #${task.id} 已提交，正在排队执行`)
       onCancel()
       onSubmitSuccess(task)
@@ -69,7 +102,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
 
   return (
     <Modal
-      title="新增采集任务"
+      title={preset?.params ? '再次运行采集任务（参数已回填）' : '新增采集任务'}
       open={visible}
       onOk={onSubmitTask}
       onCancel={onCancel}
@@ -83,16 +116,11 @@ export const TaskModal: React.FC<TaskModalProps> = ({
           <Form.Item label="从模板创建">
             <Select
               allowClear
-              placeholder="选择模板快速填充（可选）"
+              placeholder="选择模板快速填充（含已保存参数）"
               onChange={(templateId) => {
                 const tpl = templates.find((t) => t.id === templateId)
                 if (tpl) {
-                  const spiderType = spiderMap[tpl.spider_name]?.type || 'web'
-                  setSelectedType(spiderType)
-                  form.setFieldsValue({
-                    spider_name: tpl.spider_name,
-                    priority: tpl.priority || 'normal',
-                  })
+                  applyPreset({ spiderName: tpl.spider_name, params: tpl.params, priority: tpl.priority })
                 }
               }}
               options={templates.map((t) => ({
@@ -108,6 +136,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             value={selectedType}
             onChange={(e) => {
               setSelectedType(e.target.value)
+              setBaseParams({})
               form.setFieldsValue({ spider_name: undefined })
             }}
             optionType="button"
@@ -123,6 +152,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         >
           <Select
             placeholder={spidersOfType.length ? '选择该类型下的爬虫' : '该类型暂无可用爬虫'}
+            onChange={() => setBaseParams({})}
             options={spidersOfType.map((s) => ({
               label: `${s.title}（${s.name}）`,
               value: s.name,

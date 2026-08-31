@@ -107,10 +107,13 @@ class SpiderTaskService:
         limit: int = 20,
         status: Optional[str] = None,
         priority: Optional[str] = None,
+        spider_name: Optional[str] = None,
     ) -> SpiderTaskListResponse:
         """分页列表（Service 层负责把 ORM 实体转成响应契约）"""
-        items = await self.repo.list_tasks(skip=skip, limit=limit, status=status, priority=priority)
-        total = await self.repo.count(status=status, priority=priority)
+        items = await self.repo.list_tasks(
+            skip=skip, limit=limit, status=status, priority=priority, spider_name=spider_name
+        )
+        total = await self.repo.count(status=status, priority=priority, spider_name=spider_name)
         return SpiderTaskListResponse(
             total=total,
             items=[SpiderTaskResponse.model_validate(t) for t in items],

@@ -29,24 +29,34 @@ class SpiderTaskRepository(BaseRepository[SpiderTask]):
         limit: int = 20,
         status: Optional[str] = None,
         priority: Optional[str] = None,
+        spider_name: Optional[str] = None,
     ) -> List[SpiderTask]:
-        """分页查询任务，可按状态/优先级过滤（最新优先）"""
+        """分页查询任务，可按状态/优先级/爬虫过滤（最新优先）"""
         stmt = select(SpiderTask)
         if status:
             stmt = stmt.where(SpiderTask.status == status)
         if priority:
             stmt = stmt.where(SpiderTask.priority == priority)
+        if spider_name:
+            stmt = stmt.where(SpiderTask.spider_name == spider_name)
         stmt = stmt.order_by(SpiderTask.id.desc()).offset(skip).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def count(self, status: Optional[str] = None, priority: Optional[str] = None) -> int:
-        """按状态/优先级计数（均为 None 为总数）"""
+    async def count(
+        self,
+        status: Optional[str] = None,
+        priority: Optional[str] = None,
+        spider_name: Optional[str] = None,
+    ) -> int:
+        """按状态/优先级/爬虫计数（均为 None 为总数）"""
         stmt = select(func.count(SpiderTask.id))
         if status:
             stmt = stmt.where(SpiderTask.status == status)
         if priority:
             stmt = stmt.where(SpiderTask.priority == priority)
+        if spider_name:
+            stmt = stmt.where(SpiderTask.spider_name == spider_name)
         result = await self.session.execute(stmt)
         return int(result.scalar() or 0)
 

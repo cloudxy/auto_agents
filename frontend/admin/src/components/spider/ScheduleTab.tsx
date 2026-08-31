@@ -23,7 +23,8 @@ export interface ScheduleTabProps {
   spiderMap: SpiderMap
   canCreate: boolean
   canSchedule: boolean
-  onRunTask: (spiderName: string) => void
+  /** 手动运行：携带该调度的 params 供任务弹窗回填（U1-2） */
+  onRunTask: (schedule: SpiderScheduleType) => void
 }
 
 export const ScheduleTab: React.FC<ScheduleTabProps> = ({
@@ -150,7 +151,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
       render: (_: unknown, record: SpiderScheduleType) => (
         <Space size="small">
           {canCreate && (
-            <Button type="link" size="small" icon={<PlayCircleOutlined />} onClick={() => onRunTask(record.spider_name)}>
+            <Button type="link" size="small" icon={<PlayCircleOutlined />} onClick={() => onRunTask(record)}>
               手动运行
             </Button>
           )}

@@ -25,7 +25,14 @@ export const LogDrawer: React.FC<LogDrawerProps> = ({ task, spiderMap, onClose }
     if (!task) return
     const pull = () => {
       fetchTaskLogs(task.id, 200, logKeyword || undefined, logLevel || undefined)
-        .then(setLogData)
+        .then((data) => {
+          setLogData(data)
+          // U1-6：任务已达终态后停止轮询（避免无意义的持续请求）
+          if (data.status === 'completed' || data.status === 'failed') {
+            if (logTimer.current) clearInterval(logTimer.current)
+            logTimer.current = null
+          }
+        })
         .catch(() => { /* 轮询静默失败 */ })
     }
     pull()

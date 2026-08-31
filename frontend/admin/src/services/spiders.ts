@@ -126,11 +126,11 @@ export const FLOW_TYPE_FALLBACK: SpiderTypeInfo = {
 export const fetchTasks = (
   skip = 0,
   limit = 20,
-  priority?: string
+  filters?: { priority?: string; status?: string; spider_name?: string }
 ): Promise<{ total: number; items: Task[] }> =>
   api
     .get('/spiders/tasks', {
-      params: { skip, limit, ...(priority ? { priority } : {}) },
+      params: { skip, limit, ...filters },
     })
     .then((res) => unwrap<{ total: number; items: Task[] }>(res))
 
