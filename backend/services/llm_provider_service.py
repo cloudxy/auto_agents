@@ -17,6 +17,7 @@
 - 解密失败视为密钥缺失（供应商密文与当前主密钥不匹配等场景），不抛异常不中断
 """
 import os
+from datetime import datetime, timezone
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -306,6 +307,68 @@ class LlmProviderService:
     # ------------------------------------------------------------------
     # 连通性测试（一次性 client，10s 超时，1-token 请求，不落库）
     # ------------------------------------------------------------------
+    # ---------- B-M2-2 fetch diff + 逐模型健康 ----------
+
+    async def fetch_models_diff(self, provider_id: int) -> dict:
+        """远端列表 vs 本地子表三分类（new/existing/vanished）——不直写"""
+        provider = await self.repo.get_by_id(provider_id)
+        if provider is None:
+            raise NotFoundException(resource=f"LLM 供应商 {provider_id}")
+        api_key = self.decrypt_api_key(provider.api_key_encrypted)
+        adapter = get_adapter(provider.provider_type or "openai_compatible")
+        remote = await adapter.list_models(provider.base_url, api_key)
+        remote_ids = set(remote.ids())
+        local_ids = set(
+            (await self.session.execute(
+                select(LlmProviderModel.model_id).where(LlmProviderModel.provider_id == provider_id)
+            )).scalars()
+        )
+        return {
+            "new": sorted(remote_ids - local_ids),
+            "existing": sorted(remote_ids & local_ids),
+            "vanished": sorted(local_ids - remote_ids),
+        }
+
+    async def test_model(self, provider_id: int, model_id: str) -> dict:
+        """单模型 1-token 测试并落健康态：200→healthy / 401·403→down / 其余→degraded"""
+        import time
+
+        logger.info(f"模型连通测试 | provider={provider_id} model={model_id}")
+        provider = await self.repo.get_by_id(provider_id)
+        if provider is None:
+            raise NotFoundException(resource=f"LLM 供应商 {provider_id}")
+        row = (await self.session.execute(
+            select(LlmProviderModel).where(
+                LlmProviderModel.provider_id == provider_id,
+                LlmProviderModel.model_id == model_id,
+            )
+        )).scalar_one_or_none()
+        if row is None:
+            raise NotFoundException(resource=f"模型 {model_id}")
+
+        api_key = self.decrypt_api_key(provider.api_key_encrypted)
+        adapter = get_adapter(provider.provider_type or "openai_compatible")
+        request = adapter.build_chat(
+            provider.base_url, api_key, model_id,
+            [{"role": "user", "content": "ping"}], max_tokens=1,
+        )
+        started = time.perf_counter()
+        try:
+            data = await execute_json(None, "POST", request.url, request.headers, request.json_payload)
+            if not adapter.parse_chat(data):
+                raise ProtocolError("HTTP 200 响应缺少文本内容")
+            ok, error, status = True, "", "healthy"
+        except ProtocolError as exc:
+            ok, error = False, str(exc)
+            status = "down" if any(f"HTTP {code}" in str(exc) for code in (401, 403)) else "degraded"
+        latency_ms = int((time.perf_counter() - started) * 1000)
+
+        row.health_status = status
+        row.last_latency_ms = latency_ms
+        row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await self.session.flush()
+        return {"ok": ok, "latency_ms": latency_ms, "model": model_id, "error": error, "health_status": status}
+
     # ---------- B-M2-1 多模型（全量替换 + 默认冗余同步） ----------
 
     async def get_models(self, provider_id: int) -> list[dict]:

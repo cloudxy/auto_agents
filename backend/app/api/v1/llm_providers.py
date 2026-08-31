@@ -87,6 +87,32 @@ async def probe_provider_model_test(
     return ok(data=result)
 
 
+@router.post("/providers/{provider_id}/models/fetch", response_model=ApiResponse[dict])
+async def fetch_provider_models(
+    provider_id: int = Path(..., gt=0),
+    _user: CurrentUser = Depends(require_admin),
+    service: LlmProviderService = Depends(_service),
+):
+    """远端模型列表 vs 本地三分类 diff（new/existing/vanished，不直写）"""
+    return ok(data=await service.fetch_models_diff(provider_id))
+
+
+@router.post("/providers/{provider_id}/models/{model_id}/test", response_model=ApiResponse[dict])
+async def test_provider_model(
+    provider_id: int = Path(..., gt=0),
+    model_id: str = Path(..., min_length=1, max_length=128),
+    user: CurrentUser = Depends(require_admin),
+    service: LlmProviderService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """单模型 1-token 测试并落健康态（healthy/down/degraded + 延迟 + 时间）"""
+    result = await service.test_model(provider_id, model_id)
+    await session.commit()
+    await record_audit(session, user, "llm.provider.model.test",
+                       f"llm_provider#{provider_id}/{model_id}", detail={"ok": result["ok"]})
+    return ok(data=result)
+
+
 @router.get("/providers/{provider_id}/models", response_model=ApiResponse[list[dict]])
 async def get_provider_models(
     provider_id: int = Path(..., gt=0),
