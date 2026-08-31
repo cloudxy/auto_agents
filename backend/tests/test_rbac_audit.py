@@ -56,8 +56,10 @@ def test_effective_role_from_role_column():
     assert effective_role(_user(role="viewer")) == "viewer"
 
 
-def test_effective_role_fallback_operator():
-    assert effective_role(_user(role=None)) == "operator"
+def test_effective_role_fallback_viewer():
+    """未知/空角色按最小权限 viewer（B1：原默认 operator 导致自注册即可跑任务）"""
+    assert effective_role(_user(role=None)) == "viewer"
+    assert effective_role(_user(role="")) == "viewer"
 
 
 # ---------------- require_role 守卫（接收鉴权层快照） ----------------

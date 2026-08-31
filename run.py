@@ -4,7 +4,7 @@ from __future__ import annotations
 Auto Agents 统一入口 —— 纯 orchestrator
 
 职责：fork 三个独立启动脚本为子进程，统一日志 + 信号管理。
-      不做环境自愈、不跑迁移、不装依赖（请用 scripts/bootstrap.sh）。
+      不做环境自愈、不跑迁移、不装依赖（初始化请用 scripts/bootstrap-db.sh）。
 
 使用方式：
     python run.py all                       # 同时起 backend + frontend
@@ -127,7 +127,7 @@ def main():
         _spawn("run_frontend.py", extra, "Frontend")
 
     elif args.command == "all":
-        _port_ok(9111, "Backend") or _port_ok(3001, "Admin") or _port_ok(3002, "Official")
+        _port_ok(9111, "Backend") or _port_ok(9112, "Admin") or _port_ok(9113, "Official")
         be = ["--no-reload"]
         fe = ["--all"]
         sp = []
