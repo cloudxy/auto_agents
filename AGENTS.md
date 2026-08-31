@@ -21,7 +21,7 @@
 - `uv.lock` 必须提交（可复现性保证），禁止加入 `.gitignore`
 - `platform_core/` 是源码包，经 `sys.path` 引入，不打包、不进 workspace
 
-## 架构红线 + 核心边界（11 红线（R1-R11） + 3 边界，机械可检查）
+## 架构红线 + 核心边界（12 红线（R1-R12） + 3 边界，机械可检查）
 
 详见 `.claude/rules/project_rule.md`；提交前会自动执行 `scripts/check-arch.sh`
 （pre-commit hook + CI）。核心约束：

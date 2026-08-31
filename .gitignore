@@ -83,3 +83,7 @@ docs/*
 !docs/adr/
 !docs/migration-drill-2026-08-30.md
 !docs/evolution-roadmap-phase5-triggers.md
+# 空库引导说明随仓库提交
+!docs/database-bootstrap.md
+# 归档证据（拆包契约基线等）随仓库提交
+!docs/evidence/
