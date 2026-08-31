@@ -438,7 +438,7 @@ CI 三阶段：Python lint+test → 架构红线 → 前端构建。
 
 ## 相关文档
 
-- **[全系统架构与模块诊断报告（docs/architecture-audit-2026-08.md）](docs/architecture-audit-2026-08.md)** —— 63+8 项问题清单（P0/P1/P2 带证据）、LLM 故障转移与 new-api 调度接线设计、对标 EasySpider/crawlab/spider-flow 的易用性优化方案、分批修复路线图
+- **[全系统架构与模块诊断报告（docs/architecture-audit-2026-08.md）](docs/architecture-audit-2026-08.md)** —— 63+8 项问题清单（P0/P1/P2 带证据）、LLM 故障转移与 new-api 调度接线设计、对标 EasySpider/crawlab/spider-flow 的易用性优化方案、SaaS 多租户升级方案（企业子账号管理）、自动化脚本存废决策、分批修复路线图
 - 项目规则（12 红线 + 3 边界）：`.claude/rules/project_rule.md`
 - new-api 网关部署：[deploy/newapi/README.md](deploy/newapi/README.md)
 - AI 协作层：`.claude/IDENTITY.md` / `SOUL.md` / `MEMORY.md`、子代理 `spider-doctor / arch-warden / memory-curator`

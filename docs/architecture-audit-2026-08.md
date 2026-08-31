@@ -18,9 +18,13 @@
 
 **易用性专项结论**（详见第 6/7 章）：系统主链路设计方向正确（动态表单→提交自动看日志→结果导出），但被"假分页 / 运行与模板不回填参数 / 路由级权限缺失"等功能 bug 与系统性的内部概念泄漏（手写 JSON/cron/格式串）拖累。对标 EasySpider / crawlab / spider-flow 的四阶段（U1-U4）优化方案见第 7 章。
 
+**SaaS 化升级方向**（详见第 8 章，2026-08-31 决策）：系统升级为面向企业的多租户 SaaS——企业自助开通、租户内子账号自管理；既有四大功能模块与全部演进方案（4.1 / 4.2 / 第 7 章）保留并叠加租户维度。当前差距：users 表无租户概念，除 `ai_plan.created_by`（字符串用户名）与 `task_template.created_by`（用户 ID，类型还不一致）外**全部业务表无归属字段**。
+
+**自动化脚本存废决策**（详见第 9 章）：保留 5（bootstrap-db.sh / check-arch.sh / migrate.sh / init_db_sync.py(内部依赖) / set_admin_account.py），删除 5（init-db.sh / init-database.sh / start.sh / start_frontend.sh / run-spider.sh，均为被 run.py 编排器或 bootstrap 收编的旧入口）。
+
 **最优先行动**（详见第 5 章批次 1）：修 RetryMiddleware 重试上限、补 webhook 密钥启动守卫、token 用量落库、httpx `proxies=` 参数替换。
 
-另：开发环境问题（git 连接 GitHub 失败：本地代理未启动）的诊断与解决方案见附录 8.3。
+另：开发环境问题（git 连接 GitHub 失败：本地代理未启动）的诊断与解决方案见附录 10.3。
 
 ---
 
@@ -297,7 +301,7 @@ export const register = (username: string, email: string, password: string) => {
 |---|------|------|
 | B1 | 未知/空角色默认授予 `operator` 而非 viewer；开放注册（`auth.py:172-205`）不设 role → 模型默认 operator → **任何自注册用户即可创建/运行爬虫任务** | `backend/app/api/deps.py:47`；`models/user.py` default |
 | B2 | 注册接口用户枚举：已存在用户名/邮箱返回 409 + 明确提示；authenticate 用户不存在时不做 dummy hash，存在时序差异 | `auth_service.py:108-119,48-61` |
-| B3 | `set_admin_account.py` 硬编码 `admin/123456`，生产误跑即重置弱口令 | `backend/scripts/set_admin_account.py:13-15` |
+| B3 | ~~set_admin_account.py 硬编码弱口令~~ **已按决策采纳为预期设计**（2026-08-31）：初始化脚本固定创建/重置 `admin/123456`，初始化后由后台管理用户；残余风险仅"生产环境误跑脚本会重置口令"，缓解手段：脚本结尾打印醒目"请立即登录修改密码"提示（README 已注明） | `backend/scripts/set_admin_account.py:13-15` |
 | B4 | 请求体全局"XSS 清洗"静默篡改业务字段：`on\w+\s*=` 正则会删改 `params`（JSON 字符串）中合法的 `onclick=` 类内容、密码含此类子串也被改写——静默修改输入比不修改更危险 | `platform_core/schemas/base.py:33-46`；`validators.py:34-42`；`schemas/spider.py:43` |
 | B5 | 已提交的固定 dev JWT 密钥与弱密码：compose `AUTO_AGENTS_JWT__SECRET_KEY: "auto-agents-dev-secret-key-2026"`、密码 123456（虽声明"严禁用于生产"但密钥可预测）；`scripts/init-db.sh:8` 硬编码 `IDENTIFIED BY '123456'`（check-arch R2 不扫 scripts/，检测不到） | `docker-compose.yml:48,14-17,28,46-47`；`scripts/init-db.sh:8` |
 | B6 | logger `diagnose=True` 会在 traceback 中打印变量值，生产日志可能带出敏感数据；轮转不压缩 | `platform_core/logger.py:76-78` |
@@ -347,7 +351,7 @@ export const register = (username: string, email: string, password: string) => {
 | F2 | CI 无前端测试/ESLint/安全扫描（仅 build）；scrapy 侧无测试目录；后端 pytest 仅 backend/tests | `.github/workflows/ci.yml:63-91` |
 | F3 | 文档失联：`AGENTS.md:80` 引用已删除的 GEMINI.md；`run.py:7` 引用不存在的 `scripts/bootstrap.sh`（实际 bootstrap-db.sh）；`ci.yml:6` 与 `.pre-commit-config.yaml:31` 写"10 条红线"，实际 12（check-arch.sh:38） | 各处 |
 | F4 | `run.py:130` 端口预检逻辑失效：`or` 短路 + 结果丢弃 + 不阻断启动，纯装饰 | `run.py:130` |
-| F5 | 四套 DB 初始化脚本并存且口径矛盾：init-db.sh（硬编码 123456）、init-database.sh、bootstrap-db.sh（自称"唯一推荐入口"）、init_db_sync.py；README:163 用的是 init-db.sh | `scripts/` 各处 |
+| F5 | 四套 DB 初始化脚本并存且口径矛盾：init-db.sh（硬编码 123456）、init-database.sh、bootstrap-db.sh（自称"唯一推荐入口"）、init_db_sync.py；README:163 用的是 init-db.sh → **存废决策见第 9 章：保留 5 删除 5** | `scripts/` 各处 |
 | F6 | 前端工具链老化：react-scripts 5.0.1（CRA 已停止维护）+ TS 4.9.5 配 React 19 类型（官方要求 TS≥5.0）+ target es5；两前端高度同构可抽共享包未抽 | 两处 package.json / tsconfig.json |
 | F7 | CI 三阶段关卡无 docker 镜像漏洞扫描与依赖审计（pip-audit / npm audit） | `ci.yml` |
 
@@ -358,7 +362,7 @@ export const register = (username: string, email: string, password: string) => {
 | G1 | `official/src/services/api.ts` 零导入（死文件）；`ApiEnvelope` 接口两处重复定义；`unwrap` 强转不校验 `success` 字段（依赖"后端错误必带非 2xx"的隐含约定） | `official/src/services/api.ts`；`admin/src/services/auth.ts:23-29`、`api.ts:49-59` |
 | G2 | token 30 分钟过期但无 refresh-token 流程；401 一律 `window.location.href='/login'` 硬跳丢页面状态；token 持久化 localStorage（`useAuthStore.ts:38` 注释自认 rememberMe 语义未实现） | `config/default/jwt.yml:11`；`admin/src/services/api.ts:35-39`；`useAuthStore.ts:36-45` |
 | G3 | `usePermission.ts:35` 在 hook 返回值里用 CommonJS `require()`，每次渲染执行且 ESM/TS 风格违规 | `usePermission.ts:35` |
-| G4 | 用户管理只读：admin 前端 `menu:users` 权限对应的写操作后端不存在（无改密/禁用/角色分配端点、无 logout/token 撤销；`jwt.yml:13` 配了 REFRESH_TOKEN_EXPIRE_DAYS 但无刷新端点） | `v1/admin.py:33,43,55` |
+| G4 | 用户管理只读：admin 前端 `menu:users` 权限对应的写操作后端不存在（无改密/禁用/角色分配端点、无 logout/token 撤销；`jwt.yml:13` 配了 REFRESH_TOKEN_EXPIRE_DAYS 但无刷新端点）→ **SaaS S2 补齐（第 8 章）** | `v1/admin.py:33,43,55` |
 | G5 | 遗留演示脏代码：zhihu_feed/dianping_home/example 在 RedisSpider 上声明 `start_urls`（scrapy-redis 不消费，纯误导）；openweather 错误提示指向不存在的 `spider_sites.yml` | `zhihu_feed.py:12`、`dianping_home.py:12`、`example.py:20`、`openweather.py:24` |
 
 ### 3.4 第二轮易用性走查新增（功能级缺陷，2026-08-31 已人工复核）
@@ -498,6 +502,8 @@ NEWAPI.ENABLED（总开关）
 | **批次 4（演进）** | 4.1 LLM 故障转移 + 4.2 调度接线 | 1-2 周 | 见 4.1.6 / 4.2.5 验收标准 |
 | **批次 5（易用性 U1+U2）** | 见第 7.3 章：修假分页/参数回填/路由守卫/双页头等快赢 11 项 + 参数校验前移/参数元数据补全/cron 可视化/预置示例模板/pending 引导/空库 onboarding | 1-2 周 | 见 7.5 节 U1/U2 验收；前端 build 通过；新用户不看文档 3 分钟完成"从零到数据" |
 | **批次 6（易用性 U3+U4）** | WebSocket 日志 tail、结果单条预览、服务端流式导出、任务详情页、error_message 结构化；（可选）选择器实时试测/流程只读画布/jsonpath | 2-4 周 | 见 7.5 节 U3/U4 验收 |
+| **批次 7（SaaS S1+S2）** | 第 8.5 章：租户基座（tenants/行级隔离/两级 RBAC/越权测试）+ 子账号管理（补 G4）——**硬前置：批次 1 与 UX-B4 已完成** | 2-3 周 | 见 8.5 节 S1/S2 验收（越权测试全绿为 P0 级门槛） |
+| **批次 8（SaaS S3-S5）** | 配额与用量看板、LLM 供应商租户化、官网注册/定价与平台运营台（节奏视商业化决定） | 按需 | 见 8.5 节 S3-S5 验收 |
 
 **顺序依赖**：批次 1 的 P0-3 用量表与批次 4 的 4.1.4 是同一张表——建议批次 1 直接按 4.1.4 建表，避免二次迁移。
 
@@ -702,26 +708,145 @@ cron 表达式手写 Input（仅正则校验"5 段"，无可视化选择器、�
 
 ---
 
-## 8. 附录
+## 8. SaaS 化升级方案：多租户与企业子账号管理
 
-### 8.1 测试盲区清单（回归风险最高处）
+> 目标（2026-08-31 决策）：系统升级为面向企业客户的 SaaS——企业自助开通、租户内自主管理子账号。**既有四大功能模块（爬虫 / LLM 管理 / new-api 调度 / 官网后台）与既有全部演进方案（4.1 LLM 故障转移、4.2 调度接线、第 7 章易用性 U1-U4）照常实施**，本章在其上叠加租户维度。
+
+### 8.1 现状差距（SaaS 化要还的债）
+
+| # | 差距 | 证据 |
+|---|------|------|
+| 1 | **users 表无租户概念**：username/email 全局唯一，只有全局 is_admin + role | `platform_core/models/user.py`（全文 24 行，无任何组织/租户字段） |
+| 2 | **业务表几乎无归属字段**：spider_tasks / spider_results / spider_definitions / spider_schedules / alert_rules / llm_providers / operation_logs 全部全局共享；仅有的两个归属字段类型还不一致（ai_plan 存用户名字符串，task_template 存用户 ID 整数） | `platform_core/models/` 全量 grep（ai_plan.py:36、task_template.py:16） |
+| 3 | **后台无法管理用户**：admin 用户页只读，无创建/禁用/改密/角色分配端点 | `v1/admin.py:33,43,55`（仅 3 个 GET） |
+| 4 | **注册默认 operator**：开放注册即业务操作权限 | `models/user.py` default + `deps.py:47` |
+| 5 | **配额/计量缺失**：无任务数/存储/LLM token 的租户维度计量（P0-3 的用量表是唯一基础） | `llm_client.py:35` 进程内存 |
+
+### 8.2 租户模型选型
+
+| 方案 | 结论 |
+|------|------|
+| **共享库 + `tenant_id` 行级隔离（推荐）** | 单 MySQL/单 FastAPI/统一 BaseRepository 是天然的过滤收口点，改造成本最低、运维不变 |
+| 每租户独立 schema | Alembic 迁移要 ×N 执行，连接池按租户路由，成本高收益低 |
+| 每租户独立库 | 面向大客户隔离合规场景，可作为未来"企业版"选项，不作为起步方案 |
+
+### 8.3 数据与权限设计
+
+**新表 `tenants`**：
+
+```sql
+tenants (id, name, slug UNIQUE, plan VARCHAR(16) DEFAULT 'free', status VARCHAR(16),
+         quota JSON,            -- {max_members, max_concurrent_tasks, max_results_mb, llm_token_monthly}
+         expired_at DATETIME NULL, created_at, updated_at)
+```
+
+**users 表改造**：`+ tenant_id INT NULL`（NULL = 平台超管，现有 is_admin 用户回填 NULL）、`+ tenant_role VARCHAR(16)`（owner / admin / operator / viewer），唯一约束改 `UNIQUE(tenant_id, username)`（email 保持全局唯一）；现有全局 `role` 保留过渡期并映射到 tenant_role。
+
+**JWT claims 扩展**：`{user_id, tenant_id, tenant_role, is_platform_admin}`；`deps.py` 的 CurrentUser 快照同步扩展，现有 `require_operator/admin` 依赖改读 tenant_role。
+
+**两级权限模型**：
+
+| 层级 | 角色 | 能力 |
+|------|------|------|
+| 平台 | super_admin（tenant_id=NULL，现 is_admin 用户） | 租户管理、套餐配额、渠道调度（newapi 保持平台级）、全局监控、审计 |
+| 租户 | owner（开通者） | 本租户全部 + 子账号管理 + 成员角色分配 |
+| 租户 | admin | 本租户业务全权（现 operator+ 调度/告警） |
+| 租户 | operator / viewer | 同现有语义，但仅限本租户数据 |
+
+**行级隔离实现（本仓库的天然收口点）**：
+
+1. `platform_core/repository.py` BaseRepository 增加租户过滤——asyncpg/SQLAlchemy 侧用 `with_loader_criteria` 对声明了 `tenant_id` 的模型全局追加条件，租户上下文经 `contextvars.ContextVar` 从请求中间件（解析 JWT）注入；
+2. **平台级豁免清单**（不加过滤）：tenants、system_config、channel_events、channel_probe_results、users(tenant_id IS NULL 的超管由服务层处理)；
+3. 豁免之外任何 Service/Repository 直接裸查询必须在 code review + check-arch 增设红线（R13：业务模型查询必须经过租户过滤收口）。
+
+**业务表加 `tenant_id`（一次 Alembic 迁移 + 默认租户回填）**：spider_tasks、spider_results（随 task 冗余存列，数据中心直查免 join）、spider_definitions（增加 `scope: platform|tenant`——平台预置爬虫全租户可见，租户可私有注册/AI 注册的归租户）、spider_schedules、alert_rules、task_templates（created_by 顺带统一为 user_id）、ai_plans（同前）、llm_providers（租户自带 key，见 8.5）、operation_logs。
+
+**子账号管理 API（补齐 8.1-3 的债）**：
+
+- 租户侧 `/api/v1/tenants/me/members`：GET 列表 / POST 创建子账号 / PATCH 角色·启停 / POST 重置密码（owner·admin 可用，配额 max_members 校验，全程审计）
+- 平台侧 `/api/v1/platform/tenants`：CRUD / 套餐与配额调整 / 停启用（super_admin）
+- 前端：admin 增「成员管理」页（租户角色）与「租户管理」页（平台运营台）；现有用户只读页升级为成员管理
+
+### 8.4 与既有模块/方案的叠加关系
+
+| 模块 | 叠加方式 |
+|------|----------|
+| 智能爬虫 | 任务/结果/调度/模板/告警按租户隔离；配额在 `enqueue`（并发任务数）与结果回流（存储量）两处检查，超配额返回明确的业务码 |
+| LLM 管理（cc-switch 式） | `llm_providers` 租户化——**企业自带 API Key**，每租户一张注册表；4.1 的故障转移/健康巡检/**用量表**（4.1.4）照做并加 `tenant_id` 维度；免费套餐可选回退平台公共 provider（平台承担成本时必须配 token 配额） |
+| new-api 调度 | 渠道是**平台基础设施**，保持平台级（4.2 照做，不租户化）；远期（S4）套餐 → 渠道组分配，租户用量经 4.1.4 表 × new-api logs 对账 |
+| 官网/后台 | 官网增「企业注册/定价」页与登录入口；admin 按登录租户自动限定数据范围（无需页面改造，行级隔离兜底） |
+
+### 8.5 分阶段落地
+
+| 阶段 | 内容 | 依赖 | 验收 |
+|------|------|------|------|
+| **S1 租户基座** | tenants 表 + users 租户化 + 全业务表 tenant_id 回填（默认租户承接存量数据）+ BaseRepository 行级过滤 + JWT/两级 RBAC + 中间件注入租户上下文 | **前置：批次 1（P0 安全）与 UX-B4 路由守卫必须先完成**——多租户会放大一切越权缺口 | 越权测试套件：A 租户 token 访问 B 租户任务/结果/模板/供应商全部 403/404；pytest 全绿 |
+| **S2 子账号管理** | members CRUD + 角色分配 + 禁用 + 重置密码 + 成员配额 + 前端「成员管理」页 + 审计 | S1 | 租户 admin 可自助管理子账号（补 G4）；被禁用成员 token 立即失效（或短窗内） |
+| **S3 配额与用量** | 任务并发/结果存储/LLM token 三类配额 + 租户用量看板（4.1.4 用量表加 tenant 维度）+ 超限业务码与前端提示 | S1 + 批次 1 的用量表 | 超配额任务被拒且文案可行动；用量看板按租户/成员双维度 |
+| **S4 能力租户化** | llm_providers 租户自带 key；平台公共 provider 兜底策略；套餐→new-api 渠道组分配（远期） | S3 + 4.1/4.2 完成 | 租户各自配 key 各自计量；平台成本可控 |
+| **S5 商业化闭环** | 官网企业注册/定价页、开通流程、到期停用与降级策略、平台运营台（租户/套餐/全局监控） | S1-S4 | 企业可从官网自助开通到跑通第一个采集任务，全程无人工介入 |
+
+### 8.6 风险与前置条件
+
+1. **顺序硬约束**：SaaS 放大安全缺口——批次 1（P0-2 webhook 守卫等）与 UX-B4（路由级权限）必须先行；B1（未知角色默认 operator）在租户语境下改为默认 viewer（S1 一并修）；
+2. **存量数据回填**：迁移必须创建"默认租户"承接现有全部数据，保证升级零感知；
+3. **check-arch 增红线 R13**（业务查询必须经租户过滤收口），否则行级隔离会被后续新增代码悄悄打穿；
+4. **llm_providers 密钥加密密钥**（LLM_ENCRYPTION_KEY）平台统一持有即可，无需按租户派生（Fernet 加密已是列级，租户隔离靠 tenant_id 行级）。
+
+---
+
+## 9. 自动化脚本保留评估（2026-08-31 决策）
+
+### 9.1 全量盘点（11 项）
+
+| 脚本 | 行数 | 实际职责 | 依赖关系 | 决策 |
+|------|------|----------|----------|------|
+| `scripts/bootstrap-db.sh` | 106 | 新环境唯一推荐入口：建库 → create_all 基线 → alembic 收口（幂等） | 内部调用 `init_db_sync.py` + alembic | **保留** |
+| `scripts/check-arch.sh` | 152 | 12 红线 + 3 边界扫描（pre-commit + CI 门禁） | CI `.github/workflows` + pre-commit | **保留** |
+| `scripts/init_db_sync.py` | 53 | create_all 基线建表 | **bootstrap-db.sh Step3 的内部依赖**（bootstrap-db.sh:84 直接调用） | **保留**（标注"内部依赖，勿单独使用"） |
+| `scripts/migrate.sh` | 4 | alembic upgrade head 薄封装 | 无 | **保留** |
+| `backend/scripts/set_admin_account.py` | — | 初始管理员创建/重置（admin/123456，**已采纳为预期设计**，见 3.3-B3） | 独立 | **保留** |
+| `scripts/init-db.sh` | 11 | root 交互建库建用户，`IDENTIFIED BY '123456'` 硬编码 | 功能被 bootstrap Step1/2 覆盖（应用账号创建改文档化 SQL） | **删除** |
+| `scripts/init-database.sh` | 46 | 旧"调用 Python 初始化逻辑"入口 | 被 bootstrap 收编 | **删除** |
+| `scripts/start.sh` | 4 | `uv run python run_backend.py` 薄包装 | 被 `run.py backend` 取代 | **删除** |
+| `scripts/start_frontend.sh` | 8 | `npm start` 直启双前端 | 被 `run.py frontend` 取代（后者有端口预检/日志前缀/npm install 兜底） | **删除** |
+| `scripts/run-spider.sh` | 4 | `run_spider.py --spider $1` 薄包装 | 被 `run.py spider --spider` 取代 | **删除** |
+| `.claude/hooks/*.sh` | 3 个 | AI 协作层运行时 hook（inject/guard/suggest，fail-open） | `.claude/settings.json` 启用 | **保留**（非运维脚本，属协作层契约） |
+
+### 9.2 删除收益
+
+1. 收敛 F5（四套 DB 初始化脚本并存 → 一入口 bootstrap-db.sh + 一个内部依赖）；
+2. 自然消除 B5 的 `scripts/init-db.sh:8` 硬编码 `123456`（check-arch R2 盲区中最实质的一条——删代码优于扩扫描）；
+3. 消除"README 教的命令是被弃用脚本"的口径漂移风险；scripts/ 从 9 个文件收敛到 4 个。
+
+### 9.3 执行步骤与验收
+
+1. 删除 5 个脚本 + 在 `run.py:7` 修正指向不存在 `scripts/bootstrap.sh` 的注释（实为 bootstrap-db.sh，即 F3）；
+2. README「运维脚本」表同步为保留清单；`init-db.sh` 的"创建应用账号"职责文档化为 bootstrap-db.sh 头注释中的一段 SQL 示例（密码取自 .env，不再硬编码）；
+3. 验收：`grep -rn "init-db\.sh\|init-database\.sh\|start_frontend\.sh\|run-spider\.sh\|scripts/start\.sh"` 全仓无引用；`bash scripts/bootstrap-db.sh` 幂等重跑通过；CI 三阶段绿。
+
+---
+
+## 10. 附录
+
+### 10.1 测试盲区清单（回归风险最高处）
 
 - `SpiderScheduler` 后台触发链路（`schedule_service.py:156-371`：_tick_once/_fire/动态优先级/静默时段）**零测试**——智能调度核心无回归保护
 - `tasks/consumer.py` 主循环：现有测试仅覆盖 `extract_start_urls/build_start_payload` 纯函数；`_dispatch`/`_flush_batch`/`_retry_loop`（含重试回滚兜底）未测
 - 爬虫中间件/管道零测试（P0-1、P0-4 正是 mock 掩盖或零覆盖所致）
 - `app/middleware/`（RequestID）、`app/responses/` 分页构造器、v2 health 多数端点、alembic 迁移（无 upgrade 测试）、`admin.py` 审计过滤分页
 
-### 8.2 值得保留的优良实践（后续重构勿误伤）
+### 10.2 值得保留的优良实践（后续重构勿误伤）
 
 - 统一异常信封 + 4 级处理器（`platform_core/exceptions/handlers.py`），500 兜底不泄内部信息
 - Redis 异步化收口（R11）执行彻底；`distributed_lock`（`queues.py:97-202`）token + Lua 原子释放/续期实现规范
 - LLM 密钥 Fernet 加密 + 掩码出参 + SSRF 元数据端点恒拒绝（`schemas/llm_provider.py:41-101`）
 - `deploy/newapi/` 编排（版本锁定、`:?` 必填密钥、`$$` 转义健康检查、独立网络）是仓库内最佳实践范本
 - `deps.py:30-36` CurrentUser 快照规避 async 惰性加载 MissingGreenlet、`db.py:14-16` pytest NullPool——真实踩坑沉淀
-- httpx 客户端统一 `trust_env=False`（`backend/services/ai_planner/llm_client.py:76-77` 等），不读系统代理环境变量——规避本机代理软件（Clash 等）劫持请求返回 502 的陷阱；与附录 8.3 的 git 代理故障同源（代码层已防，shell/git 层未防）
+- httpx 客户端统一 `trust_env=False`（`backend/services/ai_planner/llm_client.py:76-77` 等），不读系统代理环境变量——规避本机代理软件（Clash 等）劫持请求返回 502 的陷阱；与附录 10.3 的 git 代理故障同源（代码层已防，shell/git 层未防）
 - uv workspace 纪律（根 venv 唯一、uv.lock 提交、.dockerignore 排敏感文件）执行到位
 
-### 8.3 开发环境问题：git 连接 GitHub 失败（本地代理未启动）
+### 10.3 开发环境问题：git 连接 GitHub 失败（本地代理未启动）
 
 **现象**：
 
@@ -763,4 +888,4 @@ Failed to connect to 127.0.0.1 port 7897 after 0 ms: Couldn't connect to server
 
 ---
 
-*报告生成：2026-08-31（第一轮：架构与缺陷审计；第二轮：易用性专项走查 + 对标 EasySpider/crawlab/spider-flow 的优化方案）· 审计方式：静态深度阅读（并行扫描 + 关键证据人工复核）· 所有行号基于当前工作区 `feature/project-structure` 分支*
+*报告生成：2026-08-31（第一轮：架构与缺陷审计；第二轮：易用性专项走查 + 对标 EasySpider/crawlab/spider-flow 的优化方案；第三轮：SaaS 多租户升级方案 + 自动化脚本存废决策 + set_admin_account 定性修正）· 审计方式：静态深度阅读（并行扫描 + 关键证据人工复核）· 所有行号基于当前工作区 `feature/project-structure` 分支*
