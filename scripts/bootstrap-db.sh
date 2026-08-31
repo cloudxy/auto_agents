@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================================
-# 空库引导脚本（bootstrap-db）—— 新环境从零建库到迁移链 head 的标准流程
+# 空库引导脚本（bootstrap-db）—— 兼容路径（E0.2 基线修复后非必需）
 #
 # 背景（docs/release-notes-2026-08-30.md「已知遗留项」留档）：
-#   Alembic 迁移链 003/006 对链外表 spider_tasks 做 add_column，而该基线表由
-#   scripts/init_db_sync.py 的 create_all 预建 —— 空库直接 `alembic upgrade head`
-#   会因基线表缺失而失败。因此新环境初始化必须走：
-#     建库（如缺失）→ create_all 基线 → alembic stamp head
-#   基线修复另行排期前，本脚本是新环境引导的唯一推荐入口。
+#   Alembic 迁移链 003/006 曾对链外表 spider_tasks 做 add_column（基线表由
+#   scripts/init_db_sync.py 的 create_all 预建）——空库直接 `alembic upgrade head`
+#   会因基线表缺失而失败，故有本脚本。
+#   ⚠️ 该缺口已由 E0.2 修复（基线迁移 002a 补链外表，见
+#   backend/alembic/versions/002a_baseline_spider_tasks_and_system_configs.py）：
+#   新环境直接 `alembic upgrade head` 即可；本脚本保留为兼容路径，幂等可重复。
 #
 # 流程（幂等，可重复执行；每步失败即停并给出下一步提示）：
 #   Step 1  前置校验（uv 可用）+ 解析 MySQL 连接参数并打印（密码掩码）

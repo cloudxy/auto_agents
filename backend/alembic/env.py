@@ -20,10 +20,12 @@ if config.config_file_name is not None:
 # 动态注入数据库连接串（配置即代码；密码取法与 platform_core.db.DBManager 对齐）
 from config import settings  # noqa: E402
 
+from urllib.parse import quote_plus  # noqa: E402
+
 mysql_conf = settings.MYSQL.DEFAULT
 _password = os.getenv('MYSQL_DEFAULT_PASSWORD') or str(settings.get('MYSQL_DEFAULT_PASSWORD', ''))
 _db_url = (
-    f"mysql+pymysql://{mysql_conf.USER}:{_password}@{mysql_conf.HOST}:"
+    f"mysql+pymysql://{mysql_conf.USER}:{quote_plus(_password)}@{mysql_conf.HOST}:"
     f"{mysql_conf.PORT}/{mysql_conf.DB_NAME}?charset=utf8mb4"
 )
 config.set_main_option("sqlalchemy.url", _db_url)

@@ -414,7 +414,7 @@ Service 划分：`skill_service`（CRUD/扫描/写回/tier 派生）、`skill_sc
 | `backend/services/channel_scheduler_service.py:427,437` | `text(sql)` 对 new-api **外部库**（独立 engine） | C：外部库豁免 | 登记豁免 + 代码注释明示 |
 | `backend/app/api/v1/health.py:34` | `text("SELECT 1")` 主库探测 | C：探测语句（无业务表） | 豁免（无租户语义） |
 
-**结论**：主库上不存在 text() 裸 SQL 业务语句——S1 无"B 类（需改 ORM）"改造项；5 处 Core ORM 语句全部可由 `do_orm_execute` 收口。`consumer.py` 的 `add_all` 写入路径（before_flush 主防线的最大风险点）不属裸语句问题，已由 §7.1-3 覆盖。
+**结论**：主库上不存在 text() 裸 SQL 业务语句——S1 无"B 类（需改 ORM）"改造项；6 处 Core ORM 语句（alert ×2 / config ×2 / state ×2）全部可由 `do_orm_execute` 收口。`consumer.py` 的 `add_all` 写入路径（before_flush 主防线的最大风险点）不属裸语句问题，已由 §7.1-3 覆盖。
 
 **10.2-F 核对结论（未拆分，列 S1 前置小任务）**：现行 `ChannelConfigInfo.limit_quota`（`ge=0`，0=显式关闭该渠道调度）正是审计 10.2-F 警告的语义混载——全局 `DEFAULT_WINDOW_QUOTA: 0` 意为"不启用全局默认"，两个 0 含义冲突（读取侧 `channel_scheduler_service.py:447-473` 以 if/elif 区分，代码自洽但对外契约歧义）。S1 前小任务：schema 增 `enabled: bool`（默认 true）、`limit_quota` 收紧 `ge=1`、读取侧兼容旧 hash（无 enabled 键视为 true）、前端配置弹窗加开关，旧 `limit_quota=0` 语义保留一个版本的兼容读取并在 channel_events 记 deprecation。
 
