@@ -125,6 +125,23 @@ async def get_skill_detail(
     return ok(data=detail.model_dump())
 
 
+@router.post("/{name}/rescore")
+async def rescore_skill(
+    name: str,
+    user: CurrentUser = Depends(require_operator),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """手动触发 AI 重评（入队；评分由后台 worker 消费）"""
+    from backend.services.skill_scoring_service import SkillScoringService
+
+    repo = SkillRepository(session)
+    if not await repo.get_by_name(name):
+        raise NotFoundException(resource=f"技能 {name}")
+    queued = await SkillScoringService.enqueue_rescore(name)
+    await record_audit(session, user, "skill.rescore", f"skill#{name}")
+    return ok(data={"name": name, "queued": queued})
+
+
 @router.put("/{name}/meta")
 async def correct_skill_meta(
     name: str,

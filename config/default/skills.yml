@@ -5,3 +5,14 @@ SKILLS:
   LIBRARY_ROOT: "skills-library"
   # lifespan 启动时是否增量扫描一次（本地单机语义）
   SCAN_ON_STARTUP: false
+  SCORING:
+    # 评分 worker 总开关（lifespan 常驻组件）
+    ENABLED: false
+    # 指定该供应商已添加的轻量模型省钱——依赖方案 B M2（未就绪前告警并回退默认模型，D10 能力开关）
+    MODEL: ""
+    # 逐个评（LLM 串行，防爆预算）
+    MAX_CONCURRENCY: 1
+    # 评分 prompt 版本，变更可触发批量重评
+    PROMPT_VERSION: "v1"
+    # 评分独立预算（0=不限）；与 AI 采集规划的 LLM.MAX_TOKENS_BUDGET 互不挤占
+    MAX_TOKENS_BUDGET: 0

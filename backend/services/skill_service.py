@@ -200,7 +200,20 @@ class SkillService:
         )
         existing.content_hash = content_hash
         await self.session.flush()
+        if existing.sync_state == "hash_changed":
+            await self._enqueue_rescore_best_effort(skill_dir.name)
         return existing
+
+    async def _enqueue_rescore_best_effort(self, name: str) -> None:
+        """内容变更入评分队列（失败仅告警，不阻断扫描）"""
+        try:
+            from platform_core.queues import SKILL_SCORE_QUEUE
+            from platform_core.redis_async import get_async_redis
+
+            redis = await get_async_redis()
+            await redis.lpush(SKILL_SCORE_QUEUE, name)
+        except Exception as exc:  # noqa: BLE001 队列不可用不阻断扫描
+            logger.warning(f"评分入队失败（忽略） | skill={name} err={exc}")
 
     async def _mark_parse_error(
         self, skill_dir: Path, root: Path, existing: Optional[Skill]

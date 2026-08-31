@@ -151,6 +151,11 @@ def create_app():
                 await llm_usage_flush.stop()
             except Exception as e:  # noqa: BLE001
                 get_logger("global").warning(f"LLM 用量聚合任务停止失败（忽略）: {e}")
+        if skill_scoring_worker is not None:
+            try:
+                await skill_scoring_worker.stop()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"技能评分 worker 停止失败（忽略）: {e}")
 
     app = FastAPI(
         title="Auto Agents API",
