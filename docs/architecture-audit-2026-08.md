@@ -2,7 +2,7 @@
 
 > 审计范围：backend / scrapy / platform_core / config / frontend(admin+official) / deploy / scripts / CI
 > 方法：三路并行深度代码扫描 + 关键发现逐行人肉核验（P0 全部 4 条、prod 配置、前端注册调用均已亲自复核）。
-> 性质：诊断报告，本文档不伴随任何代码改动；修复方案与演进设计见第 4/5 章。
+> 性质：诊断报告，本文档不伴随任何代码改动；修复方案与演进设计见第 4/5 章，**方案自复核与修订见第 10 章（实施时以其为准）**。
 
 ---
 
@@ -22,9 +22,11 @@
 
 **自动化脚本存废决策**（详见第 9 章）：保留 5（bootstrap-db.sh / check-arch.sh / migrate.sh / init_db_sync.py(内部依赖) / set_admin_account.py），删除 5（init-db.sh / init-database.sh / start.sh / start_frontend.sh / run-spider.sh，均为被 run.py 编排器或 bootstrap 收编的旧入口）。
 
-**最优先行动**（详见第 5 章批次 1）：修 RetryMiddleware 重试上限、补 webhook 密钥启动守卫、token 用量落库、httpx `proxies=` 参数替换。
+**最优先行动**（详见第 5 章批次 1）：删除自定义 RetryMiddleware 启用内置（10.1 修正 2）、补 webhook 密钥启动守卫、token 用量落库（按 10.2-C 的 4 列唯一键建表）、httpx `proxies=` 参数替换。
 
-另：开发环境问题（git 连接 GitHub 失败：本地代理未启动）的诊断与解决方案见附录 10.3。
+**方案复核结论**（第 10 章，2026-08-31 第四轮）：诊断层 3 条修正（P1-1 证据不在版本库 → 重新定性；P0-1 修复主次颠倒；P0-2 影响面需收窄），方案层 7 处实施级缺口（**A** SaaS 隔离押错收口点 / **B** 唯一约束漏 4 表 + `is_active` 跨租户互斥 / **C** 用量表仍会二次迁移 / **D** 熔断 Redis 降级语义未定义 / **E** 故障转移漏模型能力语义 / **F** `limit_quota=0` 语义重载 / **G** 迁移可回滚性缺评估）。其中 A、B 为 S1 上线即爆的硬伤。
+
+另：开发环境问题（git 连接 GitHub 失败：本地代理未启动）的诊断与解决方案见附录 11.3。
 
 ---
 
@@ -112,13 +114,13 @@ class RetryMiddleware:
 
 三个叠加缺陷：
 
-1. 对 429/5xx **无条件重试，无任何次数上限**，也不读 `retry_times`；与内置 `scrapy.downloadermiddlewares.retry.RetryMiddleware` 同为 550 优先级且未禁用内置（`scrapy/settings.py:65`），自定义的先短路响应链，内置的计数上限永远不生效。
+1. 对 429/5xx **无条件重试，无任何次数上限**，也不读 `retry_times`；内置 `scrapy.downloadermiddlewares.retry.RetryMiddleware` 在 `DOWNLOADER_MIDDLEWARES_BASE` 中的默认优先级正是 550，用户字典里 `middlewares.RetryMiddleware: 550`（`scrapy/settings.py:65`）构成**优先级槽位冲突**（→ 10.1 修正 2 精确化），内置的计数上限不生效。
 2. `retry_req.meta["download_delay"] = 5` 是自创 meta 键，Scrapy 下载器不消费该键（仅认 spider 属性/槽位设置）——429 风暴下仍按全局 1s 延迟全速重试。
 3. 连锁后果：爬虫永不空闲 → `IdleAutoClose` 不触发 → webhook 不回调 → DB 任务**永久卡 running**。全仓无 running 任务超时回收逻辑（仅 Redis 活跃键 86400s TTL 自过期，DB 行无人纠正）。
 
-**修复方案**：
-- 读取 `request.meta.get("retry_times", 0)`，达到 `RETRY_TIMES`（建议默认 3）后放行响应并记 warning；
-- 429 退避改为 `spider.download_delay` 临时调整或 `twisted` 层延迟（或直接删自定义中间件、启用内置 RetryMiddleware 并配置 `RETRY_HTTP_CODES`）；
+**修复方案**（⚠️ 已被 10.1 修正 2 改写主次，以下为修订后版本）：
+- **首选：删除自定义 RetryMiddleware**（类定义 + `DOWNLOADER_MIDDLEWARES` 注册行一并删）——`scrapy/settings.py:43-44` 的 `RETRY_TIMES=3` 与 `RETRY_HTTP_CODES=[500,502,503,504,408,429]` 已就绪，内置中间件删除后立即接管，零新增代码；
+- 仅当确需"429 专属退避"才保留自定义：必须继承内置 `RetryMiddleware` 并复用其 `_retry()` 维护 `retry_times`，429 退避走 AutoThrottle / `DOWNLOAD_SLOTS`，不用自创 meta 键；
 - 兜底：consumer 增加周期扫描——`running` 超过 N 小时且 Redis 活跃键不存在的任务置 failed（可复用现有 ZSET 重试机制）；
 - 补测试：真实经过下载器中间件链的集成测试（现有测试全部 mock，掩盖了此类缺陷）。
 
@@ -126,9 +128,11 @@ class RetryMiddleware:
 
 **证据**：`config/default/webhook.yml:6`（`SECRET_KEY: "change-me-in-production"`）+ `backend/app/external_api/v1/webhooks.py:46`（`secret = str(settings.WEBHOOK.SECRET_KEY)` 直接使用）。
 
-防御不对称：JWT 密钥同样默认占位符，但 `backend/utils/auth.py:13-17` 在导入时强制抛错拒绝默认值；webhook 密钥没有等价防线。`config/prod/.env` 也未配置 webhook 密钥。
+防御不对称：JWT 密钥同样默认占位符，但 `backend/utils/auth.py:13-17` 在导入时强制抛错拒绝默认值；webhook 密钥没有等价防线。
 
-**影响**：漏配部署时，任何人用仓库内公开的默认密钥即可签名调用 `POST /external/v1/webhooks/spider/callback`，伪造任意 `task_id` 的 completed/failed 终态 → 篡改任务状态、触发失败重试链、钉钉/邮件通知轰炸。
+**影响**（已按 10.1 修正 3 收窄）：漏配部署时，任何人用仓库内公开的默认密钥即可签名调用 `POST /external/v1/webhooks/spider/callback`，伪造任意 `task_id` 的 completed/failed 终态 → 篡改任务状态、触发失败重试链、钉钉/邮件通知。
+
+**已有的削弱因素**（原报告未计入）：`webhooks.py:41-45` 已实现时间戳防重放（`WEBHOOK.MAX_CLOCK_SKEW` 默认 300s，签名载荷为 `{timestamp}.{raw_body}`），攻击者无法重放旧回调，只能在 ±5 分钟窗口内构造新签名。因此"通知轰炸"需持续主动构造而非简单重放。P0 定级维持——伪造终态本身即完整破坏任务状态机。
 
 **修复方案**：比照 `auth.py` 的 JWT 守卫，在应用工厂/lifespan 启动时校验 `WEBHOOK.SECRET_KEY`——非空、非占位符、长度 ≥ 32，否则拒绝启动；scrapy 侧 `SpiderCloseWebhook` 同样读取该配置，两侧同源校验。
 
@@ -169,9 +173,11 @@ async with httpx.AsyncClient(timeout=probe_timeout) as client:
 
 ### 3.2 P1 —— 重要缺陷（13 条）
 
-#### P1-1 prod 配置键名失效 + `${}` 不展开 → 生产部署启动即失败 ✅
+#### P1-1 prod 配置无可交付载体 → 生产部署启动即失败 ⚠️ 已被 10.1 修正 1 重新定性
 
-**证据**：`config/prod/.env:2-5`（全文仅 5 行）：
+> **原标题**："prod 配置键名失效 + `${}` 不展开"。原证据 `config/prod/.env` **不在版本库中**（被 `.gitignore:47` 的 `config/**/.env` 排除，`git ls-files config/prod/` 仅 5 个 yml），审计的是审计者本机的未跟踪文件。结论（prod 启动失败）巧合正确但因果链不同，修复动作随之改变——详见 10.1 修正 1。以下保留原始记录供追溯。
+
+**原证据**：`config/prod/.env:2-5`（全文仅 5 行，本机未跟踪文件）：
 
 ```
 MYSQL_DEFAULT_PASSWORD="${PROD_MYSQL_PASSWORD}"
@@ -407,6 +413,8 @@ export const register = (username: string, email: string, password: string) => {
 
 `llm_chat` 按序尝试：每个候选 1 次请求 + 对 429/5xx 有限重试（保留现有指数退避但上限 2 次）；遇到**硬失败**（连接错误/超时/401/403/404 model）立即切下一候选；响应中记录实际使用的 provider_id（供用量归集与前端展示）。全部耗尽才抛 `LLMAllProvidersFailedException`（AppException 子类，聚合各候选错误摘要）。
 
+> ⚠️ 补充约束（**10.2-E**）：候选链必须携带**模型能力分级**（`model_tier`），仅同级内静默转移，跨级降质转移须记 warning 并写入 ai_plan 试采历史——否则 orchestrator 的质量评判会把劣质 selectors 当正常结果处理。
+
 #### 4.1.3 周期健康巡检
 
 - lifespan 中新增 `LLMHealthProbeTask`（与 channel scheduler 同模式：分布式锁 + 间隔可配 `LLM.HEALTH_CHECK_INTERVAL`）；
@@ -415,6 +423,8 @@ export const register = (username: string, email: string, password: string) => {
 - 熔断状态落库（不进程内存），多副本一致。
 
 #### 4.1.4 Token 用量持久化（同时解决 P0-3）
+
+> ⚠️ 本节表结构已被 **10.2-C 修正**：唯一键必须一次定为 4 列（含 `tenant_id`），否则 S3 仍需二次迁移；熔断的 Redis 降级语义见 **10.2-D**（fail-closed）。以下为原始设计，建表时以 10.2-C/D 为准。
 
 新表：
 
@@ -458,6 +468,7 @@ llm_token_usage (
 
 - `GET /newapi/channels` —— 合并视图：new-api 管理 API 渠道列表 ⨝ 本地 Redis 配置（含 effective 额度：per-channel > 全局默认）
 - `PUT /newapi/channels/{channel_id}/config` —— body `{ limit_quota: int, window_hours: int, cooldown_seconds: int }`，写 `newapi:channel:cfg:{id}` hash（经 `get_async_redis()`；字段名即调度器读取侧契约——`limit_quota<=0` 视为显式关闭该渠道调度，见 `channel_scheduler_service.py:444` docstring 与 `newapi.yml:29` 注释）
+  > ⚠️ **10.2-F 修正**：不要把 `limit_quota=0` 开放给前端承载"关闭调度"语义——它与全局 `DEFAULT_WINDOW_QUOTA: 0`（"不启用全局默认"）含义冲突。body 改为显式 `{ enabled: bool, limit_quota: int>0, ... }`。
 - `DELETE /newapi/channels/{channel_id}/config` —— 清除 per-channel 配置，回退全局默认
 
 Service 层新建 `channel_config_service.py`（hash 字段名与 scheduler 读取侧严格对齐——以 `channel_scheduler_service.py:447` 的 hkey 契约为准）；写操作记 `channel_events`（复用现有事件表）+ 现有通知通道。
@@ -496,7 +507,7 @@ NEWAPI.ENABLED（总开关）
 
 | 批次 | 内容 | 预估 | 验收标准 |
 |------|------|------|----------|
-| **批次 1（P0）** | P0-1 重试上限+running 回收；P0-2 webhook 守卫；P0-3 用量落库（可先做最小版：Redis 聚合+定时 flush，表结构按 4.1.4）；P0-4 httpx proxy 参数+测试重写 | 1-2 天 | `uv run pytest -x -q backend/tests` 退出码 0；新增回归测试覆盖 4 条；默认密钥启动被拒（curl 验证） |
+| **批次 1（P0）** | P0-1 **删自定义 RetryMiddleware 启用内置**（10.1-2）+ running 回收；P0-2 webhook 守卫；P0-3 用量落库（Redis 聚合+定时 flush，**表结构按 10.2-C：唯一键含 tenant_id 4 列**，熔断降级按 10.2-D fail-closed）；P0-4 httpx proxy 参数+测试重写；**P1-1 补 `config/prod/.env.example` + `/health/config` 自检**（10.1-1 重新定性后前移） | 1-2 天 | `uv run pytest -x -q backend/tests` 退出码 0；新增回归测试覆盖 4 条；默认密钥启动被拒（curl 验证）；**429 mock 站点验证重试在 3 次后停止** |
 | **批次 2（P1）** | P1-1~5、7~11、13（prod 配置、compose 绑定、前端 register、丢数据兜底、openweather、反爬接线、RedisPipeline、bcrypt、v2 health、审计独立 session、pre_ping）；P1-6/12 并入批次 4 | 3-5 天 | pytest + check-arch 双绿；`docker compose up` 后宿主机 curl 9111 health 通；前端注册 e2e 可用；scrapy 对 429 站点不再无限重试（本地起 mock 站点验证） |
 | **批次 3（P2 backlog）** | 按主题推进：安全加固（B1 角色默认 viewer、B4 清洗白名单、B5 脚本密钥）→ 架构收口（A1/A2/A3）→ 性能（D1 批量去重、D3 gather）→ 工程化（F1 扫描盲区、F2 前端测试、F5 脚本合并）→ 前端（G1/G2/G4） | 持续 | 每项独立 PR，各自带测试；check-arch 盲区修复后全仓扫描 0 违规 |
 | **批次 4（演进）** | 4.1 LLM 故障转移 + 4.2 调度接线 | 1-2 周 | 见 4.1.6 / 4.2.5 验收标准 |
@@ -742,6 +753,8 @@ tenants (id, name, slug UNIQUE, plan VARCHAR(16) DEFAULT 'free', status VARCHAR(
 
 **users 表改造**：`+ tenant_id INT NULL`（NULL = 平台超管，现有 is_admin 用户回填 NULL）、`+ tenant_role VARCHAR(16)`（owner / admin / operator / viewer），唯一约束改 `UNIQUE(tenant_id, username)`（email 保持全局唯一）；现有全局 `role` 保留过渡期并映射到 tenant_role。
 
+> ⚠️ **10.2-B 修正**：users 不是唯一需要改约束的表——另有 4 张业务表持有全局 unique（`spider_definition.name` / `llm_provider.name` / `task_template.name` / `system_config.config_key`），且 `llm_providers.is_active` 的"全表至多一行"互斥语义会导致**跨租户互相踢激活行**。清单与修法见 10.2-B，属 S1 的 P0 级门槛。
+
 **JWT claims 扩展**：`{user_id, tenant_id, tenant_role, is_platform_admin}`；`deps.py` 的 CurrentUser 快照同步扩展，现有 `require_operator/admin` 依赖改读 tenant_role。
 
 **两级权限模型**：
@@ -753,7 +766,7 @@ tenants (id, name, slug UNIQUE, plan VARCHAR(16) DEFAULT 'free', status VARCHAR(
 | 租户 | admin | 本租户业务全权（现 operator+ 调度/告警） |
 | 租户 | operator / viewer | 同现有语义，但仅限本租户数据 |
 
-**行级隔离实现（本仓库的天然收口点）**：
+**行级隔离实现** ⚠️ **本段的"BaseRepository 是天然收口点"判断已被 10.2-A 推翻**（实测 58 处子类自定义查询 + 7 处 Service 裸 `session.execute` 绕过它，且 `with_loader_criteria` 覆盖不到写入侧）。实施时以 **10.2-A 的双侧收口方案**为准，以下为原始设计供追溯：
 
 1. `platform_core/repository.py` BaseRepository 增加租户过滤——asyncpg/SQLAlchemy 侧用 `with_loader_criteria` 对声明了 `tenant_id` 的模型全局追加条件，租户上下文经 `contextvars.ContextVar` 从请求中间件（解析 JWT）注入；
 2. **平台级豁免清单**（不加过滤）：tenants、system_config、channel_events、channel_probe_results、users(tenant_id IS NULL 的超管由服务层处理)；
@@ -780,7 +793,7 @@ tenants (id, name, slug UNIQUE, plan VARCHAR(16) DEFAULT 'free', status VARCHAR(
 
 | 阶段 | 内容 | 依赖 | 验收 |
 |------|------|------|------|
-| **S1 租户基座** | tenants 表 + users 租户化 + 全业务表 tenant_id 回填（默认租户承接存量数据）+ BaseRepository 行级过滤 + JWT/两级 RBAC + 中间件注入租户上下文 | **前置：批次 1（P0 安全）与 UX-B4 路由守卫必须先完成**——多租户会放大一切越权缺口 | 越权测试套件：A 租户 token 访问 B 租户任务/结果/模板/供应商全部 403/404；pytest 全绿 |
+| **S1 租户基座** | tenants 表 + users 租户化 + 全业务表 tenant_id 回填（默认租户承接存量数据）+ **模型层写入侧 + `do_orm_execute` 读取侧双侧隔离（10.2-A，非 BaseRepository）** + **唯一约束/互斥语义清查（10.2-B）** + JWT/两级 RBAC + 中间件注入租户上下文 | **前置：批次 1（P0 安全）与 UX-B4 路由守卫必须先完成**——多租户会放大一切越权缺口 | 越权测试套件：A 租户 token 访问 B 租户任务/结果/模板/供应商全部 403/404；**`consumer.py` 批量写入路径 tenant_id 非空断言通过**；pytest 全绿 |
 | **S2 子账号管理** | members CRUD + 角色分配 + 禁用 + 重置密码 + 成员配额 + 前端「成员管理」页 + 审计 | S1 | 租户 admin 可自助管理子账号（补 G4）；被禁用成员 token 立即失效（或短窗内） |
 | **S3 配额与用量** | 任务并发/结果存储/LLM token 三类配额 + 租户用量看板（4.1.4 用量表加 tenant 维度）+ 超限业务码与前端提示 | S1 + 批次 1 的用量表 | 超配额任务被拒且文案可行动；用量看板按租户/成员双维度 |
 | **S4 能力租户化** | llm_providers 租户自带 key；平台公共 provider 兜底策略；套餐→new-api 渠道组分配（远期） | S3 + 4.1/4.2 完成 | 租户各自配 key 各自计量；平台成本可控 |
@@ -827,26 +840,205 @@ tenants (id, name, slug UNIQUE, plan VARCHAR(16) DEFAULT 'free', status VARCHAR(
 
 ---
 
-## 10. 附录
+## 10. 方案复核与修订（第四轮，2026-08-31）
 
-### 10.1 测试盲区清单（回归风险最高处）
+> 复核对象：本报告自身的**诊断证据链与演进方案可实施性**（非新一轮代码审计）。
+> 方法：对第 3/4/8 章的承重前提逐条回到代码核验——webhook 防重放实现、httpx 锁定版本、`config/prod/` 版本库状态、`scrapy/settings.py` 的 RETRY 配置、BaseRepository 实际方法集与子类查询分布、consumer 写入路径、全仓 unique 约束清单、渠道配置 hash 读写方。
+> 定位：**10.1 = 诊断层修正**（改变已有条目的定性或修法）；**10.2 = 方案层缺口**（原方案照做会在实施时失败）。
+
+### 10.1 诊断层修正（3 条）
+
+#### 修正 1 —— P1-1 的证据不在版本库中（重新定性）
+
+**核验**：`config/prod/.env` 被 `.gitignore:47` 的 `config/**/.env` 排除；`git ls-files config/prod/` 仅返回 `log.yml / mysql.yml / redis.yml / settings.yml / web.yml` 五个文件。原报告审计的是审计者本机的未跟踪文件。
+
+**影响**：原结论"生产部署启动即失败"巧合正确，但因果链完全不同——真实部署环境**根本没有这个文件** → 全部落到 yml 默认占位符 → `backend/utils/auth.py:13-17` fail-fast 抛 ValueError。因此"统一 prod `.env` 键名为双下划线格式"这个修复动作**没有落点**（改不了不存在的文件）。
+
+**重新定性**：P1 级 —— **配置契约缺少可交付载体**。真实缺陷是仓库既没有 `config/prod/.env.example` 声明生产必需键位，也没有启动期"哪些键未生效"的自检能力，导致部署方只能靠读源码反推需要配什么。
+
+**修法**（替代原 P1-1 修复方案）：
+
+1. 新增 `config/prod/.env.example`（**入库**，仅键名 + 注释 + 格式示例，零真实值）：完整列出 `AUTO_AGENTS_JWT__SECRET_KEY` / `AUTO_AGENTS_WEBHOOK__SECRET_KEY` / `MYSQL_DEFAULT_PASSWORD` / `REDIS_DEFAULT_PASSWORD` / `LLM_ENCRYPTION_KEY` / `AUTO_AGENTS_EXTERNAL_API__API_KEYS` 等，并在文件头注明"由部署脚本注入真实值，Dynaconf 不做 `${VAR}` shell 展开"——原报告发现的"`${}` 不展开"这个**知识点是对的**，应沉淀进 example 注释防止后人重犯；
+2. 补 `GET /health/config`（require_admin）：列出所有必需键的"已配置 / 用默认值 / 缺失"三态，值一律脱敏为 `***`（仅回报是否命中占位符）；
+3. `.gitignore` 增 `!config/prod/.env.example` 豁免，确保 example 不被 `config/**/.env` 规则连带排除（**注意**：`config/**/.env` 不匹配 `.env.example`，但显式豁免可防后续规则收紧时误伤）。
+
+#### 修正 2 —— P0-1 修复方案主次颠倒（改写修法）
+
+**核验**：`scrapy/settings.py:43-44` 已配置 `RETRY_TIMES = project_settings.get("RETRY_TIMES", 3)` 与 `RETRY_HTTP_CODES = [500, 502, 503, 504, 408, 429]`（配置源 `config/scrapy/default/settings.yml:10-11`）——**内置 RetryMiddleware 所需配置全部就绪**。
+
+**修正的两点**：
+
+1. **机理描述精确化**：内置 `RetryMiddleware` 在 Scrapy 的 `DOWNLOADER_MIDDLEWARES_BASE` 中默认优先级正是 550，用户字典写 `middlewares.RetryMiddleware: 550` 构成**同槽位冲突**，而非原报告所述"两个中间件同为 550 并存、自定义的先短路"。
+2. **修法主次反了**：原方案把"给自定义中间件补 `retry_times` 计数"列为首选、"删掉它用内置"塞进括号当备选——等于让人手写一遍框架已实现的逻辑（还要自己处理 `RETRY_PRIORITY_ADJUST`、重试耗尽后的 `retry/max_reached` 统计、`dont_retry` meta 等细节）。**首选应是删除**：删掉 `scrapy/middlewares/__init__.py:325-336` 的类定义与 `settings.py:65` 的注册行，内置立即接管，零新增代码、零新增测试面。
+
+**保留自定义的唯一正当理由**是需要"429 专属退避"。若确需，必须 `class RetryMiddleware(scrapy.downloadermiddlewares.retry.RetryMiddleware)` 继承并复用父类 `_retry()`（它维护 `retry_times` 与上限），429 的降速走 AutoThrottle 或 `DOWNLOAD_SLOTS` 的 `delay`，而不是原代码自创的 `meta["download_delay"]`（Scrapy 下载器不消费该键——原报告这一点判断正确）。
+
+#### 修正 3 —— P0-2 影响面需收窄（定级维持）
+
+**核验**：`backend/app/external_api/v1/webhooks.py:41-45` 已实现时间戳防重放——签名载荷为 `{timestamp}.{raw_body}`，`abs(time.time() - ts) > MAX_CLOCK_SKEW`（默认 300s）直接拒绝。
+
+**修正**：原报告影响描述中的"触发失败重试链、钉钉/邮件通知轰炸"被这层防线削弱——攻击者无法重放截获的旧回调，必须在 ±5 分钟窗口内持续主动构造签名。**P0 定级维持不变**：默认密钥公开在仓库中，伪造 `task_id` 终态本身即完整破坏任务状态机，fail-fast 守卫仍是必需的。此修正只影响风险叙述准确性，不影响修复优先级。
+
+### 10.2 方案层缺口（7 处，A/B 为 S1 上线即爆）
+
+#### A. SaaS 行级隔离押错收口点（S1 根本风险）
+
+**原方案**（8.3）：BaseRepository 是"天然的过滤收口点"，用 `with_loader_criteria` 全局追加 `tenant_id` 条件。
+
+**核验数据**：
+
+| 项 | 实测 |
+|---|---|
+| `platform_core/repository.py` BaseRepository 方法数 | 6 个通用 CRUD（`get_by_id` / `get_all` / `create` / `update` / `delete` / `exists`） |
+| 子类 Repository 自定义查询 | **58 处** select/update/delete/insert，分布于 11 个文件（`spider_result_repository.py` 12 处、`spider_task_repository.py` 11 处、`newapi_repository.py` 8 处…） |
+| Service/API 层直接 `session.execute` | **7 个文件**（auth / channel_scheduler / alert / config / ai_planner.state / v1.health / v2.health） |
+| consumer 批量写入 | `backend/tasks/consumer.py:563` `session.add_all(instances)` —— 唯一批量写入点 |
+
+**两个致命盲区**：
+
+1. **写入侧完全不设防**：`with_loader_criteria` 只作用于 ORM 实体**加载**。`consumer.py:563` 的 `add_all` 若不显式填 `tenant_id`，直接写出 `tenant_id IS NULL` 的脏数据——而这是结果回流主路径，脏数据规模等于全部采集量，且**读取侧过滤会让这批数据对所有租户都不可见**（NULL 不等于任何 tenant_id），表现为"采集成功但数据凭空消失"，排查成本极高。
+2. **Core 层操作绕过**：`with_loader_criteria` 覆盖不到 bulk update/delete、聚合 `count()`、导出游标——而 `spider_result_repository.py` 恰好是自定义查询最密集的一个（12 处，含导出与统计）。
+
+**修订方案（双侧收口，写入侧优先）**：
+
+```
+写入侧（第一道，防脏数据）
+├─ platform_core/models/mixins.py 新增 TenantMixin
+│    tenant_id = Column(Integer, nullable=False, index=True)
+│    __init__ 中从 ContextVar 自动填充（未设置则抛异常）
+└─ SessionEvents.before_flush 断言：session.new 中所有 TenantMixin 实例
+     tenant_id 非空 —— 漏填在 flush 前就炸，而非上线后靠 SQL 排查
+
+读取侧（第二道，防越权）
+└─ do_orm_execute 事件钩子（而非 with_loader_criteria）
+     覆盖 Core 层 select/update/delete；对声明 TenantMixin 的模型
+     追加 tenant_id 条件；平台级豁免清单走白名单跳过
+```
+
+**为什么用 `do_orm_execute` 而非 `with_loader_criteria`**：后者是 ORM 加载期选项，只对 `select()` 的实体加载生效；前者拦截 session 上所有 ORM 执行（含 Core 风格 update/delete 与聚合），是本仓库这种"子类自定义查询密集"形态的唯一可靠拦截点。
+
+**R13 红线的定位修正**：8.6 把 R13（业务查询必须经租户过滤收口）当作隔离保障。它只能 grep 出"新增的裸查询"，**扫不出写入路径漏填 tenant_id**——后者才是最高频的人为失误。R13 是补充手段，`before_flush` 断言才是主防线。
+
+**S1 验收追加项**：`consumer.py` 结果回流的 tenant_id 非空断言测试（走真实 flush，不 mock session）。
+
+#### B. 唯一约束漏 4 张表 + `is_active` 跨租户互斥（S1 上线即爆）
+
+**原方案**（8.3）只提 `UNIQUE(tenant_id, username)`。**全仓实测的 6 个全局 unique**：
+
+| 表 | 字段 | 证据 | S1 处理 |
+|---|---|---|---|
+| users | username | `models/user.py:12` | → `UNIQUE(tenant_id, username)`（原方案已含） |
+| users | email | `models/user.py:13` | 保持全局唯一（原方案已含，合理——邮箱是跨租户登录标识） |
+| spider_definitions | name | `models/spider_definition.py:18` | → `UNIQUE(tenant_id, name)`，配合 8.3 的 `scope: platform\|tenant`（平台预置行 tenant_id=NULL） |
+| **llm_providers** | **name** | `models/llm_provider.py:25` | → `UNIQUE(tenant_id, name)` —— **S4 租户自带 key 的前置**，否则 A 租户建了 `default` B 租户就建不了 |
+| **task_templates** | **name** | `models/task_template.py:12` | → `UNIQUE(tenant_id, name)`（顺带把 `created_by` 统一为 user_id，同 8.3） |
+| system_config | config_key | `models/system_config.py:10` | 保持全局（平台级豁免清单内，合理） |
+
+**更隐蔽的一条 —— `is_active` 互斥语义**：`llm_providers.is_active` 的设计语义是"**全表**至多一行"（`models/llm_provider.py:41` 注释明写），实现为 `activate_exclusive` 单语句互斥 UPDATE（`llm_provider_service.py:276`）。租户化后 A 租户激活供应商会**把 B 租户的激活行一并置 0**——所有租户互相踢激活，且症状是"我的供应商莫名变成未激活"，用户无法自查。
+
+**修法**：`activate_exclusive` 的 UPDATE 加 `WHERE tenant_id = :tid` 条件，互斥范围从全表收窄为租户内；模型注释同步改为"**同租户内**至多一行"；补跨租户激活互不影响的测试。
+
+**定级**：本条与越权测试并列为 **S1 的 P0 级门槛**——B 类问题不修，S4"llm_providers 租户化"一上线即全租户故障。
+
+#### C. 用量表仍会二次迁移（批次 1 建表时就要定对）
+
+**原方案**5.1 顺序依赖已注意到"批次 1 直接按 4.1.4 建表避免二次迁移"，但 4.1.4 的唯一键是 `(provider_name, model, stat_date)` 三列，而 S3 要加 tenant 维度 → 唯一键得改 4 列 → **仍是二次迁移**（且是改唯一键，比加列更重）。
+
+既然第 8 章 SaaS 化已是 2026-08-31 既定决策，批次 1 建表就该一次定对：
+
+```sql
+llm_token_usage (
+  id BIGINT PK AUTO_INCREMENT,
+  tenant_id INT NULL,              -- NULL = 平台级/存量数据（S1 回填默认租户）
+  provider_id INT NULL,
+  provider_name VARCHAR(64),
+  model VARCHAR(128),
+  stat_date DATE,
+  prompt_tokens BIGINT DEFAULT 0,
+  completion_tokens BIGINT DEFAULT 0,
+  total_tokens BIGINT DEFAULT 0,
+  request_count INT DEFAULT 0,
+  failed_count INT DEFAULT 0,
+  updated_at DATETIME,
+  UNIQUE KEY uq (tenant_id, provider_name, model, stat_date),   -- 一次定成 4 列
+  KEY idx_tenant_date (tenant_id, stat_date)                    -- S3 用量看板查询路径
+)
+```
+
+Redis 累计键同步带租户维度：`llm:usage:{tenant}:{provider}:{model}:{date}`（批次 1 阶段 tenant 位填 `_platform`）。
+
+#### D. 预算熔断改读 Redis 后的降级语义未定义
+
+**原方案**（4.1.4）："预算熔断改读 Redis 聚合值"——但没写 **Redis 不可用时怎么办**。
+
+两个问题：
+
+1. **每轮重试多一次往返**：熔断判断在重试循环内每轮执行（`llm_client.py:175` `for attempt in range(cfg.max_retries)` 内），改 Redis 后 N 次重试 = N 次额外往返。修法：候选链每个 provider 只在**首次尝试前**读一次 Redis，循环内复用该快照。
+2. **降级方向必须与限流相反**：项目在登录限流处已有 fail-open 先例（commit `7f8bdf5` "Redis 故障 fail-open 显式化"）。但**预算熔断是成本闸门，fail-open 等于 Redis 一挂就无限花钱**——必须 **fail-closed**：Redis 不可达时拒绝 LLM 调用并抛明确业务异常（"用量服务不可用，为防止超支已暂停 LLM 调用"）。
+
+**要求**：在 4.1.4 与 `llm_client.py` 的模块 docstring 里**并列写明**两处相反的降级方向及其理由（限流 fail-open 保可用性 / 熔断 fail-closed 保成本），否则后续维护者会按"项目惯例"把它改成 fail-open。
+
+#### E. 故障转移漏模型能力语义（静默降质）
+
+**原方案**（4.1.2）候选链按 priority 升序自动切换，但未定义**跨 provider 的模型能力落差**。active 是 gpt-4o、backup 只有 qwen-max 时切过去，selectors 生成质量断崖——而 `ai_planner/orchestrator.py` 的质量评判 + 自动修复迭代（MAX_ITERATIONS=2）会把劣质输出**当正常结果处理**并注册进 `spider_definitions`。静默降质比直接失败更难排查（用户看到的是"AI 生成的爬虫质量突然变差"，无任何线索指向供应商切换）。
+
+**修法**：`llm_providers` 增 `model_tier VARCHAR(16)`（`strong` / `basic`，默认 `basic`）；候选链**优先同级内转移**；跨级降质转移必须 ① 记 warning ② 写入 `ai_plans` 的试采历史（前端试采历史表增"使用供应商"列）③ 在 orchestrator 质量评判不通过时把"供应商已降级"作为失败原因之一回报。
+
+#### F. `limit_quota=0` 语义重载（4.2 CRUD 开放前必须拆）
+
+`newapi.yml:30` 的全局 `DEFAULT_WINDOW_QUOTA: 0` = "不启用全局默认，仅调度 Redis 配过的渠道"；4.2.1 又定义 per-channel `limit_quota<=0` = "显式关闭该渠道调度"。同一个 `0` 在两层含义不同。
+
+CRUD 一旦开给前端，运维在渠道配置里填 0 时无法区分三种意图：关闭该渠道调度 / 该渠道用全局默认 / 手滑填错。
+
+**修法**：per-channel hash 增显式 `enabled` 字段，`PUT` body 改为 `{ enabled: bool, limit_quota: int > 0, window_hours: int, cooldown_seconds: int }`（`limit_quota` 加 `gt=0` 校验）；"回退全局默认"走 `DELETE /config`（原方案已有该端点，语义正确）。调度器读取侧兼容旧 hash：无 `enabled` 字段时按 `limit_quota > 0` 判定，保持向后兼容。
+
+#### G. 迁移可回滚性缺评估（S1 工期估算无依据）
+
+S1 要给 9 张业务表加 `tenant_id` 并回填，其中 `spider_results` 是随采集无限增长的最大表。原方案标"2-3 周"但缺三项必需评估：
+
+1. **在线 DDL 可行性**：MySQL 8 对"加带默认值的列"支持 `ALGORITHM=INSTANT`，但**加索引不是 instant**（`tenant_id` 必须有索引才能支撑行级过滤的查询性能）。大表加索引需评估 `INPLACE` 的耗时与锁窗口，或走 gh-ost / pt-online-schema-change。
+2. **分批回填策略**：`UPDATE ... SET tenant_id = 1 WHERE tenant_id IS NULL` 全表单语句会长事务锁表。需按主键区间分批（如每批 5000 行 + sleep），并在 alembic 迁移里显式实现而非留给运维手工。
+3. **downgrade 路径**：alembic `downgrade()` 必须可用（删列 + 删索引），且要说明"降级后 SaaS 代码不可运行"这一前提。
+
+**要求**：S1 排期前先在生产量级数据上实测 `spider_results` 的加列 + 加索引耗时，据此重估工期；11.1 的测试盲区清单已指出"alembic 迁移无 upgrade 测试"，S1 的迁移必须补 upgrade/downgrade 双向测试（这是全仓最大的一次迁移，不能是第一次没测试的迁移）。
+
+### 10.3 未发现方向性问题的章节
+
+第 6 章（易用性走查）、第 7 章（对标 EasySpider/crawlab/spider-flow）、第 9 章（脚本存废）、原附录（测试盲区 / 优良实践 / git 代理诊断）本轮复核未发现方向性问题：UX-B1~B8 的行号与判断准确；7.4"明确不照搬"的边界划分合理；第 9 章"删代码优于扩扫描"（用删除 `init-db.sh` 替代扩展 check-arch R2 扫描范围）是正确取舍。
+
+### 10.4 修订后的实施顺序调整
+
+| 调整 | 原 | 改为 | 理由 |
+|---|---|---|---|
+| P0-1 修法 | 给自定义中间件补计数 | 删自定义、用内置 | 配置已就绪，零新增代码（10.1-2） |
+| P1-1 | 批次 2，改 `.env` 键名 | **前移批次 1**，补 `.env.example` + `/health/config` | 重新定性后成本极低且是部署前置（10.1-1） |
+| 用量表 | 批次 1 按 4.1.4 三列唯一键 | 批次 1 按 10.2-C 四列唯一键 | 避免 S3 改唯一键的二次迁移 |
+| S1 隔离实现 | BaseRepository + `with_loader_criteria` | 模型层 `TenantMixin` + `before_flush` 断言 + `do_orm_execute` | 原方案覆盖不到 58 处子类查询与写入侧（10.2-A） |
+| S1 门槛 | 越权测试全绿 | **+ 唯一约束/`is_active` 互斥清查** | B 类不修则 S4 上线即全租户故障（10.2-B） |
+| S1 排期 | 直接标 2-3 周 | **先实测大表 DDL 耗时再定** | 缺在线 DDL 与回填评估（10.2-G） |
+
+---
+
+## 11. 附录
+
+### 11.1 测试盲区清单（回归风险最高处）
 
 - `SpiderScheduler` 后台触发链路（`schedule_service.py:156-371`：_tick_once/_fire/动态优先级/静默时段）**零测试**——智能调度核心无回归保护
 - `tasks/consumer.py` 主循环：现有测试仅覆盖 `extract_start_urls/build_start_payload` 纯函数；`_dispatch`/`_flush_batch`/`_retry_loop`（含重试回滚兜底）未测
 - 爬虫中间件/管道零测试（P0-1、P0-4 正是 mock 掩盖或零覆盖所致）
 - `app/middleware/`（RequestID）、`app/responses/` 分页构造器、v2 health 多数端点、alembic 迁移（无 upgrade 测试）、`admin.py` 审计过滤分页
 
-### 10.2 值得保留的优良实践（后续重构勿误伤）
+### 11.2 值得保留的优良实践（后续重构勿误伤）
 
 - 统一异常信封 + 4 级处理器（`platform_core/exceptions/handlers.py`），500 兜底不泄内部信息
 - Redis 异步化收口（R11）执行彻底；`distributed_lock`（`queues.py:97-202`）token + Lua 原子释放/续期实现规范
 - LLM 密钥 Fernet 加密 + 掩码出参 + SSRF 元数据端点恒拒绝（`schemas/llm_provider.py:41-101`）
 - `deploy/newapi/` 编排（版本锁定、`:?` 必填密钥、`$$` 转义健康检查、独立网络）是仓库内最佳实践范本
 - `deps.py:30-36` CurrentUser 快照规避 async 惰性加载 MissingGreenlet、`db.py:14-16` pytest NullPool——真实踩坑沉淀
-- httpx 客户端统一 `trust_env=False`（`backend/services/ai_planner/llm_client.py:76-77` 等），不读系统代理环境变量——规避本机代理软件（Clash 等）劫持请求返回 502 的陷阱；与附录 10.3 的 git 代理故障同源（代码层已防，shell/git 层未防）
+- httpx 客户端统一 `trust_env=False`（`backend/services/ai_planner/llm_client.py:76-77` 等），不读系统代理环境变量——规避本机代理软件（Clash 等）劫持请求返回 502 的陷阱；与附录 11.3 的 git 代理故障同源（代码层已防，shell/git 层未防）
 - uv workspace 纪律（根 venv 唯一、uv.lock 提交、.dockerignore 排敏感文件）执行到位
 
-### 10.3 开发环境问题：git 连接 GitHub 失败（本地代理未启动）
+### 11.3 开发环境问题：git 连接 GitHub 失败（本地代理未启动）
 
 **现象**：
 
@@ -888,4 +1080,6 @@ Failed to connect to 127.0.0.1 port 7897 after 0 ms: Couldn't connect to server
 
 ---
 
-*报告生成：2026-08-31（第一轮：架构与缺陷审计；第二轮：易用性专项走查 + 对标 EasySpider/crawlab/spider-flow 的优化方案；第三轮：SaaS 多租户升级方案 + 自动化脚本存废决策 + set_admin_account 定性修正）· 审计方式：静态深度阅读（并行扫描 + 关键证据人工复核）· 所有行号基于当前工作区 `feature/project-structure` 分支*
+*报告生成：2026-08-31（第一轮：架构与缺陷审计；第二轮：易用性专项走查 + 对标 EasySpider/crawlab/spider-flow 的优化方案；第三轮：SaaS 多租户升级方案 + 自动化脚本存废决策 + set_admin_account 定性修正；**第四轮：方案自复核——诊断层 3 条修正 + 方案层 7 处实施级缺口，见第 10 章**）· 审计方式：静态深度阅读（并行扫描 + 关键证据人工复核）· 所有行号基于当前工作区 `feature/project-structure` 分支*
+
+> **阅读顺序提示**：第 3-9 章为原始诊断与方案，其中被第四轮修正的条目已就地标注 ⚠️ 并指向第 10 章对应小节。**实施时以第 10 章为准**——尤其 P0-1 修法（10.1-2）、用量表结构（10.2-C）、SaaS 隔离方案（10.2-A/B），这三处原方案照做会失败或需二次返工。

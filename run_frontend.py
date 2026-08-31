@@ -4,8 +4,8 @@ from __future__ import annotations
 Frontend 前端服务启动入口
 
 使用方式：
-    ./run_frontend.py --app admin              # 启动后台管理 (3001)
-    ./run_frontend.py --app official           # 启动官方网站 (3002)
+    ./run_frontend.py --app admin              # 启动后台管理 (9112)
+    ./run_frontend.py --app official           # 启动官方网站 (9113)
     ./run_frontend.py --all                    # 同时启动两者
     ./run_frontend.py --all --env dev          # 透传 REACT_APP_ENV=dev
 
@@ -74,8 +74,8 @@ def main():
     parser = argparse.ArgumentParser(description="Auto Agents Frontend Manager")
     parser.add_argument("--app", choices=["admin", "official"], help="启动指定应用")
     parser.add_argument("--all", action="store_true", help="启动所有前端应用")
-    parser.add_argument("--admin-port", type=int, default=3001, help="管理后台端口")
-    parser.add_argument("--official-port", type=int, default=3002, help="官网端口")
+    parser.add_argument("--admin-port", type=int, default=9112, help="管理后台端口")
+    parser.add_argument("--official-port", type=int, default=9113, help="官网端口")
     parser.add_argument("--env", choices=["local", "dev", "prod"], default=None,
                         help="透传为 REACT_APP_ENV")
     parser.add_argument("--skip-install", action="store_true", help="跳过 npm install")

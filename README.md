@@ -119,6 +119,7 @@ auto_agents/
 ├── frontend/official/            # 官网（React 19 + antd + Framer Motion）
 ├── deploy/newapi/                # new-api 网关独立部署编排
 ├── scripts/                      # bootstrap-db / check-arch / migrate / start ...
+├── skills-library/               # 多工具共享 skill 库（治理/评分/adapters + 本地后台 :8765）
 ├── .agents/skills/               # 工具中立 AI 资产（/new-svc /new-spider /check-arch ...）
 └── .claude/                      # Claude Code 协作层（IDENTITY/SOUL/MEMORY/agents/hooks）
 ```
@@ -433,7 +434,7 @@ CI 三阶段：Python lint+test → 架构红线 → 前端构建。
 | 包管理 | uv（Python workspace）/ npm |
 | AI 协作 | Claude Code（`.claude/` 协作层：IDENTITY / SOUL / MEMORY / agents / hooks / skills） |
 
-> AI 协作层不是运行时依赖；项目名 `auto_agents` 中的 "agents" 指自动化爬虫工人。skills 物理位于 `.agents/skills/`（工具中立），`.claude/skills` 为 symlink。
+> AI 协作层不是运行时依赖；项目名 `auto_agents` 中的 "agents" 指自动化爬虫工人。项目协作 skills 位于 `.agents/skills/`（工具中立），`.claude/skills` 为 symlink。跨工具共享的 skill 目录库在 [`skills-library/`](skills-library/README.md)（独立本地后台 `http://127.0.0.1:8765`，不并入主 API）。
 
 ---
 
@@ -444,3 +445,4 @@ CI 三阶段：Python lint+test → 架构红线 → 前端构建。
 - new-api 网关部署：[deploy/newapi/README.md](deploy/newapi/README.md)
 - AI 协作层：`.claude/IDENTITY.md` / `SOUL.md` / `MEMORY.md`、子代理 `spider-doctor / arch-warden / memory-curator`
 - 常用 Skill：`/new-svc` `/new-spider` `/new-model` `/check-arch` `/verify` `/coding-style` `/logging` `/config` `/deploy` `/cicd`
+- 跨工具 skill 库：[skills-library/README.md](skills-library/README.md)

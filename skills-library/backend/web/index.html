@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Skills Library 管理后台</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 0; background: #f5f5f7; color: #1d1d1f; }
+  header { padding: 16px 24px; background: #fff; border-bottom: 1px solid #ddd; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 18px; margin: 0; }
+  main { display: flex; height: calc(100vh - 57px); }
+  .list-pane { width: 40%; overflow-y: auto; border-right: 1px solid #ddd; }
+  .detail-pane { width: 60%; overflow-y: auto; padding: 16px 24px; }
+  .filters { display: flex; gap: 8px; padding: 12px 16px; background: #fff; border-bottom: 1px solid #eee; flex-wrap: wrap; }
+  .filters select, .filters input { padding: 4px 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
+  tr:hover { background: #eef; cursor: pointer; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; background: #e0e0e0; margin-right: 4px; }
+  .status-active { background: #d1f2d1; }
+  .status-experimental { background: #fff3cd; }
+  .status-deprecated { background: #f5c6c6; }
+  .score { font-weight: 600; }
+  section { margin-bottom: 20px; }
+  section h3 { font-size: 14px; color: #666; margin-bottom: 6px; }
+  pre { background: #fff; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
+  label { display: block; font-size: 12px; margin: 6px 0 2px; color: #555; }
+  input[type=text], input[type=number], select, textarea { width: 100%; padding: 6px; box-sizing: border-box; font-size: 13px; }
+  button { padding: 6px 14px; margin-top: 8px; cursor: pointer; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  .empty { padding: 40px; text-align: center; color: #999; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Skills Library 管理后台</h1>
+  <div>
+    <button id="btn-sync">同步到各工具 (sync)</button>
+  </div>
+</header>
+<main>
+  <div class="list-pane">
+    <div class="filters">
+      <select id="f-category"><option value="">全部分类</option></select>
+      <select id="f-industry"><option value="">全部行业</option></select>
+      <select id="f-status">
+        <option value="">全部状态</option>
+        <option value="active">active</option>
+        <option value="experimental">experimental</option>
+        <option value="deprecated">deprecated</option>
+      </select>
+    </div>
+    <table>
+      <thead><tr><th>名称</th><th>分类</th><th>行业</th><th>评分</th><th>状态</th></tr></thead>
+      <tbody id="skill-rows"></tbody>
+    </table>
+  </div>
+  <div class="detail-pane" id="detail">
+    <div class="empty">从左侧选择一个 skill 查看详情</div>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
