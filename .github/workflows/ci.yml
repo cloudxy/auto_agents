@@ -2,7 +2,7 @@
 #
 # 四阶段质量关卡（对齐 /cicd Skill 与 /verify Skill 的验证约定）：
 # 1. python-lint-test:  ruff lint + pytest（backend/tests）
-# 2. arch-check:        scripts/check-arch.sh 的 10 条架构红线
+# 2. arch-check:        scripts/check-arch.sh 的 12 条架构红线 + 3 条核心边界
 # 3. frontend-build:    admin + official 两个 React 应用构建
 # 4. docker-validate:   Dockerfile 构建 + compose 语法校验
 #
@@ -70,7 +70,7 @@ jobs:
           backend/tests/test_alembic_baseline.py
 
   arch-check:
-    name: Architecture Red Lines (10 rules)
+    name: Architecture Red Lines (12 rules + 3 boundaries)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
