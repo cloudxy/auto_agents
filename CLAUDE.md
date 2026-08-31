@@ -23,6 +23,8 @@ auto_agents/
 │   └── official/         # 官方网站（React 19 + Ant Design + Framer Motion）
 ├── config/               # Dynaconf 配置（default + local/dev/prod + scrapy 子层）
 ├── scripts/              # 运维脚本（init-db / migrate / start / run-spider）
+├── skills-library/       # 多工具共享 skill 库（治理/评分/adapters + 本地后台）
+├── .agents/skills/       # 本仓库开发协作 skill（/new-svc /check-arch 等）
 └── .claude/              # 规则和技能库
 ```
 
@@ -77,7 +79,7 @@ uv run python run.py all
 uv run python run_backend.py                       # http://127.0.0.1:9111
 uv run python run_spider.py --list                 # 列出爬虫
 uv run python run_spider.py --spider example
-uv run python run_frontend.py --all                # admin:3001 / official:3002
+uv run python run_frontend.py --all                # admin:9112 / official:9113
 ```
 
 环境切换：所有入口接受 `--env {local,dev,prod}`，透传为 `APP_ENV`。
