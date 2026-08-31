@@ -29,7 +29,7 @@ repos:
         stages: [pre-push]
 
       - id: check-arch
-        name: 架构合规检查（10 条红线）
+        name: 架构合规检查（12 红线 + 3 边界）
         entry: bash scripts/check-arch.sh
         language: system
         pass_filenames: false
