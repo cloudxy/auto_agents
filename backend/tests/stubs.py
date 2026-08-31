@@ -109,8 +109,15 @@ class FakeRedis:
     async def hget(self, key, field):
         return self.hashes.get(key, {}).get(field)
 
-    async def hset(self, key, field, value):
-        self.hashes.setdefault(key, {})[field] = value
+    async def hset(self, key, field=None, value=None, mapping=None):
+        bucket = self.hashes.setdefault(key, {})
+        if mapping:
+            bucket.update({k: str(v) for k, v in mapping.items()})
+            return len(mapping)
+        if field is not None:
+            bucket[field] = value
+            return 1
+        return 0
 
     async def hincrby(self, key, field, amount=1):
         bucket = self.hashes.setdefault(key, {})

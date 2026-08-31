@@ -342,8 +342,11 @@ class ChannelProbeService:
         TTL 仅作进程崩溃兑底，正常运行靠主动释放。
         """
         lock_ttl = int(settings.get("NEWAPI.PROBE_LOCK_TTL_SECONDS", 21600) or 21600)
+        # C4 修复：批次串行耗时可能超过 TTL（9 题 × N 渠道 × 60s 超时），
+        # 启用周期续期防止锁过期后双实例并发批次（TTL 仅作进程崩溃兜底）
+        lock_renewal = int(settings.get("NEWAPI.PROBE_LOCK_RENEWAL_SECONDS", 600) or 600)
         async with distributed_lock(
-            self._redis, NEWAPI_PROBE_LOCK_KEY, ttl=lock_ttl
+            self._redis, NEWAPI_PROBE_LOCK_KEY, ttl=lock_ttl, renewal=lock_renewal
         ) as lock:
             if lock is None:
                 return  # 其他实例已在执行本批

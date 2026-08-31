@@ -216,8 +216,14 @@ class ChannelSchedulerService:
                 if cfg:
                     managed[cid] = (ch, cfg)
             if not managed:
-                logger.debug("无受管渠道（Redis 渠道级配置为空且全局默认未启用），本轮跳过")
+                # 4.2：空转显式告警（原来是 debug 级静默跳过——三层开关全开也无人知晓受管数为 0）
+                logger.warning(
+                    "渠道调度器受管渠道数为 0（无渠道级配置且 DEFAULT_WINDOW_QUOTA=0），"
+                    "本轮空转。请在「中转站 → 渠道配置」设置渠道额度，"
+                    "或调高 NEWAPI.DEFAULT_WINDOW_QUOTA"
+                )
                 return
+            logger.info(f"渠道调度本轮受管渠道数: {len(managed)}")
 
             # 按窗口小时分组聚合用量（同窗口共享一条 SQL 结果）。
             # 聚合失败降级为空用量（评审 m-2：异常抛给上层，按窗口隔离降级，
