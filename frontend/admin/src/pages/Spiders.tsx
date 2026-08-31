@@ -19,6 +19,7 @@ import {
 import { usePermission } from '../hooks/usePermission'
 import { apiErrorMessage } from '../utils/errorMessage'
 import type { SpiderMap, Task, SpiderRegistry, TaskTemplate } from '../components/spider/types'
+import type { TaskPreset } from '../components/spider/TaskModal'
 
 import { TaskList } from '../components/spider/TaskList'
 import { TaskModal } from '../components/spider/TaskModal'
@@ -31,6 +32,8 @@ import { TemplateTab } from '../components/spider/TemplateTab'
 import { TemplateModal } from '../components/spider/TemplateModal'
 import { TaskEditModal } from '../components/spider/TaskEditModal'
 
+const PAGE_SIZE = 20
+
 const Spiders: React.FC = () => {
   // 角色权限（后端为最终防线，前端仅隐藏高危按钮）
   const { hasPermission, isAdmin } = usePermission()
@@ -42,12 +45,15 @@ const Spiders: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [tasks, setTasks] = useState<Task[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
   const [priorityFilter, setPriorityFilter] = useState<string | undefined>(undefined)
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
+  const [spiderFilter, setSpiderFilter] = useState<string | undefined>(undefined)
   const [registry, setRegistry] = useState<SpiderRegistry>({ types: [], spiders: [] })
 
-  // 新增任务弹窗
+  // 新增任务弹窗（preset 携带待回填参数）
   const [modalOpen, setModalOpen] = useState(false)
-  const [presetSpider, setPresetSpider] = useState<string | undefined>(undefined)
+  const [preset, setPreset] = useState<TaskPreset | null>(null)
 
   // 运行日志抽屉
   const [logTask, setLogTask] = useState<Task | null>(null)
@@ -71,10 +77,15 @@ const Spiders: React.FC = () => {
     return m
   }, [registry])
 
-  const loadTasks = useCallback(async (showSpin = true) => {
+  // U1-1：服务端真分页 + 状态/爬虫/优先级筛选（翻到哪页拉哪页，不再只取前 50 条）
+  const loadTasks = useCallback(async (showSpin = true, targetPage = page) => {
     if (showSpin) setLoading(true)
     try {
-      const res = await fetchTasks(0, 50, priorityFilter)
+      const res = await fetchTasks((targetPage - 1) * PAGE_SIZE, PAGE_SIZE, {
+        priority: priorityFilter,
+        status: statusFilter,
+        spider_name: spiderFilter,
+      })
       setTasks(res.items || [])
       setTotal(res.total || 0)
     } catch (error) {
@@ -82,7 +93,14 @@ const Spiders: React.FC = () => {
     } finally {
       if (showSpin) setLoading(false)
     }
-  }, [priorityFilter])
+  }, [page, priorityFilter, statusFilter, spiderFilter])
+
+  // 筛选/翻页变化：只改状态，由 useEffect([loadTasks]) 依赖驱动自动重载
+  // （避免闭包旧值；筛选变化时同时回到第 1 页）
+  const changePriorityFilter = (v: string | undefined) => { setPriorityFilter(v); setPage(1) }
+  const changeStatusFilter = (v: string | undefined) => { setStatusFilter(v); setPage(1) }
+  const changeSpiderFilter = (v: string | undefined) => { setSpiderFilter(v); setPage(1) }
+  const changePagination = (p: number) => { setPage(p) }
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -108,8 +126,8 @@ const Spiders: React.FC = () => {
   }, [tasks, loadTasks])
 
   // ---------------- 新增任务弹窗 ----------------
-  const openModal = (spiderName?: string) => {
-    setPresetSpider(spiderName)
+  const openModal = (presetArg?: TaskPreset | null) => {
+    setPreset(presetArg || null)
     setModalOpen(true)
   }
 
@@ -171,13 +189,24 @@ const Spiders: React.FC = () => {
                 tasks={tasks}
                 loading={loading}
                 total={total}
+                page={page}
+                pageSize={PAGE_SIZE}
                 spiderMap={spiderMap}
                 canCreate={canCreate}
                 canDelete={canDelete}
                 canOperate={canOperate}
                 priorityFilter={priorityFilter}
-                onPriorityFilterChange={setPriorityFilter}
-                onRun={(spiderName: string | undefined) => openModal(spiderName || undefined)}
+                onPriorityFilterChange={changePriorityFilter}
+                statusFilter={statusFilter}
+                onStatusFilterChange={changeStatusFilter}
+                spiderFilter={spiderFilter}
+                onSpiderFilterChange={changeSpiderFilter}
+                spiderOptions={registry.spiders.map((s: { name: string; title: string }) => ({
+                  value: s.name,
+                  label: s.title,
+                }))}
+                onPaginationChange={changePagination}
+                onRun={(task: Task) => openModal({ spiderName: task.spider_name, params: task.params, priority: task.priority })}
                 onCreateNew={() => openModal()}
                 onPause={(task: Task) => onControlTask(task, 'pause')}
                 onResume={(task: Task) => onControlTask(task, 'resume')}
@@ -202,7 +231,11 @@ const Spiders: React.FC = () => {
                 spiderMap={spiderMap}
                 canCreate={canCreate}
                 canSchedule={canSchedule}
-                onRunTask={(spiderName: string) => openModal(spiderName)}
+                onRunTask={(record) => openModal({
+                  spiderName: record.spider_name,
+                  params: record.params,
+                  priority: undefined,
+                })}
               />
             ),
           },
@@ -249,6 +282,7 @@ const Spiders: React.FC = () => {
         registry={registry}
         spiderMap={spiderMap}
         templates={templates}
+        preset={preset}
         onSubmitSuccess={onTaskSubmitSuccess}
         onCancel={() => setModalOpen(false)}
       />
@@ -276,10 +310,11 @@ const Spiders: React.FC = () => {
         onCancel={() => setTemplateModalOpen(false)}
       />
 
-      {/* 编辑待执行任务弹窗（仅 pending 可改 params/priority） */}
+      {/* 编辑待执行任务弹窗（仅 pending 可改 params/priority，复用动态表单） */}
       <TaskEditModal
         visible={!!editTask}
         task={editTask}
+        registry={registry}
         onSubmitSuccess={() => loadTasks(false)}
         onCancel={() => setEditTask(null)}
       />

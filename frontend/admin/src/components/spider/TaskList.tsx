@@ -18,13 +18,21 @@ export interface TaskListProps {
   tasks: Task[]
   loading: boolean
   total: number
+  page: number
+  pageSize: number
   spiderMap: SpiderMap
   canCreate: boolean
   canDelete: boolean
   canOperate: boolean
   priorityFilter: string | undefined
   onPriorityFilterChange: (v: string | undefined) => void
-  onRun: (spiderName: string) => void
+  statusFilter: string | undefined
+  onStatusFilterChange: (v: string | undefined) => void
+  spiderFilter: string | undefined
+  onSpiderFilterChange: (v: string | undefined) => void
+  spiderOptions: { value: string; label: string }[]
+  onPaginationChange: (page: number, pageSize: number) => void
+  onRun: (task: Task) => void
   onCreateNew: () => void
   onPause: (task: Task) => void
   onResume: (task: Task) => void
@@ -38,9 +46,12 @@ export interface TaskListProps {
 }
 
 export const TaskList: React.FC<TaskListProps> = ({
-  tasks, loading, total, spiderMap,
+  tasks, loading, total, page, pageSize, spiderMap,
   canCreate, canDelete, canOperate,
   priorityFilter, onPriorityFilterChange,
+  statusFilter, onStatusFilterChange,
+  spiderFilter, onSpiderFilterChange, spiderOptions,
+  onPaginationChange,
   onRun, onCreateNew, onPause, onResume, onStop, onDelete,
   onSaveTemplate, onViewLog, onViewResult, onEdit, onRefresh,
 }) => {
@@ -88,7 +99,7 @@ export const TaskList: React.FC<TaskListProps> = ({
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 120,
+      width: 150,
       render: (status: string, record: Task) => {
         const meta = STATUS_META[status] || { label: status, color: 'default' }
         const spinning = status === 'running'
@@ -102,9 +113,15 @@ export const TaskList: React.FC<TaskListProps> = ({
             {(record.retry_count || 0) > 0 ? `（重试${record.retry_count}）` : ''}
           </Tag>
         )
-        return record.error_message
-          ? <Tooltip title={record.error_message}>{tag}</Tooltip>
-          : tag
+        // 失败原因直显（U1-6）：不再只藏 Tag 的 hover 里
+        return record.error_message ? (
+          <Space direction="vertical" size={0}>
+            <Tooltip title={record.error_message}>{tag}</Tooltip>
+            <Text type="danger" ellipsis style={{ maxWidth: 150, fontSize: 12 }} title={record.error_message}>
+              {record.error_message}
+            </Text>
+          </Space>
+        ) : tag
       },
     },
     { title: '采集结果', dataIndex: 'result_count', key: 'result_count', width: 90 },
@@ -116,15 +133,17 @@ export const TaskList: React.FC<TaskListProps> = ({
       render: (_: unknown, record: Task) => (
         <Space size="small" wrap>
           {canCreate && (
-            <Button
-              type="link"
-              size="small"
-              icon={<PlayCircleOutlined />}
-              disabled={record.status === 'running'}
-              onClick={() => onRun(record.spider_name)}
-            >
-              运行
-            </Button>
+            <Tooltip title="以该任务的参数再次运行">
+              <Button
+                type="link"
+                size="small"
+                icon={<PlayCircleOutlined />}
+                disabled={record.status === 'running'}
+                onClick={() => onRun(record)}
+              >
+                再次运行
+              </Button>
+            </Tooltip>
           )}
           {canOperate && record.status === 'running' && (
             <>
@@ -152,14 +171,16 @@ export const TaskList: React.FC<TaskListProps> = ({
             </>
           )}
           {canOperate && record.status === 'running' && (
-            <Button
-              type="link"
-              size="small"
-              icon={<CaretRightOutlined />}
-              onClick={() => onResume(record)}
-            >
-              恢复
-            </Button>
+            <Tooltip title="若任务已暂停，点击恢复继续采集（未暂停时点击无副作用）">
+              <Button
+                type="link"
+                size="small"
+                icon={<CaretRightOutlined />}
+                onClick={() => onResume(record)}
+              >
+                恢复
+              </Button>
+            </Tooltip>
           )}
           <Button
             type="link"
@@ -226,19 +247,43 @@ export const TaskList: React.FC<TaskListProps> = ({
 
   return (
     <>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <Select
-          allowClear
-          placeholder="按优先级筛选"
-          style={{ width: 160 }}
-          value={priorityFilter}
-          onChange={(v) => onPriorityFilterChange(v)}
-          options={[
-            { value: 'high', label: '优先级：高' },
-            { value: 'normal', label: '优先级：普通' },
-            { value: 'low', label: '优先级：低' },
-          ]}
-        />
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <Space wrap>
+          <Select
+            allowClear
+            placeholder="按状态筛选"
+            style={{ width: 140 }}
+            value={statusFilter}
+            onChange={(v) => onStatusFilterChange(v)}
+            options={[
+              { value: 'pending', label: '状态：待执行' },
+              { value: 'running', label: '状态：运行中' },
+              { value: 'completed', label: '状态：已完成' },
+              { value: 'failed', label: '状态：失败' },
+            ]}
+          />
+          <Select
+            allowClear
+            showSearch
+            placeholder="按爬虫筛选"
+            style={{ width: 180 }}
+            value={spiderFilter}
+            onChange={(v) => onSpiderFilterChange(v)}
+            options={spiderOptions}
+          />
+          <Select
+            allowClear
+            placeholder="按优先级筛选"
+            style={{ width: 140 }}
+            value={priorityFilter}
+            onChange={(v) => onPriorityFilterChange(v)}
+            options={[
+              { value: 'high', label: '优先级：高' },
+              { value: 'normal', label: '优先级：普通' },
+              { value: 'low', label: '优先级：低' },
+            ]}
+          />
+        </Space>
         <Space>
           {canCreate && (
             <Button type="primary" icon={<PlusOutlined />} onClick={onCreateNew}>
@@ -253,7 +298,14 @@ export const TaskList: React.FC<TaskListProps> = ({
         dataSource={tasks}
         rowKey="id"
         loading={loading}
-        pagination={{ total, pageSize: 50, showTotal: (t) => `共 ${t} 条任务` }}
+        pagination={{
+          total,
+          current: page,
+          pageSize,
+          showSizeChanger: false,
+          showTotal: (t) => `共 ${t} 条任务`,
+          onChange: (p, ps) => onPaginationChange(p, ps),
+        }}
       />
     </>
   )

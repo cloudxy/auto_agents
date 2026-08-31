@@ -166,6 +166,75 @@ interface FilterRowDraft { field?: unknown; op?: string; value?: unknown }
 interface PaginationDraft { selector?: unknown; type?: string; max_pages?: unknown }
 interface DetailDraft { list_selector?: unknown; url_selector?: unknown }
 
+/**
+ * params JSON → 动态表单值（collectParams 的反向映射，U1-2 参数回填用）
+ *
+ * 用于"重跑任务 / 手动运行调度 / 从模板创建"时把既有 params 回填进表单；
+ * 未匹配到表单字段的键（如 store_to/render_js 等 API 直建任务的扩展键）
+ * 不会被收集——调用方应以原 params 为基底 merge（见 TaskModal.onSubmitTask）。
+ */
+export const paramsToFormValues = (
+  params: Record<string, unknown>,
+  fields?: SpiderParamField[]
+): Record<string, unknown> => {
+  const values: Record<string, unknown> = {}
+  for (const field of fields || []) {
+    switch (field.kind) {
+      case 'pagination': {
+        const p = params.pagination
+        if (p && typeof p === 'object') {
+          const draft = p as PaginationDraft
+          values.param_pagination = {
+            selector: draft.selector,
+            type: draft.type || 'css',
+            max_pages: draft.max_pages ?? 10,
+          }
+        }
+        break
+      }
+      case 'detail': {
+        const d = params.detail
+        if (d && typeof d === 'object') {
+          const draft = d as DetailDraft & { selectors?: unknown }
+          values.param_detail = { list_selector: draft.list_selector, url_selector: draft.url_selector }
+          if (Array.isArray(draft.selectors)) values.param_detail_selectors = draft.selectors
+        }
+        break
+      }
+      case 'filters':
+        if (Array.isArray(params.filters)) values.param_filters = params.filters
+        break
+      case 'urls':
+        if (Array.isArray(params[field.name])) {
+          values[`param_${field.name}`] = (params[field.name] as unknown[]).join('\n')
+        }
+        break
+      case 'selectors':
+        if (Array.isArray(params[field.name])) values[`param_${field.name}`] = params[field.name]
+        break
+      case 'json':
+        if (params[field.name] !== undefined) {
+          values[`param_${field.name}`] = JSON.stringify(params[field.name], null, 2)
+        }
+        break
+      default:
+        if (params[field.name] !== undefined) values[`param_${field.name}`] = params[field.name]
+    }
+  }
+  return values
+}
+
+/** 解析任务/模板的 params JSON 字符串（坏 JSON 返回空对象，不抛） */
+export const parseParamsJson = (raw?: string | null): Record<string, unknown> => {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
 /** 从表单值收集任务参数对象（与后端 params 契约一致） */
 export const collectParams = (
   values: Record<string, unknown>,

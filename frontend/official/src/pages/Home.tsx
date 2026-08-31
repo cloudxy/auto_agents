@@ -21,7 +21,7 @@ import AiFlowSection from '../components/home/AiFlowSection'
 import ArchitectureSection from '../components/home/ArchitectureSection'
 
 // 管理后台地址（经环境变量注入，见 .env.development）
-const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:3001'
+const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
 
 const SITE_NAME = 'AutoAgents'
 const SITE_SLOGAN = 'AI 驱动的智能数据采集系统'
@@ -251,6 +251,10 @@ const Hero: React.FC = () => (
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginTop: 6 }}>{s.label}</div>
           </div>
         ))}
+        {/* UX-B7：静态示意数据显式标注，避免被误读为真实运行数据 */}
+        <div style={{ gridColumn: '1 / -1', textAlign: 'right', fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
+          * 示意数据，非实时统计
+        </div>
       </motion.div>
     </div>
 

@@ -42,11 +42,14 @@ async def list_tasks(
     limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None, description="pending/running/completed/failed"),
     priority: Optional[str] = Query(None, pattern="^(high|normal|low)$", description="按优先级过滤"),
+    spider_name: Optional[str] = Query(None, max_length=100, description="按爬虫名过滤"),
     service: SpiderTaskService = Depends(_task_service),
     _user: CurrentUser = Depends(require_login),
 ) -> PaginatedResponse[SpiderTaskResponse]:
-    """获取爬虫任务列表（支持分页和状态/优先级筛选）"""
-    resp = await service.list_tasks(skip=skip, limit=limit, status=status, priority=priority)
+    """获取爬虫任务列表（支持分页和状态/优先级/爬虫筛选）"""
+    resp = await service.list_tasks(
+        skip=skip, limit=limit, status=status, priority=priority, spider_name=spider_name
+    )
     return paginated_from_offset(items=resp.items, total=resp.total, skip=skip, limit=limit)
 
 

@@ -8,19 +8,19 @@
  * - 质量概览：最近任务的质量评分分布（B1）
  */
 import React, { useEffect, useState } from 'react'
-import { Layout, Typography, Card, Row, Col, Statistic, Button, Empty, Spin, message } from 'antd'
+import { Typography, Card, Row, Col, Statistic, Button, Empty, Spin, message, Space } from 'antd'
 import {
   CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, ThunderboltOutlined,
-  SafetyCertificateOutlined,
+  SafetyCertificateOutlined, PlusOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
   BarChart, Bar, Cell,
 } from 'recharts'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
 import api from '../services/api'
 
-const { Header, Content } = Layout
 const { Title } = Typography
 
 interface DailyPoint {
@@ -52,7 +52,8 @@ interface QualityReport {
 }
 
 const Dashboard: React.FC = () => {
-  const { user, logout } = useAuthStore()
+  const { user } = useAuthStore()
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<Stats | null>(null)
   const [qualityData, setQualityData] = useState<QualityReport | null>(null)
@@ -99,24 +100,27 @@ const Dashboard: React.FC = () => {
   const avgDuration = stats?.avg_duration_seconds != null ? `${stats.avg_duration_seconds.toFixed(1)}s` : '-'
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Header style={{
-        background: '#fff',
-        padding: '0 24px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-      }}>
-        <Title level={4} style={{ margin: 0 }}>AutoAgents 管理后台</Title>
-        <div>
-          <span style={{ marginRight: 16 }}>欢迎, {user?.username}</span>
-          <Button type="link" onClick={logout} style={{ padding: 0 }}>退出登录</Button>
-        </div>
-      </Header>
+    <div style={{ padding: 0 }}>
+      {/* U1-4：行动入口（原第二套页头已移除——AdminLayout 已有全局页头与退出登录） */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }} align="middle">
+        <Col flex="auto">
+          <Title level={4} style={{ margin: 0 }}>
+            欢迎回来{user?.username ? `，${user.username}` : ''}
+          </Title>
+        </Col>
+        <Col>
+          <Space>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/spiders/tasks')}>
+              创建采集任务
+            </Button>
+            <Button icon={<RobotOutlined />} onClick={() => navigate('/ai')}>
+              AI 智能采集
+            </Button>
+          </Space>
+        </Col>
+      </Row>
 
-      <Content style={{ padding: '24px', background: '#f0f2f5' }}>
-        <Spin spinning={loading}>
+      <Spin spinning={loading}>
           {/* 统计卡片 */}
           <Row gutter={[16, 16]}>
             <Col xs={12} md={6}>
@@ -274,9 +278,8 @@ const Dashboard: React.FC = () => {
               </Card>
             </Col>
           </Row>
-        </Spin>
-      </Content>
-    </Layout>
+      </Spin>
+    </div>
   )
 }
 
