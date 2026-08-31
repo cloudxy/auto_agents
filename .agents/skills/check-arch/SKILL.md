@@ -1,6 +1,6 @@
 ---
 name: check-arch
-description: 架构合规检查 - 一键扫描 11 条架构红线 + 3 条核心代码边界，输出违规文件:行号报告
+description: 架构合规检查 - 一键扫描 12 条架构红线 + 3 条核心代码边界，输出违规文件:行号报告
 trigger: >-
   架构合规检查、扫描硬编码、提交前自检、PR Review、怀疑分层边界被破坏、
   /verify 交付自检后的第二道关卡
@@ -8,7 +8,7 @@ trigger: >-
 
 # 架构合规检查
 
-把 `project_rule.md` 的 11 条架构红线 + 3 条核心代码边界打包成一次性扫描器。用于把"纸面红线"变成"机械可执行"。
+把 `project_rule.md` 的 12 条架构红线 + 3 条核心代码边界打包成一次性扫描器。用于把"纸面红线"变成"机械可执行"。
 
 ## 触发场景
 
@@ -20,11 +20,11 @@ trigger: >-
 
 ## 执行流程
 
-### Step 1: 按信条运行 11 条红线 + 3 条边界扫描
+### Step 1: 按信条运行 12 条红线 + 3 条边界扫描
 
 一次 Bash 批量执行，路径相对项目根目录。完整命令见 [references/scan-commands.md](references/scan-commands.md)，按信条分组：
 
-**架构红线（R1-R10）：**
+**架构红线（R1-R12）：**
 
 | 信条 | 规则 |
 |------|------|
@@ -34,6 +34,8 @@ trigger: >-
 | 模型即契约 | R7 API 层 import models、R8 models 反向 import schemas |
 | 数据流向不可逆 | R9 循环 import |
 | 日志即证据 | R10 service 方法入口缺 logger |
+| 异步优先 | R11 async 上下文禁止同步 redis_client() 链式直调（网络 IO 阻塞事件循环），两段式赋值写法属盲区靠人工评审 |
+| 门面退役过渡 | R12 禁止白名单外 import 过渡门面 backend.services.spider_service，白名单见 scripts/check-arch.sh |
 
 **核心代码边界（B1-B3）：**
 
@@ -62,7 +64,7 @@ B1 platform_core 反向依赖 platform_core/xxx.py:1    from backend.yyy import 
 若无违规：
 
 ```
-✓ 架构合规检查通过（10 红线 + 3 边界，全部通过）
+✓ 架构合规检查通过（12 红线 + 3 边界，全部通过）
 ```
 
 ### Step 3: 按违规类型路由到修复 skill
@@ -89,6 +91,6 @@ B1 platform_core 反向依赖 platform_core/xxx.py:1    from backend.yyy import 
 
 | 依赖 | 用途 |
 |------|------|
-| `project_rule.md` | 11 条红线 + 核心边界定义的来源 |
+| `project_rule.md` | 12 条红线 + 核心边界定义的来源 |
 | `/verify` | 交付自检的第一道关卡，本 skill 是第二道 |
 | `/config` / `/logging` / `/new-spider` / `/new-model` | 违规的修复路径 |

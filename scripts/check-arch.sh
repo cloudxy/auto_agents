@@ -8,7 +8,7 @@
 # 与 /check-arch Skill 的检查命令保持一致，供 pre-commit 与 CI 复用。
 #
 # 规则分两组：
-#   R1-R11  架构红线（配置/安全/反爬/模型/日志/异步 Redis）
+#   R1-R12  架构红线（配置/安全/反爬/模型/日志/异步 Redis/门面白名单）
 #   B1-B3   核心代码边界（模块依赖方向）
 
 set -uo pipefail
@@ -35,7 +35,7 @@ report() {
     fi
 }
 
-echo "架构合规检查（11 条红线 + 3 条边界）"
+echo "架构合规检查（12 条红线 + 3 条边界）"
 echo "======================================"
 
 # --- 配置即代码 ---
@@ -100,8 +100,29 @@ report "R10" "service 方法入口缺 logger" "${R10_OUTPUT%$'\n'}"
 # R11: async 上下文禁止同步 redis_client() 链式直调（网络 IO 阻塞事件循环）。
 # 期 4 豁免清零：原行内豁免（spider_service._task_log_offset）与文件级豁免
 # （spider_query_service.py）均已异步化（get_async_redis + await），无残留。
+# 已知盲区：本 pattern 仅匹配链式 redis_client(...).method 写法；
+# `r = redis_client("DEFAULT")` 两段式赋值不在覆盖内，靠人工评审把关
+# （合规参照 backend/app/api/v2/health.py:39-40：先赋值再 await asyncio.to_thread(r.ping)）。
 R11_OUTPUT="$(grep -rnE "${GREP_EXCLUDES[@]}" 'redis_client\([^)]*\)\.' backend/ 2>/dev/null || true)"
 report "R11" "backend 同步 redis_client() 直调（阻塞事件循环）" "$R11_OUTPUT"
+
+# --- 门面退役过渡（期 4 → S12 收口）---
+# R12: 门面 import 白名单 —— backend/services/spider_service.py 为期 4 退役
+# 过渡薄门面（__all__ 14 符号），API 域内已直连子 Service；本规则机械拦截
+# 白名单外新增消费者（新代码必须直接依赖子 Service，不得绕回过渡门面）。
+# 白名单（域外存量消费者，共 6 处；待全部迁移到子 Service 后，
+# 本规则与门面一起删除）：
+#   backend/tasks/consumer.py
+#   backend/app/external_api/v1/public.py
+#   backend/app/external_api/v1/webhooks.py
+#   backend/app/api/v1/admin.py
+#   backend/services/schedule_service.py
+#   backend/services/ai_planner/__init__.py
+# 注：backend/services/__init__.py 的 `from .spider_service import` 为门面
+# 自身域内 re-export，相对导入不命中下方模式，无需豁免。
+R12_OUTPUT="$(grep -rnE "${GREP_EXCLUDES[@]}" '(from backend\.services\.spider_service import|import backend\.services\.spider_service)' backend/ scrapy/ 2>/dev/null \
+    | grep -vE '^backend/(tasks/consumer\.py|app/external_api/v1/(public|webhooks)\.py|app/api/v1/admin\.py|services/(schedule_service\.py|ai_planner/__init__\.py)):' || true)"
+report "R12" "spider_service 门面白名单外 import（应直接依赖子 Service）" "$R12_OUTPUT"
 
 # --- 核心代码边界（模块依赖方向） ---
 echo ""
@@ -122,7 +143,7 @@ report "B3" "config → 业务模块反向依赖" \
 # --- 汇总 ---
 echo ""
 if [ "$VIOLATIONS" -eq 0 ]; then
-    echo "✓ 架构合规检查通过（11 红线 + 3 边界，全部通过）"
+    echo "✓ 架构合规检查通过（12 红线 + 3 边界，全部通过）"
     exit 0
 else
     echo "共 $VIOLATIONS 处违规，请按 /check-arch Step 3 路由修复"
