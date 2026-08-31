@@ -20,6 +20,19 @@ jobs:
   python-lint-test:
     name: Python Lint & Test
     runs-on: ubuntu-latest
+    services:
+      # MySQL 保真通道（E0.1c）：跑迁移/方言敏感测试的子集，凭据为一次性容器口令
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: "testroot"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -ptestroot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +54,20 @@ jobs:
         env:
           APP_ENV: local
         run: uv run pytest -x -q backend/tests
+
+      - name: Pytest (MySQL 保真通道子集)
+        env:
+          APP_ENV: local
+          MYSQL_FIDELITY: "1"
+          MYSQL_FIDELITY_HOST: 127.0.0.1
+          MYSQL_FIDELITY_PORT: "3306"
+          MYSQL_FIDELITY_USER: root
+          MYSQL_FIDELITY_PASSWORD: testroot
+        run: >-
+          uv run pytest -q
+          backend/tests/test_mysql_fidelity.py
+          backend/tests/test_db_fixtures.py
+          backend/tests/test_alembic_baseline.py
 
   arch-check:
     name: Architecture Red Lines (10 rules)

@@ -34,6 +34,10 @@ auto-agents-spider = { workspace = true }
 testpaths = ["backend/tests"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    # 仅在 MYSQL_FIDELITY=1（真实 MySQL 保真通道，工单 E0.1c）下运行，默认跳过
+    "mysql_fidelity: 需要真实 MySQL 的保真测试（CI service container 承载）",
+]
 
 [tool.ruff]
 # 最小 lint 范围：语法错误 + 未使用导入（存量代码逐步收紧）

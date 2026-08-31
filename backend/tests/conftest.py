@@ -63,19 +63,56 @@ def client(app):
 
 
 # ---------------------------------------------------------------------------
-# DB fixture（E0.1a 工单 01）：SQLite 会话与测试间隔离
+# DB fixture（E0.1a/1c 工单 01/03）：SQLite 会话与测试间隔离 + MySQL 保真通道
 #
 # 约束：
 # - TestClient 每请求新建事件循环，引擎必须 NullPool（连接不跨循环复用），
 #   与 platform_core/db.py 的 pytest 态处理同一口径；
-# - 每测试独立 tmp 文件库（非共享内存库）——隔离即"全新库"，唯一键冲突不可能跨测试出现；
-# - MySQL 保真通道（MYSQL_FIDELITY）属工单 03，本组 fixture 不感知。
+# - SQLite 模式：每测试独立 tmp 文件库（非共享内存库）——隔离即"全新库"；
+# - MySQL 保真模式（MYSQL_FIDELITY=1）：连真实 MySQL，每测试独立 schema
+#   （会话级建删），凭据只走 MYSQL_FIDELITY_* 环境变量，不落任何 yml；
+#   服务端不可达时报清晰错误（fail-fast），不静默回退 SQLite。
 # ---------------------------------------------------------------------------
+
+_MYSQL_FIDELITY_DB_PREFIX = "test_auto_agents"
+
+
+def mysql_fidelity_enabled() -> bool:
+    """MYSQL_FIDELITY 开关（"1"/"true"/"yes" 视为开启）"""
+    return os.environ.get("MYSQL_FIDELITY", "").strip().lower() in ("1", "true", "yes")
+
+
+def _mysql_fidelity_parts() -> tuple[str, str]:
+    """返回 (server_url 无库名, 独立测试 schema 名)"""
+    import uuid
+    from urllib.parse import quote_plus
+
+    host = os.environ.get("MYSQL_FIDELITY_HOST", "127.0.0.1")
+    port = os.environ.get("MYSQL_FIDELITY_PORT", "3306")
+    user = os.environ.get("MYSQL_FIDELITY_USER", "root")
+    password = quote_plus(os.environ.get("MYSQL_FIDELITY_PASSWORD", ""))
+    server_url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/"
+    schema = f"{_MYSQL_FIDELITY_DB_PREFIX}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+    return server_url, schema
+
+
+async def _run_schema_ddl(server_url: str, statement: str) -> None:
+    """在 server 层执行 CREATE/DROP DATABASE（独立短生命周期引擎）"""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    engine = create_async_engine(server_url, poolclass=NullPool)
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text(statement))
+    finally:
+        await engine.dispose()
 
 
 @pytest.fixture
 def db_engine(tmp_path: Path) -> Iterator["AsyncEngine"]:
-    """每测试独立的 SQLite 异步引擎（create_all 建全部 ORM 表）"""
+    """每测试独立的异步引擎：默认 SQLite 文件库；MYSQL_FIDELITY=1 时真实 MySQL 独立 schema"""
     import asyncio
 
     from sqlalchemy.ext.asyncio import create_async_engine
@@ -84,10 +121,15 @@ def db_engine(tmp_path: Path) -> Iterator["AsyncEngine"]:
     import platform_core.models  # noqa: F401 触发全模型注册到 Base.metadata
     from platform_core.models.base import Base
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
-        poolclass=NullPool,
-    )
+    mysql_schema: str | None = None
+    if mysql_fidelity_enabled():
+        server_url, mysql_schema = _mysql_fidelity_parts()
+        asyncio.run(_run_schema_ddl(server_url, f"CREATE DATABASE `{mysql_schema}` CHARACTER SET utf8mb4"))
+        url: str = f"{server_url}{mysql_schema}"
+    else:
+        url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+
+    engine = create_async_engine(url, poolclass=NullPool)
 
     async def _create_all() -> None:
         async with engine.begin() as conn:
@@ -96,6 +138,8 @@ def db_engine(tmp_path: Path) -> Iterator["AsyncEngine"]:
     asyncio.run(_create_all())
     yield engine
     asyncio.run(engine.dispose())
+    if mysql_schema is not None:
+        asyncio.run(_run_schema_ddl(server_url, f"DROP DATABASE `{mysql_schema}`"))
 
 
 @pytest.fixture
