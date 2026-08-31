@@ -5,7 +5,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from platform_core.schemas.base import PaginationQuery
 
@@ -28,6 +28,8 @@ class SkillQuery(PaginationQuery):
 class SkillReviewResponse(BaseModel):
     """评分历史条目"""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     reviewer_type: str
     reviewer: str
@@ -41,6 +43,8 @@ class SkillReviewResponse(BaseModel):
 
 class SkillResponse(BaseModel):
     """技能列表条目（治理字段投影）"""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
