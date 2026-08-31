@@ -20,8 +20,8 @@ from factories import (
 
 
 @pytest.mark.asyncio
-async def test_builders_flush_under_sqlite(db_session):
-    """四个 builder 的产物全部满足列约束，可直接 add_all + flush"""
+async def test_builders_flush_via_db_engine(db_session):
+    """四个 builder 的产物全部满足列约束，可直接 add_all + flush（引擎随 fixture 模式切换）"""
     async with db_session() as s:
         s.add_all(
             [
@@ -51,12 +51,12 @@ async def test_builder_overrides_customize_fields(db_session):
     """关键字段可覆盖定制（名字/状态/优先级/协议）"""
     user = build_user(username="custom-user")
     task = build_spider_task(spider_name="custom_spider", status="running", priority="high")
-    provider = build_llm_provider(name="custom-provider", model="gpt-4o-mini", is_active=True)
+    provider = build_llm_provider(name="custom-provider", model="qwen-plus", is_active=True)
     definition = build_spider_definition(name="custom_def", type="api", enabled=False)
 
     assert user.username == "custom-user"
     assert task.spider_name == "custom_spider" and task.status == "running" and task.priority == "high"
-    assert provider.name == "custom-provider" and provider.model == "gpt-4o-mini" and provider.is_active is True
+    assert provider.name == "custom-provider" and provider.model == "qwen-plus" and provider.is_active is True
     assert definition.name == "custom_def" and definition.type == "api" and definition.enabled is False
 
     async with db_session() as s:

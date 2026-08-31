@@ -38,7 +38,9 @@ def alembic_db_url(monkeypatch: pytest.MonkeyPatch) -> str:
     host = os.environ.get("MYSQL_FIDELITY_HOST", "127.0.0.1")
     port = os.environ.get("MYSQL_FIDELITY_PORT", "3306")
     user = os.environ.get("MYSQL_FIDELITY_USER", "root")
-    password = os.environ.get("MYSQL_FIDELITY_PASSWORD", "")
+    from urllib.parse import quote_plus
+
+    password = quote_plus(os.environ.get("MYSQL_FIDELITY_PASSWORD", ""))
 
     monkeypatch.setenv("MYSQL_DEFAULT_PASSWORD", password)
 
@@ -64,12 +66,18 @@ def alembic_db_url(monkeypatch: pytest.MonkeyPatch) -> str:
         asyncio.run(_run_schema_ddl(server_url, f"DROP DATABASE `{schema}`"))
 
 
-def _run_alembic(target: str) -> None:
-    from alembic import command
+def _alembic_config():
     from alembic.config import Config
 
     cfg = Config(str(REPO_ROOT / "backend" / "alembic.ini"))
     cfg.set_main_option("script_location", str(REPO_ROOT / "backend" / "alembic"))
+    return cfg
+
+
+def _run_alembic(target: str) -> None:
+    from alembic import command
+
+    cfg = _alembic_config()
     command.upgrade(cfg, target) if target != "base" else command.downgrade(cfg, "base")
 
 
@@ -103,6 +111,26 @@ def test_fresh_upgrade_head_matches_create_all(db_engine, alembic_db_url: str):
             f"表 {table} 列集不一致: 仅迁移有={migrated[table] - reference[table]} "
             f"仅模型有={reference[table] - migrated[table]}"
         )
+
+
+def test_bootstrapped_db_upgrade_head_is_noop(alembic_db_url: str) -> None:
+    """存量口径：create_all 预建 + stamp head 的库再 upgrade head 必须零报错零变更（幂等验收）"""
+    import platform_core.models  # noqa: F401
+    from alembic import command
+    from platform_core.models.base import Base
+    from sqlalchemy import create_engine
+
+    engine = create_engine(alembic_db_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    cfg = _alembic_config()
+    command.stamp(cfg, "head")
+    before = _sync_inspect(alembic_db_url)
+
+    command.upgrade(cfg, "head")
+    after = _sync_inspect(alembic_db_url)
+    assert before == after, "幂等升级不应改变任何表结构"
 
 
 def test_downgrade_base_leaves_nothing(alembic_db_url: str):
