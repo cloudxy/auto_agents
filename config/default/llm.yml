@@ -43,3 +43,9 @@ LLM:
     - {name: "Ollama（本地）", protocol: "openai_compatible", base_url: "http://localhost:11434/v1", requires_key: false}
     - {name: "vLLM / LM Studio（本地）", protocol: "openai_compatible", base_url: "", requires_key: false}
     - {name: "中转站（new-api/one-api）", protocol: "openai_compatible", base_url: "", requires_key: true}
+  # B-M4-2 周期健康巡检：批量刷新全部启用供应商模型的 health_status
+  HEALTH_PATROL_ENABLED: false
+  HEALTH_PATROL_INTERVAL_MIN: 30
+  # 预算熔断降级方向（10.2-D）：true=Redis 读数不可用即拒绝 LLM 调用（保成本）；
+  # false=回退进程内存计数（保可用，测试/CI 无 Redis）。prod 置 true（见 config/prod/llm.yml）
+  BUDGET_FAIL_CLOSED: false

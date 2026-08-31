@@ -88,6 +88,27 @@ def create_app():
                 await llm_usage_flush.start()
             except Exception as e:  # noqa: BLE001 失败仅告警不阻断启动
                 get_logger("global").warning(f"LLM 用量聚合任务启动失败（忽略）: {e}")
+        # 技能 AI 评分 worker（方案 A · A-P2-2）：SKILLS.SCORING.ENABLED 控制，
+        # 失败仅告警不阻断启动（评分队列积压可在恢复后继续消费）
+        skill_scoring_worker = None
+        if settings.get("SKILLS.SCORING.ENABLED", False):
+            from backend.services.skill_scoring_service import SkillScoringWorker
+
+            skill_scoring_worker = SkillScoringWorker()
+            try:
+                await skill_scoring_worker.start()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"技能评分 worker 启动失败（忽略）: {e}")
+        # LLM 周期健康巡检（方案 B · B-M4-2）：LLM.HEALTH_PATROL_ENABLED 控制
+        llm_health_patrol = None
+        if settings.get("LLM.HEALTH_PATROL_ENABLED", False):
+            from backend.services.llm_health_patrol import LlmHealthPatrol
+
+            llm_health_patrol = LlmHealthPatrol()
+            try:
+                await llm_health_patrol.start()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"LLM 健康巡检启动失败（忽略）: {e}")
         # new-api 渠道集成（阶段三）：三层开关 ENABLED → SCHEDULER_ENABLED / PROBE_ENABLED，
         # 失败仅告警不阻断启动（外部系统依赖故障不影响主平台可用性）
         newapi_scheduler = None
@@ -151,6 +172,11 @@ def create_app():
                 await llm_usage_flush.stop()
             except Exception as e:  # noqa: BLE001
                 get_logger("global").warning(f"LLM 用量聚合任务停止失败（忽略）: {e}")
+        if llm_health_patrol is not None:
+            try:
+                await llm_health_patrol.stop()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"LLM 健康巡检停止失败（忽略）: {e}")
         if skill_scoring_worker is not None:
             try:
                 await skill_scoring_worker.stop()

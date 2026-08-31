@@ -319,11 +319,19 @@ async def llm_chat(
     for attempt in range(cfg.max_retries):
         # 预算读数优先月度 Redis 聚合（P0-3：跨重启/多副本有效）；
         # None（测试态/Redis 故障）回退进程内存计数（原语义，存量测试零变化）
+        # 预算熔断降级方向（审计 10.2-D，与登录限流 fail-open 方向相反，二者刻意不对称）：
+        # - fail-open（默认，LLM.BUDGET_FAIL_CLOSED=false）：Redis 读数不可用回退进程内存
+        #   计数（保可用，测试/CI 无 Redis 可跑）；
+        # - fail-closed（LLM.BUDGET_FAIL_CLOSED=true，prod 建议）：读数不可用即拒绝调用
+        #   （保成本——预算检查失去数据支撑时宁可拒绝不可放行）。
         month_used = await get_month_used(usage_dim)
-        used_total = (
-            month_used if month_used is not None
-            else _facade._TOKEN_USAGE.get(usage_dim, 0)
-        )
+        if month_used is None:
+            if bool(_facade.settings.get("LLM.BUDGET_FAIL_CLOSED", False)):
+                raise BusinessException(
+                    f"LLM token 预算读数不可用（Redis），fail-closed 拒绝调用: {usage_dim}"
+                )
+            month_used = _facade._TOKEN_USAGE.get(usage_dim, 0)
+        used_total = month_used
         if used_total >= budget:
             raise BusinessException(
                 f"LLM token 预算已耗尽（{usage_dim} 本月累计 {used_total} >= {budget}），已熔断"
