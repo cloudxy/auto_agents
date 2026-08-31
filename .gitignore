@@ -81,6 +81,8 @@ storage/
 docs/*
 # 全系统架构与模块诊断报告随仓库提交
 !docs/architecture-audit-2026-08.md
+# 平台演进总方案（v2 合并版）随仓库提交
+!docs/plan/
 # 发布公告随仓库提交（其余 docs 内容不入库）
 !docs/release-notes-2026-08-30.md
 # ADR 决策记录与迁移演练报告随仓库提交
