@@ -70,14 +70,21 @@ class DBManager:
 
             try:
                 # 1. 同步引擎
-                engine = create_engine(sync_url, pool_size=5, max_overflow=10, pool_recycle=3600)
+                # P1-13：统一 pool_pre_ping（与 channel_scheduler 自建引擎口径一致），
+                # MySQL wait_timeout 后的陈旧连接借一次往返探测自动重连，
+                # 消除非整点回收窗口的 "server has gone away"
+                engine = create_engine(
+                    sync_url, pool_size=5, max_overflow=10, pool_recycle=3600,
+                    pool_pre_ping=True,
+                )
                 with engine.connect() as conn:
                     conn.execute(text("SELECT 1"))
                 self.mysql[key] = sessionmaker(bind=engine)
-                
+
                 # 2. 异步引擎（测试态用 NullPool，见模块头部说明）
                 async_engine_kwargs: Dict = {
                     "pool_recycle": 3600,
+                    "pool_pre_ping": True,
                     "echo": False,
                 }
                 if _IN_PYTEST:

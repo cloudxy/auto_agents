@@ -73,7 +73,10 @@ SPIDER_MIDDLEWARES = {
 
 # === 管道配置 ===
 ITEM_PIPELINES = {
-    "scrapy_redis.pipelines.RedisPipeline": 100,
+    # P1-8：scrapy-redis 自带 RedisPipeline 已禁用——它把每条 item 再复制到
+    # <spider>:items 键，全仓无消费者且无 TTL（内存无限增长）；真实数据出口
+    # 是 StorePipeline → spider:item_queue（backend 消费者回流落库）
+    "scrapy_redis.pipelines.RedisPipeline": None,
     "pipelines.CleanPipeline": 200,
     "pipelines.ValidatePipeline": 300,
     "pipelines.quality.QualityCheckPipeline": 350,

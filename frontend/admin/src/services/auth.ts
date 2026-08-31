@@ -37,10 +37,9 @@ export const login = (params: LoginParams): Promise<LoginResponse> => {
 }
 
 /**
- * 用户注册
+ * 用户注册（P1-3 修复：后端期望 JSON body——旧实现把密码放 URL query
+ * 且 body 为 null，必然 422，且密码会进各级访问日志）
  */
 export const register = (username: string, email: string, password: string) => {
-  return api.post('/auth/register', null, {
-    params: { username, email, password }
-  })
+  return api.post('/auth/register', { username, email, password })
 }
