@@ -23,7 +23,7 @@ auto_agents/
 │   └── official/         # 官方网站（React 19 + Ant Design + Framer Motion）
 ├── config/               # Dynaconf 配置（default + local/dev/prod + scrapy 子层）
 ├── scripts/              # 运维脚本（init-db / migrate / start / run-spider）
-├── skills-library/       # 多工具共享 skill 库（治理/评分/adapters + 本地后台）
+├── skills-library/       # 多工具共享 skill 库（内容文件/adapters；治理并入主 API v1/skills）
 ├── .agents/skills/       # 本仓库开发协作 skill（/new-svc /check-arch 等）
 └── .claude/              # 规则和技能库
 ```
