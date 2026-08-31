@@ -41,10 +41,10 @@ class CurrentUser:
 
 
 def effective_role(user: User) -> str:
-    """生效角色：历史 is_admin 标记等价 admin"""
+    """生效角色：历史 is_admin 标记等价 admin；未知/空角色按最小权限 viewer（B1）"""
     if user.is_admin:
         return "admin"
-    return user.role or "operator"
+    return user.role or "viewer"
 
 
 async def get_current_user(

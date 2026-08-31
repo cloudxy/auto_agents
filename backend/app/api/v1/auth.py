@@ -35,9 +35,11 @@ async def check_login_rate_limit(username: str):
         fail_count = await redis.get(key)
         if fail_count and int(fail_count) >= 5:
             ttl = await redis.ttl(key)
+            # ttl<=0（无过期/-1）时给保守值，避免出现"请0分钟/请-1分钟后再试"（E7）
+            minutes = max(1, -(-max(ttl, 0) // 60))
             raise RateLimitException(
-                message=f"登录失败次数过多，请{ttl // 60}分钟后再试",
-                retry_after=ttl
+                message=f"登录失败次数过多，请{minutes}分钟后再试",
+                retry_after=max(ttl, 60)
             )
     except RedisError:
         logger.warning(f"登录限流检查失败，fail-open 放行 | key={key}")

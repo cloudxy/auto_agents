@@ -398,10 +398,11 @@ CI 三阶段：Python lint+test → 架构红线 → 前端构建。
 |------|------|
 | `scripts/bootstrap-db.sh` | **新环境唯一推荐入口**：建库 → 基线表 → 迁移（幂等） |
 | `scripts/migrate.sh` | 执行 Alembic 迁移到最新 |
-| `scripts/init-db.sh` / `init-database.sh` / `init_db_sync.py` | 历史初始化脚本（被 bootstrap-db.sh 收编，仅维护使用） |
-| `scripts/check-arch.sh` | 架构红线扫描（退出码 = 违规数） |
-| `scripts/start.sh` / `start_frontend.sh` / `run-spider.sh` | 兼容旧入口的启动脚本 |
-| `backend/scripts/set_admin_account.py` | 创建/重置管理员账号 |
+| `scripts/init_db_sync.py` | create_all 基线建表（bootstrap-db.sh 的内部依赖，勿单独使用） |
+| `scripts/check-arch.sh` | 架构红线扫描（退出码 = 违规数；pre-commit 与 CI 自动执行） |
+| `backend/scripts/set_admin_account.py` | 创建/重置管理员账号（默认 admin/123456，登录后请修改） |
+
+> 旧脚本（init-db.sh / init-database.sh / start.sh / start_frontend.sh / run-spider.sh / init_worktree.sh）已于 2026-08-31 清理：初始化统一走 bootstrap-db.sh，启停统一走 `run.py` 编排器（诊断报告第 9 章决策）。
 
 ---
 
