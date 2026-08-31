@@ -16,8 +16,12 @@ LLM:
   TEMPERATURE: 0.2            # 规划类任务低温稳定输出
   TIMEOUT: 120                # 单次请求超时（秒）
   MAX_RETRIES: 3              # 指数退避重试次数
-  MAX_TOKENS_BUDGET: 200000   # token 预算熔断阈值（累计用量超过即拒绝调用）
+  MAX_TOKENS_BUDGET: 200000   # token 预算熔断阈值（月度累计用量超过即拒绝调用）
   MAX_ITERATIONS: 2           # 试采失败自动修复迭代上限
+  # P0-3 用量持久化：Redis 日/月计数 → llm_token_usage 表定时聚合
+  # 预算口径同步升级为"当月累计"（原口径为进程启动以来，重启即清零）
+  USAGE_PERSIST_ENABLED: true # 用量落库后台任务开关（关闭则预算仍用进程内存口径）
+  USAGE_FLUSH_INTERVAL: 60    # 聚合落库周期（秒）
   # SSRF 加固开关（评审 M-1）：true 时服务层拒绝全部私网/环回 base_url
   # （public untrusted 租户场景开启）；默认 false：本地 new-api(localhost:3000)/
   # ollama 属文档化合法路径。云元数据端点（169.254.0.0/16 / metadata.*）

@@ -22,6 +22,7 @@ from typing import Optional
 import httpx
 
 from backend.services.llm_provider_service import LlmProviderService, LlmRuntimeConfig
+from backend.services.llm_usage_service import get_month_used, record_usage
 from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
 
@@ -172,10 +173,16 @@ async def llm_chat(messages: list[dict]) -> str:
     last_error: Exception | None = None
 
     for attempt in range(cfg.max_retries):
-        used_total = _facade._TOKEN_USAGE.get(usage_dim, 0)
+        # 预算读数优先月度 Redis 聚合（P0-3：跨重启/多副本有效）；
+        # None（测试态/Redis 故障）回退进程内存计数（原语义，存量测试零变化）
+        month_used = await get_month_used(usage_dim)
+        used_total = (
+            month_used if month_used is not None
+            else _facade._TOKEN_USAGE.get(usage_dim, 0)
+        )
         if used_total >= budget:
             raise BusinessException(
-                f"LLM token 预算已耗尽（{usage_dim} 累计 {used_total} >= {budget}），已熔断"
+                f"LLM token 预算已耗尽（{usage_dim} 本月累计 {used_total} >= {budget}），已熔断"
             )
         try:
             if cfg.provider_id is not None:
@@ -201,6 +208,16 @@ async def llm_chat(messages: list[dict]) -> str:
                 logger.info(
                     f"LLM token 用量: +{used}（{usage_dim} 累计 "
                     f"{_facade._TOKEN_USAGE[usage_dim]}/{budget}）"
+                )
+                # P0-3 用量持久化：Redis 日/月计数（内部失败不影响主路径；
+                # 测试态为 no-op，保持纯内存语义）
+                usage_info = data.get("usage") or {}
+                await record_usage(
+                    dim=usage_dim,
+                    model=cfg.model,
+                    prompt_tokens=int(usage_info.get("prompt_tokens") or 0),
+                    completion_tokens=int(usage_info.get("completion_tokens") or 0),
+                    total_tokens=used,
                 )
             return content
         except BusinessException:

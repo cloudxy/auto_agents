@@ -22,13 +22,35 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from platform_core.logger import get_logger
 
+# Webhook 签名密钥的默认占位符（config/default/webhook.yml）——已随仓库公开，
+# 沿用即意味着外部回调可被任意伪造，启动时必须拒绝（P0-2）
+_WEBHOOK_SECRET_PLACEHOLDER = "change-me-in-production"
+
+
+def _validate_runtime_secrets() -> None:
+    """启动期密钥 fail-fast（P0-2）：Webhook 密钥为空/默认占位符时拒绝启动
+
+    与 JWT 守卫（backend/utils/auth.py 对同款占位符导入即抛错）构成对称防线；
+    Scrapy 侧 SpiderCloseWebhook 读取同一配置源（config/default/webhook.yml），
+    两侧密钥必须一致，配置入口：config/<env>/.env 的 AUTO_AGENTS_WEBHOOK__SECRET_KEY。
+    """
+    secret = str(settings.get("WEBHOOK.SECRET_KEY", "") or "").strip()
+    if not secret or secret == _WEBHOOK_SECRET_PLACEHOLDER:
+        raise RuntimeError(
+            "WEBHOOK.SECRET_KEY 未配置或仍为默认占位符，拒绝启动（外部回调可被伪造）。"
+            "请在 config/<env>/.env 配置 AUTO_AGENTS_WEBHOOK__SECRET_KEY"
+            "（Backend 与 Scrapy 两侧一致），"
+            "生成命令：python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+
 
 def create_app():
     """创建 FastAPI 应用实例（不含初始化逻辑）"""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """应用生命周期：启动 Redis 队列消费者 + 定时调度器 + 代理健康管理"""
+        """应用生命周期：密钥守卫 + Redis 队列消费者 + 定时调度器 + 代理健康管理 + LLM 用量聚合"""
+        _validate_runtime_secrets()
         consumer = None
         if settings.get("TASKS.CONSUMER_ENABLED", True):
             from backend.tasks.consumer import SpiderTaskConsumer
@@ -56,6 +78,16 @@ def create_app():
                 await proxy_health.start()
             except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
                 get_logger("global").warning(f"代理健康管理启动失败（忽略）: {e}")
+        # LLM 用量聚合落库（P0-3）：Redis 日粒度计数 → llm_token_usage 表
+        llm_usage_flush = None
+        if settings.get("LLM.USAGE_PERSIST_ENABLED", True):
+            from backend.services.llm_usage_service import LlmUsageFlushService
+
+            llm_usage_flush = LlmUsageFlushService()
+            try:
+                await llm_usage_flush.start()
+            except Exception as e:  # noqa: BLE001 失败仅告警不阻断启动
+                get_logger("global").warning(f"LLM 用量聚合任务启动失败（忽略）: {e}")
         # new-api 渠道集成（阶段三）：三层开关 ENABLED → SCHEDULER_ENABLED / PROBE_ENABLED，
         # 失败仅告警不阻断启动（外部系统依赖故障不影响主平台可用性）
         newapi_scheduler = None
@@ -112,8 +144,13 @@ def create_app():
         if consumer is not None:
             try:
                 await consumer.stop()
-            except Exception as e:  # noqa: BLE001 关闭失败仅告警
+            except Exception as e:  # noqa: BLE001
                 get_logger("global").warning(f"Redis 队列消费者停止失败（忽略）: {e}")
+        if llm_usage_flush is not None:
+            try:
+                await llm_usage_flush.stop()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"LLM 用量聚合任务停止失败（忽略）: {e}")
 
     app = FastAPI(
         title="Auto Agents API",
