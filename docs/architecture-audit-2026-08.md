@@ -1,0 +1,548 @@
+# 全系统架构与模块诊断报告（2026-08）
+
+> 审计范围：backend / scrapy / platform_core / config / frontend(admin+official) / deploy / scripts / CI
+> 方法：三路并行深度代码扫描 + 关键发现逐行人肉核验（P0 全部 4 条、prod 配置、前端注册调用均已亲自复核）。
+> 性质：诊断报告，本文档不伴随任何代码改动；修复方案与演进设计见第 4/5 章。
+
+---
+
+## 1. 执行摘要
+
+**整体判断**：这是一个治理水平较高的代码库——分层纪律（API→Service→Repository）、异常信封、Redis 异步化、分布式锁（Lua 原子释放）、LLM 密钥 Fernet 加密、SSRF 防护、配置多层合并都执行到位；**未发现已提交的真实密钥、SQL 注入、可远程利用的鉴权缺失**。
+
+但存在系统性的**"引擎造好了、方向盘没接上"**问题：多个模块的核心逻辑完整，而配置面/消费方/收尾链路缺失，导致实际运行形态是"半成品空转"。典型如：new-api 渠道调度器每轮巡检 0 个受管渠道（配置无写入方）、站点级反爬配置无任何代码消费、LLM 用量统计只活在进程内存里。
+
+另有 4 个 P0 级"功能已坏/安全缺口"，其中爬虫无限重试会导致任务在 DB 中永久卡 running。
+
+**问题统计**：P0 × 4｜P1 × 13｜P2 × 46（按主题归组）。
+
+**最优先行动**（详见第 5 章批次 1）：修 RetryMiddleware 重试上限、补 webhook 密钥启动守卫、token 用量落库、httpx `proxies=` 参数替换。
+
+另：开发环境问题（git 连接 GitHub 失败：本地代理未启动）的诊断与解决方案见附录 6.3。
+
+---
+
+## 2. 系统架构现状
+
+### 2.1 整体结构
+
+```
+auto_agents/ (uv workspace，根 .venv 唯一)
+├── backend/          FastAPI（api/v1+v2 内部 + external_api/v1 外部）+ services + repositories + tasks/consumer
+├── scrapy/           scrapy-redis 分布式爬虫（禁 import backend，B2 红线）
+├── platform_core/    共享基建：db / redis_async / queues / repository / logger / models / schemas / exceptions
+├── config/           Dynaconf：default → scrapy/default → <env> → scrapy/<env> → <env>/.env → AUTO_AGENTS_* 环境变量
+├── frontend/         admin（React 19 + antd 6 + CRA）13 页面 / official（纯展示，仅 Home）
+├── deploy/newapi/    外部 new-api 中转站独立编排（质量高：密钥 ${VAR:?} 强制注入）
+└── scripts/          check-arch.sh（12 红线+3 边界）+ 4 套 DB 初始化脚本
+```
+
+### 2.2 智能爬虫板块数据流（核心闭环完整）
+
+```
+Backend SpiderTaskConsumer (backend/tasks/consumer.py)
+  blpop 优先级任务队列 → 任务置 running + 写活跃 SET
+  → rpush <spider>:start_urls
+      → 爬虫（base/generic/flow_generic，TaskAwareRedisSpider 解析队列条目注入 task_id）
+      → 管道：Clean → Validate → QualityCheck(0-100 评分) → Store(rpush spider:item_queue)
+  → consumer 批量 lpop(20) → 增量去重 + bulk insert spider_results
+       + result_count 累加 + redis/csv 镜像双写
+  → 爬虫空闲收尾(IdleAutoClose) → SpiderCloseWebhook（HMAC-SHA256 签名回调）
+  → backend finish_task → 终态/失败重试（ZSET 退避 1s→5s→15s）
+```
+
+架构合规良好：scrapy 无任何 `import backend`，仅通过 Redis 队列 + webhook 通信。中间件体系完整（UA 轮换 / 代理评分加权随机 / 账号会话 / 任务暂停停止控制 / Playwright 可选渲染）。
+
+### 2.3 大模型管理模块（cc-switch 类）
+
+定位：**多供应商注册表 + 单激活热切换**（非多路复用）。
+
+- 表 `llm_providers`：name 唯一、`api_key_encrypted`（Fernet）、**单一 `model` 字符串**（`platform_core/models/llm_provider.py:32`）、`is_active` 全表至多一行
+- `llm_provider_service.py`：CRUD、`activate_exclusive`（单语句互斥 UPDATE）、`test_connectivity`（手动触发）、`resolve_runtime_config`（激活且 enabled 优先，否则回退 `llm.yml` + env）
+- 消费方 `ai_planner/llm_client.py::llm_chat`：共享 httpx client 缓存、指数退避重试、**进程内 `_TOKEN_USAGE` 预算熔断**
+- 前端 `LlmProviders.tsx` 已接线
+
+关键限制：仅 `openai_compatible` 一种协议；无模型列表；无周期巡检；active 挂掉不切换其他注册供应商。
+
+### 2.4 new-api token 智能调度模块
+
+定位（如实描述）：**不是 new-api 的等价替代品，而是外部独立 new-api 实例的外挂管控侧**。不做请求转发、不做 token 发放、不做渠道负载均衡、不做计费记账——所有 LLM 流量直接打 new-api 本体。
+
+已实现三块：
+
+1. `channel_scheduler_service.py`：渠道额度巡检（lifespan 启动）——分布式锁 → 拉 new-api 管理 API 渠道列表 → **直连 new-api 库**（独立 engine + `NEWAPI.DB_DSN`）聚合 `logs` 表窗口 quota → 超限置 status=3（auto disabled）→ 落 `channel_events` → 通知；冷却到期复核后自动恢复
+2. `channel_probe_service.py`：渠道真伪探针（10 维行为指纹：身份矛盾/缓存逐字重复/相似度 <0.15 判 spoofed）
+3. `newapi_overview_service.py` + `v1/newapi.py`：全只读 3 端点（overview/events/probe-results，require_admin）+ 前端 `NewApiOps.tsx`
+
+### 2.5 集成点与官网/后台
+
+- LLM ↔ 爬虫（唯一真实闭环）：`ai_planner/orchestrator.py`——LLM 规划生成 selectors → flow_generic 试采 → 质量评判 → 失败自动修复迭代（MAX_ITERATIONS=2）→ 注册 `spider_definitions`（source=ai_generated）
+- newapi ↔ LLM 管理模块：仅文档级注释，无代码集成
+- 前端：admin 13 页面（含 /ai /llm /newapi）均已接线真实 API；official 仅静态官网
+
+---
+
+## 3. 问题清单
+
+> 每条 = 证据（file:line）+ 影响 + 修复方案。
+> 标注 ✅ 的为本次审计中人肉逐行复核过的条目。
+
+### 3.1 P0 —— 功能已坏 / 安全缺口（4 条）
+
+#### P0-1 爬虫自定义 RetryMiddleware 无限重试 → 任务永久卡 running ✅
+
+**证据**：`scrapy/middlewares/__init__.py:325-336`
+
+```python
+class RetryMiddleware:
+    def process_response(self, request, response, spider):
+        if response.status in [429, 500, 502, 503, 504]:
+            retry_req = request.copy()
+            retry_req.dont_filter = True
+            if response.status == 429:
+                retry_req.meta["download_delay"] = 5   # ← 自创 meta 键，Scrapy 不读
+            return retry_req                            # ← 无重试次数上限
+```
+
+三个叠加缺陷：
+
+1. 对 429/5xx **无条件重试，无任何次数上限**，也不读 `retry_times`；与内置 `scrapy.downloadermiddlewares.retry.RetryMiddleware` 同为 550 优先级且未禁用内置（`scrapy/settings.py:65`），自定义的先短路响应链，内置的计数上限永远不生效。
+2. `retry_req.meta["download_delay"] = 5` 是自创 meta 键，Scrapy 下载器不消费该键（仅认 spider 属性/槽位设置）——429 风暴下仍按全局 1s 延迟全速重试。
+3. 连锁后果：爬虫永不空闲 → `IdleAutoClose` 不触发 → webhook 不回调 → DB 任务**永久卡 running**。全仓无 running 任务超时回收逻辑（仅 Redis 活跃键 86400s TTL 自过期，DB 行无人纠正）。
+
+**修复方案**：
+- 读取 `request.meta.get("retry_times", 0)`，达到 `RETRY_TIMES`（建议默认 3）后放行响应并记 warning；
+- 429 退避改为 `spider.download_delay` 临时调整或 `twisted` 层延迟（或直接删自定义中间件、启用内置 RetryMiddleware 并配置 `RETRY_HTTP_CODES`）；
+- 兜底：consumer 增加周期扫描——`running` 超过 N 小时且 Redis 活跃键不存在的任务置 failed（可复用现有 ZSET 重试机制）；
+- 补测试：真实经过下载器中间件链的集成测试（现有测试全部 mock，掩盖了此类缺陷）。
+
+#### P0-2 Webhook 签名密钥默认值无 fail-fast → 外部回调可伪造 ✅
+
+**证据**：`config/default/webhook.yml:6`（`SECRET_KEY: "change-me-in-production"`）+ `backend/app/external_api/v1/webhooks.py:46`（`secret = str(settings.WEBHOOK.SECRET_KEY)` 直接使用）。
+
+防御不对称：JWT 密钥同样默认占位符，但 `backend/utils/auth.py:13-17` 在导入时强制抛错拒绝默认值；webhook 密钥没有等价防线。`config/prod/.env` 也未配置 webhook 密钥。
+
+**影响**：漏配部署时，任何人用仓库内公开的默认密钥即可签名调用 `POST /external/v1/webhooks/spider/callback`，伪造任意 `task_id` 的 completed/failed 终态 → 篡改任务状态、触发失败重试链、钉钉/邮件通知轰炸。
+
+**修复方案**：比照 `auth.py` 的 JWT 守卫，在应用工厂/lifespan 启动时校验 `WEBHOOK.SECRET_KEY`——非空、非占位符、长度 ≥ 32，否则拒绝启动；scrapy 侧 `SpiderCloseWebhook` 同样读取该配置，两侧同源校验。
+
+#### P0-3 LLM token 用量纯进程内存统计 → 预算熔断形同虚设 ✅
+
+**证据**：`backend/services/ai_planner/llm_client.py:33-35`
+
+```python
+# 进程级 token 用量累计（跨请求熔断；按 provider 维度计数，兜底路径统一记
+# "config" 名下；单实例假设：多副本部署时预算无法跨进程聚合，需外部聚合方案）
+_TOKEN_USAGE: dict[str, int] = {}
+```
+
+重启清零、多副本无法聚合、**整个仓库不存在 provider 维度的用量落库**。预算熔断（L175-222）在重启后从 0 重新计数；作为"token 智能调度系统"的计量基础完全缺失。
+
+**修复方案**（与 4A 演进设计合并）：新增 `llm_token_usage` 表（按 provider/model/日聚合）+ Redis `INCRBY` 实时累计；熔断判断读聚合值，进程内存仅作读缓存。详见 4.1.4。
+
+#### P0-4 代理健康探测使用 httpx 0.28 已删除的 `proxies=` 参数 → 代理池评分衰减到 0 ✅
+
+**证据**：`backend/services/proxy_health_service.py:114-121`
+
+```python
+async with httpx.AsyncClient(timeout=probe_timeout) as client:
+    for proxy in low_score_proxies:
+        resp = await client.head(
+            probe_url,
+            proxies={"all://": proxy},   # ← httpx 0.28 已删除该参数
+            ...
+```
+
+项目锁定 `httpx>=0.28.1`（`backend/pyproject.toml:19`）；`proxies` 参数在 httpx 0.28 中已移除（0.26 起废弃），正确写法是 `httpx.AsyncClient(proxy=proxy)` 或 `mounts=`。当前每次探测抛 `TypeError`，被 `proxy_health_service.py:134` 的 `except Exception` 吞掉并当作"探测失败"走 `_decay_score`（每轮 -0.1）。
+
+**影响**：开启 `PROXY_HEALTH.ENABLED` 后所有低分代理被持续误判失败，评分永久衰减到 0，代理池被清空。测试未发现是因为 `test_proxy_health_service.py` mock 了 httpx，请求参数从未真实发出。
+
+**修复方案**：改为 `httpx.AsyncClient(proxy=proxy)` 循环外构建（或 `mounts={"all://": proxy}`）；重写测试——不 mock `client.head` 签名，改为断言请求构造参数；顺带消除 P2-16 的每请求新建 Redis 连接问题。
+
+---
+
+### 3.2 P1 —— 重要缺陷（13 条）
+
+#### P1-1 prod 配置键名失效 + `${}` 不展开 → 生产部署启动即失败 ✅
+
+**证据**：`config/prod/.env:2-5`（全文仅 5 行）：
+
+```
+MYSQL_DEFAULT_PASSWORD="${PROD_MYSQL_PASSWORD}"
+REDIS_DEFAULT_PASSWORD="${PROD_REDIS_PASSWORD}"
+SECRET_KEY="${PROD_SECRET_KEY}"
+JWT_SECRET_KEY="${PROD_JWT_SECRET_KEY}"
+```
+
+两个问题：① `JWT_SECRET_KEY` 裸键不能映射到代码读取的 `settings.JWT.SECRET_KEY`（需要 `AUTO_AGENTS_JWT__SECRET_KEY` 或 yml），而 `MYSQL_DEFAULT_PASSWORD` 恰好是 `db.py:43` 认的裸键格式——**同一文件两种口径**；② Dynaconf 的 `.env` 加载不做 `${VAR}` shell 展开，值是字面量字符串 `"${PROD_JWT_SECRET_KEY}"`。
+
+**后果**：JWT 密钥取不到真实值 → 走到 `webhook.yml`/`jwt.yml` 默认占位符 → `auth.py:13-17` 启动即抛 ValueError（fail-fast 本身是对的，但这份配置文件是坏的）；`SECRET_KEY` 无任何消费方。
+
+**修复方案**：统一 prod `.env` 键名为 Dynaconf 双下划线格式（`AUTO_AGENTS_JWT__SECRET_KEY=` 等）；`.env` 中删除 `${}` 插值写法（由部署脚本直接注入真实值）；补一个"配置自检"启动脚本或 `/health/config` 端点列出未生效的键。
+
+#### P1-2 docker-compose 后端容器绑定 127.0.0.1 → 发布端口不可达
+
+**证据**：`run_backend.py:61` 用 `settings.API.HOST`；`config/default/api.yml:5` 为 `127.0.0.1`；`config/local/` 无 api.yml 覆盖；`docker-compose.yml:40-48` 环境变量只覆盖 MySQL/Redis/JWT，不含 `AUTO_AGENTS_API__HOST` → 容器内 uvicorn 只听 loopback，宿主机 `9111:9111`（compose:39）连不通。且 Dockerfile HEALTHCHECK（`Dockerfile:48-49`）在容器内自检 127.0.0.1 通过，呈现"健康但不可访问"假象。
+
+**修复方案**：compose 增加 `AUTO_AGENTS_API__HOST: 0.0.0.0`（保持本地裸跑仍 127.0.0.1）；或 `config/local/api.yml` 覆盖。健康检查保留容器内探测即可。
+
+#### P1-3 前端 register 死功能：密码入 URL + body 为 null → 必然 422 ✅
+
+**证据**：`frontend/admin/src/services/auth.ts:42-46`
+
+```ts
+export const register = (username: string, email: string, password: string) => {
+  return api.post('/auth/register', null, { params: { username, email, password } })
+}
+```
+
+后端 `backend/app/api/v1/auth.py:172-176` 期望 JSON body（`request: RegisterRequest`），此调用必然 422——注册功能实际从未可用。同时密码进入 URL 查询串，会被 uvicorn access_log（`run_backend.py:93` `access_log=True`）及各级代理日志记录。
+
+**修复方案**：改为 `api.post('/auth/register', { username, email, password })`；核查 admin 前端是否有注册入口（若有则为可见死按钮）；access_log 在 prod 关闭或脱敏 query。
+
+#### P1-4 结果链路三处静默丢数据（Redis 无 ack 语义）
+
+**证据**：
+- `scrapy/pipelines/__init__.py:92-96`：StorePipeline rpush `spider:item_queue` 失败**仅记日志**（"推送失败仅告警，不中断采集"）→ item 无重试、无死信队列，直接蒸发；
+- `backend/tasks/consumer.py:416-420`：消息缺 `task_id` 直接跳过（而 StorePipeline 在多活跃任务无法归属时恰好置 None，`pipelines/__init__.py:76-79`）→ 归属失败的合法数据被丢弃；
+- `backend/tasks/consumer.py:409`：批量 `lpop(count=20)` 后消息只存在于内存，进程崩溃 → 整批已出队未落库数据丢失；同理 `_dispatch`（L214-227）blpop 后崩溃 → 任务消息丢失且 DB 无对账，任务永久 pending。
+
+**修复方案**：
+- StorePipeline 失败改为本地缓冲重投（内存队列 + 周期重试），连续失败触发 spider 停止而非继续采集丢数据；
+- 缺 task_id 的消息转入死信 list（`spider:item_dead`）并告警，不静默丢；
+- 中期：改用 Redis Stream（XADD/XREADGROUP/XACK）获得消费 ack 语义；短期兜底：consumer 启动时对账——活跃 SET 中的 task 与 DB running 任务互相校验，孤儿任务走失败重试。
+
+#### P1-5 openweather 爬虫双重损坏 + API Key 明文入库
+
+**证据**：`scrapy/spiders/openweather.py`
+- `:18-20` `SPIDER_SITES.get('openweather')` 未解包 Dynaconf 顶层 `sites` 命名空间（正确写法见 `middlewares/__init__.py:30` 的 `inner = sites_cfg.get("sites", sites_cfg)`）→ `api_key` 恒为空，`:23-24` 直接 return，**该爬虫永远跑不了**；
+- `:22-31` 覆盖 `start_requests`，破坏 RedisSpider 的队列消费语义（scrapy-redis 的 start_requests 是无限消费循环），即使配好 key 也收不到 Backend 分发的任务；
+- `:30,36` `appid={api_key}` 拼 URL 且 `item['url'] = response.url` 原样入库 → **key 明文落 `spider_results.url`**，后台用户与 external API（`public.py:40`）均可读；
+- 另 `config/scrapy/default/sites.yml:20` 占位符 `YOUR_API_KEY_HERE` 入库（读取逻辑修好后占位符会被当真 key 发请求）。
+
+**修复方案**：修 sites 解包（复用中间件的写法或抽公共函数）；删 `start_requests` 覆盖；`item['url']` 对 query 做脱敏（剥 appid 参数）或存脱敏占位；启动时校验占位符值并拒绝。
+
+#### P1-6 new-api 渠道调度配置无写入方 → 调度器空转（受管渠道 = 0）
+
+**证据**：`backend/services/channel_scheduler_service.py:447` 只读 `newapi:channel:cfg:{id}`；**全仓无任何 API/脚本/页面写这个 hash**（grep `NEWAPI_CHANNEL_CFG_PREFIX` 仅定义+读两处）；叠加 `config/default/newapi.yml:30` `DEFAULT_WINDOW_QUOTA: 0`（0 = 不启用全局默认），三层开关全开时受管渠道仍为 0，调度器每轮空转。运维只能 redis-cli 手工 hset。
+
+**修复方案**：见 4.2 演进设计（渠道配置 CRUD API + admin 前端 + 引导脚本）。
+
+#### P1-7 站点级反爬策略只接线一半（配置面无消费者）
+
+**证据**：`config/scrapy/default/sites.yml:16-19,26,37` 为 zhihu(3s)/weibo(5s)/dianping(4s) 配置 `anti_crawl.download_delay`，但全仓无代码消费该键（grep `download_delay` 仅命中中间件自创 meta 键）→ 高风控站点实际仍用全局 `DOWNLOAD_DELAY=1`（`scrapy/settings.py:30`）。`login_required: true`（weibo/zhihu/dianping）同样无消费者；`AccountSessionMiddleware` 依赖的 `meta['account_id']` 全仓无任何 spider/中间件设置 → `utils/session_manager.py` 账号会话体系整体为死代码。
+
+**修复方案**：在 `TaskAwareRedisSpider` 或站点中间件中消费 `anti_crawl.download_delay`（按 site 动态设置 `spider.download_delay`）；账号会话要么补齐（登录态注入 + account_id 分发）要么明确删除，避免"看起来有账号体系"的误导。
+
+#### P1-8 scrapy_redis RedisPipeline 双写无人消费 → Redis 无限增长
+
+**证据**：`scrapy/settings.py:76` `scrapy_redis.pipelines.RedisPipeline: 100` 把每个 item 再序列化 rpush 到 `<spider>:items` 键——无消费者、无 TTL，与 `spider:item_queue` 形成重复双写，Redis 内存随采集无限增长。
+
+**修复方案**：`ITEM_PIPELINES` 中禁用该行（`scrapy_redis.pipelines.RedisPipeline: null`）；若未来需要再启用需配 TTL/裁剪。
+
+#### P1-9 bcrypt 同步调用阻塞事件循环（登录/注册卡顿全服务）
+
+**证据**：`backend/utils/auth.py:23-35`（`bcrypt.checkpw`/`bcrypt.hashpw` 同步 CPU 密集），由 `backend/services/auth_service.py:59`（authenticate）与 `:122`（register_user）在 `async def` 中直接调用。每次登录/注册期间整个事件循环停摆约 100-300ms（含后台消费者、调度器 tick、其他请求）。项目其他位置已严格遵循"同步操作下 to_thread"惯例（如 `v1/health.py:57`、`spider_task_service.py:660`），唯独 bcrypt 漏网。
+
+**修复方案**：`await asyncio.to_thread(bcrypt.checkpw, ...)`；顺带修 P2-6 的时序枚举（用户不存在时也做一次 dummy hash，放到同一个 to_thread 里）。
+
+#### P1-10 v2 健康检查是 v1 已修复缺陷的"活化石"
+
+**证据**：`backend/app/api/v2/health.py`
+- `:60` 与 `:84`：`"error": str(e)` 把内部异常全文（可含连接串、路径）回显客户端——v1 已收窄为 `type(e).__name__`（`v1/health.py:40`）；
+- `:69-70`：`storage.create_temp(...)` + `unlink()` 在 `async def` 中直接同步文件 IO——v1 已改 `asyncio.to_thread`（`v1/health.py:57`，注释"m-3 评审修复"）；
+- 端点集合不一致：v1 有 `/health/redis` 而 v2 没有；v2 的 `/health/db` 顺带 ping Redis。
+
+**修复方案**：短期 v2 直接复用 v1 的实现（import 同一 service 函数）；或明确 v2 为弃用状态并在路由 docstring 标注。根因是复制粘贴漂移，缺少"同一资源只有一个实现"的约束。
+
+#### P1-11 审计写入与业务事务分离 → 已成功操作变 500 / 审计可丢
+
+**证据**：`backend/app/api/_helpers.py:20-21`——`AuditService.record()` 内部吞掉 create 异常（`audit_service.py:46-48` 只记日志），但若 flush 失败 session 已处于 PendingRollback 态，随后 `record_audit` 的 `await session.commit()` 再抛 `PendingRollbackError` → 全局兜底 500。此时业务事务已成功提交（如 `spider_task_service.py:187`），用户收到 500 后重试会造成重复操作。另外业务 commit 与审计 commit 之间进程崩溃会丢审计记录（高危操作如 `task.delete` 留痕缺失）。
+
+**修复方案**：`record_audit` 改用**独立 session**（审计不与业务共享事务），异常时 rollback 而非 commit；或审计失败仅记结构化日志 + 补偿队列，绝不让审计问题影响业务响应码。
+
+#### P1-12 LLM 供应商无故障转移 / 模型列表 / 周期巡检（"多供应商"名不副实）
+
+**证据**：`backend/services/ai_planner/llm_client.py:150-163` 运行时只解析**一个**激活 provider，失败重试在同一 provider 上指数退避（L174-220），耗尽即抛异常，不切换其他 enabled 供应商。`models/llm_provider.py:32` 单 `model` 字符串——无模型列表、无按模型路由。健康检查仅手动触发（`llm_provider_service.py:285`）。
+
+**修复方案**：按用户选定方向做故障转移演进，见 4.1 设计。
+
+#### P1-13 共享 MySQL 引擎缺 `pool_pre_ping` → 陈旧连接报错
+
+**证据**：`platform_core/db.py:73,79-87` 只配 `pool_recycle=3600`；而项目自己在 `channel_scheduler_service.py:139` 用了 `pool_pre_ping=True`——同一仓库两种口径。MySQL `wait_timeout` 后的陈旧连接在非整点回收窗口会抛 "server has gone away"。
+
+**修复方案**：`DBManager` 创建 engine 统一加 `pool_pre_ping=True`（一次 DB 往返换稳定性，值得）。
+
+---
+
+### 3.3 P2 —— 治理类问题（按主题归组）
+
+#### A. 架构与分层
+
+| # | 问题 | 证据 |
+|---|------|------|
+| A1 | API 层直接 import ORM 绕过 R7 红线正则：`from platform_core.models.user import User` 这种子模块形式匹配不到 `check-arch.sh:72` 的 `from.*\.models import` 模式 | `backend/app/api/deps.py:21,64`；`tasks/consumer.py:40` |
+| A2 | external_api 绕过 Service 直用 Repository；`/data/{spider_name}` 裸 dict 无响应信封 | `backend/app/external_api/v1/public.py:15-16,72,107` |
+| A3 | alert_service 在 Service 层手写 `session.execute(select(...))` 绕过 Repository；对不存在的规则抛裸 `ValueError` → 前端收 500 而非 404 | `backend/services/alert_service.py:121-127,137-147,62,71` |
+| A4 | 删除类操作权限粒度分裂：delete_task/result/definition/schedule 均 require_admin，唯独 delete_template 是 require_operator；且 update/delete_template 不校验 created_by（任何 operator 可删他人模板） | `v1/spiders/templates.py:71`；`spider_registry_service.py:352-361` |
+| A5 | yml 与 settings.py 双份中间件/管道配置漂移：`config/scrapy/default/settings.yml:14-27` 声明的配置不会被 `scrapy/settings.py` 读取（后者硬编码，L59-81），yml 版缺 4 个中间件/管道且含 null 条目——"改 yml 无效"陷阱 | 两处对照 |
+| A6 | 死代码/幽灵模块：`middleware/process_time.py` 从未注册；`backend/cors/` 只剩 `__pycache__` 但 `app/__init__.py:14`、`platform_core/models/base.py:1` 注释仍指向已删文件；`storage.py` 的 cache_set/cache_get/save_upload/save_export/cleanup_temp、`UserRepository.get_active_users`、`UpdatePasswordRequest`（`schemas/auth.py:30-34`）均无调用方 | 各处 |
+| A7 | 重复代码：`_store_dir`/`_store_targets` 两 Service 逐字重复（`spider_task_service.py:680-694` vs `spider_query_service.py:322-335`）；`_EXPORT_COLUMNS` 两处；consumer `_ingest` vs `_flush_batch` 重复（`consumer.py:519-523`/`:620-625`） | 各处 |
+
+#### B. 安全（次级）
+
+| # | 问题 | 证据 |
+|---|------|------|
+| B1 | 未知/空角色默认授予 `operator` 而非 viewer；开放注册（`auth.py:172-205`）不设 role → 模型默认 operator → **任何自注册用户即可创建/运行爬虫任务** | `backend/app/api/deps.py:47`；`models/user.py` default |
+| B2 | 注册接口用户枚举：已存在用户名/邮箱返回 409 + 明确提示；authenticate 用户不存在时不做 dummy hash，存在时序差异 | `auth_service.py:108-119,48-61` |
+| B3 | `set_admin_account.py` 硬编码 `admin/123456`，生产误跑即重置弱口令 | `backend/scripts/set_admin_account.py:13-15` |
+| B4 | 请求体全局"XSS 清洗"静默篡改业务字段：`on\w+\s*=` 正则会删改 `params`（JSON 字符串）中合法的 `onclick=` 类内容、密码含此类子串也被改写——静默修改输入比不修改更危险 | `platform_core/schemas/base.py:33-46`；`validators.py:34-42`；`schemas/spider.py:43` |
+| B5 | 已提交的固定 dev JWT 密钥与弱密码：compose `AUTO_AGENTS_JWT__SECRET_KEY: "auto-agents-dev-secret-key-2026"`、密码 123456（虽声明"严禁用于生产"但密钥可预测）；`scripts/init-db.sh:8` 硬编码 `IDENTIFIED BY '123456'`（check-arch R2 不扫 scripts/，检测不到） | `docker-compose.yml:48,14-17,28,46-47`；`scripts/init-db.sh:8` |
+| B6 | logger `diagnose=True` 会在 traceback 中打印变量值，生产日志可能带出敏感数据；轮转不压缩 | `platform_core/logger.py:76-78` |
+| B7 | storage.py `save_upload` 对 filename 无路径清洗，`../../x.jpg` 可穿越 uploads 目录（当前零调用的死代码，属潜伏缺陷） | `platform_core/storage.py:66-76` |
+| B8 | Dockerfile 全程 root 运行（无 USER 指令） | `Dockerfile:23-51` |
+
+#### C. 可靠性与资源生命周期
+
+| # | 问题 | 证据 |
+|---|------|------|
+| C1 | 进程退出不清理 DB 引擎与异步 Redis：`close_all()`（`db.py:186-197`）与 `close_async_redis()`（`redis_async.py:73-83`）全仓零调用；lifespan 关闭链只 stop 后台组件。且 `close_all` 用 `asyncio.run()` dispose 异步引擎——在运行中的事件循环内调用直接 RuntimeError，写法本身不可用于 FastAPI 关闭钩子 | `backend/app/__init__.py:91-120` |
+| C2 | DBManager 懒加载路径在事件循环内做同步网络 IO（`SELECT 1` + `ping()`）；`app/__init__.py:152` 模块级 `create_app()` 使 `uvicorn backend.app:app` 直启成为可能，首个请求阻塞全量建连。另 `state.py:118-119`、`schedule_service.py:370-371`、`newapi_api.py:50-52` 直接 `manager.async_engines["DEFAULT"]` 绕过 ready 检查，DB 未初始化时 KeyError 被吞成 warning（启动对账静默失效） | `platform_core/db.py:145-153` |
+| C3 | `_create_redis_client_for_db` 每次调用新建 100 连接的池且不关闭（当前仅 v2/health 一处无 db 参数的调用，潜伏地雷） | `platform_core/db.py:165-184` |
+| C4 | 渠道探针锁 TTL 与批次时长不匹配：锁 TTL 21600s 无自动续期，批次串行 9 题 × N 渠道 × 60s 超时，渠道多时可能超 TTL → 双实例并发批次、事件交叉 | `channel_probe_service.py:344,397-415` |
+| C5 | 代理统计读-改-写竞态：hget→内存改→hset 非原子，多 Worker 并发互相覆盖丢计数；`failed_proxies` 仅本地内存，重启即遗忘 | `scrapy/middlewares/__init__.py:232-245,148` |
+| C6 | mirror 双写时序：`_mirror_batch`（Redis rpush）发生在 `session.commit()` 之前——commit 失败时 Redis 镜像含未提交数据；反向失败仅告警，两侧都可能不一致 | `backend/tasks/consumer.py:569,572,601-602` |
+| C7 | Playwright 浏览器懒初始化竞态：`_ensure_browser` 无锁，首批并发请求启动多个浏览器实例泄漏 | `scrapy/middlewares/playwright_dm.py:93-101` |
+| C8 | 质量管道去重集合无界：`self._seen` 只增不减，常驻 Worker 长跑内存泄漏 | `scrapy/pipelines/quality.py:32` |
+| C9 | 去重策略断层：任务级请求全部 `dont_filter=True`（`base.py:47`、`flow_generic.py:104,148,176`），跨任务内容级去重仅 `params.incremental=true` 才启用（`consumer.py:527-535`），默认重复任务重复入库 | 各处 |
+
+#### D. 性能
+
+| # | 问题 | 证据 |
+|---|------|------|
+| D1 | consumer 增量去重 N+1 + 同批重复漏检：每条消息单独 `find_by_content_hash`（一批 50 条 = 50 次点查）；查重在 bulk insert 之前执行，同批两条相同 hash 互相检不出 | `backend/tasks/consumer.py:528,561-563,639-643` |
+| D2 | `get_proxy_health` 每请求新建 Redis 连接（`aioredis.from_url` + finally aclose），违背 `get_async_redis()` 门面约定；且端点函数体内 import + 构造 Service 而非依赖注入 | `proxy_health_service.py:182-184`；`v1/spiders/definitions.py:120-123` |
+| D3 | `stats()` 6 个串行查询可 gather；`list_nodes` 对每个心跳 key 逐个 hgetall + 每爬虫逐个 smembers（Redis N+1） | `spider_query_service.py:286-320`；`spider_registry_service.py:257-272` |
+| D4 | `stats()` 的 `total_results` 语义错误：名为"总结果数"实为近 7 日合计，与 `total_tasks`（全量）口径不一致，仪表盘失真；`datetime.now()` 本地时区裸值 | `spider_query_service.py:316,295` |
+
+#### E. 输入校验与契约一致性
+
+| # | 问题 | 证据 |
+|---|------|------|
+| E1 | `params` 字段无长度与 JSON 合法性校验（4 处 `Optional[str]`）：超大 payload 直达 DB Text 列，非法 JSON 要到消费者分发时才失败；`AlertRuleRequest.rule_type` 无枚举约束、name 无长度限制 | `schemas/spider.py:43,173,180,256,344,303`；`consumer.py:76` |
+| E2 | `PUT /configs/{key}` 的 key 无约束，可写任意长度/任意数量配置键 | `v1/configs.py:32-35`；`config_service.py:23-38` |
+| E3 | 成功响应 `request_id` 恒为 None（`ok()/created()` 不填），所有错误处理器都填——同一信封字段成功/失败行为不一致 | `app/responses/api.py:16,19-21` vs `exceptions/handlers.py:34` |
+| E4 | webhooks 直接抛 HTTPException（code 为 `HTTP_400` 而非业务码），绕过 AppException 体系 | `external_api/v1/webhooks.py:65,70,77` |
+| E5 | alembic DSN 密码未 URL 编码（应用侧用 `quote_plus`），含特殊字符的密码下迁移可用性与应用不一致 | `backend/alembic/env.py:24-28` vs `db.py:67` |
+| E6 | spider_files 定义快照 500 条静默截断，超出后 registered/enabled 状态失真（无告警无分页） | `spider_registry_service.py:124` |
+| E7 | 限流提示负数分钟：key 无过期（ttl=-1）时提示"请-1分钟后再试" | `v1/auth.py:39` |
+
+#### F. 工程化与 CI
+
+| # | 问题 | 证据 |
+|---|------|------|
+| F1 | check-arch.sh 盲区：R1/R2 不覆盖 `platform_core/ scripts/ config/ deploy/ docker-compose.yml`；R2 模式只匹配 Python 双引号赋值（漏单引号/yaml `PASSWORD:`/secret-token-api_key 键名），`test_` 前缀全豁免；R10 的 `for f in backend/services/*.py` 漏子包 `ai_planner/*.py`（6 文件真空）；R11 自认两段式赋值不匹配 | `scripts/check-arch.sh:46,72,89,103-105` |
+| F2 | CI 无前端测试/ESLint/安全扫描（仅 build）；scrapy 侧无测试目录；后端 pytest 仅 backend/tests | `.github/workflows/ci.yml:63-91` |
+| F3 | 文档失联：`AGENTS.md:80` 引用已删除的 GEMINI.md；`run.py:7` 引用不存在的 `scripts/bootstrap.sh`（实际 bootstrap-db.sh）；`ci.yml:6` 与 `.pre-commit-config.yaml:31` 写"10 条红线"，实际 12（check-arch.sh:38） | 各处 |
+| F4 | `run.py:130` 端口预检逻辑失效：`or` 短路 + 结果丢弃 + 不阻断启动，纯装饰 | `run.py:130` |
+| F5 | 四套 DB 初始化脚本并存且口径矛盾：init-db.sh（硬编码 123456）、init-database.sh、bootstrap-db.sh（自称"唯一推荐入口"）、init_db_sync.py；README:163 用的是 init-db.sh | `scripts/` 各处 |
+| F6 | 前端工具链老化：react-scripts 5.0.1（CRA 已停止维护）+ TS 4.9.5 配 React 19 类型（官方要求 TS≥5.0）+ target es5；两前端高度同构可抽共享包未抽 | 两处 package.json / tsconfig.json |
+| F7 | CI 三阶段关卡无 docker 镜像漏洞扫描与依赖审计（pip-audit / npm audit） | `ci.yml` |
+
+#### G. 前端质量
+
+| # | 问题 | 证据 |
+|---|------|------|
+| G1 | `official/src/services/api.ts` 零导入（死文件）；`ApiEnvelope` 接口两处重复定义；`unwrap` 强转不校验 `success` 字段（依赖"后端错误必带非 2xx"的隐含约定） | `official/src/services/api.ts`；`admin/src/services/auth.ts:23-29`、`api.ts:49-59` |
+| G2 | token 30 分钟过期但无 refresh-token 流程；401 一律 `window.location.href='/login'` 硬跳丢页面状态；token 持久化 localStorage（`useAuthStore.ts:38` 注释自认 rememberMe 语义未实现） | `config/default/jwt.yml:11`；`admin/src/services/api.ts:35-39`；`useAuthStore.ts:36-45` |
+| G3 | `usePermission.ts:35` 在 hook 返回值里用 CommonJS `require()`，每次渲染执行且 ESM/TS 风格违规 | `usePermission.ts:35` |
+| G4 | 用户管理只读：admin 前端 `menu:users` 权限对应的写操作后端不存在（无改密/禁用/角色分配端点、无 logout/token 撤销；`jwt.yml:13` 配了 REFRESH_TOKEN_EXPIRE_DAYS 但无刷新端点） | `v1/admin.py:33,43,55` |
+| G5 | 遗留演示脏代码：zhihu_feed/dianping_home/example 在 RedisSpider 上声明 `start_urls`（scrapy-redis 不消费，纯误导）；openweather 错误提示指向不存在的 `spider_sites.yml` | `zhihu_feed.py:12`、`dianping_home.py:12`、`example.py:20`、`openweather.py:24` |
+
+---
+
+## 4. 演进方案设计（用户选定方向：LLM 故障转移 + new-api 调度接线）
+
+### 4.1 LLM 管理模块：多供应商故障转移
+
+**现状**：单激活 + yml/env 单一兜底（`resolve_runtime_config`，`llm_provider_service.py:331-354`）；失败只在同一 provider 上退避重试。
+
+#### 4.1.1 数据模型变更（一张 alembic 迁移）
+
+`llm_providers` 表增列：
+
+- `priority INT NOT NULL DEFAULT 100` —— 故障转移顺序（越小越优先）
+- `models JSON NULL` —— 模型列表（替代单一 `model` 字符串；迁移时把存量 `model` 回填为单元素列表，旧列保留兼容期）
+- `consecutive_failures INT NOT NULL DEFAULT 0` —— 熔断计数（健康巡检维护）
+- `last_health_check DATETIME NULL` / `health_status VARCHAR(16) NULL`
+
+#### 4.1.2 运行时候选链解析
+
+`resolve_runtime_config` 改为返回**有序候选列表**：
+
+1. active 且 enabled 的 provider 排第一；
+2. 其余 enabled 且 `health_status != 'down'` 的按 priority 升序；
+3. yml/env 兜底配置排最后。
+
+`llm_chat` 按序尝试：每个候选 1 次请求 + 对 429/5xx 有限重试（保留现有指数退避但上限 2 次）；遇到**硬失败**（连接错误/超时/401/403/404 model）立即切下一候选；响应中记录实际使用的 provider_id（供用量归集与前端展示）。全部耗尽才抛 `LLMAllProvidersFailedException`（AppException 子类，聚合各候选错误摘要）。
+
+#### 4.1.3 周期健康巡检
+
+- lifespan 中新增 `LLMHealthProbeTask`（与 channel scheduler 同模式：分布式锁 + 间隔可配 `LLM.HEALTH_CHECK_INTERVAL`）；
+- 对全部 enabled provider 做轻量连通性探测（复用 `test_connectivity` 的 1-token 请求）；
+- 连续失败 ≥ N（默认 3）→ 置 `health_status='down'` + 通知；探测恢复 → 重新置 `healthy`。down 的 provider 不进候选链，但仍保留在注册表（人工重启或自动恢复）。
+- 熔断状态落库（不进程内存），多副本一致。
+
+#### 4.1.4 Token 用量持久化（同时解决 P0-3）
+
+新表：
+
+```sql
+llm_token_usage (
+  id BIGINT PK AUTO_INCREMENT,
+  provider_id INT NULL,            -- NULL = yml/env 兜底路径
+  provider_name VARCHAR(64),       -- 冗余存名，防 provider 删除后失义
+  model VARCHAR(128),
+  stat_date DATE,
+  prompt_tokens BIGINT DEFAULT 0,
+  completion_tokens BIGINT DEFAULT 0,
+  total_tokens BIGINT DEFAULT 0,
+  request_count INT DEFAULT 0,
+  failed_count INT DEFAULT 0,
+  updated_at DATETIME,
+  UNIQUE KEY uq (provider_name, model, stat_date)
+)
+```
+
+写入路径：每次请求成功后 `Redis INCRBY llm:usage:{provider}:{model}:{date}`（异步门面）+ 后台任务每分钟聚合 flush 到 MySQL（`INSERT ... ON DUPLICATE KEY UPDATE`）。预算熔断改读 Redis 聚合值；admin 前端 LlmProviders 页增用量列。进程内 `_TOKEN_USAGE` 降级为读缓存。
+
+#### 4.1.5 模型列表支持
+
+- 管理端"拉取模型列表"动作：`GET {base_url}/models`（openai_compatible 通用），结果写 `models` JSON 列；
+- Schema：`ProviderCreate/Update` 增 `models: list[str]`；`ai_planner` 调用处允许指定 model（默认取列表第一个）。
+
+#### 4.1.6 验收标准
+
+- 单测：候选链排序（active 优先/优先级/健康过滤）、故障切换（primary 500 → backup 200 的 mock 双 provider）、用量聚合正确性；
+- `uv run pytest -x -q backend/tests` 退出码 0；`bash scripts/check-arch.sh` 0 违规；
+- 手动 curl：禁用 active provider 的 base_url，触发 AI 规划，观察自动切换日志与 `llm_token_usage` 落库行。
+
+### 4.2 new-api 调度接线：让调度器真正管起来
+
+**现状**：`channel_scheduler_service.py:447` 读 `newapi:channel:cfg:{id}` hash 但全仓无写入方；`DEFAULT_WINDOW_QUOTA=0` → 受管渠道 0，调度器空转。
+
+#### 4.2.1 渠道配置 CRUD API（backend 侧）
+
+`backend/app/api/v1/newapi.py` 增写端点（require_admin + 审计）：
+
+- `GET /newapi/channels` —— 合并视图：new-api 管理 API 渠道列表 ⨝ 本地 Redis 配置（含 effective 额度：per-channel > 全局默认）
+- `PUT /newapi/channels/{channel_id}/config` —— body `{ limit_quota: int, window_hours: int, cooldown_seconds: int }`，写 `newapi:channel:cfg:{id}` hash（经 `get_async_redis()`；字段名即调度器读取侧契约——`limit_quota<=0` 视为显式关闭该渠道调度，见 `channel_scheduler_service.py:444` docstring 与 `newapi.yml:29` 注释）
+- `DELETE /newapi/channels/{channel_id}/config` —— 清除 per-channel 配置，回退全局默认
+
+Service 层新建 `channel_config_service.py`（hash 字段名与 scheduler 读取侧严格对齐——以 `channel_scheduler_service.py:447` 的 hkey 契约为准）；写操作记 `channel_events`（复用现有事件表）+ 现有通知通道。
+
+#### 4.2.2 Admin 前端入口
+
+`NewApiOps.tsx` 增"渠道配置"区块：渠道表格（名称/状态/窗口用量/effective 额度）+ 行内编辑抽屉（limit_quota 设 0 即关闭该渠道调度 / window_hours / cooldown_seconds）。services 层沿用 unwrap 信封约定。
+
+#### 4.2.3 生效链路收口
+
+三层开关文档化并加启动自检日志：
+
+```
+NEWAPI.ENABLED（总开关）
+  └─ SCHEDULER.ENABLED（调度器开关）
+      └─ 渠道受管条件：存在 newapi:channel:cfg:{id} 或 DEFAULT_WINDOW_QUOTA > 0
+```
+
+- `bootstrap-db.sh` / 空库引导脚本补可选的渠道配置种子步骤；
+- 调度器每轮启动/巡检时打印"受管渠道数 = N"，N=0 且开关全开时打 warning（消除静默空转）。
+
+#### 4.2.4 顺带修复
+
+- 探针锁：TTL 按批次规模估算（N 渠道 × 9 题 × 超时）或启用 `distributed_lock` 的 renewal 自动续期（`platform_core/queues.py` 已支持）；
+- 探针批次并发上限，避免长批次。
+
+#### 4.2.5 验收标准
+
+- 单测：config service 读写 hash 契约、effective 额度计算（per-channel 覆盖默认）；
+- 集成：mock new-api API + 假 DB DSN 下调度器 dry-run，断言受管渠道数 > 0 且超限渠道被置 status=3；
+- curl：`PUT /newapi/channels/1/config` 后 `HGETALL newapi:channel:cfg:1` 可见；前端 `npm run build` 通过。
+
+---
+
+## 5. 分批修复路线图
+
+| 批次 | 内容 | 预估 | 验收标准 |
+|------|------|------|----------|
+| **批次 1（P0）** | P0-1 重试上限+running 回收；P0-2 webhook 守卫；P0-3 用量落库（可先做最小版：Redis 聚合+定时 flush，表结构按 4.1.4）；P0-4 httpx proxy 参数+测试重写 | 1-2 天 | `uv run pytest -x -q backend/tests` 退出码 0；新增回归测试覆盖 4 条；默认密钥启动被拒（curl 验证） |
+| **批次 2（P1）** | P1-1~5、7~11、13（prod 配置、compose 绑定、前端 register、丢数据兜底、openweather、反爬接线、RedisPipeline、bcrypt、v2 health、审计独立 session、pre_ping）；P1-6/12 并入批次 4 | 3-5 天 | pytest + check-arch 双绿；`docker compose up` 后宿主机 curl 9111 health 通；前端注册 e2e 可用；scrapy 对 429 站点不再无限重试（本地起 mock 站点验证） |
+| **批次 3（P2 backlog）** | 按主题推进：安全加固（B1 角色默认 viewer、B4 清洗白名单、B5 脚本密钥）→ 架构收口（A1/A2/A3）→ 性能（D1 批量去重、D3 gather）→ 工程化（F1 扫描盲区、F2 前端测试、F5 脚本合并）→ 前端（G1/G2/G4） | 持续 | 每项独立 PR，各自带测试；check-arch 盲区修复后全仓扫描 0 违规 |
+| **批次 4（演进）** | 4.1 LLM 故障转移 + 4.2 调度接线 | 1-2 周 | 见 4.1.6 / 4.2.5 验收标准 |
+
+**顺序依赖**：批次 1 的 P0-3 用量表与批次 4 的 4.1.4 是同一张表——建议批次 1 直接按 4.1.4 建表，避免二次迁移。
+
+---
+
+## 6. 附录
+
+### 6.1 测试盲区清单（回归风险最高处）
+
+- `SpiderScheduler` 后台触发链路（`schedule_service.py:156-371`：_tick_once/_fire/动态优先级/静默时段）**零测试**——智能调度核心无回归保护
+- `tasks/consumer.py` 主循环：现有测试仅覆盖 `extract_start_urls/build_start_payload` 纯函数；`_dispatch`/`_flush_batch`/`_retry_loop`（含重试回滚兜底）未测
+- 爬虫中间件/管道零测试（P0-1、P0-4 正是 mock 掩盖或零覆盖所致）
+- `app/middleware/`（RequestID）、`app/responses/` 分页构造器、v2 health 多数端点、alembic 迁移（无 upgrade 测试）、`admin.py` 审计过滤分页
+
+### 6.2 值得保留的优良实践（后续重构勿误伤）
+
+- 统一异常信封 + 4 级处理器（`platform_core/exceptions/handlers.py`），500 兜底不泄内部信息
+- Redis 异步化收口（R11）执行彻底；`distributed_lock`（`queues.py:97-202`）token + Lua 原子释放/续期实现规范
+- LLM 密钥 Fernet 加密 + 掩码出参 + SSRF 元数据端点恒拒绝（`schemas/llm_provider.py:41-101`）
+- `deploy/newapi/` 编排（版本锁定、`:?` 必填密钥、`$$` 转义健康检查、独立网络）是仓库内最佳实践范本
+- `deps.py:30-36` CurrentUser 快照规避 async 惰性加载 MissingGreenlet、`db.py:14-16` pytest NullPool——真实踩坑沉淀
+- httpx 客户端统一 `trust_env=False`（`backend/services/ai_planner/llm_client.py:76-77` 等），不读系统代理环境变量——规避本机代理软件（Clash 等）劫持请求返回 502 的陷阱；与附录 6.3 的 git 代理故障同源（代码层已防，shell/git 层未防）
+- uv workspace 纪律（根 venv 唯一、uv.lock 提交、.dockerignore 排敏感文件）执行到位
+
+### 6.3 开发环境问题：git 连接 GitHub 失败（本地代理未启动）
+
+**现象**：
+
+```
+fatal: unable to access 'https://github.com/cloudxy/auto_agents.git/':
+Failed to connect to 127.0.0.1 port 7897 after 0 ms: Couldn't connect to server
+```
+
+**根因（2026-08-31 本机实测诊断）**：
+
+- git 全局与仓库局部均**无** `http.proxy`/`https.proxy` 配置（`git config --global --get-regexp proxy` 为空）——不是 git 配置问题；
+- 但 shell 环境变量 `HTTP_PROXY=http://127.0.0.1:7897`、`HTTPS_PROXY=http://127.0.0.1:7897` 存在；
+- `lsof -nP -iTCP:7897 -sTCP:LISTEN` 显示**无进程监听 7897**——代理软件（Clash Verge 系，7897 为其默认混合端口）未启动，或已改用其他端口；
+- git 的 HTTPS 传输由 libcurl 实现，会遵循 `http_proxy/https_proxy/all_proxy` 环境变量 → 去连一个不存在的本机代理端口。"after 0 ms"（瞬间拒绝）正是本机端口无监听的典型特征，区别于远程超时。
+
+**与项目代码的关联**：后端 httpx 客户端已统一 `trust_env=False` 防御同类问题（`llm_client.py:76-77` 注释自述"规避本机代理软件如 Clash 劫持 httpx 请求返回 502 的陷阱"）——同一网络环境问题在工具链的另一层表现：代码层防了，shell/git 层没防。
+
+**解决方案（已采纳约定：提交跟随系统，不固化任何代理配置）**：
+
+**约定**：`http_proxy`/`https_proxy` 环境变量由使用者**按需开启与关闭**（代理软件开则开、关则关）；git 层面**不做任何持久化代理配置**——不设 `git config http.proxy`、不设域名级代理、不把 unset 固化进 shell rc。提交/推送时 git 自动跟随当前系统环境：变量开启时走代理，关闭时直连，无需任何额外操作。
+
+**故障处理**（报错出现 = 环境变量与代理软件状态不一致，对齐其一即可）：
+
+1. 需要代理 → 启动代理软件（确认混合端口 7897 与环境变量一致）；
+2. 暂不用代理 → 关闭当前会话的代理变量（仅本会话，不持久化）：
+   ```bash
+   unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy all_proxy
+   ```
+3. 一次性绕过（可选，不改变任何配置）：
+   ```bash
+   git -c http.proxy= -c https.proxy= push
+   ```
+
+**明确不采用**的方案（与"按需开关"的使用方式冲突）：`git config --global http.https://github.com.proxy ...`（域名级固化代理）、从 `~/.zshrc` 删除 export 行（使用者需要它们作为开关）。
+
+**验收**：`git ls-remote origin` 正常返回引用列表即恢复。
+
+**团队预防**：将"代理变量按需开关 + git 跟随系统不固化 + 故障特征（after 0 ms = 本机代理未启动）"写入 README 开发环境章节；CI/容器内不携带这些环境变量，不受影响。
+
+---
+
+*报告生成：2026-08-31 · 审计方式：静态深度阅读（三路并行扫描 + 关键证据人工复核）· 所有行号基于当前工作区 `feature/project-structure` 分支*
