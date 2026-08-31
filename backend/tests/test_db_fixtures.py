@@ -13,7 +13,7 @@ from sqlalchemy import func, inspect as sa_inspect, select
 
 from platform_core.models.user import User
 
-# 独立事实源：platform_core/models/ 下 14 个模型文件的表名清单
+# 独立事实源：platform_core/models/ 下模型文件的表名清单
 # （不用 Base.metadata 回读——那与 create_all 同源，属 tautological 断言）
 ALL_ORM_TABLES = {
     "users",
@@ -30,6 +30,9 @@ ALL_ORM_TABLES = {
     "alert_rules",
     "operation_logs",
     "system_configs",
+    "skills",
+    "skill_reviews",
+    "skill_jobs",
 }
 
 
