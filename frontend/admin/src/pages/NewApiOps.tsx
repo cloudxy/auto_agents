@@ -11,15 +11,17 @@
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Button, Card, Input, Space, Statistic, Table, Tabs, Tag, Tooltip, Typography, message,
+  Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Space, Statistic,
+  Table, Tabs, Tag, Tooltip, Typography, message,
 } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
+import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import {
-  CHANNEL_STATUS, fetchNewapiEvents, fetchNewapiOverview, fetchNewapiProbeResults,
+  CHANNEL_STATUS, clearChannelConfig, fetchChannelsWithConfig, fetchNewapiEvents,
+  fetchNewapiOverview, fetchNewapiProbeResults, setChannelConfig,
 } from '../services/newapi'
 import type {
-  ChannelEventItem, ChannelProbeResultItem, NewapiChannel, NewapiOverview, ProbeVerdict,
+  ChannelEventItem, ChannelProbeResultItem, ChannelWithConfig, NewapiOverview, ProbeVerdict,
 } from '../services/newapi'
 
 const { Text } = Typography
@@ -84,6 +86,68 @@ const NewApiOps: React.FC = () => {
     }
   }, [])
 
+  // ---------------- 渠道额度配置（4.2 接线） ----------------
+  const [channelsCfg, setChannelsCfg] = useState<ChannelWithConfig[]>([])
+  const [channelsCfgLoading, setChannelsCfgLoading] = useState(false)
+  const [cfgTarget, setCfgTarget] = useState<ChannelWithConfig | null>(null)
+  const [cfgSaving, setCfgSaving] = useState(false)
+  const [cfgForm] = Form.useForm()
+
+  const loadChannelsCfg = useCallback(async (showSpin = true) => {
+    if (showSpin) setChannelsCfgLoading(true)
+    try {
+      setChannelsCfg(await fetchChannelsWithConfig())
+    } catch (error) {
+      // 管理面不可达：保持列表为空（顶部已有降级 Alert 说明）
+      setChannelsCfg([])
+    } finally {
+      if (showSpin) setChannelsCfgLoading(false)
+    }
+  }, [])
+
+  const openCfg = (record: ChannelWithConfig) => {
+    setCfgTarget(record)
+    cfgForm.setFieldsValue({
+      limit_quota: record.effective.limit_quota,
+      window_hours: record.effective.window_hours,
+      cooldown_seconds: record.effective.cooldown_seconds,
+    })
+  }
+
+  const onSaveCfg = async () => {
+    if (!cfgTarget) return
+    try {
+      const values = await cfgForm.validateFields()
+      setCfgSaving(true)
+      await setChannelConfig(cfgTarget.id, values)
+      message.success(`渠道 #${cfgTarget.id} 额度配置已保存（调度器下一轮巡检生效）`)
+      setCfgTarget(null)
+      loadChannelsCfg(false)
+      loadEvents(false) // config_updated 事件已落库
+    } catch (error) {
+      if ((error as { errorFields?: unknown })?.errorFields) return
+      message.error('保存渠道配置失败')
+    } finally {
+      setCfgSaving(false)
+    }
+  }
+
+  const onClearCfg = async () => {
+    if (!cfgTarget) return
+    try {
+      setCfgSaving(true)
+      await clearChannelConfig(cfgTarget.id)
+      message.success(`渠道 #${cfgTarget.id} 已清除渠道级配置（回退全局默认）`)
+      setCfgTarget(null)
+      loadChannelsCfg(false)
+      loadEvents(false)
+    } catch (error) {
+      message.error('清除渠道配置失败')
+    } finally {
+      setCfgSaving(false)
+    }
+  }
+
   // ---------------- 事件时间线 ----------------
   const [events, setEvents] = useState<ChannelEventItem[]>([])
   const [eventsTotal, setEventsTotal] = useState(0)
@@ -136,7 +200,8 @@ const NewApiOps: React.FC = () => {
 
   useEffect(() => {
     loadOverview()
-  }, [loadOverview])
+    loadChannelsCfg()
+  }, [loadOverview, loadChannelsCfg])
 
   useEffect(() => {
     loadEvents()
@@ -148,6 +213,7 @@ const NewApiOps: React.FC = () => {
 
   const refreshAll = () => {
     loadOverview(false)
+    loadChannelsCfg(false)
     loadEvents(false)
     loadProbes(false)
   }
@@ -159,7 +225,7 @@ const NewApiOps: React.FC = () => {
   }
 
   // ---------------- 表格列 ----------------
-  const channelColumns: ColumnsType<NewapiChannel> = [
+  const channelColumns: ColumnsType<ChannelWithConfig> = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 70 },
     {
       title: '名称', dataIndex: 'name', key: 'name', width: 160,
@@ -212,6 +278,30 @@ const NewApiOps: React.FC = () => {
       title: '创建时间', dataIndex: 'created_time', key: 'created_time', width: 170,
       render: (v: number | null | undefined) =>
         v ? new Date(v * 1000).toLocaleString('zh-CN', { hour12: false }) : '-',
+    },
+    {
+      // 4.2 额度调度配置：生效额度（渠道级 > 全局默认）+ 来源标识 + 配置入口
+      title: '额度调度', key: 'quota_cfg', width: 190,
+      render: (_: unknown, record: ChannelWithConfig) => {
+        const sourceMeta: Record<string, { color: string; text: string }> = {
+          channel: { color: 'blue', text: '渠道级' },
+          global: { color: 'cyan', text: '全局默认' },
+          none: { color: 'default', text: '未纳管' },
+        }
+        const meta = sourceMeta[record.effective_source] || sourceMeta.none
+        return (
+          <Space size={4}>
+            <Tooltip title={`窗口 ${record.effective.window_hours}h / 冷却 ${record.effective.cooldown_seconds}s`}>
+              <Tag color={meta.color}>
+                {record.effective_source === 'none' ? '未纳管' : fmtQuota(record.effective.limit_quota)}
+              </Tag>
+            </Tooltip>
+            <Button type="link" size="small" icon={<SettingOutlined />} onClick={() => openCfg(record)}>
+              配置
+            </Button>
+          </Space>
+        )
+      },
     },
   ]
 
@@ -309,11 +399,11 @@ const NewApiOps: React.FC = () => {
       </Space>
       <Table
         columns={channelColumns}
-        dataSource={overview?.available ? overview.channels : []}
+        dataSource={overview?.available ? channelsCfg : []}
         rowKey="id"
-        loading={overviewLoading}
+        loading={overviewLoading || channelsCfgLoading}
         pagination={false}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1290 }}
         locale={{
           emptyText: overview && !overview.available
             ? '降级模式：中转站不可达，无渠道数据'
@@ -419,6 +509,49 @@ const NewApiOps: React.FC = () => {
           { key: 'events', label: '事件时间线', children: renderEventsTab() },
         ]}
       />
+
+      {/* 渠道额度调度配置（4.2 接线：写入 Redis hash，调度器下一轮巡检生效） */}
+      <Modal
+        title={`渠道 #${cfgTarget?.id ?? ''} 额度调度配置${cfgTarget ? `（${cfgTarget.name}）` : ''}`}
+        open={!!cfgTarget}
+        onOk={onSaveCfg}
+        onCancel={() => setCfgTarget(null)}
+        confirmLoading={cfgSaving}
+        okText="保存"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <Alert
+          type="info" showIcon style={{ marginBottom: 16 }}
+          message="窗口内用量达到上限后渠道自动下线，冷却到期自动恢复；额度设为 0 表示显式关闭该渠道调度。"
+        />
+        <Form form={cfgForm} layout="vertical">
+          <Form.Item
+            name="limit_quota" label="窗口用量上限（quota）"
+            rules={[{ required: true, message: '请输入额度上限' }]}
+            tooltip="new-api quota 单位；0 = 关闭该渠道调度"
+          >
+            <InputNumber min={0} step={100} style={{ width: '100%' }} placeholder="如 100000" />
+          </Form.Item>
+          <Form.Item name="window_hours" label="统计窗口（小时）" initialValue={24} rules={[{ required: true }]}>
+            <InputNumber min={1} max={720} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="cooldown_seconds" label="超限冷却（秒）" initialValue={3600} rules={[{ required: true }]}>
+            <InputNumber min={60} max={604800} step={60} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+        {cfgTarget?.config && (
+          <Popconfirm
+            title="确认清除该渠道的渠道级配置？"
+            description="清除后回退全局默认额度；若无全局默认则该渠道退出调度纳管。"
+            okText="清除" okButtonProps={{ danger: true }} onConfirm={onClearCfg}
+          >
+            <Button danger type="link" style={{ padding: 0 }} disabled={cfgSaving}>
+              清除渠道级配置（回退全局默认）
+            </Button>
+          </Popconfirm>
+        )}
+      </Modal>
     </Card>
   )
 }

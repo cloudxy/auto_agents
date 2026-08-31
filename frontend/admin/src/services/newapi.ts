@@ -110,3 +110,38 @@ export const fetchNewapiProbeResults = (
   api
     .get('/newapi/probe-results', { params })
     .then((res) => unwrap<PagedResponse<ChannelProbeResultItem>>(res))
+
+// ---------------- 渠道额度调度配置（4.2 接线：写路径） ----------------
+
+/** 渠道级额度配置（与 Redis hash newapi:channel:cfg:{id} 字段对应） */
+export interface ChannelConfigInfo {
+  limit_quota: number
+  window_hours: number
+  cooldown_seconds: number
+}
+
+/** 渠道快照 + 调度配置合并视图（GET /newapi/channels） */
+export interface ChannelWithConfig extends NewapiChannel {
+  config?: ChannelConfigInfo | null
+  effective: ChannelConfigInfo
+  effective_source: 'channel' | 'global' | 'none'
+}
+
+/** 渠道列表 + 配置合并视图（远程不可达时后端返回业务码 502，错误提示走拦截器） */
+export const fetchChannelsWithConfig = (): Promise<ChannelWithConfig[]> =>
+  api.get('/newapi/channels').then((res) => unwrap<ChannelWithConfig[]>(res))
+
+/** 写入渠道级额度配置（limit_quota=0 = 显式关闭该渠道调度） */
+export const setChannelConfig = (
+  channelId: number,
+  cfg: ChannelConfigInfo
+): Promise<{ channel_id: number; config: ChannelConfigInfo }> =>
+  api
+    .put(`/newapi/channels/${channelId}/config`, cfg)
+    .then((res) => unwrap<{ channel_id: number; config: ChannelConfigInfo }>(res))
+
+/** 清除渠道级配置（回退全局默认；无全局默认则退出纳管） */
+export const clearChannelConfig = (channelId: number): Promise<{ channel_id: number; cleared: boolean }> =>
+  api
+    .delete(`/newapi/channels/${channelId}/config`)
+    .then((res) => unwrap<{ channel_id: number; cleared: boolean }>(res))
