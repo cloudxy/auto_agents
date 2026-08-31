@@ -1,0 +1,7 @@
+# 技能管理中心配置（方案 A）——本文件只含非敏感项（R1 红线）
+# 敏感项（评分专用 Key 等）一律走 config/<env>/.env
+SKILLS:
+  # 技能库根目录（相对仓库根或绝对路径）；技能目录 = <LIBRARY_ROOT>/skills/<name>/
+  LIBRARY_ROOT: "skills-library"
+  # lifespan 启动时是否增量扫描一次（本地单机语义）
+  SCAN_ON_STARTUP: false
