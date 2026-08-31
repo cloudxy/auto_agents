@@ -88,6 +88,8 @@ SKILL_SCORER_LOCK: Final[str] = "skill:scorer:lock"
 SKILL_SCAN_LOCK: Final[str] = "skill:scan:lock"
 # 公开 API 按 IP 限流计数（INCR+EXPIRE 每分钟窗口，A-P4-1 第三道闸）
 SKILL_PUBLIC_RATE_PREFIX: Final[str] = "skill:public:rl:"
+# LLM 周期健康巡检分布式锁（B-M4-2，多实例单跑）
+LLM_PATROL_LOCK: Final[str] = "llm:patrol:lock"
 
 
 # ── 共享分布式锁设施（全仓库唯一锁样板定义处，禁止再手写锁样板） ──────
@@ -237,5 +239,6 @@ __all__ = [
     "SKILL_SCORER_LOCK",
     "SKILL_SCAN_LOCK",
     "SKILL_PUBLIC_RATE_PREFIX",
+    "LLM_PATROL_LOCK",
     "distributed_lock",
 ]
