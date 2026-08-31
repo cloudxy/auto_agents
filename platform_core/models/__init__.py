@@ -21,10 +21,11 @@ from platform_core.models.channel_event import ChannelEvent
 from platform_core.models.channel_probe_result import ChannelProbeResult
 from platform_core.models.llm_token_usage import LlmTokenUsage
 from platform_core.models.skill import Skill, SkillJob, SkillReview
+from platform_core.models.llm_provider_model import LlmProviderModel
 
 __all__ = [
     "Base", "SpiderTask", "SpiderResult", "SpiderSchedule", "SpiderDefinition",
     "User", "OperationLog", "SystemConfig", "AlertRule", "TaskTemplate", "AiPlan",
     "LlmProvider", "ChannelEvent", "ChannelProbeResult", "LlmTokenUsage",
-    "Skill", "SkillReview", "SkillJob",
+    "Skill", "SkillReview", "SkillJob", "LlmProviderModel",
 ]

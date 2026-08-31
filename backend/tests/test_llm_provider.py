@@ -67,6 +67,7 @@ def _service() -> LlmProviderService:
     svc.session.commit = AsyncMock()
     svc.session.refresh = AsyncMock()
     svc.session.rollback = AsyncMock()
+    svc.session.execute = AsyncMock()  # B-M2-1：delete_provider 子表清理走 session.execute
     svc.repo = MagicMock()
     for _method in ("get_by_id", "get_by_name", "get_active", "list_providers",
                     "activate_exclusive", "delete", "create", "update",
