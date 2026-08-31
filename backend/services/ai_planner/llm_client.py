@@ -141,12 +141,22 @@ async def _resolve_llm_runtime_config() -> LlmRuntimeConfig:
         return _facade.resolve_config_from_settings()
 
 
-async def llm_chat(messages: list[dict]) -> str:
+async def llm_chat(
+    messages: list[dict],
+    *,
+    usage_dim: Optional[str] = None,
+    budget_override: Optional[int] = None,
+) -> str:
     """chat completions：超时 / 指数退避重试 / token 预算熔断 / 未启用抛业务异常
 
-    原 AiPlannerService._llm_chat 方法体（拆分后委托调用，行为零变化）。
+    原 AiPlannerService._llm_chat 方法体（拆分后委托调用，默认行为零变化）。
     配置来源：激活且 enabled 的供应商优先（provider 路径，共享 client），
     否则 yml/env 兜底（行为与阶段一完全一致，一次性 client）。
+
+    可选参数（A-P2-1 技能评分等旁路消费方使用；不传时行为与拆分前完全一致）：
+    - usage_dim：计量维度覆盖（如 "skill_scoring"）——旁路用量与 AI 规划互不挤占；
+    - budget_override：该维度独立预算（如 SKILLS.SCORING.MAX_TOKENS_BUDGET），
+      替代全局 LLM.MAX_TOKENS_BUDGET 的熔断阈值。
     """
     cfg = await _facade._resolve_llm_runtime_config()
     if not cfg.enabled:
@@ -163,13 +173,16 @@ async def llm_chat(messages: list[dict]) -> str:
             "缺少 LLM API Key：请在 .env 配置 LLM_API_KEY（或为激活的供应商配置密钥）"
         )
 
-    # token 预算沿用全局 LLM.MAX_TOKENS_BUDGET（供应商表无独立预算列）
-    budget = int(_facade.settings.get("LLM.MAX_TOKENS_BUDGET", 200000))
+    # token 预算：调用方独立预算优先，否则沿用全局 LLM.MAX_TOKENS_BUDGET
+    budget = budget_override if budget_override is not None else int(
+        _facade.settings.get("LLM.MAX_TOKENS_BUDGET", 200000)
+    )
     payload = {"model": cfg.model, "messages": messages, "temperature": cfg.temperature}
     headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}
     url = f"{cfg.base_url}/chat/completions"
-    # token 用量按 provider 维度计数（兜底路径统一记在 "config" 名下）
-    usage_dim = f"provider:{cfg.provider_id}" if cfg.provider_id is not None else "config"
+    # token 用量按 provider 维度计数（兜底路径统一记在 "config" 名下）；调用方可覆盖维度
+    dim = f"provider:{cfg.provider_id}" if cfg.provider_id is not None else "config"
+    usage_dim = usage_dim or dim
     last_error: Exception | None = None
 
     for attempt in range(cfg.max_retries):

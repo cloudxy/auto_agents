@@ -79,6 +79,14 @@ PROXY_SCORES_KEY: Final[str] = "spider:proxy:scores"
 # HASH: proxy → JSON({success, fail, avg_latency, last_check})
 PROXY_STATS_KEY: Final[str] = "spider:proxy:stats"
 
+# ── 技能域（方案 A；键名契约唯一源红线）──────────────────────────────
+# AI 评分队列（list：lpush 入队 / blpop 消费，SkillScoringService 串行逐个评）
+SKILL_SCORE_QUEUE: Final[str] = "skill:score_queue"
+# 评分器分布式锁（多实例互斥，worker 启动抢占）
+SKILL_SCORER_LOCK: Final[str] = "skill:scorer:lock"
+# 扫描互斥锁（scan_library 并发防护）
+SKILL_SCAN_LOCK: Final[str] = "skill:scan:lock"
+
 
 # ── 共享分布式锁设施（全仓库唯一锁样板定义处，禁止再手写锁样板） ──────
 # 语义：SET key token NX EX ttl 抢占 → Lua 原子释放/续期（GET==token 才 DEL/EXPIRE）。
@@ -223,5 +231,8 @@ __all__ = [
     "TASK_CONTROL_KEY",
     "PROXY_SCORES_KEY",
     "PROXY_STATS_KEY",
+    "SKILL_SCORE_QUEUE",
+    "SKILL_SCORER_LOCK",
+    "SKILL_SCAN_LOCK",
     "distributed_lock",
 ]
