@@ -77,12 +77,16 @@ ai_tool/*
 
 # 运行期导出数据（storage/exports 等由 STORAGE 配置指向）
 storage/
+# 技能工单暂存区（本地 markdown 工单，见 docs/agents/issue-tracker.md）
+.scratch/
 
 docs/*
 # 全系统架构与模块诊断报告随仓库提交
 !docs/architecture-audit-2026-08.md
 # 平台演进总方案（v2 合并版）随仓库提交
 !docs/plan/
+# 工程技能配置（issue tracker / triage 标签 / 域文档规则）随仓库提交
+!docs/agents/
 # 发布公告随仓库提交（其余 docs 内容不入库）
 !docs/release-notes-2026-08-30.md
 # ADR 决策记录与迁移演练报告随仓库提交
