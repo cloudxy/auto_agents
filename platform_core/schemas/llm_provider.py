@@ -146,6 +146,8 @@ class LlmProviderCreate(RequestBody):
         if v not in PROVIDER_TYPES:
             raise ValueError(f"不支持的供应商类型: {v}（仅 {'/'.join(PROVIDER_TYPES)}）")
         return v
+    # B-M2 向导流：创建时一并落模型子表（可选；默认模型取 is_default 行）
+    models: list[ProviderModelEntry] = Field(default_factory=list)
 
 
 class LlmProviderUpdate(RequestBody):
