@@ -469,6 +469,7 @@ llm_token_usage (
 - `GET /newapi/channels` —— 合并视图：new-api 管理 API 渠道列表 ⨝ 本地 Redis 配置（含 effective 额度：per-channel > 全局默认）
 - `PUT /newapi/channels/{channel_id}/config` —— body `{ limit_quota: int, window_hours: int, cooldown_seconds: int }`，写 `newapi:channel:cfg:{id}` hash（经 `get_async_redis()`；字段名即调度器读取侧契约——`limit_quota<=0` 视为显式关闭该渠道调度，见 `channel_scheduler_service.py:444` docstring 与 `newapi.yml:29` 注释）
   > ⚠️ **10.2-F 修正**：不要把 `limit_quota=0` 开放给前端承载"关闭调度"语义——它与全局 `DEFAULT_WINDOW_QUOTA: 0`（"不启用全局默认"）含义冲突。body 改为显式 `{ enabled: bool, limit_quota: int>0, ... }`。
+  > ✅ **10.2-F 核对（2026-08-31，E0.6）**：4.2 实施时**未采纳**本修正——现行 `ChannelConfigInfo.limit_quota`（ge=0，0=显式关闭）即上述语义混载。结论：列入 S1 前置小任务（schema 增 `enabled`、`limit_quota` 收紧 `ge=1`、旧 hash 兼容读取），详见 `docs/plan/README.md` §7.3。
 - `DELETE /newapi/channels/{channel_id}/config` —— 清除 per-channel 配置，回退全局默认
 
 Service 层新建 `channel_config_service.py`（hash 字段名与 scheduler 读取侧严格对齐——以 `channel_scheduler_service.py:447` 的 hkey 契约为准）；写操作记 `channel_events`（复用现有事件表）+ 现有通知通道。

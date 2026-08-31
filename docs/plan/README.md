@@ -37,7 +37,7 @@
 | **平台基座** | JWT 认证 + 三角色 RBAC、审计日志、统一异常信封、Dynaconf 多层配置、check-arch 12 红线门禁、admin（13 页面）/official（单页静态官网）双前端、6 个 lifespan 常驻组件 | `backend/app/` + `platform_core/` + `frontend/` |
 | **skills-library** | 本地子系统（已入 git）：meta.yaml 治理元数据、4 维评分 rubric、本地 8765 后台（无鉴权）、claude-code(symlink)/codex(拼接) 两适配器、1 个占位示例 skill | `skills-library/` |
 
-审计修复进度：P0 ×4 全修 ✅；P1 ×13 已修 12（唯 P1-12 LLM 故障转移 = B-M4）；4.2 中转站调度接线 ✅（10.2-F 语义核对收编入 E0.6）；易用性 U1 ✅；SaaS 多租户零落地。
+审计修复进度：P0 ×4 全修 ✅；P1 ×13 已修 12（唯 P1-12 LLM 故障转移 = B-M4）；4.2 中转站调度接线 ✅（10.2-F 已核对：未拆分，S1 前小任务见 §7.3）；易用性 U1 ✅；SaaS 多租户零落地。**工程基座 E0 六项已全部落地（2026-08-31）：测试基座/工厂/MySQL 保真通道/Alembic 基线修复/门禁口径/前端 jest 29 复活/裸语句清查。**
 
 **平台级基础设施定位（不租户化）**：new-api 中转站渠道、skills 域新表、system_configs、channel_events/channel_probe_results、operation_logs（跨租户平台审计）。
 
@@ -400,6 +400,23 @@ Service 划分：`skill_service`（CRUD/扫描/写回/tier 派生）、`skill_sc
 | **S3 配额与用量** | 任务并发 / 结果存储 / LLM token 三类配额 + 用量看板（租户/成员双维度）+ 超限业务码 | S1 + B(M1-M3) | 超配额被拒且文案可行动；看板双维度 |
 | **S4 能力租户化** | llm_providers 租户自带 Key + 平台公共供应商兜底（token 配额约束）+ 套餐→渠道组分配（远期）；**评估点：租户私有技能** | S3 + B(M4) | 租户各自配 Key 各自计量；平台成本可控 |
 | **S5 商业化闭环** | 官网企业注册/定价 + 自助开通 + 到期停用降级 + 平台运营台 | S1-S4 | 企业从官网浏览到跑通第一个采集任务全程无人工 |
+
+### 7.3 S1 前置附录：裸语句三分类清单（E0.6 产出，2026-08-31）
+
+全仓 Service 层 `session.execute` 清查结果（repository 层的 ORM execute 属正常范式，不计入）：
+
+| 位置 | 语句形态 | 分类 | S1 处置 |
+|---|---|---|---|
+| `backend/services/alert_service.py:127,147` | `select(SpiderTask)` Core ORM | A：`do_orm_execute` 可拦 | 直接纳入租户过滤，无需改造 |
+| `backend/services/config_service.py:17,26` | `select(SystemConfig)` Core ORM | A | 纳入；system_configs 为平台级豁免表，拦截后白名单放行 |
+| `backend/services/ai_planner/state.py:69` | `select(SpiderTask)` 标量列（独立 session） | A | 纳入；租户上下文缺失时的拒绝策略随 S1 全局规则 |
+| `backend/services/ai_planner/state.py:120` | `update(AiPlan)` Core ORM（`synchronize_session=False`，启动对账） | A | `do_orm_execute` 对 ORM-enabled update 注入 tenant 条件；**S1 专项测试用例** |
+| `backend/services/channel_scheduler_service.py:427,437` | `text(sql)` 对 new-api **外部库**（独立 engine） | C：外部库豁免 | 登记豁免 + 代码注释明示 |
+| `backend/app/api/v1/health.py:34` | `text("SELECT 1")` 主库探测 | C：探测语句（无业务表） | 豁免（无租户语义） |
+
+**结论**：主库上不存在 text() 裸 SQL 业务语句——S1 无"B 类（需改 ORM）"改造项；5 处 Core ORM 语句全部可由 `do_orm_execute` 收口。`consumer.py` 的 `add_all` 写入路径（before_flush 主防线的最大风险点）不属裸语句问题，已由 §7.1-3 覆盖。
+
+**10.2-F 核对结论（未拆分，列 S1 前置小任务）**：现行 `ChannelConfigInfo.limit_quota`（`ge=0`，0=显式关闭该渠道调度）正是审计 10.2-F 警告的语义混载——全局 `DEFAULT_WINDOW_QUOTA: 0` 意为"不启用全局默认"，两个 0 含义冲突（读取侧 `channel_scheduler_service.py:447-473` 以 if/elif 区分，代码自洽但对外契约歧义）。S1 前小任务：schema 增 `enabled: bool`（默认 true）、`limit_quota` 收紧 `ge=1`、读取侧兼容旧 hash（无 enabled 键视为 true）、前端配置弹窗加开关，旧 `limit_quota=0` 语义保留一个版本的兼容读取并在 channel_events 记 deprecation。
 
 ---
 
