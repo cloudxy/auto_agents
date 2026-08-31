@@ -86,6 +86,8 @@ SKILL_SCORE_QUEUE: Final[str] = "skill:score_queue"
 SKILL_SCORER_LOCK: Final[str] = "skill:scorer:lock"
 # 扫描互斥锁（scan_library 并发防护）
 SKILL_SCAN_LOCK: Final[str] = "skill:scan:lock"
+# 公开 API 按 IP 限流计数（INCR+EXPIRE 每分钟窗口，A-P4-1 第三道闸）
+SKILL_PUBLIC_RATE_PREFIX: Final[str] = "skill:public:rl:"
 
 
 # ── 共享分布式锁设施（全仓库唯一锁样板定义处，禁止再手写锁样板） ──────
@@ -234,5 +236,6 @@ __all__ = [
     "SKILL_SCORE_QUEUE",
     "SKILL_SCORER_LOCK",
     "SKILL_SCAN_LOCK",
+    "SKILL_PUBLIC_RATE_PREFIX",
     "distributed_lock",
 ]

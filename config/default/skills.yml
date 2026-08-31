@@ -19,3 +19,7 @@ SKILLS:
   # 允许后端 subprocess 执行 sync.sh（仅本地单机部署语义；关闭时 sync 端点拒绝）
   ADAPTER_SYNC:
     ENABLED: false
+  # 官网公开 API（无鉴权三道闸之第三闸；白名单/发布态过滤见 public_skills.py）
+  PUBLIC_API:
+    ENABLED: true
+    RATE_LIMIT_PER_MIN: 60
