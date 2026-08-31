@@ -27,3 +27,19 @@ LLM:
   # ollama 属文档化合法路径。云元数据端点（169.254.0.0/16 / metadata.*）
   # 由 schema 层恒拒绝，不受本开关影响
   PROVIDER_BLOCK_PRIVATE_URL: false
+
+# 预设平台注册表（B-M1）：仅做"预填+免记忆"，base_url 前端可改；全公开 URL 非敏感
+  PLATFORM_PRESETS:
+    - {name: "OpenAI", protocol: "openai_compatible", base_url: "https://api.openai.com/v1", requires_key: true}
+    - {name: "Anthropic Claude", protocol: "anthropic", base_url: "https://api.anthropic.com", requires_key: true}
+    - {name: "Google Gemini", protocol: "google_gemini", base_url: "https://generativelanguage.googleapis.com", requires_key: true}
+    - {name: "DeepSeek", protocol: "openai_compatible", base_url: "https://api.deepseek.com/v1", requires_key: true}
+    - {name: "阿里通义（百炼兼容）", protocol: "openai_compatible", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", requires_key: true}
+    - {name: "智谱 GLM", protocol: "openai_compatible", base_url: "https://open.bigmodel.cn/api/paas/v4", requires_key: true}
+    - {name: "月之暗面 Kimi", protocol: "openai_compatible", base_url: "https://api.moonshot.cn/v1", requires_key: true}
+    - {name: "OpenRouter", protocol: "openai_compatible", base_url: "https://openrouter.ai/api/v1", requires_key: true}
+    - {name: "SiliconFlow 硅基流动", protocol: "openai_compatible", base_url: "https://api.siliconflow.cn/v1", requires_key: true}
+    - {name: "Groq", protocol: "openai_compatible", base_url: "https://api.groq.com/openai/v1", requires_key: true}
+    - {name: "Ollama（本地）", protocol: "openai_compatible", base_url: "http://localhost:11434/v1", requires_key: false}
+    - {name: "vLLM / LM Studio（本地）", protocol: "openai_compatible", base_url: "", requires_key: false}
+    - {name: "中转站（new-api/one-api）", protocol: "openai_compatible", base_url: "", requires_key: true}

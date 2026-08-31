@@ -22,7 +22,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from platform_core.schemas.base import RequestBody
 
-PROVIDER_TYPES = ("openai_compatible",)
+# 协议白名单（B-M1：经 llm_protocol 适配器支持三协议）
+PROVIDER_TYPES = ("openai_compatible", "anthropic", "google_gemini")
 
 # link-local 元数据网段（RFC 3927，云厂商 metadata 服务所在地址段，恒拒绝）
 _LINK_LOCAL_NET = ipaddress.ip_network("169.254.0.0/16")
