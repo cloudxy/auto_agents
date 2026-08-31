@@ -29,6 +29,15 @@ export interface LlmProvider {
 }
 
 /** 创建/更新供应商入参（api_key 更新时可选：留空表示不修改） */
+export interface LlmProviderModelEntry {
+  model_id: string
+  alias?: string
+  model_tier?: 'strong' | 'basic'
+  priority?: number
+  is_default?: boolean
+  enabled?: boolean
+}
+
 export interface LlmProviderPayload {
   name: string
   provider_type?: string | null
@@ -40,6 +49,8 @@ export interface LlmProviderPayload {
   max_retries?: number | null
   enabled?: boolean
   remark?: string | null
+  /** B-M2 向导流：创建时一并落模型子表（默认模型取 is_default 行） */
+  models?: LlmProviderModelEntry[]
 }
 
 /** 连通性测试结果 */
@@ -79,3 +90,67 @@ export const testLlmProvider = (id: number): Promise<LlmTestResult> =>
   api
     .post(`/llm/providers/${id}/test`, undefined, { timeout: 30000 })
     .then((res) => unwrap<LlmTestResult>(res))
+
+// ---------------- B-M1/M2：探测与多模型管理 ----------------
+
+export interface PlatformPreset {
+  name: string
+  protocol: 'openai_compatible' | 'anthropic' | 'google_gemini'
+  base_url: string
+  requires_key: boolean
+}
+
+export interface ProbeModel {
+  id: string
+  owned_by: string
+}
+
+export const getPlatformPresets = (): Promise<PlatformPreset[]> =>
+  api.get('/llm/providers/platform-presets').then((r) => unwrap<PlatformPreset[]>(r.data))
+
+export const probeModels = (payload: {
+  provider_type: string
+  base_url: string
+  api_key: string
+}): Promise<{ models: ProbeModel[]; chat_only_count: number }> =>
+  api.post('/llm/providers/models/probe', payload).then((r) => unwrap(r.data))
+
+export const probeTest = (payload: {
+  provider_type: string
+  base_url: string
+  api_key: string
+  model: string
+}): Promise<{ ok: boolean; latency_ms: number; model: string; error: string }> =>
+  api.post('/llm/providers/models/probe-test', payload).then((r) => unwrap(r.data))
+
+export interface ProviderModelRow {
+  model_id: string
+  alias: string
+  model_tier: 'strong' | 'basic'
+  priority: number
+  is_default: boolean
+  enabled: boolean
+  health_status: 'unknown' | 'healthy' | 'degraded' | 'down'
+  last_checked_at?: string | null
+  last_latency_ms?: number | null
+}
+
+export const getLlmProviderModels = (providerId: number): Promise<ProviderModelRow[]> =>
+  api.get(`/llm/providers/${providerId}/models`).then((r) => unwrap<ProviderModelRow[]>(r.data))
+
+export const putLlmProviderModels = (
+  providerId: number,
+  models: Array<Pick<ProviderModelRow, 'model_id' | 'alias' | 'model_tier' | 'priority' | 'is_default' | 'enabled'>>,
+): Promise<ProviderModelRow[]> =>
+  api.put(`/llm/providers/${providerId}/models`, { models }).then((r) => unwrap<ProviderModelRow[]>(r.data))
+
+export const fetchModelsDiff = (
+  providerId: number,
+): Promise<{ new: string[]; existing: string[]; vanished: string[] }> =>
+  api.post(`/llm/providers/${providerId}/models/fetch`).then((r) => unwrap(r.data))
+
+export const testLlmProviderModel = (
+  providerId: number,
+  modelId: string,
+): Promise<{ ok: boolean; latency_ms: number; model: string; error: string; health_status: string }> =>
+  api.post(`/llm/providers/${providerId}/models/${encodeURIComponent(modelId)}/test`).then((r) => unwrap(r.data))

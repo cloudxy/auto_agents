@@ -240,6 +240,25 @@ class LlmProviderService:
         # commit 会 expire ORM 对象（expire_on_commit=True），过期属性访问将触发
         # 同步 refresh → MissingGreenlet，故主键必须在 commit 前固化为普通 int
         new_id = int(item.id)
+        # B-M2 向导流：models[] 一并落子表（父行 model 取 is_default 行，缺省取首行）
+        if payload.models:
+            defaults = [m for m in payload.models if m.is_default]
+            if len(defaults) > 1:
+                raise ValidationException(message="默认模型至多一个（is_default 多行）", field="models")
+            for entry in payload.models:
+                self.session.add(
+                    LlmProviderModel(
+                        provider_id=new_id,
+                        model_id=entry.model_id,
+                        alias=entry.alias or "",
+                        model_tier=entry.model_tier or "basic",
+                        priority=int(entry.priority or 100),
+                        is_default=bool(entry.is_default),
+                        enabled=bool(entry.enabled if entry.enabled is not None else True),
+                    )
+                )
+            chosen = defaults[0].model_id if defaults else payload.models[0].model_id
+            item.model = chosen
         await self.session.commit()
         logger.info(f"创建 LLM 供应商: id={new_id}, name={payload.name}")
         return await self.get_provider(new_id)
