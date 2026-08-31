@@ -28,6 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories.llm_provider_repository import LlmProviderRepository
 from config import settings
 from platform_core.exceptions import BusinessException, NotFoundException
+from platform_core.exceptions import NotFoundException, ValidationException
+from platform_core.models.llm_provider_model import LlmProviderModel
+from sqlalchemy import delete, select
+
 from backend.services.llm_protocol import ProtocolError, execute_json, get_adapter
 from platform_core.logger import get_logger
 from platform_core.schemas.llm_provider import (
@@ -274,6 +278,11 @@ class LlmProviderService:
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
+        # 子表显式清理（Core delete 不触发 ORM cascade，SQLite 默认不启用 FK——
+        # 显式语句与 MySQL FK ON DELETE CASCADE 语义对齐的双保险）
+        await self.session.execute(
+            delete(LlmProviderModel).where(LlmProviderModel.provider_id == provider_id)
+        )
         # commit 会 expire ORM 对象且行已删除（refresh 会抛 ObjectDeletedError），
         # 名称必须在 commit 前固化为普通字符串
         deleted_name = str(getattr(item, "name", "") or "")
@@ -297,6 +306,64 @@ class LlmProviderService:
     # ------------------------------------------------------------------
     # 连通性测试（一次性 client，10s 超时，1-token 请求，不落库）
     # ------------------------------------------------------------------
+    # ---------- B-M2-1 多模型（全量替换 + 默认冗余同步） ----------
+
+    async def get_models(self, provider_id: int) -> list[dict]:
+        """列供应商全部模型（含健康态）"""
+        rows = (
+            await self.session.execute(
+                select(LlmProviderModel)
+                .where(LlmProviderModel.provider_id == provider_id)
+                .order_by(LlmProviderModel.priority.asc(), LlmProviderModel.id.asc())
+            )
+        ).scalars().all()
+        return [
+            {
+                "model_id": r.model_id, "alias": r.alias or "", "model_tier": r.model_tier,
+                "priority": r.priority, "is_default": r.is_default, "enabled": r.enabled,
+                "health_status": r.health_status,
+                "last_checked_at": r.last_checked_at.isoformat() if r.last_checked_at else None,
+                "last_latency_ms": r.last_latency_ms,
+            }
+            for r in rows
+        ]
+
+    async def put_models(self, provider_id: int, entries: list[dict]) -> list[dict]:
+        """全量替换模型集；is_default 至多一行（多行 422）；默认变更同事务刷新父行 model 列"""
+        logger.info(f"模型集全量替换 | provider={provider_id} count={len(entries)}")
+        provider = await self.repo.get_by_id(provider_id)
+        if provider is None:
+            raise NotFoundException(resource=f"LLM 供应商 {provider_id}")
+
+        defaults = [e for e in entries if e.get("is_default")]
+        if len(defaults) > 1:
+            raise ValidationException(
+                message="默认模型至多一个（is_default 多行）", field="models"
+            )
+
+        await self.session.execute(
+            delete(LlmProviderModel).where(LlmProviderModel.provider_id == provider_id)
+        )
+        for entry in entries:
+            self.session.add(
+                LlmProviderModel(
+                    provider_id=provider_id,
+                    model_id=entry["model_id"],
+                    alias=entry.get("alias") or "",
+                    model_tier=entry.get("model_tier") or "basic",
+                    priority=int(entry.get("priority") or 100),
+                    is_default=bool(entry.get("is_default")),
+                    enabled=bool(entry.get("enabled", True)),
+                )
+            )
+        if defaults:
+            provider.model = defaults[0]["model_id"]  # 冗余快照：消费路径零改动的前提
+        elif entries:
+            provider.model = entries[0]["model_id"]
+        await self.session.flush()
+        await _invalidate_llm_clients(provider_id)
+        return await self.get_models(provider_id)
+
     # ---------- B-M1 探测（保存前；key 仅本次请求使用，不落库不落日志不回显） ----------
 
     @staticmethod

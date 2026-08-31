@@ -102,6 +102,23 @@ def _validate_base_url(v: str) -> str:
     return v
 
 
+class ProviderModelEntry(RequestBody):
+    """供应商模型条目（PUT /providers/{id}/models 全量替换语义的元素）"""
+
+    model_id: str = Field(..., min_length=1, max_length=128)
+    alias: str = Field("", max_length=128)
+    model_tier: str = Field("basic", pattern=r"^(strong|basic)$")
+    priority: int = Field(100, ge=0, le=10000)
+    is_default: bool = False
+    enabled: bool = True
+
+
+class ProviderModelsUpdate(RequestBody):
+    """全量替换请求体；is_default 至多一行（多行 422 由服务层校验）"""
+
+    models: list[ProviderModelEntry] = Field(..., min_length=0, max_length=200)
+
+
 class LlmProviderCreate(RequestBody):
     """创建 LLM 供应商请求（api_key 可选；未配置主密钥时带 api_key 会被服务层拒绝）"""
 

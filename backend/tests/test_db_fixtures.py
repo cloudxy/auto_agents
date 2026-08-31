@@ -33,6 +33,7 @@ ALL_ORM_TABLES = {
     "skills",
     "skill_reviews",
     "skill_jobs",
+    "llm_provider_models",
 }
 
 

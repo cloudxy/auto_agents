@@ -18,6 +18,7 @@ from backend.services.llm_provider_service import LlmProviderService
 from platform_core.db import get_async_db
 from platform_core.schemas.llm_provider import (
     LlmProviderCreate,
+    ProviderModelsUpdate,
     LlmProviderResponse,
     LlmProviderTestResponse,
     LlmProviderUpdate,
@@ -83,6 +84,32 @@ async def probe_provider_model_test(
         api_key=str(body.get("api_key") or ""),
         model=str(body.get("model") or ""),
     )
+    return ok(data=result)
+
+
+@router.get("/providers/{provider_id}/models", response_model=ApiResponse[list[dict]])
+async def get_provider_models(
+    provider_id: int = Path(..., gt=0),
+    _user: CurrentUser = Depends(require_admin),
+    service: LlmProviderService = Depends(_service),
+):
+    """列供应商全部模型（含 tier/priority/健康态）"""
+    return ok(data=await service.get_models(provider_id))
+
+
+@router.put("/providers/{provider_id}/models", response_model=ApiResponse[list[dict]])
+async def put_provider_models(
+    body: ProviderModelsUpdate,
+    provider_id: int = Path(..., gt=0),
+    user: CurrentUser = Depends(require_admin),
+    service: LlmProviderService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """模型集全量替换（is_default 至多一行；默认变更同事务刷新父行冗余列）"""
+    result = await service.put_models(provider_id, [m.model_dump() for m in body.models])
+    await session.commit()
+    await record_audit(session, user, "llm.provider.models.update", f"llm_provider#{provider_id}",
+                       detail={"count": len(result)})
     return ok(data=result)
 
 
