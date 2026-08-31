@@ -19,6 +19,7 @@ import { FadeIn, CONTENT_MAX_WIDTH, EASE_OUT_EXPO } from '../components/home/com
 import FeaturesSection from '../components/home/FeaturesSection'
 import AiFlowSection from '../components/home/AiFlowSection'
 import ArchitectureSection from '../components/home/ArchitectureSection'
+import SkillsSection from '../components/home/SkillsSection'
 
 // 管理后台地址（经环境变量注入，见 .env.development）
 const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
@@ -31,6 +32,7 @@ const NAV_LINKS = [
   { label: '核心功能', href: '#features' },
   { label: 'AI 采集流程', href: '#ai-flow' },
   { label: '系统架构', href: '#architecture' },
+  { label: '技能广场', href: '/skills' },
 ]
 
 /** Hero 平台能力概览（静态示意数据） */
@@ -378,6 +380,7 @@ const Home: React.FC = () => {
         <FeaturesSection />
         <AiFlowSection />
         <ArchitectureSection />
+        <SkillsSection />
         <CtaBand />
       </main>
       <SiteFooter />
