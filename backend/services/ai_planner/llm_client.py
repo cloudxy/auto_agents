@@ -20,6 +20,7 @@ import os
 from typing import Optional
 
 import httpx
+from sqlalchemy import select
 
 from backend.services.llm_provider_service import LlmProviderService, LlmRuntimeConfig
 from backend.services.llm_usage_service import get_month_used, record_usage
@@ -168,11 +169,101 @@ def _normalize_usage(protocol: str, data: dict) -> dict[str, int]:
     }
 
 
+
+async def _candidate_chain(provider_id: int, session=None):
+    """候选链：enabled 且 health != down，priority 升序，默认模型行首位
+
+    session 可注入（测试经 db_session）；缺省独立短事务（与 _resolve 同范式）。
+    查询失败返回空链（故障转移静默退化为单模型语义，不放大故障）。
+    """
+    try:
+        if session is not None:
+            return await _query_chain(session, provider_id)
+        manager = _facade.get_manager()
+        async with _facade.AsyncSession(manager.async_engines["DEFAULT"]) as s:
+            return await _query_chain(s, provider_id)
+    except Exception as exc:  # noqa: BLE001 候选链不可用不阻断主路径
+        logger.warning(f"候选链查询失败（跳过故障转移）: {exc}")
+        return []
+
+
+async def _query_chain(session, provider_id: int):
+    from platform_core.models.llm_provider_model import LlmProviderModel
+
+    rows = (await session.execute(
+        select(LlmProviderModel)
+        .where(
+            LlmProviderModel.provider_id == provider_id,
+            LlmProviderModel.enabled == True,  # noqa: E712
+            LlmProviderModel.health_status != "down",
+        )
+        .order_by(LlmProviderModel.priority.asc(), LlmProviderModel.id.asc())
+    )).scalars().all()
+    ordered = sorted(rows, key=lambda r: (not r.is_default,))
+    return [(r.model_id, r.model_tier) for r in ordered]
+
+
+async def _failover(messages, *, usage_dim, budget_override, cfg, primary_error):
+    """B-M4-1：主模型耗尽重试后按候选链接管（priority 升序，默认行已由主路径尝试过）；
+    strong→basic 跨级降质发告警不静默（审计 10.2-E）；全耗尽抛含各候选摘要的结构化失败"""
+    from platform_core.exceptions import BusinessException as _BizErr
+
+    if cfg.provider_id is None:
+        raise _BizErr(f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {primary_error}")
+    chain = [
+        (model_id, tier) for model_id, tier in await _candidate_chain(cfg.provider_id)
+        if model_id != cfg.model
+    ]
+    if not chain:
+        raise _BizErr(f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {primary_error}")
+
+    # 当前模型 tier（默认行；缺省按 basic 保守处理，跨级判定宁缺勿滥告警）
+    current_tier = "basic"
+    for model_id, tier in await _candidate_chain(cfg.provider_id):
+        if model_id == cfg.model:
+            current_tier = tier
+            break
+
+    failures: list[str] = [f"{cfg.model}: {type(primary_error).__name__}"]
+    for model_id, tier in chain:
+        logger.warning(f"LLM 故障转移 | {cfg.model} → {model_id}（tier {current_tier}→{tier}）")
+        try:
+            content = await llm_chat(
+                messages, usage_dim=usage_dim, budget_override=budget_override,
+                model_override=model_id, _no_failover=True,
+            )
+            if current_tier == "strong" and tier == "basic":
+                await _notify_degrade(cfg, model_id)
+            return content
+        except Exception as exc:  # noqa: BLE001 单候选失败继续下一候选
+            failures.append(f"{model_id}: {type(exc).__name__}")
+    raise _BizErr(
+        f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {primary_error}；"
+        f"候选链 {len(failures)} 个模型均失败: " + "; ".join(failures)
+    )
+
+
+async def _notify_degrade(cfg, fallback_model: str) -> None:
+    """跨级降质告警（strong→basic 不静默）；通知失败仅记日志"""
+    try:
+        from backend.services.notify_service import NotifyService
+
+        await NotifyService().notify_text(
+            "llm.failover.degrade",
+            f"LLM 故障转移发生跨级降质（strong→basic）：{cfg.model} → {fallback_model}，"
+            "输出质量可能下降，请检查主模型可用性",
+        )
+    except Exception as exc:  # noqa: BLE001 告警通道故障不影响业务
+        logger.warning(f"降质告警发送失败（忽略）: {exc}")
+
+
 async def llm_chat(
     messages: list[dict],
     *,
     usage_dim: Optional[str] = None,
     budget_override: Optional[int] = None,
+    model_override: Optional[str] = None,
+    _no_failover: bool = False,
 ) -> str:
     """chat completions：超时 / 指数退避重试 / token 预算熔断 / 未启用抛业务异常
 
@@ -205,9 +296,10 @@ async def llm_chat(
         _facade.settings.get("LLM.MAX_TOKENS_BUDGET", 200000)
     )
     protocol = getattr(cfg, "protocol", "openai_compatible") or "openai_compatible"
+    effective_model = model_override or cfg.model
     if protocol == "openai_compatible":
         # 历史路径原样构造（零回归硬约束：payload 不新增字段）
-        payload = {"model": cfg.model, "messages": messages, "temperature": cfg.temperature}
+        payload = {"model": effective_model, "messages": messages, "temperature": cfg.temperature}
         headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}
         url = f"{cfg.base_url}/chat/completions"
         adapter = None
@@ -216,7 +308,7 @@ async def llm_chat(
 
         adapter = _get_adapter(protocol)
         _req = adapter.build_chat(
-            cfg.base_url, cfg.api_key, cfg.model, messages, max_tokens=_BUSINESS_MAX_TOKENS
+            cfg.base_url, cfg.api_key, effective_model, messages, max_tokens=_BUSINESS_MAX_TOKENS
         )
         url, headers, payload = _req.url, _req.headers, _req.json_payload
     # token 用量按 provider 维度计数（兜底路径统一记在 "config" 名下）；调用方可覆盖维度
@@ -269,7 +361,7 @@ async def llm_chat(
                 # 测试态为 no-op，保持纯内存语义）
                 await record_usage(
                     dim=usage_dim,
-                    model=cfg.model,
+                    model=effective_model,
                     prompt_tokens=norm["prompt"],
                     completion_tokens=norm["completion"],
                     total_tokens=used,
@@ -291,6 +383,9 @@ async def llm_chat(
         )
         await asyncio.sleep(delay)
 
+    if not _no_failover:
+        return await _failover(messages, usage_dim=usage_dim, budget_override=budget_override,
+                               cfg=cfg, primary_error=last_error)
     raise BusinessException(f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {last_error}")
 
 
