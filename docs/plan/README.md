@@ -37,7 +37,7 @@
 | **平台基座** | JWT 认证 + 三角色 RBAC、审计日志、统一异常信封、Dynaconf 多层配置、check-arch 12 红线门禁、admin（13 页面）/official（单页静态官网）双前端、6 个 lifespan 常驻组件 | `backend/app/` + `platform_core/` + `frontend/` |
 | **skills-library** | 本地子系统（已入 git）：meta.yaml 治理元数据、4 维评分 rubric、本地 8765 后台（无鉴权）、claude-code(symlink)/codex(拼接) 两适配器、1 个占位示例 skill | `skills-library/` |
 
-审计修复进度：P0 ×4 全修 ✅；P1 ×13 已修 12（唯 P1-12 LLM 故障转移 = B-M4）；4.2 中转站调度接线 ✅（10.2-F 已核对：未拆分，S1 前小任务见 §7.3）；易用性 U1 ✅；SaaS 多租户零落地。**工程基座 E0 六项已全部落地（2026-08-31）：测试基座/工厂/MySQL 保真通道/Alembic 基线修复/门禁口径/前端 jest 29 复活/裸语句清查。**
+审计修复进度：P0 ×4 全修 ✅；P1 ×13 已修 12（唯 P1-12 LLM 故障转移 = B-M4）；4.2 中转站调度接线 ✅（10.2-F 已核对：未拆分，S1 前小任务见 §7.3）；易用性 U1 ✅；SaaS 多租户零落地。**工程基座 E0 六项已全部落地（2026-08-31）。方案 A（技能管理中心 P1-P4）与方案 B（LLM 多平台 M1-M4，含故障转移与巡检）已全部实施完毕（工单 01-27 全 resolved，自动化测试 652 passed）；仅余 A-P5 市场采集（二期）与 SaaS S1-S5（另批拆票）。**
 
 **平台级基础设施定位（不租户化）**：new-api 中转站渠道、skills 域新表、system_configs、channel_events/channel_probe_results、operation_logs（跨租户平台审计）。
 
@@ -478,4 +478,4 @@ S2 子账号 ──► S3 配额用量 ──► S4 能力租户化 ──► S5
 
 ---
 
-*版本：v2 合并版 · 2026-08-31 重写（基线 `cf2ab0a`）· 由 v1 三方案 + README 融合，融合过程含三路代码探索复核与两轮决策拷问 · 修订时更新本行*
+*版本：v2 合并版 · 2026-08-31 重写（基线 `cf2ab0a`）· 同日 E0+A(P1-P4)+B(M1-M4) 落地（至 `fb463e6`）· 由 v1 三方案 + README 融合，融合过程含三路代码探索复核与两轮决策拷问 · 修订时更新本行*
