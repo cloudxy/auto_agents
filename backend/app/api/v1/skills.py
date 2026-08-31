@@ -15,7 +15,7 @@ from backend.app.responses import ok
 from backend.repositories.skill_repository import SkillRepository, SkillReviewRepository
 from backend.services.skill_service import SkillService
 from platform_core.db import get_async_db
-from platform_core.exceptions import NotFoundException
+from platform_core.exceptions import NotFoundException, ValidationException
 from platform_core.logger import get_logger
 from platform_core.models.skill import SkillJob
 from platform_core.schemas.skill import (
@@ -58,6 +58,28 @@ async def scan_skills(
     await session.commit()
     await record_audit(session, user, "skill.scan", "skills", detail={"total": summary["total"]})
     return ok(data=summary)
+
+
+@router.post("/import-url")
+async def import_skill_from_url(
+    body: dict,
+    user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """URL 导入（admin）：GitHub 子目录 / raw 文件 / zip（安全边界见 skill_import_service）"""
+    from backend.services.skill_import_service import SkillImportService
+
+    url = str(body.get("url") or "").strip()
+    if not url.startswith(("http://", "https://")):
+        raise ValidationException(message="url 必须是 http(s) 地址", field="url")
+    result = await SkillImportService(session).import_url(
+        url,
+        category=body.get("category"),
+        industries=body.get("industries"),
+    )
+    await session.commit()
+    await record_audit(session, user, "skill.import", f"skill#{result['name']}", detail={"url": url})
+    return ok(data=result)
 
 
 @router.get("/jobs")
@@ -157,9 +179,7 @@ async def correct_skill_meta(
     }
     payload = {k: v for k, v in body.items() if k in allowed}
     if not payload:
-        from platform_core.exceptions import ValidationException
-
-        raise ValidationException(message="无可矫正字段")
+        raise ValidationException(message="无可矫正字段", field="url")
     result = await service.correct_meta(name, reviewer=user.username, payload=payload)
     await session.commit()
     await record_audit(session, user, "skill.correct", f"skill#{name}", detail=payload)
@@ -178,6 +198,19 @@ async def export_skill_meta(
     await session.commit()
     await record_audit(session, user, "skill.export_meta", f"skill#{name}")
     return ok(data={"name": name, "written_back": done})
+
+
+@router.get("/{name}/check-update")
+async def check_skill_update(
+    name: str,
+    user: CurrentUser = Depends(require_operator),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """只读检查来源更新（哈希比对，不自动覆盖——手动更新走 git）"""
+    from backend.services.skill_import_service import SkillImportService
+
+    data = await SkillImportService(session).check_update(name)
+    return ok(data=data)
 
 
 def _read_skill_files(file_path: str) -> tuple[str, str]:
