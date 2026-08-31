@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_admin, require_login
+from backend.app.api.deps import CurrentUser, require_admin, require_login, require_operator
 from backend.app.responses import ok
 from backend.repositories.skill_repository import SkillRepository, SkillReviewRepository
 from backend.services.skill_service import SkillService
@@ -123,6 +123,44 @@ async def get_skill_detail(
     detail.skill_md, detail.meta_yaml = _read_skill_files(row.file_path)
     detail.reviews = [SkillReviewResponse.model_validate(rv) for rv in reviews]
     return ok(data=detail.model_dump())
+
+
+@router.put("/{name}/meta")
+async def correct_skill_meta(
+    name: str,
+    body: dict,
+    user: CurrentUser = Depends(require_operator),
+    service: SkillService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """人工矫正（operator）：落 DB + 写回 meta.yaml + CHANGELOG + skill_reviews(human)"""
+    allowed = {
+        "category", "industries", "status", "similar_to",
+        "score", "rubric_human", "review_notes",
+    }
+    payload = {k: v for k, v in body.items() if k in allowed}
+    if not payload:
+        from platform_core.exceptions import ValidationException
+
+        raise ValidationException(message="无可矫正字段")
+    result = await service.correct_meta(name, reviewer=user.username, payload=payload)
+    await session.commit()
+    await record_audit(session, user, "skill.correct", f"skill#{name}", detail=payload)
+    return ok(data=result)
+
+
+@router.post("/{name}/export-meta")
+async def export_skill_meta(
+    name: str,
+    user: CurrentUser = Depends(require_operator),
+    service: SkillService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """手动补导出 meta.yaml（写回失败后的恢复路径）"""
+    done = await service.export_meta(name)
+    await session.commit()
+    await record_audit(session, user, "skill.export_meta", f"skill#{name}")
+    return ok(data={"name": name, "written_back": done})
 
 
 def _read_skill_files(file_path: str) -> tuple[str, str]:

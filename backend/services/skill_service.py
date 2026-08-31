@@ -6,7 +6,8 @@
 已入库行的人工治理字段（score/tier/category/status...）永不被扫描覆盖。
 """
 import hashlib
-from datetime import date, datetime
+import os
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
@@ -16,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_core.logger import get_logger
-from platform_core.models.skill import Skill, SkillJob
+from platform_core.models.skill import Skill, SkillJob, SkillReview
 
 logger = get_logger("service.skill")
 
@@ -215,6 +216,157 @@ class SkillService:
                 )
             )
         await self.session.flush()
+
+    async def correct_meta(self, name: str, reviewer: str, payload: dict) -> dict:
+        """人工矫正（总方案 §5.1 写回规则）：同 Service 内先落 DB（含 skill_reviews(human)
+        与 tier 派生）→ 成功后原子写回 meta.yaml（tmp+rename）→ 追加 CHANGELOG。
+        写回失败：DB 不回滚（DB 是真相源），记 skill_jobs 告警，可 export_meta 补导出。
+        AI 路径永不调用本方法（评分落库见 15 的独立方法，不写 score/rubric_human）。
+        """
+        logger.info(f"人工矫正 | skill={name} reviewer={reviewer} fields={sorted(payload)}")
+        row = (await self.session.execute(select(Skill).where(Skill.name == name))).scalar_one_or_none()
+        if row is None:
+            from platform_core.exceptions import NotFoundException
+
+            raise NotFoundException(resource=f"技能 {name}")
+
+        if "category" in payload:
+            row.category = str(payload["category"])
+        if "industries" in payload:
+            row.industries = _json_safe(payload["industries"])
+        if "status" in payload:
+            row.status = _map_status(payload["status"])
+        if "similar_to" in payload:
+            row.similar_to = _json_safe(payload["similar_to"])
+        if "score" in payload:
+            row.score = payload["score"]
+        if "rubric_human" in payload:
+            row.rubric_human = _json_safe(payload["rubric_human"])
+        if "review_notes" in payload:
+            row.review_notes = payload["review_notes"]
+        row.reviewed_by = reviewer
+        row.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        row.tier = derive_tier(
+            float(row.score) if row.score is not None else None,
+            float(row.ai_suggested_score) if row.ai_suggested_score is not None else None,
+        )
+
+        self.session.add(
+            SkillReview(
+                skill_id=row.id,
+                reviewer_type="human",
+                reviewer=reviewer,
+                score=row.score,
+                rubric=row.rubric_human,
+                notes=payload.get("review_notes"),
+                content_hash=row.content_hash,
+            )
+        )
+        await self.session.flush()
+
+        written_back = self._write_back_meta(row)
+        if written_back:
+            self._append_changelog(
+                row,
+                f"{reviewer} | 矫正: "
+                + ", ".join(f"{k}={payload[k]}" for k in sorted(payload)),
+            )
+        else:
+            self._record_export_failure(name, "矫正后写回失败")
+        return {
+            "name": name,
+            "written_back": written_back,
+            "tier": row.tier,
+            "category": row.category,
+            "status": row.status,
+        }
+
+    async def export_meta(self, name: str) -> bool:
+        """手动补导出：按 DB 当前治理状态重写 meta.yaml + CHANGELOG"""
+        logger.info(f"手动补导出 meta | skill={name}")
+        row = (await self.session.execute(select(Skill).where(Skill.name == name))).scalar_one_or_none()
+        if row is None:
+            from platform_core.exceptions import NotFoundException
+
+            raise NotFoundException(resource=f"技能 {name}")
+        ok = self._write_back_meta(row)
+        if not ok:
+            self._record_export_failure(name, "手动补导出失败")
+        else:
+            self._append_changelog(row, "system | 补导出 meta.yaml")
+            await self.session.flush()
+        return ok
+
+    def _library_root(self) -> Path:
+        from config import settings
+
+        return Path(str(settings.get("SKILLS.LIBRARY_ROOT", "skills-library")))
+
+    def _write_back_meta(self, row: Skill) -> bool:
+        """DB → meta.yaml 原子写回（tmp 文件 + rename，单写者=主后端）"""
+        try:
+            meta: dict = dict(row.raw_meta or {})
+            meta["name"] = row.name
+            meta["category"] = row.category
+            meta["industries"] = row.industries or []
+            meta["status"] = row.status
+            meta["similar_to"] = row.similar_to or []
+            source = dict(meta.get("source") or {})
+            source["content_hash"] = row.content_hash or ""
+            meta["source"] = source
+            capability = dict(meta.get("capability") or {})
+            capability["score"] = float(row.score) if row.score is not None else None
+            capability["ai_suggested_score"] = (
+                float(row.ai_suggested_score) if row.ai_suggested_score is not None else None
+            )
+            capability["rubric"] = row.rubric_human or {}
+            capability["reviewed_by"] = row.reviewed_by
+            capability["reviewed_at"] = (
+                row.reviewed_at.date().isoformat() if row.reviewed_at else None
+            )
+            capability["notes"] = row.review_notes
+            meta["capability"] = capability
+
+            skill_dir = self._library_root() / row.file_path
+            if not skill_dir.is_dir():
+                logger.error(f"meta.yaml 写回失败 | skill={row.name} 目录不存在: {skill_dir}")
+                return False
+            tmp_path = skill_dir / "meta.yaml.tmp"
+            tmp_path.write_text(
+                yaml.safe_dump(_json_safe(meta), allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            os.replace(tmp_path, skill_dir / "meta.yaml")
+            return True
+        except OSError as exc:
+            logger.error(f"meta.yaml 写回失败 | skill={row.name} err={exc}")
+            return False
+
+    def _append_changelog(self, row: Skill, summary: str) -> None:
+        """CHANGELOG.md 追加一行 `- YYYY-MM-DD | 摘要`（沿用 skills-library 既有格式）"""
+        try:
+            skill_dir = self._library_root() / row.file_path
+            if not skill_dir.is_dir():
+                logger.error(f"CHANGELOG 追加失败 | skill={row.name} 目录不存在")
+                return
+            changelog = skill_dir / "CHANGELOG.md"
+            existing = changelog.read_text(encoding="utf-8") if changelog.exists() else "# 更新记录\n"
+            line = f"- {date.today().isoformat()} | {summary}\n"
+            changelog.write_text(existing + line, encoding="utf-8")
+        except OSError as exc:
+            logger.error(f"CHANGELOG 追加失败 | skill={row.name} err={exc}")
+
+    def _record_export_failure(self, name: str, reason: str) -> None:
+        self.session.add(
+            SkillJob(
+                job_type="export_meta",
+                status="failed",
+                total=1,
+                succeeded=0,
+                failed=1,
+                detail={"failed": [name], "reason": reason},
+            )
+        )
 
     @staticmethod
     def _rel_path(skill_dir: Path, root: Path) -> str:
