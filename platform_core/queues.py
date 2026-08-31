@@ -39,6 +39,10 @@ def task_queue(priority: str = "normal") -> str:
 # Scrapy → 消费者：采集结果回流队列（list，消息为 JSON 字符串）
 ITEM_QUEUE: Final[str] = "spider:item_queue"
 
+# 结果回流死信队列（list）：消息缺 task_id 等无法归属的结果转入此处留档排查，
+# 不再静默丢弃（P1-4）；人工排查后可重放或清理，无 TTL
+DEAD_ITEM_QUEUE: Final[str] = "spider:item_dead"
+
 # 当前活跃任务关联键（SET，成员为 task_id），用于把结果关联回任务 + 并发槽位控制；
 # 阶段 4.1 由 string 升级为 SET：同爬虫可并发运行多个任务（上限见 SPIDER_MAX_CONCURRENT_PER_SPIDER）
 ACTIVE_TASK_KEY: Final[str] = "spider:active_tasks:{spider_name}"

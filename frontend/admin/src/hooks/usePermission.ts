@@ -2,6 +2,7 @@
  * 权限控制 Hook - 用于菜单和按钮级权限控制（角色与后端 RBAC 对齐）
  */
 import { useAuthStore } from '../store/useAuthStore'
+import { menuConfig } from '../config/menuConfig'
 import type { MenuItem } from '../config/menuConfig'
 
 // 角色 → 权限码（与后端 /auth/permissions 的 _ROLE_PERMISSIONS 保持一致）
@@ -34,6 +35,6 @@ export const usePermission = () => {
     hasPermission,
     role,
     isAdmin: role === 'admin',
-    filteredMenus: filterMenu(require('../config/menuConfig').menuConfig),
+    filteredMenus: filterMenu(menuConfig),
   }
 }

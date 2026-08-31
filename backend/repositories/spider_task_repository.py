@@ -162,6 +162,22 @@ class SpiderTaskRepository(BaseRepository[SpiderTask]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def find_stale_pending(self, cutoff: datetime, limit: int = 100) -> List[SpiderTask]:
+        """积压 pending 候选（P1-4）：pending 且 created_at < cutoff 且从未启动，
+        供消费者对账重投（blpop 后进程崩溃会丢任务消息，任务将永久 pending）"""
+        stmt = (
+            select(SpiderTask)
+            .where(
+                SpiderTask.status == "pending",
+                SpiderTask.created_at < cutoff,
+                SpiderTask.started_at.is_(None),
+            )
+            .order_by(SpiderTask.id.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def batch_increment_result_counts(self, counts: dict[int, int]) -> None:
         """批量原子累加 result_count（每条 task_id 一条 UPDATE 语句）
 

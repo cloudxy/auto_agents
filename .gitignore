@@ -45,6 +45,8 @@ files/exports/*
 .env
 .env.local
 config/**/.env
+# 生产 .env 模板随仓库分发（键名规范 + ${} 不展开警示，P1-1）
+!config/prod/.env.example
 config/.secrets.yml
 
 # OS

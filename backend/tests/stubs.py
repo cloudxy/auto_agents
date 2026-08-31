@@ -51,6 +51,7 @@ class FakeRedis:
         self.strings: dict = {}
         self.hashes: dict = {}
         self.sets: dict = {}
+        self.lists: dict = {}
 
     async def set(self, key, value, nx=False, ex=None):
         if nx and key in self.strings:
@@ -128,6 +129,11 @@ class FakeRedis:
 
     async def sismember(self, key, member):
         return member in self.sets.get(key, set())
+
+    async def rpush(self, key, *values):
+        bucket = self.lists.setdefault(key, [])
+        bucket.extend(values)
+        return len(bucket)
 
     async def aclose(self):
         pass

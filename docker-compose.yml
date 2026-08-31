@@ -39,6 +39,9 @@ services:
       - "9111:9111"
     environment:
       APP_ENV: "local"
+      # 容器内必须监听 0.0.0.0（P1-2 修复：API.HOST 默认 127.0.0.1 会让
+      # 发布端口 9111 在容器外不可达，且容器内 HEALTHCHECK 通过造成假象）
+      AUTO_AGENTS_API__HOST: "0.0.0.0"
       # Dynaconf 嵌套覆盖（双下划线分隔层级）：指向 compose 服务名
       AUTO_AGENTS_MYSQL__DEFAULT__HOST: "mysql"
       AUTO_AGENTS_REDIS__DEFAULT__HOST: "redis"
@@ -46,6 +49,8 @@ services:
       AUTO_AGENTS_MYSQL_DEFAULT_PASSWORD: "123456"
       AUTO_AGENTS_REDIS_DEFAULT_PASSWORD: "123456"
       AUTO_AGENTS_JWT__SECRET_KEY: "auto-agents-dev-secret-key-2026"
+      # Webhook 守卫（P0-2）拒绝默认占位符启动，dev 栈显式注入 dev 密钥
+      AUTO_AGENTS_WEBHOOK__SECRET_KEY: "auto-agents-dev-webhook-secret-2026"
     depends_on:
       mysql:
         condition: service_healthy

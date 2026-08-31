@@ -40,12 +40,42 @@ function App() {
           <Route path="spiders/logs" element={<SpiderLogs />} />
           <Route path="spiders/nodes" element={<Nodes />} />
           <Route path="ai" element={<AiPlans />} />
-          <Route path="llm" element={<LlmProviders />} />
-          <Route path="newapi" element={<NewApiOps />} />
+          {/* UX-B4：路由级权限守卫——admin 专属页面（LLM 配置/中转站/用户/设置）
+              菜单隐藏只是视觉隐藏，直达 URL 必须被拦截到 /unauthorized */}
+          <Route
+            path="llm"
+            element={
+              <ProtectedRoute requireAdmin>
+                <LlmProviders />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="newapi"
+            element={
+              <ProtectedRoute requireAdmin>
+                <NewApiOps />
+              </ProtectedRoute>
+            }
+          />
           <Route path="logs" element={<LogCenter />} />
-          <Route path="users" element={<Users />} />
+          <Route
+            path="users"
+            element={
+              <ProtectedRoute requireAdmin>
+                <Users />
+              </ProtectedRoute>
+            }
+          />
           <Route path="data" element={<Data />} />
-          <Route path="settings" element={<Settings />} />
+          <Route
+            path="settings"
+            element={
+              <ProtectedRoute requireAdmin>
+                <Settings />
+              </ProtectedRoute>
+            }
+          />
         </Route>
 
         {/* 未匹配路由兼底 */}

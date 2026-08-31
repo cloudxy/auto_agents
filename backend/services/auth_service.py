@@ -1,4 +1,5 @@
 """认证服务 - 业务逻辑层（只负责编排，不直接操作数据库）"""
+import asyncio
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories.user_repository import UserRepository
@@ -8,6 +9,10 @@ from platform_core.exceptions import BusinessException
 from pydantic import BaseModel
 
 logger = get_logger("api")
+
+# 用户不存在时的哑哈希（P1-9）：做一次等代价 bcrypt 校验对齐时序，
+# 消除"用户名存在与否"的响应时间差（用户枚举侧信道）
+_DUMMY_HASH = get_password_hash("timing-equalization-dummy-password")
 
 
 class TokenResponse(BaseModel):
@@ -46,17 +51,19 @@ class AuthService:
         
         # 1. 通过 Repository 查询用户
         user = await self.user_repo.get_by_username(username)
-        
+
         if not user:
+            # 时序对齐（P1-9）：对不存在的用户做一次等代价哈希校验
+            await asyncio.to_thread(verify_password, password, _DUMMY_HASH)
             logger.warning(f"用户不存在: {username}")
             return None
-        
+
         if not user.is_active:
             logger.warning(f"用户未激活: {username}")
             return None
-        
-        # 2. 验证密码
-        if not verify_password(password, user.password_hash):
+
+        # 2. 验证密码（P1-9：bcrypt 是同步 CPU 密集操作，转线程池避免阻塞事件循环）
+        if not await asyncio.to_thread(verify_password, password, user.password_hash):
             logger.warning(f"密码错误: {username}")
             return None
         
@@ -118,8 +125,8 @@ class AuthService:
                 status_code=409
             )
         
-        # 2. 通过 Repository 创建用户
-        hashed_password = get_password_hash(password)
+        # 2. 通过 Repository 创建用户（哈希计算转线程池，P1-9）
+        hashed_password = await asyncio.to_thread(get_password_hash, password)
         new_user = await self.user_repo.create(
             username=username,
             email=email,

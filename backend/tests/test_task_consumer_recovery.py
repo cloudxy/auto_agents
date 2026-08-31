@@ -92,3 +92,100 @@ async def test_recover_conservative_when_redis_error():
         await svc._recover_stale_once()
 
     fail.assert_not_awaited()  # Redis 异常 → 不回收
+
+
+# ---------------- P1-4：死信队列 ----------------
+@pytest.mark.asyncio
+async def test_accept_message_routes_missing_task_id_to_dead_letter():
+    """缺 task_id 的结果消息转入 spider:item_dead 留档，不再静默丢弃"""
+    import json as _json
+
+    from platform_core.queues import DEAD_ITEM_QUEUE
+
+    redis = FakeRedis()
+    svc = _consumer(redis)
+    raw = _json.dumps({"task_id": None, "spider_name": "generic", "item": {"url": "u"}})
+
+    assert await svc._accept_message(raw, _json.loads(raw)) is False
+    assert redis.lists[DEAD_ITEM_QUEUE] == [raw]
+
+    # 正常消息直接放行，不动死信
+    ok_raw = _json.dumps({"task_id": 5, "spider_name": "generic", "item": {}})
+    assert await svc._accept_message(ok_raw, _json.loads(ok_raw)) is True
+    assert len(redis.lists[DEAD_ITEM_QUEUE]) == 1
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_write_failure_does_not_break_flow():
+    """死信写入自身失败：不抛（回流主路径不受影响）"""
+    import json as _json
+
+    class _BrokenPushRedis(FakeRedis):
+        async def rpush(self, key, *values):
+            raise RuntimeError("redis full")
+
+    svc = _consumer(_BrokenPushRedis())
+    raw = _json.dumps({"task_id": None, "spider_name": "generic"})
+    assert await svc._accept_message(raw, _json.loads(raw)) is False  # 不抛即通过
+
+
+# ---------------- P1-4：积压 pending 对账重投 ----------------
+class _FakePendingTask:
+    def __init__(self, task_id, spider_name, params=None, priority="normal"):
+        self.id = task_id
+        self.spider_name = spider_name
+        self.params = params or '{"urls": ["https://example.com"]}'
+        self.priority = priority
+
+
+@pytest.mark.asyncio
+async def test_requeue_stale_pending_repushes_lost_messages():
+    """dispatch 崩溃丢消息的 pending 任务：重建消息重新入优先级队列
+
+    _MAX_REQUEUE_ATTEMPTS=2：连续两轮各重投一次（消息重建字段完整），
+    计数内不置 failed；耗尽场景由下一个用例覆盖。
+    """
+    import json as _json
+
+    from platform_core.queues import task_queue
+
+    redis = FakeRedis()
+    svc = _consumer(redis)
+    repo = MagicMock()
+    repo.find_stale_pending = AsyncMock(return_value=[_FakePendingTask(11, "generic")])
+    fail = AsyncMock()
+    with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
+         patch.object(consumer_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
+         patch.object(consumer_mod, "AsyncSession", _FakeSessionCtx), \
+         patch.object(svc, "_fail_task", fail):
+        await svc._requeue_stale_pending()
+        await svc._requeue_stale_pending()
+
+    queued = redis.lists[task_queue("normal")]
+    assert len(queued) == 2  # 两轮各重投一次
+    assert _json.loads(queued[0]) == {
+        "task_id": 11,
+        "spider_name": "generic",
+        "params": '{"urls": ["https://example.com"]}',
+        "priority": "normal",
+    }
+    fail.assert_not_awaited()  # 计数内不放弃
+
+
+@pytest.mark.asyncio
+async def test_requeue_gives_up_after_max_attempts():
+    """重投次数耗尽仍无进展：置 failed 闭环（防每轮扫描无限重投）"""
+    redis = FakeRedis()
+    svc = _consumer(redis)
+    svc._requeued_counts[12] = consumer_mod.SpiderTaskConsumer._MAX_REQUEUE_ATTEMPTS
+    repo = MagicMock()
+    repo.find_stale_pending = AsyncMock(return_value=[_FakePendingTask(12, "generic")])
+    fail = AsyncMock()
+    with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
+         patch.object(consumer_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
+         patch.object(consumer_mod, "AsyncSession", _FakeSessionCtx), \
+         patch.object(svc, "_fail_task", fail):
+        await svc._requeue_stale_pending()
+
+    fail.assert_awaited_once()
+    assert fail.await_args.args[0] == 12

@@ -30,6 +30,7 @@ from platform_core.logger import get_logger
 from platform_core.queues import (
     ACTIVE_TASK_KEY,
     ACTIVE_TASK_TTL,
+    DEAD_ITEM_QUEUE,
     ITEM_QUEUE,
     LEGACY_ACTIVE_TASK_PREFIX,
     TASK_CONTROL_KEY,
@@ -149,11 +150,6 @@ def build_start_payload(
 
 class SpiderTaskConsumer:
     """Redis 双队列消费者（任务分发 + 结果回流）"""
-
-    def __init__(self):
-        self._running = False
-        self._loops: List[asyncio.Task] = []
-        self._redis: Optional[aioredis.Redis] = None
 
     async def start(self) -> None:
         """启动两个消费循环（幂等：重复调用不叠加）"""
@@ -333,6 +329,20 @@ class SpiderTaskConsumer:
         except Exception as e:  # noqa: BLE001
             logger.error(f"任务置 failed 失败: task_id={task_id}, error={e}")
 
+    async def _accept_message(self, raw: str, message: dict) -> bool:
+        """消息准入校验（P1-4）：缺 task_id 的结果转入死信队列留档，不再静默丢弃"""
+        if message.get("task_id"):
+            return True
+        logger.warning(
+            f"结果消息缺少 task_id，转入死信队列 {DEAD_ITEM_QUEUE}: "
+            f"spider={message.get('spider_name', '')}"
+        )
+        try:
+            await self._redis.rpush(DEAD_ITEM_QUEUE, raw)
+        except Exception as e:  # noqa: BLE001 死信写入失败不阻断回流主路径
+            logger.error(f"死信队列写入失败: {e}")
+        return False
+
     # ------------------------------------------------------------------
     # 失败重试延迟扫描（期 3）：ZSET 到期成员重新入主队列
     # ------------------------------------------------------------------
@@ -394,17 +404,26 @@ class SpiderTaskConsumer:
     # running 任务超时回收（P0-1b）：防爬虫崩溃/webhook 丢失导致任务永久卡 running
     # ------------------------------------------------------------------
     _STALE_BATCH = 100  # 单轮回收扫描的候选任务上限
+    # P1-4：同一任务最多对账重投次数（进程内存计数，防止坏消息每轮循环重投）
+    _MAX_REQUEUE_ATTEMPTS = 2
+
+    def __init__(self):
+        self._running = False
+        self._loops: List[asyncio.Task] = []
+        self._redis: Optional[aioredis.Redis] = None
+        self._requeued_counts: dict[int, int] = {}
 
     async def _recover_loop(self) -> None:
-        """超时回收循环：周期扫描 running 任务，活跃集合无记录者置 failed"""
+        """超时回收循环：孤儿 running 置 failed + 积压 pending 对账重投"""
         interval = float(settings.get("TASKS.STALE_RECOVER_INTERVAL", 300) or 300)
         while self._running:
             try:
                 await self._recover_stale_once()
+                await self._requeue_stale_pending()
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001 回收失败不中断循环
-                logger.error(f"running 任务超时回收异常: {e}")
+                logger.error(f"任务超时回收/对账异常: {e}")
             await asyncio.sleep(max(5.0, interval))
 
     async def _recover_stale_once(self) -> None:
@@ -445,6 +464,51 @@ class SpiderTaskConsumer:
                 f"task_ids={[t.id for t in orphans]}"
             )
 
+    async def _requeue_stale_pending(self) -> None:
+        """积压 pending 对账重投（P1-4）：blpop 后进程崩溃会丢任务消息，
+        任务永久 pending——超过阈值且从未启动的任务重建消息重新入队；
+        同一任务重投超过 _MAX_REQUEUE_ATTEMPTS 次仍无效则置 failed 闭环。
+        """
+        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", 6) or 0)
+        if stale_hours <= 0 or self._redis is None:
+            return
+        cutoff = datetime.now() - timedelta(hours=stale_hours)
+        async with AsyncSession(self._engine()) as session:
+            candidates = await SpiderTaskRepository(session).find_stale_pending(
+                cutoff, limit=self._STALE_BATCH
+            )
+        for task in candidates:
+            attempts = self._requeued_counts.get(task.id, 0)
+            if attempts >= self._MAX_REQUEUE_ATTEMPTS:
+                await self._fail_task(
+                    task.id,
+                    f"任务长期 pending 且对账重投 {attempts} 次仍无消费进展，"
+                    "请检查消费者与队列后重新创建任务",
+                )
+                self._requeued_counts.pop(task.id, None)
+                continue
+            message = json.dumps(
+                {
+                    "task_id": task.id,
+                    "spider_name": task.spider_name,
+                    "params": task.params,
+                    "priority": task.priority or "normal",
+                },
+                ensure_ascii=False,
+            )
+            try:
+                await self._redis.rpush(
+                    task_queue(str(task.priority or "normal")), message
+                )
+            except Exception as e:  # noqa: BLE001 重投失败下轮再试
+                logger.error(f"积压任务重投失败: task_id={task.id}, error={e}")
+                continue
+            self._requeued_counts[task.id] = attempts + 1
+            logger.warning(
+                f"积压任务对账重投（第 {attempts + 1} 次）: task_id={task.id}, "
+                f"spider={task.spider_name}"
+            )
+
     # ------------------------------------------------------------------
     # 结果回流：批量 accumulate + 定期 flush（高吞吐优化）
     # ------------------------------------------------------------------
@@ -476,10 +540,7 @@ class SpiderTaskConsumer:
                     except (TypeError, ValueError):
                         logger.warning(f"结果消息 JSON 解析失败，跳过: raw={raw!r}")
                         continue
-                    if not message.get("task_id"):
-                        logger.warning(
-                            f"结果消息缺少 task_id，跳过: spider={message.get('spider_name', '')}"
-                        )
+                    if not await self._accept_message(raw, message):
                         continue
                     batch.append(message)
                     tid = message["task_id"]

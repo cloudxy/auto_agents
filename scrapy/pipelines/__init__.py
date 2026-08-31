@@ -5,10 +5,11 @@ StorePipeline 把 Item 消息推送到 spider:item_queue，由 Backend 消费者
 """
 import json
 import re
+import time
 from datetime import datetime, timezone
 
 import redis
-from scrapy.exceptions import DropItem
+from scrapy.exceptions import CloseSpider, DropItem
 
 from platform_core.logger import get_logger
 from platform_core.queues import ACTIVE_TASK_KEY, ITEM_QUEUE
@@ -44,13 +45,22 @@ class StorePipeline:
          "item": {...}, "fetched_at": iso8601}
     task_id 优先取 Item 内部归属字段（TaskAttribution 中间件从响应 meta 注入，
     并发下精确）；缺失时回退活跃任务集合：唯一成员才归属，多成员置 None（防误关联）。
+
+    P1-4 修复（2026-08-31）：推送失败不再"仅记日志后丢弃"——单条消息按指数
+    退避重投；连续多条（_MAX_CONSECUTIVE_FAILURES）重投耗尽则抛 CloseSpider
+    停止采集（数据停在源头，而不是静默蒸发；任务侧由超时回收闭环终态）。
     """
+
+    _MAX_PUSH_ATTEMPTS = 3          # 单条消息最大投递尝试次数
+    _MAX_CONSECUTIVE_FAILURES = 5   # 连续投递失败条数上限（超过停止采集）
+    _RETRY_BACKOFF_BASE = 0.5       # 重投退避基数（秒）：0.5/1/2
 
     def open_spider(self, spider):
         # 复用 scrapy-redis 同一 REDIS_URL，保证连接目标一致
         self.redis = redis.Redis.from_url(
             spider.settings.get("REDIS_URL"), decode_responses=True
         )
+        self._consecutive_failures = 0
 
     def close_spider(self, spider):
         try:
@@ -89,9 +99,31 @@ class StorePipeline:
             ensure_ascii=False,
             default=str,
         )
-        try:
-            self.redis.rpush(ITEM_QUEUE, message)
+        if self._push_with_retry(message, task_id):
+            self._consecutive_failures = 0
             logger.debug(f"结果已推送队列: {ITEM_QUEUE}, task_id={task_id}")
-        except Exception as e:  # noqa: BLE001 推送失败仅告警，不中断采集
-            logger.error(f"结果推送队列失败: task_id={task_id}, error={e}")
+        else:
+            self._consecutive_failures += 1
+            logger.error(
+                f"结果推送重投耗尽，本条丢弃: task_id={task_id}"
+                f"（连续失败 {self._consecutive_failures}/{self._MAX_CONSECUTIVE_FAILURES}）"
+            )
+            if self._consecutive_failures >= self._MAX_CONSECUTIVE_FAILURES:
+                logger.error("Redis 结果队列持续不可用，停止采集防止继续静默丢数据")
+                raise CloseSpider("redis_push_failed")
         return item
+
+    def _push_with_retry(self, message: str, task_id) -> bool:
+        """带退避的消息重投：成功返回 True，重投耗尽返回 False（不抛出）"""
+        for attempt in range(1, self._MAX_PUSH_ATTEMPTS + 1):
+            try:
+                self.redis.rpush(ITEM_QUEUE, message)
+                return True
+            except Exception as e:  # noqa: BLE001 单次失败进入退避重试
+                logger.error(
+                    f"结果推送队列失败（第 {attempt}/{self._MAX_PUSH_ATTEMPTS} 次）: "
+                    f"task_id={task_id}, error={e}"
+                )
+                if attempt < self._MAX_PUSH_ATTEMPTS:
+                    time.sleep(min(self._RETRY_BACKOFF_BASE * (2 ** (attempt - 1)), 8))
+        return False
