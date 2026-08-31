@@ -100,3 +100,28 @@ class SkillJobResponse(BaseModel):
     detail: Optional[dict] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+
+
+class SkillScoringRationale(BaseModel):
+    """AI 评分每维一句话理由（四维必填）"""
+
+    completeness: str = Field(..., min_length=1)
+    doc_quality: str = Field(..., min_length=1)
+    maintenance: str = Field(..., min_length=1)
+    real_world_effect: str = Field(..., min_length=1)
+
+
+class SkillScoringResult(BaseModel):
+    """AI 评分结果契约（A-P2-1）：LLM 输出入口校验——非法结构在落库前即拒
+
+    维度 1-10 整数；rationale 每维必填（拒绝"只给分不讲理由"的退化输出）。
+    期望样例见 tests/test_skill_scoring_plumbing.py 的 VALID_SAMPLE（独立事实源）。
+    """
+
+    completeness: int = Field(..., ge=1, le=10)
+    doc_quality: int = Field(..., ge=1, le=10)
+    maintenance: int = Field(..., ge=1, le=10)
+    real_world_effect: int = Field(..., ge=1, le=10)
+    overall: int = Field(..., ge=1, le=10)
+    rationale: SkillScoringRationale
+    notes: str = Field("", max_length=2000)
