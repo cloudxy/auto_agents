@@ -149,7 +149,7 @@ async def test_get_proxy_health_merges_scores_and_stats_sorted():
     }
     svc = _service()
     with patch.object(proxy_mod, "settings", fake_settings()), \
-         patch.object(proxy_mod.aioredis, "from_url", lambda *a, **kw: redis):
+         patch.object(proxy_mod, "get_async_redis", lambda: redis):
         result = await svc.get_proxy_health()
 
     assert [row["proxy"] for row in result] == ["http://high", "http://low"]  # 降序
@@ -159,3 +159,51 @@ async def test_get_proxy_health_merges_scores_and_stats_sorted():
     assert low["score"] == 0.2 and low["fail"] == 7
     assert low["avg_latency"] == 1.234  # round 3
     assert low["last_check"] == "2026-08-31T10:00:00"
+
+
+# ---------------- P0-4 回归：探测 client 构造 ----------------
+def test_build_probe_client_uses_proxy_param_not_removed_proxies():
+    """P0-4 核心：必须用 httpx 0.28 的 proxy= 参数，禁止已删除的 proxies=
+    （旧代码传 proxies= 每次抛 TypeError 被 except 吞成"探测失败"，
+    评分衰减到 0 清空代理池——正是本回归要锁死的行为）"""
+    captured: dict = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return MagicMock()
+
+    with patch.object(proxy_mod.httpx, "AsyncClient", _capture):
+        proxy_mod._build_probe_client("http://p1:8080", 5)
+
+    assert captured["proxy"] == "http://p1:8080"
+    assert "proxies" not in captured          # 已删除参数绝不允许再出现
+    assert captured["follow_redirects"] is True
+    assert captured["trust_env"] is False     # 不走系统代理（与 llm 客户端同约定）
+
+
+@pytest.mark.asyncio
+async def test_health_check_once_builds_one_client_per_proxy():
+    """逐代理各建一个 client（proxy 绑定在 client 级），且全部走 proxy= 参数"""
+    redis = FakeRedis()
+    redis.hashes[PROXY_SCORES_KEY] = {"http://a": "0.2", "http://b": "0.3"}
+    svc = _service(redis)
+    created: list[dict] = []
+
+    def _factory(**kwargs):
+        created.append(kwargs)
+        return _HeadClientStub(status_code=200, **kwargs)
+
+    settings_kv = {
+        "PROXY_HEALTH.LOW_SCORE_THRESHOLD": 0.5,
+        "PROXY_HEALTH.RECOVER_SCORE": 0.5,
+        "PROXY_HEALTH.PROBE_URL": "http://probe.test/get",
+        "PROXY_HEALTH.PROBE_TIMEOUT": 5,
+    }
+    with patch.object(proxy_mod, "settings", fake_settings(**settings_kv)), \
+         patch.object(proxy_mod.httpx, "AsyncClient", _factory):
+        await svc._health_check_once()
+
+    assert sorted(k["proxy"] for k in created) == ["http://a", "http://b"]
+    assert all("proxies" not in k for k in created)
+    # 两个低分代理均探测成功恢复评分
+    assert redis.hashes[PROXY_SCORES_KEY] == {"http://a": "0.5", "http://b": "0.5"}

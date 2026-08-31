@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import time
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import redis.asyncio as aioredis
@@ -168,9 +169,16 @@ class SpiderTaskConsumer:
             asyncio.create_task(self._ingest_loop(), name="spider-item-ingest"),
             asyncio.create_task(self._retry_loop(), name="spider-retry-scan"),
         ]
+        # P0-1b：running 任务超时回收循环（STALE_TASK_HOURS=0 时关闭）
+        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", 6) or 0)
+        if stale_hours > 0:
+            self._loops.append(
+                asyncio.create_task(self._recover_loop(), name="spider-stale-recover")
+            )
         logger.info(
             f"队列消费者已启动: tasks={[task_queue(p) for p in TASK_QUEUE_PRIORITIES]}, "
-            f"items={ITEM_QUEUE}, retry_zset={RETRY_ZSET_KEY}"
+            f"items={ITEM_QUEUE}, retry_zset={RETRY_ZSET_KEY}, "
+            f"stale_recover={'on(%.0fh)' % stale_hours if stale_hours > 0 else 'off'}"
         )
 
     async def _purge_legacy_active_keys(self) -> None:
@@ -381,6 +389,61 @@ class SpiderTaskConsumer:
                     except (TypeError, ValueError):
                         pass
                     await self._fail_task(task_id, "重试重新入队失败（消息丢失）")
+
+    # ------------------------------------------------------------------
+    # running 任务超时回收（P0-1b）：防爬虫崩溃/webhook 丢失导致任务永久卡 running
+    # ------------------------------------------------------------------
+    _STALE_BATCH = 100  # 单轮回收扫描的候选任务上限
+
+    async def _recover_loop(self) -> None:
+        """超时回收循环：周期扫描 running 任务，活跃集合无记录者置 failed"""
+        interval = float(settings.get("TASKS.STALE_RECOVER_INTERVAL", 300) or 300)
+        while self._running:
+            try:
+                await self._recover_stale_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 回收失败不中断循环
+                logger.error(f"running 任务超时回收异常: {e}")
+            await asyncio.sleep(max(5.0, interval))
+
+    async def _recover_stale_once(self) -> None:
+        """单轮回收：running 超过 STALE_TASK_HOURS 且不在对应爬虫活跃集合的任务 → failed
+
+        判定依据：dispatch 时写入活跃集合（sadd + TTL）；爬虫进程崩溃后集合成员
+        不被移除（靠 TTL 自然过期），因此"超时 + 集合无此成员"是孤儿任务的有效
+        信号。Redis 异常时保守跳过（member 视为存在，不误杀存活任务）。
+        不做自动重试：坏站点/失效选择器会形成无限失败循环，交由用户重新运行。
+        """
+        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", 6) or 0)
+        if stale_hours <= 0 or self._redis is None:
+            return
+        cutoff = datetime.now() - timedelta(hours=stale_hours)
+        async with AsyncSession(self._engine()) as session:
+            candidates = await SpiderTaskRepository(session).find_stale_running(
+                cutoff, limit=self._STALE_BATCH
+            )
+        orphans = []
+        for task in candidates:
+            active_key = ACTIVE_TASK_KEY.format(spider_name=task.spider_name)
+            try:
+                member = bool(await self._redis.sismember(active_key, task.id))
+            except Exception as e:  # noqa: BLE001 Redis 异常：保守视为仍在运行
+                logger.warning(f"活跃集合查询失败（跳过回收）: task_id={task.id}, error={e}")
+                continue
+            if not member:
+                orphans.append(task)
+        for task in orphans:
+            await self._fail_task(
+                task.id,
+                f"任务超时回收：running 超过 {stale_hours:g} 小时且执行器无活跃记录"
+                "（爬虫可能崩溃或回调丢失），请检查日志后重新运行",
+            )
+        if orphans:
+            logger.warning(
+                f"超时回收完成: {len(orphans)} 个孤儿任务置 failed, "
+                f"task_ids={[t.id for t in orphans]}"
+            )
 
     # ------------------------------------------------------------------
     # 结果回流：批量 accumulate + 定期 flush（高吞吐优化）

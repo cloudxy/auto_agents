@@ -13,6 +13,10 @@ ENVIRONMENT: "local"  # local, dev, prod
 # 引用方式：settings.get("TASKS.CONSUMER_ENABLED", True)
 TASKS:
   CONSUMER_ENABLED: true
+  # 运行中任务超时回收（P0-1b）：running 超过 N 小时且 Redis 活跃集合无该任务
+  # → 置 failed（爬虫崩溃/webhook 丢失场景的兜底，防止任务永久卡 running）
+  STALE_TASK_HOURS: 6         # 阈值小时数（0 = 关闭回收）
+  STALE_RECOVER_INTERVAL: 300 # 回收扫描周期（秒）
 
 # === 定时调度器 ===
 # 扫描 spider_schedules 表中到期的计划并触发任务入队（随 Backend lifespan 启动）

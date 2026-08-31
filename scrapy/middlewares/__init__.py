@@ -323,17 +323,69 @@ class ProxyMiddleware:
 
 
 class RetryMiddleware:
-    """智能重试中间件 - 动态调整延迟"""
+    """智能重试中间件 - 风控/5xx 按上限重试（P0-1 修复）
+
+    旧缺陷（2026-08-31 审计 P0-1）：无条件重试且无次数上限、download_delay
+    是 Scrapy 不读的自创 meta 键 → 429 风暴下爬虫永不空闲、任务永久卡 running。
+
+    现语义：
+    - 与内置 RetryMiddleware 同名 meta 约定（retry_times）计数，达到
+      RETRY_TIMES 上限后放行响应交由上层处理（终态可被 webhook/超时回收闭环）
+    - 429 时把下载槽位延迟指数上调（对齐内置中间件的动态延迟调整思路），
+      不再使用无效的自创 meta 键；取不到槽位则跳过（重试上限仍兜底）
+    """
+    RETRY_STATUSES = (429, 500, 502, 503, 504)
+    _SLOT_DELAY_CAP = 60.0  # 槽位延迟上调上限（秒）
+
+    def __init__(self, max_retries: int = 3, backoff_base: float = 5.0):
+        self._max_retries = max(1, int(max_retries))
+        self._backoff_base = float(backoff_base)
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(
+            max_retries=crawler.settings.getint("RETRY_TIMES", 3),
+            backoff_base=crawler.settings.getfloat("RETRY_BACKOFF_BASE", 5.0),
+        )
+
     def process_response(self, request, response, spider):
-        if response.status in [429, 500, 502, 503, 504]:
-            logger.warning(f"触发风控/服务器错误 [{response.status}]，准备重试: {request.url}")
-            retry_req = request.copy()
-            retry_req.dont_filter = True
-            # 遇到 429 自动增加延迟
-            if response.status == 429:
-                retry_req.meta["download_delay"] = 5
-            return retry_req
-        return response
+        if response.status not in self.RETRY_STATUSES:
+            return response
+        if request.meta.get("dont_retry"):
+            return response
+        retry_times = int(request.meta.get("retry_times", 0))
+        if retry_times >= self._max_retries:
+            logger.warning(
+                f"响应 [{response.status}] 重试 {retry_times} 次已达上限，放行: {request.url}"
+            )
+            return response
+        if response.status == 429:
+            self._bump_download_delay(request, spider, retry_times)
+        retry_req = request.copy()
+        retry_req.dont_filter = True
+        retry_req.meta["retry_times"] = retry_times + 1
+        logger.warning(
+            f"触发风控/服务器错误 [{response.status}]，"
+            f"第 {retry_times + 1}/{self._max_retries} 次重试: {request.url}"
+        )
+        return retry_req
+
+    def _bump_download_delay(self, request, spider, retry_times: int) -> None:
+        """429 时临时抬高下载槽位延迟（尽力而为，取不到槽位则跳过）"""
+        delay = self._backoff_base * (2 ** retry_times)
+        crawler = getattr(spider, "crawler", None)
+        engine = getattr(crawler, "engine", None)
+        downloader = getattr(engine, "downloader", None)
+        if downloader is None:
+            return
+        slot_key = request.meta.get("download_slot")
+        slot = downloader.slots.get(slot_key) if slot_key else None
+        if slot is None:
+            return
+        slot.delay = min(max(slot.delay, delay), self._SLOT_DELAY_CAP)
+        logger.warning(
+            f"429 风控：下载槽位延迟上调至 {slot.delay:.0f}s: slot={slot_key}"
+        )
 
 
 class FingerprintMiddleware:

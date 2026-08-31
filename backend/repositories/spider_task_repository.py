@@ -147,6 +147,21 @@ class SpiderTaskRepository(BaseRepository[SpiderTask]):
         result = await self.session.execute(stmt)
         return int(result.scalar() or 0)
 
+    async def find_stale_running(self, cutoff: datetime, limit: int = 100) -> List[SpiderTask]:
+        """运行超时候选（P0-1b）：running 且 started_at < cutoff，供消费者超时回收"""
+        stmt = (
+            select(SpiderTask)
+            .where(
+                SpiderTask.status == "running",
+                SpiderTask.started_at.isnot(None),
+                SpiderTask.started_at < cutoff,
+            )
+            .order_by(SpiderTask.id.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def batch_increment_result_counts(self, counts: dict[int, int]) -> None:
         """批量原子累加 result_count（每条 task_id 一条 UPDATE 语句）
 

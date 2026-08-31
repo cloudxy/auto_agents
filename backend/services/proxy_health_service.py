@@ -20,8 +20,23 @@ import redis.asyncio as aioredis
 from config import settings
 from platform_core.logger import get_logger
 from platform_core.queues import PROXY_SCORES_KEY, PROXY_STATS_KEY
+from platform_core.redis_async import get_async_redis
 
 logger = get_logger("api")
+
+
+def _build_probe_client(proxy: str, timeout: int) -> httpx.AsyncClient:
+    """构造单代理探测 client（P0-4：httpx 0.28 已移除 proxies= 参数，改用 proxy=）
+
+    proxy 逐代理绑定（无法在共享 client 上按请求切换），follow_redirects 对齐
+    旧行为；trust_env=False 与 llm/notify/newapi 客户端同一约定（不走系统代理）。
+    """
+    return httpx.AsyncClient(
+        proxy=proxy,
+        timeout=timeout,
+        follow_redirects=True,
+        trust_env=False,
+    )
 
 
 class ProxyHealthService:
@@ -111,29 +126,25 @@ class ProxyHealthService:
 
         logger.info(f"开始探测 {len(low_score_proxies)} 个低分代理")
 
-        async with httpx.AsyncClient(timeout=probe_timeout) as client:
-            for proxy in low_score_proxies:
-                try:
-                    resp = await client.head(
-                        probe_url,
-                        proxies={"all://": proxy},
-                        follow_redirects=True,
+        for proxy in low_score_proxies:
+            try:
+                async with _build_probe_client(proxy, probe_timeout) as client:
+                    resp = await client.head(probe_url)
+                if resp.status_code < 500:
+                    # 探测成功：恢复评分
+                    await self._redis.hset(
+                        PROXY_SCORES_KEY, proxy, str(recover_score)
                     )
-                    if resp.status_code < 500:
-                        # 探测成功：恢复评分
-                        await self._redis.hset(
-                            PROXY_SCORES_KEY, proxy, str(recover_score)
-                        )
-                        # 更新 stats 的 last_check
-                        await self._update_last_check(proxy)
-                        logger.info(
-                            f"代理探测成功，恢复评分: {proxy} → {recover_score}"
-                        )
-                    else:
-                        await self._decay_score(proxy, score_decay)
-                except Exception as e:  # noqa: BLE001
-                    logger.debug(f"代理探测失败: {proxy} | {e}")
+                    # 更新 stats 的 last_check
+                    await self._update_last_check(proxy)
+                    logger.info(
+                        f"代理探测成功，恢复评分: {proxy} → {recover_score}"
+                    )
+                else:
                     await self._decay_score(proxy, score_decay)
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"代理探测失败: {proxy} | {e}")
+                await self._decay_score(proxy, score_decay)
 
     async def _decay_score(self, proxy: str, decay: float) -> None:
         """降低代理评分（最低 0.0）"""
@@ -179,35 +190,32 @@ class ProxyHealthService:
             ...
         ]
         """
-        redis = aioredis.from_url(
-            settings.REDIS.DEFAULT.URL, decode_responses=True
-        )
-        try:
-            scores_raw = await redis.hgetall(PROXY_SCORES_KEY)
-            stats_raw = await redis.hgetall(PROXY_STATS_KEY)
+        # 读接口统一走异步门面（P2-16/17 修复：不再每请求新建连接再关闭；
+        # 门面实例由门面管理生命周期，调用方禁止 close）
+        redis = get_async_redis()
+        scores_raw = await redis.hgetall(PROXY_SCORES_KEY)
+        stats_raw = await redis.hgetall(PROXY_STATS_KEY)
 
-            result = []
-            all_proxies = set(scores_raw.keys()) | set(stats_raw.keys())
-            for proxy in all_proxies:
-                score = float(scores_raw.get(proxy, 0.0))
-                stats = {}
-                raw = stats_raw.get(proxy)
-                if raw:
-                    try:
-                        stats = json.loads(raw)
-                    except (json.JSONDecodeError, TypeError):
-                        stats = {}
-                result.append({
-                    "proxy": proxy,
-                    "score": round(score, 4),
-                    "success": stats.get("success", 0),
-                    "fail": stats.get("fail", 0),
-                    "avg_latency": round(stats.get("avg_latency", 0.0) or 0.0, 3),
-                    "last_check": stats.get("last_check", ""),
-                })
+        result = []
+        all_proxies = set(scores_raw.keys()) | set(stats_raw.keys())
+        for proxy in all_proxies:
+            score = float(scores_raw.get(proxy, 0.0))
+            stats = {}
+            raw = stats_raw.get(proxy)
+            if raw:
+                try:
+                    stats = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    stats = {}
+            result.append({
+                "proxy": proxy,
+                "score": round(score, 4),
+                "success": stats.get("success", 0),
+                "fail": stats.get("fail", 0),
+                "avg_latency": round(stats.get("avg_latency", 0.0) or 0.0, 3),
+                "last_check": stats.get("last_check", ""),
+            })
 
-            # 按评分降序排列
-            result.sort(key=lambda x: x["score"], reverse=True)
-            return result
-        finally:
-            await redis.aclose()
+        # 按评分降序排列
+        result.sort(key=lambda x: x["score"], reverse=True)
+        return result
