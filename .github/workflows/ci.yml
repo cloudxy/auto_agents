@@ -111,11 +111,19 @@ jobs:
           npm ci
           npm run build
 
+      - name: Test admin
+        working-directory: frontend/admin
+        run: npm test
+
       - name: Build official
         working-directory: frontend/official
         run: |
           npm ci
           npm run build
+
+      - name: Test official
+        working-directory: frontend/official
+        run: npm test
 
   docker-validate:
     name: Docker Validate (build + compose)
