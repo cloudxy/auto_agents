@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Skills-library 本地管理后台。仅监听 127.0.0.1，不对外暴露。
+"""[DEPRECATED 2026-08-31] 本地管理后台已退役——技能治理并入主平台 API v1/skills 与 admin 技能中心页。
+本文件仅保留作历史参考，不再演进。仅监听 127.0.0.1，不对外暴露。
 
 - GET  /api/skills                     列表(支持 category/industry/status 筛选)
 - GET  /api/skills/{name}               详情 (meta.yaml + SKILL.md frontmatter + SOURCE.md + CHANGELOG.md)

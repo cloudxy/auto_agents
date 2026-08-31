@@ -1,3 +1,13 @@
+> ⚠️ **治理已并入主平台（2026-08-31 起）**：技能治理（扫描入库/评分/矫正/分类）统一走主后端 `v1/skills` 与 admin「技能中心」页；本目录承载**内容文件（SKILL.md/meta.yaml/CHANGELOG）与分发适配器（adapters/sync.sh）**。本地 8765 后台（`sync.sh --serve`）已退役为 deprecated，仅保留代码作历史参考，不再演进。
+
+## 主平台集成（数据流）
+
+- **内容真相源**：`skills/<name>/` 文件（SKILL.md 正文 / meta.yaml 治理快照 / CHANGELOG.md），git 版本化；
+- **治理真相源**：主库 `skills` / `skill_reviews` / `skill_jobs` 三表（迁移 014）；
+- 管理面写操作（人工矫正/状态变更）由主后端**写回** meta.yaml（tmp+rename 原子写）并追加 CHANGELOG；
+- 扫描：`POST /api/v1/skills/scan`（admin）增量入库，内容变更（content_hash）自动进入重评流程；
+- 分发不变：`adapters/*.sh` + `sync.sh`（远端机器靠 git 同步本目录后自行执行）。
+
 # skills-library
 
 多工具共享的 skill 库：单一源头 + 溯源记录 + 人工能力评分 + 行业标签 + 本地管理后台。

@@ -66,7 +66,7 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push  # 安装�
 
 ## Skill 路由（.agents/skills/）
 
-项目协作 skill 在 `.agents/skills/`。跨工具共享的 skill 目录库在 `skills-library/`（独立本地后台，不并入主 API；用法见该目录 README）。
+项目协作 skill 在 `.agents/skills/`。跨工具共享的 skill 目录库在 `skills-library/`（**技能治理已并入主 API `v1/skills`**，本地 8765 后台已退役；用法见该目录 README）。
 
 | 场景 | Skill |
 |------|-------|
