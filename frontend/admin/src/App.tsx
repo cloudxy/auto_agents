@@ -14,6 +14,7 @@ import AiPlans from './pages/AiPlans'
 import LlmProviders from './pages/LlmProviders'
 import NewApiOps from './pages/NewApiOps'
 import LogCenter from './pages/LogCenter'
+import Skills from './pages/Skills'
 import Unauthorized from './pages/Unauthorized'
 import './App.css'
 
@@ -40,6 +41,8 @@ function App() {
           <Route path="spiders/logs" element={<SpiderLogs />} />
           <Route path="spiders/nodes" element={<Nodes />} />
           <Route path="ai" element={<AiPlans />} />
+          {/* 技能中心（方案 A）：三角色可见（viewer 只读），写操作由按钮级权限控制 */}
+          <Route path="skills" element={<Skills />} />
           {/* UX-B4：路由级权限守卫——admin 专属页面（LLM 配置/中转站/用户/设置）
               菜单隐藏只是视觉隐藏，直达 URL 必须被拦截到 /unauthorized */}
           <Route

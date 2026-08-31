@@ -7,9 +7,9 @@ import type { MenuItem } from '../config/menuConfig'
 
 // 角色 → 权限码（与后端 /auth/permissions 的 _ROLE_PERMISSIONS 保持一致）
 const ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: ['menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 'menu:spiders.nodes', 'menu:users', 'menu:data', 'menu:settings', 'menu:ai', 'menu:llm', 'menu:newapi', 'menu:logs', 'btn:create', 'btn:delete', 'btn:schedule'],
-  operator: ['menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 'menu:spiders.nodes', 'menu:data', 'menu:ai', 'menu:logs', 'btn:create'],
-  viewer: ['menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 'menu:spiders.nodes', 'menu:ai'],
+  admin: ['menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 'menu:spiders.nodes', 'menu:users', 'menu:data', 'menu:settings', 'menu:ai', 'menu:skills', 'menu:llm', 'menu:newapi', 'menu:logs', 'btn:create', 'btn:delete', 'btn:schedule', 'btn:skill:edit', 'btn:skill:admin'],
+  operator: ['menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 'menu:spiders.nodes', 'menu:data', 'menu:ai', 'menu:skills', 'menu:logs', 'btn:create', 'btn:skill:edit'],
+  viewer: ['menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 'menu:spiders.nodes', 'menu:ai', 'menu:skills'],
 }
 
 export const usePermission = () => {
