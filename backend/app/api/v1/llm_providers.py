@@ -48,6 +48,44 @@ async def get_active_provider(
     return ok(await service.get_active_provider())
 
 
+@router.get("/providers/platform-presets")
+async def get_platform_presets():
+    """预设平台注册表（前端下拉数据源；读 ll.yml 直出）"""
+    from config import settings
+
+    presets = settings.get("LLM.PLATFORM_PRESETS", []) or []
+    return ok(data=presets)
+
+
+@router.post("/providers/models/probe")
+async def probe_provider_models(
+    body: dict,
+    _user: CurrentUser = Depends(require_admin),
+):
+    """保存前拉取平台模型列表（key 不落库不写日志不回显）"""
+    result = await LlmProviderService.probe_models(
+        provider_type=str(body.get("provider_type") or ""),
+        base_url=str(body.get("base_url") or ""),
+        api_key=str(body.get("api_key") or ""),
+    )
+    return ok(data=result)
+
+
+@router.post("/providers/models/probe-test")
+async def probe_provider_model_test(
+    body: dict,
+    _user: CurrentUser = Depends(require_admin),
+):
+    """保存前 1-token 连通测试（用表单当前配置真发一次）"""
+    result = await LlmProviderService.probe_test(
+        provider_type=str(body.get("provider_type") or ""),
+        base_url=str(body.get("base_url") or ""),
+        api_key=str(body.get("api_key") or ""),
+        model=str(body.get("model") or ""),
+    )
+    return ok(data=result)
+
+
 @router.post("/providers", response_model=ApiResponse[LlmProviderResponse])
 async def create_provider(
     payload: LlmProviderCreate,

@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories.llm_provider_repository import LlmProviderRepository
 from config import settings
 from platform_core.exceptions import BusinessException, NotFoundException
+from backend.services.llm_protocol import ProtocolError, execute_json, get_adapter
 from platform_core.logger import get_logger
 from platform_core.schemas.llm_provider import (
     LlmProviderCreate,
@@ -83,6 +84,20 @@ async def _invalidate_llm_clients(provider_id: Optional[int] = None) -> None:
         await invalidate_client_cache(provider_id)
     except Exception as e:  # noqa: BLE001 缓存清理失败不影响主流程（连接池自然回收）
         logger.warning(f"LLM 共享 client 缓存清理失败（忽略）: {e}")
+
+
+
+def _host_of(base_url: str) -> str:
+    from urllib.parse import urlparse
+
+    return urlparse(base_url).hostname or ""
+
+
+def _validated_probe_base_url(base_url: str) -> str:
+    """探测地址过 schema 同款校验（恒拒云元数据；格式合法）"""
+    from platform_core.schemas.llm_provider import _validate_base_url
+
+    return _validate_base_url(base_url)
 
 
 class LlmProviderService:
@@ -282,6 +297,48 @@ class LlmProviderService:
     # ------------------------------------------------------------------
     # 连通性测试（一次性 client，10s 超时，1-token 请求，不落库）
     # ------------------------------------------------------------------
+    # ---------- B-M1 探测（保存前；key 仅本次请求使用，不落库不落日志不回显） ----------
+
+    @staticmethod
+    async def probe_models(provider_type: str, base_url: str, api_key: str) -> dict:
+        """拉取平台模型列表（归一化 + 对话模型计数）"""
+        logger.info(f"模型列表探测 | type={provider_type} host={_host_of(base_url)}")
+        validated = _validated_probe_base_url(base_url)
+        adapter = get_adapter(provider_type)
+        models = await adapter.list_models(validated, api_key)
+        chat_only = models.chat_only()
+        return {
+            "models": [{"id": m.id, "owned_by": m.owned_by} for m in models],
+            "chat_only_count": len(chat_only),
+        }
+
+    @staticmethod
+    async def probe_test(provider_type: str, base_url: str, api_key: str, model: str) -> dict:
+        """1-token 连通测试（保存前）——用表单当前 平台/地址/Key/模型 真发一次"""
+        import time
+
+        logger.info(f"连通探测 | type={provider_type} host={_host_of(base_url)} model={model}")
+        validated = _validated_probe_base_url(base_url)
+        adapter = get_adapter(provider_type)
+        request = adapter.build_chat(
+            validated, api_key, model, [{"role": "user", "content": "ping"}], max_tokens=1
+        )
+        started = time.perf_counter()
+        try:
+            data = await execute_json(None, "POST", request.url, request.headers, request.json_payload)
+            content = adapter.parse_chat(data)
+            if not content:
+                raise ProtocolError("HTTP 200 响应缺少文本内容")
+            return {
+                "ok": True, "latency_ms": int((time.perf_counter() - started) * 1000),
+                "model": model, "error": "",
+            }
+        except ProtocolError as exc:
+            return {
+                "ok": False, "latency_ms": int((time.perf_counter() - started) * 1000),
+                "model": model, "error": str(exc),
+            }
+
     async def test_connectivity(self, provider_id: int) -> LlmProviderTestResponse:
         """向 {base_url}/chat/completions 发 1-token 探测请求，返回延迟与错误摘要"""
         item = await self.repo.get_by_id(provider_id)
