@@ -14,11 +14,13 @@
 
 另有 4 个 P0 级"功能已坏/安全缺口"，其中爬虫无限重试会导致任务在 DB 中永久卡 running。
 
-**问题统计**：P0 × 4｜P1 × 13｜P2 × 46（按主题归组）。
+**问题统计**：第一轮（架构与缺陷审计）P0 × 4｜P1 × 13｜P2 × 46；第二轮（易用性专项走查，第 6 章）新增功能级缺陷 8 项（见 3.4 节）与 22 条 UX 反模式（见 6.4 节）。
+
+**易用性专项结论**（详见第 6/7 章）：系统主链路设计方向正确（动态表单→提交自动看日志→结果导出），但被"假分页 / 运行与模板不回填参数 / 路由级权限缺失"等功能 bug 与系统性的内部概念泄漏（手写 JSON/cron/格式串）拖累。对标 EasySpider / crawlab / spider-flow 的四阶段（U1-U4）优化方案见第 7 章。
 
 **最优先行动**（详见第 5 章批次 1）：修 RetryMiddleware 重试上限、补 webhook 密钥启动守卫、token 用量落库、httpx `proxies=` 参数替换。
 
-另：开发环境问题（git 连接 GitHub 失败：本地代理未启动）的诊断与解决方案见附录 6.3。
+另：开发环境问题（git 连接 GitHub 失败：本地代理未启动）的诊断与解决方案见附录 8.3。
 
 ---
 
@@ -359,6 +361,21 @@ export const register = (username: string, email: string, password: string) => {
 | G4 | 用户管理只读：admin 前端 `menu:users` 权限对应的写操作后端不存在（无改密/禁用/角色分配端点、无 logout/token 撤销；`jwt.yml:13` 配了 REFRESH_TOKEN_EXPIRE_DAYS 但无刷新端点） | `v1/admin.py:33,43,55` |
 | G5 | 遗留演示脏代码：zhihu_feed/dianping_home/example 在 RedisSpider 上声明 `start_urls`（scrapy-redis 不消费，纯误导）；openweather 错误提示指向不存在的 `spider_sites.yml` | `zhihu_feed.py:12`、`dianping_home.py:12`、`example.py:20`、`openweather.py:24` |
 
+### 3.4 第二轮易用性走查新增（功能级缺陷，2026-08-31 已人工复核）
+
+> 这些不是风格问题，而是**行为与用户预期直接相悖**的功能缺陷；行号均已逐行核验。
+
+| # | 问题 | 证据 |
+|---|------|------|
+| UX-B1 | **假分页**：任务列表永远只拉前 50 条，表格翻到第 2 页显示空表（服务端分页未接通） | `frontend/admin/src/pages/Spiders.tsx:77`（fetchTasks(0,50) 固定）+ `TaskList.tsx:256`（pagination 无 onChange） |
+| UX-B2 | **"运行"≠重跑**：任务行「运行」、调度「手动运行」只带 spider_name 打开空白表单，不回填该任务/调度的 params——用户以为在重跑，实际要重填一切 | `TaskList.tsx:118-128` → `TaskModal.tsx:31-39`；`Spiders.tsx:180,205` |
+| UX-B3 | **"从模板创建"不填参数**：模板保存了完整 params，但创建弹窗选模板只回填 spider_name+priority，placeholder 却写"选择模板快速填充" | `TaskModal.tsx:87-96` |
+| UX-B4 | **路由级权限缺失**：`ProtectedRoute` 的 requireAdmin 参数全站 0 处使用（grep 计数=0），viewer 直达 /users /llm /settings 得到的是接口报错 toast + 空表，而非 403 页——菜单隐藏只是视觉隐藏 | `App.tsx:29-49`、`ProtectedRoute.tsx:22-25` |
+| UX-B5 | **Dashboard 双页头**：页面自己又渲染一套 Header（第二个标题、第二个"退出登录"） | `Dashboard.tsx:102-116` vs `AdminLayout.tsx:60-68` |
+| UX-B6 | **编辑断崖**：创建任务是动态表单，编辑却退化为手写 params JSON 文本域，且要求理解 pending/queued 状态词 | `TaskEditModal.tsx:78,90-95` |
+| UX-B7 | **官网假数据与虚假承诺**：官网静态假统计（"累计执行任务 128,000+"）无示意标注；后台设置页宣称"官网内容已实时同步更新"，但官网从不请求任何 API；官网称可"一句话描述提取字段"而后台 AI 表单只有 URL | `official/src/pages/Home.tsx:37-41`、`admin/src/pages/Settings.tsx:46`、`official/.../AiFlowSection.tsx:29` |
+| UX-B8 | **导出隐性截断与按钮语义错位**：数据中心导出硬上限 100 条仅靠 toast 告知；「详情」按钮打开的是"整任务结果抽屉"而非该条数据 | `Data.tsx:167-182,317` |
+
 ---
 
 ## 4. 演进方案设计（用户选定方向：LLM 故障转移 + new-api 调度接线）
@@ -479,31 +496,232 @@ NEWAPI.ENABLED（总开关）
 | **批次 2（P1）** | P1-1~5、7~11、13（prod 配置、compose 绑定、前端 register、丢数据兜底、openweather、反爬接线、RedisPipeline、bcrypt、v2 health、审计独立 session、pre_ping）；P1-6/12 并入批次 4 | 3-5 天 | pytest + check-arch 双绿；`docker compose up` 后宿主机 curl 9111 health 通；前端注册 e2e 可用；scrapy 对 429 站点不再无限重试（本地起 mock 站点验证） |
 | **批次 3（P2 backlog）** | 按主题推进：安全加固（B1 角色默认 viewer、B4 清洗白名单、B5 脚本密钥）→ 架构收口（A1/A2/A3）→ 性能（D1 批量去重、D3 gather）→ 工程化（F1 扫描盲区、F2 前端测试、F5 脚本合并）→ 前端（G1/G2/G4） | 持续 | 每项独立 PR，各自带测试；check-arch 盲区修复后全仓扫描 0 违规 |
 | **批次 4（演进）** | 4.1 LLM 故障转移 + 4.2 调度接线 | 1-2 周 | 见 4.1.6 / 4.2.5 验收标准 |
+| **批次 5（易用性 U1+U2）** | 见第 7.3 章：修假分页/参数回填/路由守卫/双页头等快赢 11 项 + 参数校验前移/参数元数据补全/cron 可视化/预置示例模板/pending 引导/空库 onboarding | 1-2 周 | 见 7.5 节 U1/U2 验收；前端 build 通过；新用户不看文档 3 分钟完成"从零到数据" |
+| **批次 6（易用性 U3+U4）** | WebSocket 日志 tail、结果单条预览、服务端流式导出、任务详情页、error_message 结构化；（可选）选择器实时试测/流程只读画布/jsonpath | 2-4 周 | 见 7.5 节 U3/U4 验收 |
 
 **顺序依赖**：批次 1 的 P0-3 用量表与批次 4 的 4.1.4 是同一张表——建议批次 1 直接按 4.1.4 建表，避免二次迁移。
 
 ---
 
-## 6. 附录
+## 6. 易用性专项走查（第二轮，2026-08-31）
 
-### 6.1 测试盲区清单（回归风险最高处）
+> 走查标准：**"简单好用，操作流程符合人的直觉"**——以"一个不了解内部实现的新用户能否顺利完成核心任务"为唯一裁判。方法：admin 全部 47 个源文件逐页走查 + 后端 API 旅程映射 + 对标三款成熟产品（第 7 章）。行为级缺陷已并入 3.4 节；本章记录旅程卡点、后端可用性缺口与 UX 反模式。
+
+### 6.1 总体结论
+
+主链路的设计方向是正确的：**注册表驱动的动态任务表单（创建路径全程无需手写 JSON）→ 提交后自动打开日志抽屉 → 3 秒静默轮询 → 结果抽屉/导出**，这条线接近商业产品手感；旅程 D（LLM 配置）与旅程 F（AI 采集向导）完成度最高。
+
+但整体被三类问题拖累：
+
+1. **功能 bug 直接破坏操作预期**（3.4 节）：假分页、"运行/从模板创建"不回填参数、路由权限缺失；
+2. **内部概念与格式串泄漏到 UI**：编辑任务退化为手写 params JSON（`TaskEditModal.tsx:90-95`）、cron 与静默时段手写格式串（`ScheduleTab.tsx:219-266`）、`_strategy/_quiet_hours` 混进爬虫参数（`ScheduleTab.tsx:71-76`）、"注册表/登记/收藏"等动词隐晦、`flow_generic` 内部名直接展示给用户；
+3. **反馈与引导缺失**：Dashboard 是无入口死胡同且双页头、错误只藏在 hover、任务 pending 无"执行器未启动"引导、无单条结果完整预览、空库无 onboarding。
+
+### 6.2 六条核心旅程走查
+
+#### 旅程 A：从零跑通一个爬虫任务
+
+步骤流：登录 → Dashboard（死胡同）→ 用户自行发现「爬虫管理→任务列表」→「新增任务」（动态表单，体验好）→ 提交（自动开日志抽屉，好）→「结果」看数据。
+
+| 卡点 | 描述 | 证据 |
+|---|---|---|
+| A1 | Dashboard 只有只读图表，无"新建任务"/最近任务入口；且自渲染第二套页头（双标题双退出） | `Dashboard.tsx:101-277,102-116` |
+| A2 | 「运行」≠重跑：只带 spider_name，参数全要重填（UX-B2） | `TaskList.tsx:118-128` |
+| A3 | 「从模板创建」不填参数（UX-B3） | `TaskModal.tsx:87-96` |
+| A4 | 假分页：翻页空表（UX-B1） | `Spiders.tsx:77`、`TaskList.tsx:256` |
+| A5 | 筛选不足：只有优先级，无状态/爬虫/关键词；找失败任务靠肉眼扫 | `TaskList.tsx:230-241` |
+| A6 | 操作列 9 个 link 按钮平铺；「恢复」对从未暂停的 running 任务也常驻显示 | `TaskList.tsx:113-224,154-163` |
+| A7 | 编辑断崖：创建是动态表单，编辑是手写 JSON（UX-B6） | `TaskEditModal.tsx:78,90-95` |
+
+#### 旅程 B：查看结果与导出
+
+结果抽屉服务端分页、导出 CSV/JSON 交互合格；但**无单条完整数据预览**——`extra/item_type/source` 字段不展示、无展开行看整条 JSON（`ResultDrawer.tsx:81-115`）；失败原因只藏在状态 Tag 的 hover（`TaskList.tsx:99-107`）；数据中心「详情」按钮打开的是整任务结果抽屉、导出隐性截断 100 条（UX-B8）。
+
+#### 旅程 C：创建定时调度
+
+cron 表达式手写 Input（仅正则校验"5 段"，无可视化选择器、创建时无"下次触发时间"预演）；静默时段手写 `02:00-06:00,23:00-23:59` 格式串、无校验；策略与静默时段以 `_strategy/_quiet_hours` 键混进爬虫 params（内部实现泄漏）；**调度创建后不可编辑**（后端 `updateSchedule` 支持 cron，UI 未接）；「手动运行」不带该调度参数（`ScheduleTab.tsx:219-266,146-170`；`services/spiders.ts:303-309`）。
+
+#### 旅程 D：配置 LLM 供应商（全站最佳实践页）
+
+未激活时顶部 Alert 引导、测试连通性行内反馈（延迟+模型+错误 Tooltip）、API Key 编辑态留空不改+脱敏 placeholder（`LlmProviders.tsx:309-321,170-193,388-397`）。可作为其他页面交互基线。
+
+#### 旅程 E：new-api 中转站运维
+
+纯只读三 Tab；过滤要求用户记**渠道数字 ID**（无名称下拉）；verdict 术语半翻译（"original 正品"）（`NewApiOps.tsx:329-338,42-46`）。写操作能力缺失对应 4.2 演进设计。
+
+#### 旅程 F：AI 智能采集向导
+
+三步向导 + 2.5s 轮询 + 试采历史表（轮次/判定/原因）+ 上线后指路爬虫管理，闭环好；但**输入只有 URL**——无法表达"想要哪些字段"（官网却如此宣传，UX-B7）；想换 URL 只能「重置向导」从头再来（`PlanDetail.tsx:77-105,277-295`）；viewer 可见表单但无提交按钮也无权限提示（`AiPlans.tsx:63-67`）。
+
+### 6.3 后端可用性缺口（前端体验问题的根因）
+
+| # | 缺口 | 证据 |
+|---|------|------|
+| 1 | **提交时零参数校验**：非法 JSON 的报错文案是误导性的"params 缺少 urls，无法分发采集目标"（真实原因是 JSON 写错） | `spider_task_service.py:149-206`；`consumer.py:254-256` |
+| 2 | **隐式流程路由**：params 含 pagination/detail/filters 任一段即被改写为 flow_generic 执行，任务行的爬虫名会变，事先无说明 | `spider_task_service.py:158-160`；`consumer.py:246-252` |
+| 3 | **参数元数据不完整**：`store_to/incremental/render_js/wait_for/wait_timeout` 只存在于源码，registry/表单均不暴露 | `config/default/spiders.yml:14-75` vs `spider_common.py:66-81`、`consumer.py:105-127` |
+| 4 | **无单任务 GET 端点、无 WebSocket/SSE**：只能轮询任务列表（全仓 grep WebSocket/EventSource = 0） | `v1/spiders/tasks.py` 全文 |
+| 5 | **任务日志 = 共享日志文件 + 字节偏移**：并发任务日志互串；backend 与 scrapy worker 跨机部署时永远返回空 | `spider_query_service.py:217-262`；`consumer.py:306-315` |
+| 6 | **失败原因不可读**：爬虫关闭回调只上报 `"spider closed: finished/shutdown/cancelled"`——选择器取空/403/超时等真实病因不可见 | `scrapy/extensions/__init__.py:85` |
+| 7 | **双进程心智模型无提示**：scrapy worker 不启动则任务静默 pending（提交时不校验 worker 心跳）；首个管理员需跑脚本但无文档 | `app/__init__.py:33-40`；`backend/scripts/set_admin_account.py` |
+| 8 | **零预置模板、空库无引导**：模板表无 seed，Dashboard 空态只有空转图表 | 模板迁移无 seed；`Dashboard.tsx` |
+
+### 6.4 UX 反模式清单（22 条）
+
+| # | 反模式 | 证据 |
+|---|---|---|
+| 1 | 假分页（数据只拉前 50 条） | `Spiders.tsx:77`、`SpiderLogs.tsx:38` |
+| 2 | 按钮语义与行为不符（"运行"实为新建） | `TaskList.tsx:118-128`、`Spiders.tsx:180,205` |
+| 3 | 模板不回填参数 | `TaskModal.tsx:87-96` |
+| 4 | 手写格式串：params JSON / cron / 静默时段 | `TaskEditModal.tsx:90-95`、`ScheduleTab.tsx:219-265` |
+| 5 | 创建/编辑体验不一致（表单 vs JSON 断崖） | `TaskModal.tsx` vs `TaskEditModal.tsx` |
+| 6 | 内部术语裸露：注册表/登记/`_strategy`/内容指纹/verdict/pending/queued | `FileTab.tsx:254,294`、`ScheduleTab.tsx:71-76`、`ResultDrawer.tsx:108`、`NewApiOps.tsx:42-46` |
+| 7 | 死表单：viewer 可填不可提交、无权限提示 | `AiPlans.tsx:63-67`、`PlanDetail.tsx:100-104` |
+| 8 | 路由级权限缺失（菜单隐藏≠拦截） | `App.tsx:29-49`、`Users.tsx:30-40` |
+| 9 | 双页头/双退出 | `Dashboard.tsx:102-116` |
+| 10 | 无行动入口的首页 | `Dashboard.tsx:101-277` |
+| 11 | 成功反馈撒谎（"官网已实时同步"） | `Settings.tsx:46` vs 官网零 API 调用 |
+| 12 | 中英混排空态（未配 ConfigProvider zh_CN） | `index.tsx:7-14` |
+| 13 | 任务列表筛选维度不足 | `TaskList.tsx:230-241` |
+| 14 | 结果无单条完整预览 | `ResultDrawer.tsx:81-115` |
+| 15 | 导出隐性截断 100 条 | `Data.tsx:167-182` |
+| 16 | 不可编辑实体（调度后端支持改 cron，UI 未接） | `ScheduleTab.tsx:146-170` |
+| 17 | 冲突按钮（running 同时显示暂停+恢复） | `TaskList.tsx:129-163` |
+| 18 | 过滤要求懂内部数字 ID（newapi 渠道） | `NewApiOps.tsx:329-338` |
+| 19 | 终态后轮询不停（日志抽屉） | `LogDrawer.tsx:24-37` |
+| 20 | 按钮动词不统一（提交/新增/登记/收藏/上线注册） | `TaskModal.tsx:77`、`FileTab.tsx:262,284` |
+| 21 | 营销与实物不符（官网"一句话描述字段"） | `AiFlowSection.tsx:29` vs `PlanDetail.tsx:77-105` |
+| 22 | 装了不用（react-query 在依赖中全站零使用） | `admin/package.json` + 全 src grep |
+
+### 6.5 官网（official）
+
+结构完整非空壳（Hero/功能卡/流程/架构/CTA + framer-motion 动效，约 1100 行），问题三条：静态假统计无"示意"标注（`Home.tsx:37-41`）；文案承诺与后台实物不符（UX-B7）；与后台设置页宣称的"同步"毫无关联。
+
+### 6.6 做得好的（后续改造的基线，避免误伤）
+
+1. 注册表驱动的动态任务表单 + JSON 字段中文校验报错（`formUtils.tsx:133-232`）；
+2. 提交任务自动打开日志抽屉 + 3s 静默轮询（仅活跃任务时）+ 状态列转圈（`Spiders.tsx:103-121`）；
+3. 关键术语 tooltip 解释（优先级/增量/cron 五段/温度等）；
+4. 危险操作全部 Popconfirm + 后果说明 + 运行中禁删；
+5. LLM 页交互基线（见旅程 D）；
+6. AI 向导三步流 + 试采历史表 + 上线指路；
+7. 多数列表中文 Empty 空态带行动指引；
+8. 401 自动登出 + 登录回跳 + 独立 403 页（已有页面，只差路由接上）；
+9. newapi 管理面不可达时的降级说明 Alert；
+10. CSV 导出带 BOM 防 Excel 乱码；ResultDrawer 切换任务防闪现。
+
+---
+
+## 7. 优化方案：对标 EasySpider / crawlab / spider-flow
+
+### 7.1 三款产品的易用性杠杆与借鉴结论
+
+| 产品 | 核心杠杆 | 借鉴结论 |
+|---|---|---|
+| [EasySpider](https://github.com/NaiboWang/EasySpider) | 把"写选择器"变成"点页面"；分步编号引导内嵌产品；内置示例任务 | 借鉴**引导交互与示例模板**；点选生成选择器先做降级版（选择器实时试测），不搬其浏览器执行引擎 |
+| [crawlab](https://github.com/crawlab-team/crawlab) | 运行/日志/结果/调度做成后台一级体验：实时日志 tail（WebSocket 分块增量）、Run 时参数对话框、结果在线表格、cron preset 下拉 | 四件套全部可**低成本**落地（见 U2/U3），对本系统收益最大 |
+| [spider-flow](https://github.com/ssssssss-team/spider-flow) | 节点画布表达流程语义；多范式解析下拉（css/xpath/jsonpath/regex）；预置流程骨架 | flow_generic 已用代码+params 表达流程语义——只借鉴**只读画布、解析范式下拉、流程骨架模板**，不建通用流程引擎 |
+
+### 7.2 设计原则（所有优化的裁判标准）
+
+1. **任务为中心**：用户心智是"我要这份数据"，不是"定义/模板/调度/参数"四概念——内部概念只在"高级模式"出现；
+2. **所见即所跑**：任何"运行/重跑/手动运行/试采"入口必须携带当前上下文的参数；
+3. **错误可行动**：每条报错回答"哪里错了 + 下一步做什么"；
+4. **不写格式串**：JSON/cron/时间段一律控件化，高级用户保留"JSON 模式"双轨；
+5. **每个空态给一条出路**：空列表/空 Dashboard 必须附带一个可点的下一步。
+
+### 7.3 分阶段落地
+
+#### U1：修 bug 与快赢（≈1 周，全部低成本）
+
+| 改造 | 对应问题 |
+|---|---|
+| 任务列表接通服务端分页（真分页） | UX-B1 |
+| 「运行」「手动运行」「从模板创建」回填 params | UX-B2/B3 |
+| 编辑任务复用创建的动态表单（JSON 留作"高级模式"折叠项） | UX-B6 |
+| 路由级权限守卫（requireRole 包裹 /llm /newapi /users /settings /logs） | UX-B4 |
+| Dashboard 去第二套页头 + 加"新建任务"与"最近任务"入口 | UX-B5 / 旅程 A1 |
+| ConfigProvider zh_CN（空态/分页/日期中文化） | 反模式 12 |
+| 任务列表加状态/爬虫/关键词筛选；失败错误提供直显入口（不再只 hover） | A5 / 旅程 B |
+| 「恢复」仅对 paused 任务显示；日志抽屉任务终态后停止轮询 | A6 / 反模式 19 |
+| new-api 渠道过滤改名称下拉 | 旅程 E |
+| 官网假统计加"示意"标注或接真实统计接口；设置页"实时同步"文案改实际行为 | UX-B7 |
+| 全站动词统一（运行/重跑/存为模板/启停/删除） | 反模式 20 |
+
+#### U2：参数与引导体验（1-2 周，对标 EasySpider 引导 + crawlab 表单化）
+
+| 改造 | 说明 | 来源 |
+|---|---|---|
+| 参数校验前移 + 报错修复 | API 层按爬虫类型校验 params（JSON 合法性 + 必填 + 字段类型），错误精确到字段；修复"params 缺少 urls"误导文案 | — |
+| 参数元数据补全 | `store_to/incremental/render_js/wait_for/wait_timeout` 纳入 registry fields；前端做"高级选项"折叠区 | crawlab Options 化 |
+| 隐式路由显式化 | 创建表单直接呈现"列表+翻页 / 进详情"结构化区块；任务行显示"通用采集（含翻页）"而非 flow_generic | — |
+| cron 快捷 preset + 下次执行预览 | preset 下拉（每小时/每天 8:00/每周一…）回填表达式，创建时显示 next_run_at | crawlab |
+| 静默时段控件化 | TimeRangePicker 多段选择替代手写 `02:00-06:00` | — |
+| 调度可编辑 | UI 接通后端已有 updateSchedule（改 cron/参数不必删了重建） | — |
+| 预置示例模板 | 内置 3 个开箱模板：单页抽取 / 列表+翻页 / 列表→详情两跳，配真实可跑示例 + "一键试运行" | EasySpider Sample |
+| pending 引导 | 任务 pending > 30s 且无活跃 worker 心跳 → 提示"爬虫执行器可能未启动"并链接节点页 | — |
+| 空库 onboarding | Dashboard 空态三步引导卡（配置 LLM → 跑第一个任务 → 查看数据） | EasySpider 分步引导 |
+| AI 向导加需求描述 | 表单加"想提取什么字段"文本框并入 LLM prompt（对齐官网承诺）；支持改 URL 重新规划而非重置向导 | — |
+
+#### U3：实时性与结果体验（2-3 周，对标 crawlab）
+
+- **WebSocket 日志 tail**（分块增量拉取 + 日志内搜索 + 整份下载），替代"共享文件 + 字节偏移"读取；日志按 task_id 归档——同时根治 6.3-5 的并发串日志与跨机失效；
+- **结果单条完整预览**：展开行 JSON 树展示（含 extra/item_type/source）；
+- **服务端流式导出**：数据中心导出复用按任务导出的游标实现，去 100 条隐性上限；
+- **新增 `GET /spiders/tasks/{id}` 单任务端点 + 任务详情页**（进度/日志/结果三标签，crawlab 任务详情模式）；
+- **error_message 结构化**：爬虫侧上报失败分类（选择器取空 / 403 反爬 / 超时 / DOM 结构变化），替代 "spider closed: finished"。
+
+#### U4：可视化进阶（可选，按需启动）
+
+- **选择器实时试测**（推荐先做，成本中）：输入 css/xpath → 立即显示在目标页命中的前 N 条结果预览——EasySpider"点选"的降成本替代；
+- **flow 流程只读画布**：React Flow 把 params 渲染为节点图（请求→解析→翻页/详情→过滤→输出），点击节点看参数；编辑仍走表单；
+- **jsonpath 解析范式**：selectors.type 增加 jsonpath 选项（spider-flow 多范式）；
+- **完整点选生成选择器**（iframe 代理 + 悬停高亮 → 自动生成 css 回填）：成本高，远期评估。
+
+### 7.4 明确不照搬（避免过度工程）
+
+| 模式 | 来源 | 不搬原因 |
+|---|---|---|
+| 多节点分布式 + 跨节点文件同步 | crawlab | 自研单 FastAPI+Scrapy 已有 Redis 队列分发，引入节点体系要解决文件一致性/版本漂移，收益为零 |
+| 任意语言爬虫上传执行（zip/git + 子进程执行器） | crawlab | 等于自建代码沙箱（安全/进程管理/资源隔离全套），且与"注册表+params 实例化"体系冲突 |
+| 内置 MongoDB 数据底座 | crawlab | 为在线表格引入新存储不值；结果页直接查现有 MySQL/存储层 |
+| Electron 内嵌浏览器执行引擎 | EasySpider | 自研是 HTTP 级 Scrapy，引入渲染引擎等于重做一个产品；只借其点选交互层 |
+| 完整节点流程引擎（变量作用域/子流程/双向画布编辑） | spider-flow | flow_generic 已用代码表达流程语义，重写引擎成本极高且灵活性反而低于代码 |
+| 桌面端执行器打包 | EasySpider | Web 平台形态，执行视图做成页面即可 |
+
+### 7.5 验收标准
+
+- **U1**：前端 build 通过；viewer 直达受限路由得到 403 页；任务翻页正确；"从模板创建/运行"参数完整回填；
+- **U2**：填错 JSON 在提交瞬间得到字段级中文报错；新用户用预置模板一键跑通；创建调度全程无需手写 cron；
+- **U3**：任务详情页日志实时滚动（延迟 <1s）；结果可展开查看全字段；导出突破 100 条；
+- **U4**：选择器试测可可视化验证命中结果。
+
+### 7.6 与第 5 章路线图的关系
+
+批次 5 = U1+U2，批次 6 = U3（U4 视需求插入）。UX-B4（路由守卫）属安全相关，建议提前并入批次 2 同期完成。
+
+---
+
+## 8. 附录
+
+### 8.1 测试盲区清单（回归风险最高处）
 
 - `SpiderScheduler` 后台触发链路（`schedule_service.py:156-371`：_tick_once/_fire/动态优先级/静默时段）**零测试**——智能调度核心无回归保护
 - `tasks/consumer.py` 主循环：现有测试仅覆盖 `extract_start_urls/build_start_payload` 纯函数；`_dispatch`/`_flush_batch`/`_retry_loop`（含重试回滚兜底）未测
 - 爬虫中间件/管道零测试（P0-1、P0-4 正是 mock 掩盖或零覆盖所致）
 - `app/middleware/`（RequestID）、`app/responses/` 分页构造器、v2 health 多数端点、alembic 迁移（无 upgrade 测试）、`admin.py` 审计过滤分页
 
-### 6.2 值得保留的优良实践（后续重构勿误伤）
+### 8.2 值得保留的优良实践（后续重构勿误伤）
 
 - 统一异常信封 + 4 级处理器（`platform_core/exceptions/handlers.py`），500 兜底不泄内部信息
 - Redis 异步化收口（R11）执行彻底；`distributed_lock`（`queues.py:97-202`）token + Lua 原子释放/续期实现规范
 - LLM 密钥 Fernet 加密 + 掩码出参 + SSRF 元数据端点恒拒绝（`schemas/llm_provider.py:41-101`）
 - `deploy/newapi/` 编排（版本锁定、`:?` 必填密钥、`$$` 转义健康检查、独立网络）是仓库内最佳实践范本
 - `deps.py:30-36` CurrentUser 快照规避 async 惰性加载 MissingGreenlet、`db.py:14-16` pytest NullPool——真实踩坑沉淀
-- httpx 客户端统一 `trust_env=False`（`backend/services/ai_planner/llm_client.py:76-77` 等），不读系统代理环境变量——规避本机代理软件（Clash 等）劫持请求返回 502 的陷阱；与附录 6.3 的 git 代理故障同源（代码层已防，shell/git 层未防）
+- httpx 客户端统一 `trust_env=False`（`backend/services/ai_planner/llm_client.py:76-77` 等），不读系统代理环境变量——规避本机代理软件（Clash 等）劫持请求返回 502 的陷阱；与附录 8.3 的 git 代理故障同源（代码层已防，shell/git 层未防）
 - uv workspace 纪律（根 venv 唯一、uv.lock 提交、.dockerignore 排敏感文件）执行到位
 
-### 6.3 开发环境问题：git 连接 GitHub 失败（本地代理未启动）
+### 8.3 开发环境问题：git 连接 GitHub 失败（本地代理未启动）
 
 **现象**：
 
@@ -545,4 +763,4 @@ Failed to connect to 127.0.0.1 port 7897 after 0 ms: Couldn't connect to server
 
 ---
 
-*报告生成：2026-08-31 · 审计方式：静态深度阅读（三路并行扫描 + 关键证据人工复核）· 所有行号基于当前工作区 `feature/project-structure` 分支*
+*报告生成：2026-08-31（第一轮：架构与缺陷审计；第二轮：易用性专项走查 + 对标 EasySpider/crawlab/spider-flow 的优化方案）· 审计方式：静态深度阅读（并行扫描 + 关键证据人工复核）· 所有行号基于当前工作区 `feature/project-structure` 分支*
