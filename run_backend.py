@@ -88,7 +88,14 @@ def main():
     print("=" * 60 + "\n")
 
     import uvicorn
-    uvicorn.run(app=app, host=host, port=port, reload=reload_mode, log_level="info", access_log=True)
+    uvicorn.run(
+        app=app, host=host, port=port, reload=reload_mode,
+        log_level="info", access_log=True,
+        # 反代信任头：仅 FORWARDED_ALLOW_IPS 内的反代可改写 X-Forwarded-For
+        # （按 IP 限流的来源 IP 依赖此头；配置见 config/default/api.yml）
+        proxy_headers=settings.API.PROXY_HEADERS,
+        forwarded_allow_ips=settings.API.FORWARDED_ALLOW_IPS,
+    )
 
 
 if __name__ == "__main__":

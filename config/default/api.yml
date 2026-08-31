@@ -7,6 +7,13 @@ API:
   
   # 调试模式
   DEBUG: false
+
+  # 反向代理信任头（uvicorn proxy_headers / forwarded_allow_ips）
+  # 仅信任 FORWARDED_ALLOW_IPS 列表内反代写入的 X-Forwarded-For
+  # ⚠️ 过宽（如 "*" 或未收紧的网段）会允许客户端伪造 XFF 绕过按 IP 限流，
+  #    接入反代后必须收紧为自家反代出口 IP；默认仅信任本机
+  PROXY_HEADERS: true
+  FORWARDED_ALLOW_IPS: "127.0.0.1"
   
   # 注意：API 路由前缀由代码控制
   # - 主路由: /api (在 backend/app/__init__.py 中定义)
