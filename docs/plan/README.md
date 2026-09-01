@@ -418,6 +418,21 @@ Service 划分：`skill_service`（CRUD/扫描/写回/tier 派生）、`skill_sc
 
 **10.2-F 核对结论（未拆分，列 S1 前置小任务）**：现行 `ChannelConfigInfo.limit_quota`（`ge=0`，0=显式关闭该渠道调度）正是审计 10.2-F 警告的语义混载——全局 `DEFAULT_WINDOW_QUOTA: 0` 意为"不启用全局默认"，两个 0 含义冲突（读取侧 `channel_scheduler_service.py:447-473` 以 if/elif 区分，代码自洽但对外契约歧义）。S1 前小任务：schema 增 `enabled: bool`（默认 true）、`limit_quota` 收紧 `ge=1`、读取侧兼容旧 hash（无 enabled 键视为 true）、前端配置弹窗加开关，旧 `limit_quota=0` 语义保留一个版本的兼容读取并在 channel_events 记 deprecation。
 
+
+### 7.4 S1-6 DDL 实测记录（2026-09-01，保真通道）
+
+压测表 drill_results（6000 行 × 200B payload，MySQL 8 本地）：
+
+| 操作 | 耗时 |
+|---|---|
+| ADD COLUMN tenant_id INT NULL | 0.015s |
+| CREATE INDEX (tenant_id) | 0.013s |
+| 分批回填（LIMIT 5000/批 × 2 批） | 0.083s |
+
+分批回填模板验证可用（NULL 清零断言）。结论：**当前数据量级下加列/索引/回填均为亚秒级**——
+spider_results 大表 DDL 无需停机窗口（10.2-G 的排期门槛已解除）；
+数据量增长至百万行级时再复跑 `test_saas_ddl_drill`（耗时随行数线性）。
+
 ---
 
 ## 8. 合并实施路线图（依赖修正版）
