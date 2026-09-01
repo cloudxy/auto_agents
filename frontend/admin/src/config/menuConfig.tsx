@@ -62,6 +62,12 @@ export const menuConfig: MenuItem[] = [
     permission: 'menu:members'
   },
   {
+    key: '/usage',
+    label: '用量看板',
+    icon: React.createElement(DashboardOutlined),
+    permission: 'menu:usage'
+  },
+  {
     key: '/llm',
     label: 'LLM 配置',
     icon: React.createElement(ApiOutlined),
