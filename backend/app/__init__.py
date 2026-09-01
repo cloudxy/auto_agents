@@ -202,6 +202,9 @@ def create_app():
     # 请求 ID 中间件（链路追踪）
     from backend.app.middleware import RequestIDMiddleware
     app.add_middleware(RequestIDMiddleware)
+    # S1-3：租户上下文中间件（JWT 身份 → tenant_scope/platform_scope，行级隔离据此生效）
+    from backend.app.middleware.tenant_context import TenantContextMiddleware
+    app.add_middleware(TenantContextMiddleware)
 
     # 注册统一异常处理器
     from platform_core.exceptions import register_exception_handlers

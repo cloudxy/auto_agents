@@ -10,3 +10,4 @@ __all__ = [
     "RequestIDMiddleware",
     "ProcessTimeMiddleware",
 ]
+from backend.app.middleware.tenant_context import TenantContextMiddleware  # noqa: E402,F401
