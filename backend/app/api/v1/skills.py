@@ -116,6 +116,34 @@ async def sync_adapters(
     return ok(data=result)
 
 
+@router.post("/similar-suggest")
+async def similar_suggest(
+    user: CurrentUser = Depends(require_admin),
+    service: SkillService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """AI 辅助同类候选（建议区，不动 similar_to；确认走 similar-confirm）"""
+    result = await service.similar_suggest()
+    await session.commit()
+    await record_audit(session, user, "skill.similar.suggest", "skills")
+    return ok(data=result)
+
+
+@router.put("/similar-confirm")
+async def similar_confirm(
+    body: dict,
+    user: CurrentUser = Depends(require_admin),
+    service: SkillService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """人工确认等价簇 → 互写 similar_to"""
+    groups = [g for g in (body.get("groups") or []) if isinstance(g, list) and len(g) >= 2]
+    result = await service.similar_confirm(groups)
+    await session.commit()
+    await record_audit(session, user, "skill.similar.confirm", "skills", detail={"groups": len(groups)})
+    return ok(data=result)
+
+
 @router.get("/candidates")
 async def list_skill_candidates(
     page: int = Query(1, ge=1),
