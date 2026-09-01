@@ -19,6 +19,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/spiders/nodes': '节点监控',
   '/ai': 'AI 采集',
   '/skills': '技能中心',
+  '/members': '成员管理',
   '/llm': 'LLM 配置',
   '/newapi': '中转站管控',
   '/logs': '日志中心',

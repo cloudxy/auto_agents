@@ -94,16 +94,16 @@ export const correctSkillMeta = (name: string, payload: CorrectionPayload): Prom
   written_back: boolean
   tier: string | null
 }> =>
-  api.put(`/skills/${encodeURIComponent(name)}/meta`, payload).then((r) => unwrap(r.data))
+  api.put(`/skills/${encodeURIComponent(name)}/meta`, payload).then((r) => unwrap(r))
 
 export const listManifests = (): Promise<Record<string, string[]>> =>
   api.get('/skills/manifests').then((r) => unwrap<Record<string, string[]>>(r.data))
 
 export const updateManifest = (tool: string, names: string[]): Promise<{ tool: string; names: string[] }> =>
-  api.put('/skills/manifests', { tool, names }).then((r) => unwrap(r.data))
+  api.put('/skills/manifests', { tool, names }).then((r) => unwrap(r))
 
 export const syncAdapters = (): Promise<{ ok: boolean; returncode: number; output: string }> =>
-  api.post('/skills/sync-adapters').then((r) => unwrap(r.data))
+  api.post('/skills/sync-adapters').then((r) => unwrap(r))
 
 export interface SkillCandidate {
   id: number
@@ -120,7 +120,7 @@ export const listSkillCandidates = (): Promise<{ total: number; items: SkillCand
   api.get('/skills/candidates').then((r) => unwrap<{ total: number; items: SkillCandidate[] }>(r.data))
 
 export const approveSkillCandidate = (resultId: number): Promise<{ name?: string; imported: boolean }> =>
-  api.post(`/skills/candidates/${resultId}/approve`).then((r) => unwrap(r.data))
+  api.post(`/skills/candidates/${resultId}/approve`).then((r) => unwrap(r))
 
 export const rejectSkillCandidate = (resultId: number): Promise<{ review: string; blacklisted?: string | null }> =>
-  api.post(`/skills/candidates/${resultId}/reject`).then((r) => unwrap(r.data))
+  api.post(`/skills/candidates/${resultId}/reject`).then((r) => unwrap(r))
