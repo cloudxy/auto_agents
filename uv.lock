@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 
 [manifest]
@@ -112,8 +112,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "auto-agents-backend", virtual = "backend" },
-    { name = "auto-agents-spider", virtual = "scrapy" },
+    { name = "auto-agents-backend", editable = "backend" },
+    { name = "auto-agents-spider", editable = "scrapy" },
 ]
 
 [package.metadata.requires-dev]
@@ -128,7 +128,7 @@ dev = [
 [[package]]
 name = "auto-agents-backend"
 version = "0.1.0"
-source = { virtual = "backend" }
+source = { editable = "backend" }
 dependencies = [
     { name = "aiomysql" },
     { name = "aiosmtplib" },
@@ -205,7 +205,7 @@ dev = [
 [[package]]
 name = "auto-agents-spider"
 version = "0.1.0"
-source = { virtual = "scrapy" }
+source = { editable = "scrapy" }
 dependencies = [
     { name = "drissionpage" },
     { name = "dynaconf" },
