@@ -35,7 +35,7 @@ report() {
     fi
 }
 
-echo "架构合规检查（12 条红线 + 3 条边界）"
+echo "架构合规检查（13 条红线 + 3 条边界）"
 echo "======================================"
 
 # --- 配置即代码 ---
@@ -124,6 +124,19 @@ R12_OUTPUT="$(grep -rnE "${GREP_EXCLUDES[@]}" '(from backend\.services\.spider_s
     | grep -vE '^backend/(tasks/consumer\.py|app/external_api/v1/(public|webhooks)\.py|app/api/v1/admin\.py|services/(schedule_service\.py|ai_planner/__init__\.py)):' || true)"
 report "R12" "spider_service 门面白名单外 import（应直接依赖子 Service）" "$R12_OUTPUT"
 
+# --- 租户过滤收口（SaaS S1）---
+# R13: 业务查询必须经租户过滤收口（grep 补充手段；before_flush/do_orm_execute 主防线
+# 见 platform_core/tenant_context.py）。机械约束两条：
+# 1) platform_core/tenant_context.py 的事件安装调用（install_tenant_isolation）不得被移除——
+#    backend/app/__init__.py 必须出现 platform_core 导入链（隔离随包导入自动安装）；
+# 2) TenantMixin 模型的裸 Core 查询必须出现在 allowlist 声明的收口文件内
+#    （tenant_context.py 自身 + 迁移），新增裸语句需在此登记并说明。
+R13_OUTPUT=""
+if ! grep -q "from platform_core import tenant_context\|import platform_core.tenant_context\|from platform_core import.*tenant_context" backend/app/__init__.py platform_core/__init__.py 2>/dev/null; then
+    R13_OUTPUT="platform_core/__init__.py 缺 tenant_context 安装导入（隔离钩子可能未安装）"
+fi
+report "R13" "租户过滤收口（隔离安装点缺失/裸语句未登记）" "$R13_OUTPUT"
+
 # --- 核心代码边界（模块依赖方向） ---
 echo ""
 echo "--- 核心代码边界 ---"
@@ -143,7 +156,7 @@ report "B3" "config → 业务模块反向依赖" \
 # --- 汇总 ---
 echo ""
 if [ "$VIOLATIONS" -eq 0 ]; then
-    echo "✓ 架构合规检查通过（12 红线 + 3 边界，全部通过）"
+    echo "✓ 架构合规检查通过（13 红线 + 3 边界，全部通过）"
     exit 0
 else
     echo "共 $VIOLATIONS 处违规，请按 /check-arch Step 3 路由修复"
