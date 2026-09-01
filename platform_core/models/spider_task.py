@@ -2,8 +2,9 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, Enum
 from sqlalchemy.sql import func
 from .base import Base
+from .mixins import TenantMixin
 
-class SpiderTask(Base):
+class SpiderTask(TenantMixin, Base):
     __tablename__ = "spider_tasks"
 
     id = Column(Integer, primary_key=True, index=True)

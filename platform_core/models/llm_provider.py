@@ -10,19 +10,23 @@ ai_planner._llm_chat 经 LlmProviderService.resolve_runtime_config 消费：
   不降级明文入库
 - api_key 明文永不出服务层，API 响应一律输出掩码（见 schemas/llm_provider.py）
 """
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
+from platform_core.models.mixins import TenantMixin
 
 
-class LlmProvider(Base):
+class LlmProvider(TenantMixin, Base):
     """LLM 供应商表（OpenAI 兼容协议为主，provider_type 预留扩展）"""
 
     __tablename__ = "llm_providers"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="主键")
-    name = Column(String(100), nullable=False, unique=True, index=True, comment="供应商名称（唯一）")
+    name = Column(String(100), nullable=False, index=True, comment="供应商名称（租户内唯一）")
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_llm_providers_tenant_name"),
+    )
     provider_type = Column(String(50), nullable=False, default="openai_compatible",
                            server_default="openai_compatible",
                            comment="协议类型：openai_compatible（chat/completions）")

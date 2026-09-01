@@ -3,20 +3,24 @@
 DB 承接 config/default/spiders.yml 的 SPIDERS 元数据（yml 保留为种子）；
 代码级爬虫文件仍在 scrapy/spiders/，DB 只管元数据，不破坏 B2 边界。
 """
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
+from platform_core.models.mixins import TenantMixin
 
 
-class SpiderDefinition(Base):
+class SpiderDefinition(TenantMixin, Base):
     """爬虫定义表（注册表元数据，可调度爬虫清单的 DB 数据源）"""
 
     __tablename__ = "spider_definitions"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="主键")
-    name = Column(String(50), unique=True, nullable=False, index=True,
-                  comment="爬虫名（与 scrapy spider name 一致）")
+    name = Column(String(50), nullable=False, index=True,
+                  comment="爬虫名（租户内唯一）")
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_spider_definitions_tenant_name"),
+    )
     title = Column(String(100), nullable=False, comment="展示标题")
     type = Column(String(20), nullable=False, default="web",
                   comment="类型：api/web/custom/flow（驱动前端参数表单）")

@@ -34,6 +34,7 @@ ALL_ORM_TABLES = {
     "skill_reviews",
     "skill_jobs",
     "llm_provider_models",
+    "tenants",
 }
 
 
