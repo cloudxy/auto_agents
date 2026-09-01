@@ -116,6 +116,45 @@ async def sync_adapters(
     return ok(data=result)
 
 
+@router.get("/candidates")
+async def list_skill_candidates(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    user: CurrentUser = Depends(require_login),
+    service: SkillService = Depends(_service),
+):
+    """市场采集候选（待人工审核转正）"""
+    return ok(data=await service.list_candidates(page, page_size))
+
+
+@router.post("/candidates/{result_id}/approve")
+async def approve_skill_candidate(
+    result_id: int,
+    user: CurrentUser = Depends(require_admin),
+    service: SkillService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """候选转正：走 import-url 正式管线（人工闸门）"""
+    result = await service.approve_candidate(result_id)
+    await session.commit()
+    await record_audit(session, user, "skill.candidate.approve", f"candidate#{result_id}")
+    return ok(data=result)
+
+
+@router.post("/candidates/{result_id}/reject")
+async def reject_skill_candidate(
+    result_id: int,
+    user: CurrentUser = Depends(require_admin),
+    service: SkillService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """候选拒绝：标记已审；同名已入库技能置 blacklist"""
+    result = await service.reject_candidate(result_id)
+    await session.commit()
+    await record_audit(session, user, "skill.candidate.reject", f"candidate#{result_id}")
+    return ok(data=result)
+
+
 @router.get("/jobs")
 async def list_skill_jobs(
     page: int = Query(1, ge=1),
