@@ -724,22 +724,20 @@ class TestApiEndpoints:
         assert body["data"]["name"] == "p"
 
     def test_create_endpoint_rejects_operator(self, llm_client, app):
-        """写操作仅 admin：operator 403"""
+        """写操作仅 admin：operator 403（恢复必须还原 conftest 原 override——本地重造旧签名
+        会丢失 Bearer 直通链路，污染后续 SaaS 用例的租户身份解析）"""
         from backend.app.api.deps import CurrentUser as _CU, get_current_user
 
         async def _operator_user():
             return _CU(id=2, username="op", role="operator")
 
-        async def _admin_user():
-            return _CU(id=1, username="test-admin", role="admin")
-
+        original = app.dependency_overrides[get_current_user]
         app.dependency_overrides[get_current_user] = _operator_user
         try:
             resp = llm_client.post("/api/v1/llm/providers",
                                    json={"name": "p", "base_url": "https://x/v1", "model": "m"})
         finally:
-            # 恢复 admin override（app 是 session 级 fixture，不能 pop 掉影响后续用例）
-            app.dependency_overrides[get_current_user] = _admin_user
+            app.dependency_overrides[get_current_user] = original
         assert resp.status_code == 403
 
     def test_test_endpoint_shape(self, llm_client, monkeypatch):

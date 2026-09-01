@@ -863,11 +863,12 @@ class TestApiEndpoints:
         async def _admin_user():
             return CurrentUser(id=1, username="test-admin", role="admin")
 
+        original = app.dependency_overrides[get_current_user]
         app.dependency_overrides[get_current_user] = _operator_user
         try:
             resp = ai_client.post("/api/v1/ai/plans/1/register")
         finally:
-            app.dependency_overrides[get_current_user] = _admin_user
+            app.dependency_overrides[get_current_user] = original
         assert resp.status_code == 403
 
     def test_register_endpoint_allows_admin(self, ai_client, app, monkeypatch):

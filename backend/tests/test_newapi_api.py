@@ -368,12 +368,12 @@ class TestPermissions:
         async def _admin_user():
             return _CU(id=1, username="test-admin", role="admin")
 
+        original = app.dependency_overrides[get_current_user]
         app.dependency_overrides[get_current_user] = _operator_user
         try:
             resp = api_client.get(OVERVIEW_URL)
         finally:
-            # app 是 session 级 fixture，恢复 admin override 不影响后续用例
-            app.dependency_overrides[get_current_user] = _admin_user
+            app.dependency_overrides[get_current_user] = original
         assert resp.status_code == 403
 
     def test_events_and_probe_results_require_admin(self, api_client, app):
@@ -386,12 +386,13 @@ class TestPermissions:
         async def _admin_user():
             return _CU(id=1, username="test-admin", role="admin")
 
+        original = app.dependency_overrides[get_current_user]
         app.dependency_overrides[get_current_user] = _operator_user
         try:
             assert api_client.get(EVENTS_URL).status_code == 403
             assert api_client.get(PROBE_RESULTS_URL).status_code == 403
         finally:
-            app.dependency_overrides[get_current_user] = _admin_user
+            app.dependency_overrides[get_current_user] = original
 
 
 class TestWithPatch:
