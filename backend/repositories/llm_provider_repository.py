@@ -31,16 +31,24 @@ class LlmProviderRepository(BaseRepository[LlmProvider]):
         result = await self.session.execute(select(LlmProvider).where(LlmProvider.is_active == true()))
         return result.scalar_one_or_none()
 
-    async def activate_exclusive(self, provider_id: int) -> None:
-        """单激活互斥热切换（单语句）：目标行置 1、其余全部置 0
+    async def activate_exclusive(self, provider_id: int, tenant_id: int | None = None) -> None:
+        """单激活互斥热切换（单语句，S1-4 租户内收窄）：目标行置 1、其余置 0
 
-        UPDATE llm_providers SET is_active = CASE WHEN id = :id THEN 1 ELSE 0 END
-        无 WHERE 全表扫描置位，数据库行级原子性保证并发激活下也至多一行 active；
-        MySQL 默认 rowcount 语义为「变更行数」（值未变的行不计），故此处不依赖
-        rowcount 判定成败，存在性校验由调用方完成。
+        互斥范围 = 目标行的租户域：
+        - tenant_id 非空（租户行）→ 仅该租户内互斥（其余租户激活位不受扰，10.2-B）；
+        - tenant_id 为空（平台公共行）→ 仅平台公共域（tenant_id IS NULL）互斥。
+        无租户上下文时按目标行自身 tenant_id 分域（读行成本可接受，换取语义确定）。
         """
+        if tenant_id is None:
+            row = await self.get_by_id(provider_id)
+            tenant_id = getattr(row, "tenant_id", None) if row is not None else None
+        scope = (
+            LlmProvider.tenant_id == tenant_id if tenant_id is not None
+            else LlmProvider.tenant_id.is_(None)
+        )
         stmt = (
             update(LlmProvider)
+            .where(scope)
             .values(is_active=case((LlmProvider.id == provider_id, true()), else_=false()))
             .execution_options(synchronize_session=False)
         )
