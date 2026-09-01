@@ -312,6 +312,87 @@ class SkillService:
             await self.session.flush()
         return ok
 
+    # ---------- 市场候选审核（A-P5-2） ----------
+
+    async def list_candidates(self, page: int = 1, page_size: int = 20) -> dict:
+        """待审候选：spider_results(source=marketplace) 且未处理（extra.review 缺省 pending）"""
+        from platform_core.models.spider_result import SpiderResult
+
+        stmt = select(SpiderResult).where(SpiderResult.source == "marketplace")
+        rows = (await self.session.execute(stmt.order_by(SpiderResult.id.desc()))).scalars().all()
+        pending = [r for r in rows if self._review_of(r) in ("pending", None)]
+        items = [
+            {
+                "id": r.id, "title": r.title or "", "url": r.url or "",
+                "description": r.content or "", "kind": (self._extra_of(r) or {}).get("kind", ""),
+                "repo": (self._extra_of(r) or {}).get("repo", ""),
+                "review_status": self._review_of(r) or "pending",
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in pending
+        ]
+        start = (page - 1) * page_size
+        return {"total": len(items), "items": items[start:start + page_size]}
+
+    async def approve_candidate(self, result_id: int) -> dict:
+        """转正：走 import_url 正式管线（人工闸门），成功后标记候选已审"""
+        from backend.services.skill_import_service import SkillImportService
+        from platform_core.exceptions import NotFoundException
+        from platform_core.models.spider_result import SpiderResult
+
+        row = (await self.session.execute(
+            select(SpiderResult).where(SpiderResult.id == result_id)
+        )).scalar_one_or_none()
+        if row is None:
+            raise NotFoundException(resource=f"候选 {result_id}")
+        result = await SkillImportService(self.session).import_url(row.url or "")
+        self._mark_review(row, "approved", name=result.get("name"))
+        await self.session.flush()
+        return result
+
+    async def reject_candidate(self, result_id: int) -> dict:
+        """拒绝：标记已审；若同名/同源技能已入库则置 blacklist 防重复采集提示"""
+        from platform_core.exceptions import NotFoundException
+        from platform_core.models.spider_result import SpiderResult
+
+        row = (await self.session.execute(
+            select(SpiderResult).where(SpiderResult.id == result_id)
+        )).scalar_one_or_none()
+        if row is None:
+            raise NotFoundException(resource=f"候选 {result_id}")
+        self._mark_review(row, "rejected")
+        existing = (await self.session.execute(
+            select(Skill).where(Skill.source_url == (row.url or ""))
+        )).scalar_one_or_none()
+        blacklisted = None
+        if existing is not None:
+            existing.status = "blacklist"
+            blacklisted = existing.name
+        await self.session.flush()
+        return {"id": result_id, "review": "rejected", "blacklisted": blacklisted}
+
+    @staticmethod
+    def _extra_of(row) -> dict:
+        import json as _json
+
+        try:
+            data = _json.loads(row.extra or "{}")
+            return data if isinstance(data, dict) else {}
+        except ValueError:
+            return {}
+
+    def _review_of(self, row) -> str | None:
+        return (self._extra_of(row) or {}).get("review")
+
+    def _mark_review(self, row, review: str, name: str | None = None) -> None:
+        import json as _json
+
+        extra = self._extra_of(row)
+        extra["review"] = review
+        if name:
+            extra["approved_name"] = name
+        row.extra = _json.dumps(extra, ensure_ascii=False)
+
     # ---------- 适配器矩阵（A-P3-2） ----------
 
     async def list_manifests(self) -> dict[str, list[str]]:

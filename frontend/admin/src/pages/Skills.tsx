@@ -17,6 +17,7 @@ import {
   correctSkillMeta, getSkillDetail, listSkills, scanSkills,
   type CorrectionPayload, type ScanSummary, type SkillDetail, type SkillItem,
 } from '../services/skills'
+import SkillsCandidates from './SkillsCandidates'
 import SkillsMatrix from './SkillsMatrix'
 
 const { Text, Paragraph } = Typography
@@ -229,6 +230,11 @@ const Skills: React.FC<{ canEdit?: boolean; canAdmin?: boolean }> = ({ canEdit =
             key: 'matrix',
             label: '适配器矩阵',
             children: <SkillsMatrix skillNames={items.map((i) => i.name)} canAdmin={canAdmin} />,
+          },
+          {
+            key: 'candidates',
+            label: '候选审核',
+            children: <SkillsCandidates canAdmin={canAdmin} />,
           },
         ]}
       />

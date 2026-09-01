@@ -104,3 +104,23 @@ export const updateManifest = (tool: string, names: string[]): Promise<{ tool: s
 
 export const syncAdapters = (): Promise<{ ok: boolean; returncode: number; output: string }> =>
   api.post('/skills/sync-adapters').then((r) => unwrap(r.data))
+
+export interface SkillCandidate {
+  id: number
+  title: string
+  url: string
+  description: string
+  kind: string
+  repo: string
+  review_status: string
+  created_at?: string | null
+}
+
+export const listSkillCandidates = (): Promise<{ total: number; items: SkillCandidate[] }> =>
+  api.get('/skills/candidates').then((r) => unwrap<{ total: number; items: SkillCandidate[] }>(r.data))
+
+export const approveSkillCandidate = (resultId: number): Promise<{ name?: string; imported: boolean }> =>
+  api.post(`/skills/candidates/${resultId}/approve`).then((r) => unwrap(r.data))
+
+export const rejectSkillCandidate = (resultId: number): Promise<{ review: string; blacklisted?: string | null }> =>
+  api.post(`/skills/candidates/${resultId}/reject`).then((r) => unwrap(r.data))

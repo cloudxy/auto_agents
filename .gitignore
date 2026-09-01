@@ -72,7 +72,7 @@ htmlcov/
 .lingma/*
 .gemini/*
 ai_tool/*
-.qoder/
+.qoder/*
 .idea/*
 
 # 运行期导出数据（storage/exports 等由 STORAGE 配置指向）
