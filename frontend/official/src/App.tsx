@@ -4,6 +4,8 @@ import { ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import Home from './pages/Home'
 import SkillsSquare from './pages/SkillsSquare'
+import Register from './pages/Register'
+import Pricing from './pages/Pricing'
 import './App.css'
 
 function App() {
@@ -13,6 +15,8 @@ function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/skills" element={<SkillsSquare />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/pricing" element={<Pricing />} />
         </Routes>
       </BrowserRouter>
     </ConfigProvider>

@@ -33,6 +33,8 @@ const NAV_LINKS = [
   { label: 'AI 采集流程', href: '#ai-flow' },
   { label: '系统架构', href: '#architecture' },
   { label: '技能广场', href: '/skills' },
+  { label: '定价', href: '/pricing' },
+  { label: '注册', href: '/register' },
 ]
 
 /** Hero 平台能力概览（静态示意数据） */

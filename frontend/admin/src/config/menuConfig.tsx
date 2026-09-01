@@ -68,6 +68,12 @@ export const menuConfig: MenuItem[] = [
     permission: 'menu:usage'
   },
   {
+    key: '/platform-ops',
+    label: '平台运营台',
+    icon: React.createElement(CloudServerOutlined),
+    permission: 'menu:platform-ops'
+  },
+  {
     key: '/llm',
     label: 'LLM 配置',
     icon: React.createElement(ApiOutlined),
