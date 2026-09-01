@@ -143,8 +143,12 @@ async def test_flush_once_persists_rows_and_deletes_claimed_keys():
 
     upsert = AsyncMock(return_value=1)
     repo_cls = MagicMock(return_value=MagicMock(upsert_daily=upsert))
+    # 自洽修复：该测试曾顺序耦合于其它测试初始化 DBManager（单跑必 KeyError DEFAULT）；
+    # 显式 patch _engine 注入假引擎键，消除顺序依赖
     with patch.object(usage_mod, "LlmTokenUsageRepository", repo_cls), \
-         patch.object(usage_mod, "AsyncSession", _FakeSessionCtx):
+         patch.object(usage_mod, "AsyncSession", _FakeSessionCtx), \
+         patch.object(usage_mod.LlmUsageFlushService, "_engine",
+                      staticmethod(lambda: object())):
         rows = await svc.flush_once()
 
     assert rows == 1

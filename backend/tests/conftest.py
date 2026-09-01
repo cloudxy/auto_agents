@@ -42,12 +42,34 @@ def app():
     测试环境全局 override 鉴权依赖：端点测试默认以 admin 身份通过，
     RBAC 守卫自身的 401/403 分支由 test_rbac_audit.py 直接单测。
     """
+    from fastapi import Depends
+
     from backend.app import create_app
-    from backend.app.api.deps import CurrentUser, get_current_user
+    from backend.app.api.deps import CurrentUser, _bearer, get_current_user
+    from backend.utils.auth import decode_access_token as _decode
+    from platform_core.db import get_async_db as _get_async_db
+    from platform_core.models.user import User as _User
 
     application = create_app()
 
-    async def _override_current_user():
+    async def _override_current_user(
+        credentials=Depends(_bearer),
+        session=Depends(_get_async_db),
+    ):
+        # 带真实 Bearer 时走真链路（S1/S2 越权与成员用例依赖 JWT→中间件→快照全链）；
+        # 无凭据时保持既有契约：固定 admin 快照（存量 600+ 测试零改动）
+        from backend.app.api.deps import effective_role
+
+        if credentials is not None and getattr(credentials, "credentials", ""):
+            payload = _decode(credentials.credentials)
+            if payload and payload.get("user_id"):
+                user = await session.get(_User, payload["user_id"])
+                if user and user.is_active:
+                    return CurrentUser(
+                        id=user.id, username=user.username, role=effective_role(user),
+                        tenant_id=user.tenant_id, tenant_role=user.tenant_role,
+                        is_platform_admin=bool(user.is_platform_admin),
+                    )
         return CurrentUser(id=1, username="test-admin", role="admin")
 
     application.dependency_overrides[get_current_user] = _override_current_user
