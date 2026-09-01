@@ -20,6 +20,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/ai': 'AI 采集',
   '/skills': '技能中心',
   '/members': '成员管理',
+  '/usage': '用量看板',
   '/llm': 'LLM 配置',
   '/newapi': '中转站管控',
   '/logs': '日志中心',
