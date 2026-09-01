@@ -27,6 +27,7 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.repositories.llm_provider_repository import LlmProviderRepository
+from platform_core.models.llm_provider import LlmProvider
 from config import settings
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.exceptions import NotFoundException, ValidationException
@@ -537,8 +538,31 @@ class LlmProviderService:
     # 运行时配置解析（激活供应商优先，兜底 yml/env；_llm_chat 消费）
     # ------------------------------------------------------------------
     async def resolve_runtime_config(self) -> LlmRuntimeConfig:
-        """激活且 enabled 的供应商优先；密钥缺失/解密失败/行禁用/无激活行 → yml/env 兜底"""
-        active = await self.repo.get_active()
+        """三段解析（S1-4）：当前租户激活行 → 平台公共行（tenant_id NULL，兜底）→ yml/env
+
+        无租户上下文（legacy/后台）保持原语义：任一激活行优先。
+        """
+        from platform_core.tenant_context import current_tenant_id
+
+        tenant_id = current_tenant_id()
+        if tenant_id is not None:
+            active = (await self.session.execute(
+                select(LlmProvider).where(
+                    LlmProvider.is_active == True,  # noqa: E712
+                    LlmProvider.enabled == True,  # noqa: E712
+                    LlmProvider.tenant_id == tenant_id,
+                )
+            )).scalar_one_or_none()
+            if active is None:
+                # 平台公共供应商兜底（免费档语义：配额约束在 S3 检查点执行）
+                active = (await self.session.execute(
+                    select(LlmProvider).where(
+                        LlmProvider.enabled == True,  # noqa: E712
+                        LlmProvider.tenant_id.is_(None),
+                    ).order_by(LlmProvider.id.asc())
+                )).scalars().first()
+        else:
+            active = await self.repo.get_active()
         if active is not None and bool(active.enabled):
             api_key = self.decrypt_api_key(getattr(active, "api_key_encrypted", None))
             base_url = str(active.base_url or "").rstrip("/")
