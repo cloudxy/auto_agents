@@ -8,8 +8,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.deps import CurrentUser, require_admin, require_login
+from backend.app.api.deps import CurrentUser, require_admin, require_login, require_platform_admin
 from backend.app.responses import ok
+from backend.app.api._helpers import record_audit
 from backend.services.audit_service import AuditService
 from backend.services.spider_service import SpiderService
 from backend.services.user_service import UserService
@@ -73,3 +74,62 @@ async def list_audit_logs(
         end_time=end_time,
     )
     return ok(data=data.model_dump())
+
+
+# ---------- SaaS S5-2 平台运营台（平台超管专属） ----------
+
+
+@router.get("/tenants")
+async def list_tenants(
+    _user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """租户列表（平台超管）"""
+    from sqlalchemy import select
+
+    from platform_core.models.tenant import Tenant
+
+    rows = (await session.execute(select(Tenant).order_by(Tenant.id.asc()))).scalars().all()
+    return ok(data=[
+        {
+            "id": r.id, "slug": r.slug, "name": r.name, "status": r.status,
+            "quota": r.quota,
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ])
+
+
+@router.patch("/tenants/{tenant_id}")
+async def patch_tenant(
+    tenant_id: int,
+    body: dict,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """套餐/配额/到期编辑（平台超管）"""
+    from sqlalchemy import select
+
+    from platform_core.exceptions import NotFoundException
+    from platform_core.models.tenant import Tenant
+
+    row = (await session.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
+    if row is None:
+        raise NotFoundException(resource=f"租户 {tenant_id}")
+    if "quota" in body and isinstance(body["quota"], dict):
+        merged = dict(row.quota or {})
+        merged.update({k: v for k, v in body["quota"].items() if v is not None})
+        row.quota = merged
+    if "expires_at" in body:
+        from datetime import datetime
+
+        raw = body.get("expires_at")
+        if raw:
+            row.expires_at = datetime.fromisoformat(str(raw).replace("Z", ""))
+        else:
+            row.expires_at = None
+        row.status = "active"  # 续期即恢复
+    await session.commit()
+    await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
+    return ok(data={"id": tenant_id, "updated": True})

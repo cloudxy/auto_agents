@@ -17,6 +17,7 @@ import LogCenter from './pages/LogCenter'
 import Skills from './pages/Skills'
 import Members from './pages/Members'
 import Usage from './pages/Usage'
+import PlatformOps from './pages/PlatformOps'
 import Unauthorized from './pages/Unauthorized'
 import './App.css'
 
@@ -48,6 +49,7 @@ function App() {
           {/* 成员管理（SaaS S2）：租户内部事务，owner/admin 语义在页内守卫 */}
           <Route path="members" element={<Members />} />
           <Route path="usage" element={<Usage />} />
+          <Route path="platform-ops" element={<PlatformOps />} />
           {/* UX-B4：路由级权限守卫——admin 专属页面（LLM 配置/中转站/用户/设置）
               菜单隐藏只是视觉隐藏，直达 URL 必须被拦截到 /unauthorized */}
           <Route

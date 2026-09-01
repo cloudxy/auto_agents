@@ -6,7 +6,7 @@ API V1 版本路由聚合器
 - 定义 V1 版本的路由前缀和标签
 """
 from fastapi import APIRouter
-from . import root, health, spiders, admin, auth, configs, ai, llm_providers, newapi, skills, public_skills, members, tenant_usage
+from . import root, health, spiders, admin, auth, configs, ai, llm_providers, newapi, skills, public_skills, members, tenant_usage, tenant_signup
 
 router = APIRouter()
 
@@ -23,5 +23,6 @@ router.include_router(skills.router, prefix="/skills", tags=["skills"])
 router.include_router(public_skills.router, prefix="/public", tags=["public"])
 router.include_router(members.router, prefix="/members", tags=["members"])
 router.include_router(tenant_usage.router, prefix="/tenants/me", tags=["tenants"])
+router.include_router(tenant_signup.router, prefix="/public", tags=["public"])
 
 __all__ = ["router"]
