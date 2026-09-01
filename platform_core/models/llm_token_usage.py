@@ -3,9 +3,10 @@ from sqlalchemy import BigInteger, Column, Date, DateTime, Integer, String, Uniq
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
+from platform_core.models.mixins import TenantMixin
 
 
-class LlmTokenUsage(Base):
+class LlmTokenUsage(TenantMixin, Base):
     """LLM token 用量日聚合表
 
     写入路径：llm_client 每次调用成功 → Redis 日/月计数（llm_usage_service）
@@ -18,7 +19,7 @@ class LlmTokenUsage(Base):
     """
     __tablename__ = "llm_token_usage"
     __table_args__ = (
-        UniqueConstraint("provider_name", "model", "stat_date", name="uq_llm_usage_dim"),
+        UniqueConstraint("tenant_id", "provider_name", "model", "stat_date", name="uq_llm_usage_dim"),
     )
 
     id = Column(Integer, primary_key=True, comment="ID")

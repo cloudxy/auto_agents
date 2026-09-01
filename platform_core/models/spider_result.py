@@ -6,9 +6,10 @@
 from sqlalchemy import Column, Float, Integer, String, Text, DateTime
 from sqlalchemy.sql import func
 from .base import Base
+from .mixins import TenantMixin
 
 
-class SpiderResult(Base):
+class SpiderResult(TenantMixin, Base):
     __tablename__ = "spider_results"
 
     id = Column(Integer, primary_key=True, index=True)

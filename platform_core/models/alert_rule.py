@@ -2,9 +2,10 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text
 from sqlalchemy.sql import func
 from .base import Base
+from .mixins import TenantMixin
 
 
-class AlertRule(Base):
+class AlertRule(TenantMixin, Base):
     __tablename__ = "alert_rules"
 
     id = Column(Integer, primary_key=True, index=True)

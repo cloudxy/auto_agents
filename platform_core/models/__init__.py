@@ -6,6 +6,8 @@
 - 所有业务模型继承 platform_core.models.base.Base
 """
 from platform_core.models.base import Base
+from platform_core.models.mixins import TenantMixin
+from platform_core.models.tenant import Tenant
 from platform_core.models.spider_task import SpiderTask
 from platform_core.models.spider_result import SpiderResult
 from platform_core.models.spider_schedule import SpiderSchedule
@@ -27,5 +29,5 @@ __all__ = [
     "Base", "SpiderTask", "SpiderResult", "SpiderSchedule", "SpiderDefinition",
     "User", "OperationLog", "SystemConfig", "AlertRule", "TaskTemplate", "AiPlan",
     "LlmProvider", "ChannelEvent", "ChannelProbeResult", "LlmTokenUsage",
-    "Skill", "SkillReview", "SkillJob", "LlmProviderModel",
+    "Skill", "SkillReview", "SkillJob", "LlmProviderModel", "Tenant", "TenantMixin",
 ]

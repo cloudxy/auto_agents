@@ -14,9 +14,10 @@ from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
+from platform_core.models.mixins import TenantMixin
 
 
-class AiPlan(Base):
+class AiPlan(TenantMixin, Base):
     """AI 采集计划表（LLM 规划状态机，可查询进度）"""
 
     __tablename__ = "ai_plans"
