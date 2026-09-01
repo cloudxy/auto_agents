@@ -79,11 +79,16 @@ class AuthService:
 
     async def create_token(self, user_data: dict) -> TokenResponse:
         """创建访问令牌"""
+        # S1-3：claims 只承身份——tenant_id/tenant_role/is_platform_admin 随行携带；
+        # role 仅为兼容存量消费方保留，权限判定一律 DB 快照重算
         access_token = create_access_token(
             data={
                 "sub": user_data["username"],
                 "user_id": user_data["id"],
                 "role": user_data.get("role", "operator"),
+                "tenant_id": user_data.get("tenant_id"),
+                "tenant_role": user_data.get("tenant_role"),
+                "is_platform_admin": bool(user_data.get("is_platform_admin", False)),
             }
         )
         

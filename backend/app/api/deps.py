@@ -33,11 +33,18 @@ class CurrentUser:
 
     后续路由若发生 session.commit()，ORM 对象属性会全部过期；
     届时再读 user.id/username 会触发同步惰性加载，异步上下文抛 MissingGreenlet。
+
+    S1-3 租户身份（claims 只承身份，权限一律 DB 快照重算）：
+    tenant_id=None 且 is_platform_admin=True → 平台超管（platform_scope）；
+    否则租户用户（tenant_scope，tenant_role: owner/admin/operator/viewer）。
     """
 
     id: int
     username: str
     role: str
+    tenant_id: int | None = None
+    tenant_role: str | None = None
+    is_platform_admin: bool = False
 
 
 def effective_role(user: User) -> str:
@@ -61,10 +68,20 @@ async def get_current_user(
     user_id = payload.get("user_id")
     if not user_id:
         raise AuthenticationException(message="Token 缺少用户信息")
+    tenant_id = payload.get("tenant_id")  # 身份字段（非权限）
     user = await session.get(User, user_id)
     if not user or not user.is_active:
         raise AuthenticationException(message="用户不存在或已停用")
-    return CurrentUser(id=user.id, username=user.username, role=effective_role(user))
+    # claims 只承身份：tenant 字段取自 claims；权限字段一律从 DB 行快照重算
+    # （禁用/降级立即生效，防 token 生命周期内权限漂移——S2 短窗失效验收的前提）
+    return CurrentUser(
+        id=user.id,
+        username=user.username,
+        role=effective_role(user),
+        tenant_id=tenant_id if user.tenant_id == tenant_id else user.tenant_id,
+        tenant_role=user.tenant_role,
+        is_platform_admin=bool(user.is_platform_admin),
+    )
 
 
 def require_role(*roles: str) -> Callable:
@@ -83,3 +100,12 @@ def require_role(*roles: str) -> Callable:
 require_login = require_role(*ROLE_ALL)      # 任意已登录角色
 require_operator = require_role("admin", "operator")
 require_admin = require_role("admin")
+
+
+async def require_platform_admin(
+    user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """平台级守卫：仅 is_platform_admin（tenant_id 恒 NULL 的平台超管）"""
+    if not user.is_platform_admin:
+        raise AuthorizationException(message="需要平台管理员权限")
+    return user
