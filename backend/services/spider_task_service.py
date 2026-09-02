@@ -154,6 +154,7 @@ class SpiderTaskService:
         spider_name: str,
         params: Optional[str] = None,
         priority: str = "normal",
+        tenant_id: int | None = None,
     ) -> SpiderTaskResponse:
         """入队一个新任务：数据库登记 + 投递 Redis 优先级队列（数据闭环入口）"""
         logger.info(f"爬虫任务入队: spider={spider_name}, priority={priority}")
@@ -164,6 +165,12 @@ class SpiderTaskService:
 
         # 阶段 6：注册表校验（DB 优先，yml 兜底；停用/未登记拒绝）
         await self._ensure_spider_available(spider_name)
+
+        # 租户配额·任务并发（S1 接线；平台/无租户跳过）
+        if tenant_id is not None:
+            from backend.services.quota_service import QuotaService
+
+            await QuotaService(self.session).check_task_concurrency(tenant_id)
 
         # 并发槽位守卫
         active_key = ACTIVE_TASK_KEY.format(spider_name=spider_name)
@@ -186,13 +193,15 @@ class SpiderTaskService:
             status="pending",
             params=params,
             priority=priority,
+            tenant_id=tenant_id,
         )
         await self.session.commit()
         await self.session.refresh(task)
 
         # 投递任务消息到对应优先级队列
         message = json.dumps(
-            {"task_id": task.id, "spider_name": spider_name, "params": params},
+            {"task_id": task.id, "spider_name": spider_name, "params": params,
+             "tenant_id": tenant_id},
             ensure_ascii=False,
         )
         try:

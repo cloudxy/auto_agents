@@ -39,7 +39,7 @@ def _patch(monkeypatch, cfg, chain, http_behavior, notifications):
     async def _record(**kw):
         return None
 
-    async def _month(dim):
+    async def _month(dim, **kw):
         return 0
 
     monkeypatch.setattr(lc, "record_usage", _record)

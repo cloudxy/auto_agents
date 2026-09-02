@@ -425,7 +425,7 @@ class TestFlushBatchCountsRecompute:
         repo.get_by_id = AsyncMock(side_effect=lambda tid: {1: task1, 2: task2}[tid])
         repo.batch_increment_result_counts = AsyncMock()
         repo.find_by_content_hash = AsyncMock(
-            side_effect=lambda h: MagicMock() if h == dup_hash else None
+            side_effect=lambda h, **kw: MagicMock() if h == dup_hash else None
         )
 
         session = AsyncMock()
@@ -437,7 +437,9 @@ class TestFlushBatchCountsRecompute:
 
         with patch("backend.tasks.consumer.AsyncSession", return_value=ctx), \
              patch("backend.tasks.consumer.SpiderTaskRepository", return_value=repo), \
-             patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo):
+             patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo), \
+             patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
+                   staticmethod(lambda: object())):
             # 第一轮 flush：去重扣减后 commit 失败（批次原样重试场景）
             with pytest.raises(RuntimeError):
                 await consumer._flush_batch(items, counts)

@@ -324,7 +324,10 @@ async def llm_chat(
         #   计数（保可用，测试/CI 无 Redis 可跑）；
         # - fail-closed（LLM.BUDGET_FAIL_CLOSED=true，prod 建议）：读数不可用即拒绝调用
         #   （保成本——预算检查失去数据支撑时宁可拒绝不可放行）。
-        month_used = await get_month_used(usage_dim)
+        from platform_core.tenant_context import current_tenant_id as _cur_tid
+
+        _tid = _cur_tid()
+        month_used = await get_month_used(usage_dim, tenant_id=_tid)
         if month_used is None:
             if bool(_facade.settings.get("LLM.BUDGET_FAIL_CLOSED", False)):
                 raise BusinessException(
@@ -370,6 +373,7 @@ async def llm_chat(
                 await record_usage(
                     dim=usage_dim,
                     model=effective_model,
+                    tenant_id=_tid,
                     prompt_tokens=norm["prompt"],
                     completion_tokens=norm["completion"],
                     total_tokens=used,

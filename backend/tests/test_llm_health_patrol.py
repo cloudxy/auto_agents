@@ -118,7 +118,7 @@ async def test_budget_fail_closed_when_redis_unreachable(monkeypatch):
     async def _resolve():
         return cfg
 
-    async def _month_returning_none(dim):
+    async def _month_returning_none(dim, **kw):
         return None  # Redis 不可达时的现存语义
 
     monkeypatch.setattr("backend.services.ai_planner_service._resolve_llm_runtime_config", _resolve)
