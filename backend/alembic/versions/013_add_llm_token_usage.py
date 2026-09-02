@@ -11,6 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
+# SM-EXEMPT: 历史迁移（已部署），expand-contract 检查不追溯
+# expand-contract: grandfathered
 revision: str = '013'
 down_revision: Union[str, Sequence[str], None] = '012'
 branch_labels: Union[str, Sequence[str], None] = None
