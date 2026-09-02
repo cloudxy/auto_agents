@@ -34,3 +34,18 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      # D 线 D2：数据库设计流水线执法（*.dbml 或 alembic/versions 变更时触发）
+      - id: check-db-ir
+        name: DBML IR 静态 lint（ADR-0002）
+        entry: bash scripts/check-db-ir.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: check-db-migrations
+        name: 迁移破坏性变更检测（strong_migrations 语义）
+        entry: bash scripts/check-db-migrations.sh
+        language: system
+        pass_filenames: false
+        always_run: true

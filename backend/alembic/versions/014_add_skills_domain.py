@@ -14,6 +14,8 @@ from alembic import op
 from sqlalchemy.dialects import mysql
 
 # revision identifiers, used by Alembic.
+# SM-EXEMPT: 历史迁移（已部署），expand-contract 检查不追溯
+# expand-contract: grandfathered
 revision: str = "014"
 down_revision: Union[str, Sequence[str], None] = "013"
 branch_labels: Union[str, Sequence[str], None] = None

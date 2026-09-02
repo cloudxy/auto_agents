@@ -15,6 +15,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
+# SM-EXEMPT: 历史迁移（已部署），expand-contract 检查不追溯
+# expand-contract: grandfathered
 revision: str = '003'
 down_revision: Union[str, None] = '002a'  # 基线修复(E0.2)：spider_tasks 基线表插在 003 之前
 branch_labels: Union[str, Sequence[str], None] = None

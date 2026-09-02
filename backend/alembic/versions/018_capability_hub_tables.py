@@ -16,6 +16,9 @@ from alembic import op
 from sqlalchemy.dialects import mysql
 
 # revision identifiers, used by Alembic.
+# 回填 backfill: 存量 skills → capability_assets 资产行迁移（migration data）
+# SM-EXEMPT: 历史迁移（已部署），expand-contract 检查不追溯
+# expand-contract: grandfathered
 revision: str = "018"
 down_revision: Union[str, Sequence[str], None] = "017"
 branch_labels: Union[str, Sequence[str], None] = None
