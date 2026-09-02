@@ -17,6 +17,7 @@ import LogCenter from './pages/LogCenter'
 import Skills from './pages/Skills'
 import Members from './pages/Members'
 import Usage from './pages/Usage'
+import Capabilities from './pages/Capabilities'
 import PlatformOps from './pages/PlatformOps'
 import Unauthorized from './pages/Unauthorized'
 import './App.css'
@@ -46,6 +47,7 @@ function App() {
           <Route path="ai" element={<AiPlans />} />
           {/* 技能中心（方案 A）：三角色可见（viewer 只读），写操作由按钮级权限控制 */}
           <Route path="skills" element={<Skills canEdit canAdmin />} />
+          <Route path="capabilities" element={<Capabilities />} />
           {/* 成员管理（SaaS S2）：租户内部事务，owner/admin 语义在页内守卫 */}
           <Route path="members" element={<Members />} />
           <Route path="usage" element={<Usage />} />

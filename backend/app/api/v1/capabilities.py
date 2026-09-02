@@ -109,3 +109,77 @@ async def verify_plugin(
     await record_audit(session, user, "plugin.verify", f"plugin#{name}",
                        detail={"health": result["health"]})
     return ok(data=result)
+
+
+# ---------- P6 C5/C6：专家域（扫描/详情/组队） ----------
+
+
+@router.post("/scan-experts")
+async def scan_experts(
+    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """扫描 capability-library/experts/（subagent 格式解析入库）"""
+    from backend.services.expert_service import ExpertService
+
+    result = await ExpertService(session).scan_experts()
+    await session.commit()
+    return ok(data=result)
+
+
+@router.get("/experts/{name}")
+async def get_expert(
+    name: str,
+    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """专家详情（persona/tools/skills/mcp）"""
+    from backend.services.expert_service import ExpertService
+
+    return ok(data=await ExpertService(session).get_expert_detail(name))
+
+
+@router.post("/teams")
+async def upsert_team(
+    body: dict,
+    user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """专家团定义（团长/成员引用校验；执行引擎二期）"""
+    from backend.app.api._helpers import record_audit
+    from backend.services.expert_service import TeamService
+
+    team = await TeamService(session).upsert_team(
+        name=str(body.get("name") or ""),
+        leader=str(body.get("leader") or ""),
+        members=[str(m) for m in (body.get("members") or [])],
+        workflow_md=str(body.get("workflow_md") or ""),
+        title=str(body.get("title") or ""),
+    )
+    await session.commit()
+    await record_audit(session, user, "team.upsert", f"team#{team.name}")
+    return ok(data={"name": team.name, "created": True})
+
+
+@router.get("/teams/{name}")
+async def get_team(
+    name: str,
+    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """专家团详情"""
+    from backend.services.expert_service import TeamService
+
+    return ok(data=await TeamService(session).get_team_detail(name))
+
+
+@router.get("/teams/{name}/export")
+async def export_team(
+    name: str,
+    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """专家团导出（TEAM.md 文档形态）"""
+    from backend.services.expert_service import TeamService
+
+    return ok(data={"markdown": await TeamService(session).export_team_md(name)})
