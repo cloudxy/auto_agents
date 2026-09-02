@@ -192,6 +192,7 @@ class SkillService:
             )
             self.session.add(row)
             await self.session.flush()
+            await self._sync_asset(row)
             return row
 
         existing.title = str(frontmatter.get("name") or skill_dir.name)
@@ -203,6 +204,7 @@ class SkillService:
         )
         existing.content_hash = content_hash
         await self.session.flush()
+        await self._sync_asset(existing)
         if existing.sync_state == "hash_changed":
             await self._enqueue_rescore_best_effort(skill_dir.name)
         return existing
@@ -217,6 +219,15 @@ class SkillService:
             await redis.lpush(SKILL_SCORE_QUEUE, name)
         except Exception as exc:  # noqa: BLE001 队列不可用不阻断扫描
             logger.warning(f"评分入队失败（忽略） | skill={name} err={exc}")
+
+    async def _sync_asset(self, skill) -> None:
+        """技能行 → capability_assets 目录行同步（P6 C2）"""
+        try:
+            from backend.services.capability_service import CapabilityService
+
+            await CapabilityService(self.session).upsert_skill_asset(skill)
+        except Exception as exc:  # noqa: BLE001 目录同步失败不阻断扫描主路径
+            logger.warning(f"asset 目录同步失败（忽略） | skill={skill.name} err={exc}")
 
     async def _mark_parse_error(
         self, skill_dir: Path, root: Path, existing: Optional[Skill]

@@ -66,6 +66,7 @@ class SkillReview(Base):
     notes = Column(Text, comment="AI 评语（各维理由）/ 人工笔记")
     content_hash = Column(String(64), comment="评的是哪个版本")
     prompt_version = Column(String(8), comment="AI 评审时的 prompt 版本")
+    asset_id = Column(Integer, index=True, comment="关联 capability_assets.id（P6 泛化）")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
 
 
