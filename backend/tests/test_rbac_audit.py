@@ -180,8 +180,11 @@ def test_unauthenticated_request_rejected_401():
     from fastapi.testclient import TestClient
 
     from backend.app import create_app
+    from conftest import _gadb, _mock_async_db
 
-    app = create_app()  # 不注入 dependency_overrides
+    app = create_app()  # 不注入 get_current_user override（测真实鉴权链）
+    # 仅 mock DB 依赖（测 401 不需要真库；CI 无 .env 会 ConnectionError）
+    app.dependency_overrides[_gadb] = _mock_async_db
     client = TestClient(app)
     resp = client.get("/api/v1/spiders/tasks")
     assert resp.status_code == 401
