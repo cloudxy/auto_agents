@@ -53,7 +53,7 @@ jobs:
       - name: Pytest
         env:
           APP_ENV: local
-        run: uv run pytest -x -q backend/tests
+        run: uv run pytest -x -q --tb=short backend/tests
 
       - name: Pytest (MySQL 保真通道子集)
         env:
@@ -110,6 +110,10 @@ jobs:
         working-directory: frontend/admin
         run: |
           npm ci
+          echo "=== node/npm versions ==="
+          node --version
+          npm --version
+          echo "=== env CI=$CI DISABLE_ESLINT_PLUGIN=$DISABLE_ESLINT_PLUGIN ==="
           npm run build
 
       - name: Test admin
