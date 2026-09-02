@@ -138,4 +138,4 @@ jobs:
         run: docker compose config --quiet
 
       - name: Build Dockerfile
-        run: docker build -t auto-agents-backend .
+        run: docker build --progress=plain --no-cache -t auto-agents-backend .
