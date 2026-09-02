@@ -5,19 +5,19 @@
 # 运行：见 docker-compose.yml（本地联调含 MySQL + Redis）
 
 # ===== Stage 1: 前端构建（admin + official）=====
-FROM node:20-alpine AS frontend-builder
+FROM node:20 AS frontend-builder
 
 WORKDIR /build/admin
 COPY frontend/admin/package.json frontend/admin/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm ci --no-audit --no-fund && echo 'ADMIN_CI_OK'
 COPY frontend/admin/ ./
-RUN CI= npm run build
+RUN CI= npm run build && echo 'ADMIN_BUILD_OK'
 
 WORKDIR /build/official
 COPY frontend/official/package.json frontend/official/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm ci --no-audit --no-fund && echo 'OFFICIAL_CI_OK'
 COPY frontend/official/ ./
-RUN CI= npm run build
+RUN CI= npm run build && echo 'OFFICIAL_BUILD_OK'
 
 # ===== Stage 2: 后端运行时 =====
 FROM python:3.13-slim AS backend
@@ -33,7 +33,8 @@ COPY scrapy/pyproject.toml scrapy/
 # uv export 导出全量 requirements 后 pip install——绕过 Docker 内 workspace 可编辑构建
 # （macOS ARM64 lockfile 在 Linux x86_64 的 uv sync --frozen 存在解析差异）
 RUN uv export --package auto-agents-backend --no-dev --no-hashes --format requirements-txt -o /tmp/req.txt \
-    && pip install --no-cache-dir -r /tmp/req.txt
+    && echo 'EXPORT_OK' \
+    && pip install --no-cache-dir -r /tmp/req.txt && echo 'PIP_INSTALL_OK'
 
 # 应用源码（platform_core 为源码包，经 run_backend.py 注入 sys.path）
 COPY backend/ backend/
