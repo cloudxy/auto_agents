@@ -11,13 +11,13 @@ WORKDIR /build/admin
 COPY frontend/admin/package.json frontend/admin/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/admin/ ./
-RUN CI=false npm run build
+RUN CI= npm run build
 
 WORKDIR /build/official
 COPY frontend/official/package.json frontend/official/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/official/ ./
-RUN CI=false npm run build
+RUN CI= npm run build
 
 # ===== Stage 2: 后端运行时 =====
 FROM python:3.13-slim AS backend

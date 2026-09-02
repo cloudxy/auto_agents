@@ -35,6 +35,26 @@ if str(TESTS_DIR) not in sys.path:
 os.environ.setdefault("APP_ENV", "local")
 
 
+# ── get_async_db 全局兜底 mock（CI 无 .env，防意外连真库）──
+from unittest.mock import AsyncMock, MagicMock as _MM
+
+from platform_core.db import get_async_db as _gadb
+
+
+async def _mock_async_db():
+    mock_session = _MM()
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
+    mock_session.flush = AsyncMock()
+    mock_session.close = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=_MM(
+        scalar_one_or_none=_MM(return_value=None),
+        scalars=_MM(return_value=_MM(all=_MM(return_value=[]))),
+        first=_MM(return_value=None),
+    ))
+    yield mock_session
+
+
 @pytest.fixture(scope="session")
 def app():
     """FastAPI 应用实例（含异常处理器与全量路由）
@@ -73,6 +93,8 @@ def app():
         return CurrentUser(id=1, username="test-admin", role="admin")
 
     application.dependency_overrides[get_current_user] = _override_current_user
+
+    application.dependency_overrides[_gadb] = _mock_async_db
     return application
 
 
@@ -184,6 +206,15 @@ def db_session(
     return _make_session
 
 
+@pytest.fixture(autouse=True)
+def _reset_get_async_db(app):
+    """每个测试前确保 get_async_db 指向全局兜底 mock——防前序测试的
+    dependency_overrides 残留（如 test_ai_planner 直设 lambda 不清理）"""
+    app.dependency_overrides[_gadb] = _mock_async_db
+    yield
+    # 测试后也重置（db_client teardown 之外的兜底）
+    app.dependency_overrides[_gadb] = _mock_async_db
+
 @pytest.fixture
 def db_client(
     app: "FastAPI", client: "TestClient", db_session: "Callable[[], AsyncContextManager[AsyncSession]]"
@@ -200,4 +231,5 @@ def db_client(
 
     app.dependency_overrides[get_async_db] = _override_get_async_db
     yield client
-    app.dependency_overrides.pop(get_async_db, None)
+    # 恢复全局兜底 mock（而非 pop——防止后续 client 测试意外连真库）
+    app.dependency_overrides[get_async_db] = _mock_async_db

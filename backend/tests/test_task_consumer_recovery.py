@@ -54,6 +54,8 @@ async def test_recover_fails_orphans_and_spares_active():
     with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
          patch.object(consumer_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
          patch.object(consumer_mod, "AsyncSession", _FakeSessionCtx), \
+             patch.object(__import__("backend.tasks.consumer", fromlist=["SpiderTaskConsumer"]).SpiderTaskConsumer, "_engine",
+                   staticmethod(lambda: object())), \
          patch.object(svc, "_fail_task", fail):
         await svc._recover_stale_once()
 
@@ -88,6 +90,8 @@ async def test_recover_conservative_when_redis_error():
     with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
          patch.object(consumer_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
          patch.object(consumer_mod, "AsyncSession", _FakeSessionCtx), \
+             patch.object(__import__("backend.tasks.consumer", fromlist=["SpiderTaskConsumer"]).SpiderTaskConsumer, "_engine",
+                   staticmethod(lambda: object())), \
          patch.object(svc, "_fail_task", fail):
         await svc._recover_stale_once()
 
@@ -157,6 +161,8 @@ async def test_requeue_stale_pending_repushes_lost_messages():
     with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
          patch.object(consumer_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
          patch.object(consumer_mod, "AsyncSession", _FakeSessionCtx), \
+             patch.object(__import__("backend.tasks.consumer", fromlist=["SpiderTaskConsumer"]).SpiderTaskConsumer, "_engine",
+                   staticmethod(lambda: object())), \
          patch.object(svc, "_fail_task", fail):
         await svc._requeue_stale_pending()
         await svc._requeue_stale_pending()
@@ -184,6 +190,8 @@ async def test_requeue_gives_up_after_max_attempts():
     with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
          patch.object(consumer_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
          patch.object(consumer_mod, "AsyncSession", _FakeSessionCtx), \
+             patch.object(__import__("backend.tasks.consumer", fromlist=["SpiderTaskConsumer"]).SpiderTaskConsumer, "_engine",
+                   staticmethod(lambda: object())), \
          patch.object(svc, "_fail_task", fail):
         await svc._requeue_stale_pending()
 
