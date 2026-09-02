@@ -13,6 +13,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
+# 回填 backfill migration data: 注册表种子插入
+# SM-EXEMPT: 历史迁移（已部署）
 revision: str = "016"
 down_revision: Union[str, Sequence[str], None] = "015"
 branch_labels: Union[str, Sequence[str], None] = None
