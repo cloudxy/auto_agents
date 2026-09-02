@@ -80,9 +80,7 @@ storage/
 # 技能工单暂存区（本地 markdown 工单，见 docs/agents/issue-tracker.md）
 .scratch/
 
-# 文档：默认不入库，白名单放行（现行方案索引 / ADR / 工程技能配置）
-# 已执行方案随清理出库（git 历史即档案，见 docs/plan/README.md）
-docs/*
-!docs/plan/
-!docs/adr/
-!docs/agents/
+# 私人内容：docs/（方案/ADR/工程技能配置）与 files/（上传/下载/导出运行时目录）
+# 均不入库，仅本地保留；应用启动自建 files/* 目录（platform_core/storage.py）
+docs/
+files/

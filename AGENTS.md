@@ -83,15 +83,15 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push  # 安装�
 
 ### Issue tracker
 
-工单以本地 markdown 存放于 `.scratch/<feature>/`（spec + `issues/` 每票一文件）。见 `docs/agents/issue-tracker.md`。
+工单以本地 markdown 存放于 `.scratch/<feature>/`（spec + `issues/` 每票一文件）。约定文件 `docs/agents/issue-tracker.md` 为本地私有配置（不入库）。
 
 ### Triage labels
 
-沿用五个默认 triage 角色标签（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）。见 `docs/agents/triage-labels.md`。
+沿用五个默认 triage 角色标签（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）。
 
 ### Domain docs
 
-single-context：根级 `CONTEXT.md` + `docs/adr/`（按需惰性创建）；平台演进总方案权威源为 `docs/plan/README.md`。见 `docs/agents/domain.md`。
+single-context：根级 `CONTEXT.md` + `docs/adr/`（按需惰性创建；docs/ 为本地私有不入库）。
 
 其他 provider 的完整项目指令见 `CLAUDE.md`（Claude）与 `GEMINI.md`（Gemini），
 本文件与其保持同一架构事实，如有冲突以 `project_rule.md` 为准。
