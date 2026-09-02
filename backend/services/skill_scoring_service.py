@@ -148,7 +148,7 @@ class SkillScoringService:
         from config import settings
         from pathlib import Path
 
-        skill_dir = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "skills-library"))) / row.file_path
+        skill_dir = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library"))) / row.file_path
         md = skill_dir / "SKILL.md"
         try:
             return md.read_text(encoding="utf-8") if md.exists() else ""

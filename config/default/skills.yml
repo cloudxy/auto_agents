@@ -1,25 +1,17 @@
-# 技能管理中心配置（方案 A）——本文件只含非敏感项（R1 红线）
-# 敏感项（评分专用 Key 等）一律走 config/<env>/.env
+# 能力资产中心配置（P6）——本文件只含非敏感项（R1 红线）
 SKILLS:
-  # 技能库根目录（相对仓库根或绝对路径）；技能目录 = <LIBRARY_ROOT>/skills/<name>/
-  LIBRARY_ROOT: "skills-library"
+  # 能力资产库根目录（P6 泛化：下分 skills/plugins/experts/teams/）；相对仓库根或绝对路径
+  LIBRARY_ROOT: "capability-library"
   # lifespan 启动时是否增量扫描一次（本地单机语义）
   SCAN_ON_STARTUP: false
   SCORING:
-    # 评分 worker 总开关（lifespan 常驻组件）
     ENABLED: false
-    # 指定该供应商已添加的轻量模型省钱——依赖方案 B M2（未就绪前告警并回退默认模型，D10 能力开关）
     MODEL: ""
-    # 逐个评（LLM 串行，防爆预算）
     MAX_CONCURRENCY: 1
-    # 评分 prompt 版本，变更可触发批量重评
     PROMPT_VERSION: "v1"
-    # 评分独立预算（0=不限）；与 AI 采集规划的 LLM.MAX_TOKENS_BUDGET 互不挤占
     MAX_TOKENS_BUDGET: 0
-  # 允许后端 subprocess 执行 sync.sh（仅本地单机部署语义；关闭时 sync 端点拒绝）
-  ADAPTER_SYNC:
-    ENABLED: false
-  # 官网公开 API（无鉴权三道闸之第三闸；白名单/发布态过滤见 public_skills.py）
   PUBLIC_API:
     ENABLED: true
     RATE_LIMIT_PER_MIN: 60
+  ADAPTER_SYNC:
+    ENABLED: false

@@ -53,7 +53,7 @@ async def scan_skills(
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """全量/增量扫描 skills-library（admin）"""
+    """全量/增量扫描 capability-library（admin）"""
     summary = await service.scan_library()
     await session.commit()
     await record_audit(session, user, "skill.scan", "skills", detail={"total": summary["total"]})
@@ -318,7 +318,7 @@ def _read_skill_files(file_path: str) -> tuple[str, str]:
     """读技能目录的 SKILL.md 与 meta.yaml 原文（缺失容忍为空串）"""
     from config import settings
 
-    library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "skills-library")))
+    library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library")))
     skill_dir = library_root / file_path
     skill_md = meta_yaml = ""
     try:

@@ -1,7 +1,7 @@
 """技能域服务（方案 A）——数据契约 tier 派生（08）+ 扫描入库（09）
 
 后续工单在本模块生长：矫正写回（11）等。
-治理语义（D1）：内容真相源在 skills-library/skills/<name>/ 文件；治理真相源在 DB。
+治理语义（D1）：内容真相源在 capability-library/skills/<name>/ 文件；治理真相源在 DB。
 扫描只写"内容派生字段"（title/description/content_hash/raw_meta/sync_state），
 已入库行的人工治理字段（score/tier/category/status...）永不被扫描覆盖。
 """
@@ -112,7 +112,7 @@ class SkillService:
         from config import settings
 
         if root is None:
-            library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "skills-library")))
+            library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library")))
             root = library_root / "skills"
         root = Path(root)
 
@@ -518,7 +518,7 @@ class SkillService:
     def _library_root(self) -> Path:
         from config import settings
 
-        return Path(str(settings.get("SKILLS.LIBRARY_ROOT", "skills-library")))
+        return Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library")))
 
     def _write_back_meta(self, row: Skill) -> bool:
         """DB → meta.yaml 原子写回（tmp 文件 + rename，单写者=主后端）"""
@@ -561,7 +561,7 @@ class SkillService:
             return False
 
     def _append_changelog(self, row: Skill, summary: str) -> None:
-        """CHANGELOG.md 追加一行 `- YYYY-MM-DD | 摘要`（沿用 skills-library 既有格式）"""
+        """CHANGELOG.md 追加一行 `- YYYY-MM-DD | 摘要`（沿用 capability-library 既有格式）"""
         try:
             skill_dir = self._library_root() / row.file_path
             if not skill_dir.is_dir():
