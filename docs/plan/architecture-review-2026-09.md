@@ -136,7 +136,7 @@ AFTER（单真相源下发）：
 - ❌ 成员审计 UI（API 有，LogCenter 仅平台视角，租户 owner 看不到本租户）
 - ❌ 用量看板缺「成员维度」（S3 承诺双维度，Usage 页只有租户维度）
 
-### 技能治理（vs 总方案 §5.2）
+### 技能治理（vs 已执行 v2 方案 §5.2，git 历史 @50558b9）
 
 - ❌ `/skills/compare`、`/skills/categories` 管理（`skills.py:3` docstring 仍宣称存在；矫正表单分类是自由 Input）
 - ❌ 6 端点 API 有 UI 无：rescore / export-meta / check-update / similar 两端点 / jobs
