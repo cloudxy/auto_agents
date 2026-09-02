@@ -35,6 +35,10 @@ ALL_ORM_TABLES = {
     "skill_jobs",
     "llm_provider_models",
     "tenants",
+    "capability_assets",
+    "capability_plugins",
+    "capability_experts",
+    "capability_teams",
 }
 
 
