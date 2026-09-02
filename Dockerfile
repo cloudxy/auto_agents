@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Auto Agents 镜像 - 多阶段构建（前端构建 + 后端运行时）
 #
 # 构建：docker build -t auto-agents-backend .
@@ -26,19 +25,13 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 
-# uv workspace 解析需要根配置 + 全部成员 manifest（含 README：包构建 readme 字段引用）
+# 完整源码一次 COPY（uv sync 需要包目录存在才能构建 workspace 成员的元数据）
 COPY pyproject.toml uv.lock README.md ./
-COPY backend/pyproject.toml backend/
-COPY scrapy/pyproject.toml scrapy/
-# uv export 导出全量 requirements 后 pip install——绕过 Docker 内 workspace 可编辑构建
-# （macOS ARM64 lockfile 在 Linux x86_64 的 uv sync --frozen 存在解析差异）
-RUN uv export --package auto-agents-backend --no-dev --no-hashes --format requirements-txt -o /tmp/req.txt \
-    && echo 'EXPORT_OK' \
-    && pip install --no-cache-dir -r /tmp/req.txt && echo 'PIP_INSTALL_OK'
-
-# 应用源码（platform_core 为源码包，经 run_backend.py 注入 sys.path）
 COPY backend/ backend/
+COPY scrapy/ scrapy/
 COPY platform_core/ platform_core/
+RUN uv sync --package auto-agents-backend --no-dev && echo 'UV_SYNC_OK'
+
 COPY config/ config/
 COPY run_backend.py ./
 
@@ -52,4 +45,4 @@ EXPOSE 9111
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9111/api/v1/health', timeout=3)" || exit 1
 
-CMD ["python", "run_backend.py", "--no-reload"]
+CMD ["uv", "run", "python", "run_backend.py", "--no-reload"]
