@@ -12,7 +12,6 @@ import api from '../services/api'
 
 // 模块级缓存（登录后由 refreshPermissions 填充；未登录时为空数组=全只读）
 let cachedPermissions: string[] = []
-let lastRole: string | null = null
 
 export const refreshPermissions = async (): Promise<string[]> => {
   try {

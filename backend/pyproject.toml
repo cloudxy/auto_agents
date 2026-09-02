@@ -44,4 +44,4 @@ dev = [
 
 [tool.setuptools]
 # 平铺布局显式声明（temp/files/runtime 为运行期目录不入包）
-packages = ["app", "services", "repositories", "tasks", "utils", "alembic", "tests"]
+packages = ["app", "services", "repositories", "tasks"]
