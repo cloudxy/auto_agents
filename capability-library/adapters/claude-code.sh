@@ -2,10 +2,10 @@
 # Claude Code 适配器：为 manifests/claude-code.yaml 里启用的每个 skill 建 symlink 到
 # ~/.claude/skills/<name>，Claude Code 原生按目录识别 SKILL.md。
 #
-# 用法: adapters/claude-code.sh <skills-library-root>
+# 用法: adapters/claude-code.sh <capability-library-root>
 set -euo pipefail
 
-ROOT="${1:?usage: claude-code.sh <skills-library-root>}"
+ROOT="${1:?usage: claude-code.sh <capability-library-root>}"
 MANIFEST="$ROOT/manifests/claude-code.yaml"
 TARGET_DIR="$HOME/.claude/skills"
 

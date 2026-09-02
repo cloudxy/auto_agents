@@ -3,4 +3,4 @@
 - 来源：无（骨架搭建阶段的占位示例，本地手写，非外部引入）
 - 作者：xuyun
 - 引入日期：2026-08-31
-- 用途：验证 skills-library 目录结构、meta.yaml 字段、索引、后台流程
+- 用途：验证 capability-library 目录结构、meta.yaml 字段、索引、后台流程

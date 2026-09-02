@@ -8,16 +8,16 @@
 - 扫描：`POST /api/v1/skills/scan`（admin）增量入库，内容变更（content_hash）自动进入重评流程；
 - 分发不变：`adapters/*.sh` + `sync.sh`（远端机器靠 git 同步本目录后自行执行）。
 
-# skills-library
+# capability-library
 
 多工具共享的 skill 库：单一源头 + 溯源记录 + 人工能力评分 + 行业标签 + 本地管理后台。
 
-本目录位于 `auto_agents/skills-library/`，与项目协作 skill（`.agents/skills/`）分开：
+本目录位于 `auto_agents/capability-library/`，与项目协作 skill（`.agents/skills/`）分开：
 
 | 路径 | 职责 |
 |------|------|
 | `.agents/skills/` | 本仓库开发协作 skill（`/new-svc` `/check-arch` 等），随项目走 |
-| `skills-library/` | 跨工具共享的 skill 目录库（治理元数据、评分、分发适配器、本地后台） |
+| `capability-library/` | 跨工具共享的 skill 目录库（治理元数据、评分、分发适配器、本地后台） |
 
 git 历史跟 auto_agents 主仓库走，每次改动一次 commit，方便回滚。
 
@@ -56,7 +56,7 @@ uv sync
 ## 常用操作
 
 ```bash
-cd skills-library
+cd capability-library
 ./sync.sh              # 把 manifests 里启用的 skill 分发到各工具（symlink / 拼接生成）
 ./sync.sh --reindex     # 分发后重建 index/index.db
 ./sync.sh --serve       # 分发 + 重建索引 + 启动本地后台 (默认 http://127.0.0.1:8765)
@@ -87,5 +87,5 @@ cd skills-library
 | 工具 | 机制 | 适配方式 |
 |---|---|---|
 | Claude Code | `~/.claude/skills/<name>/`，原生支持独立目录 | symlink（`adapters/claude-code.sh`） |
-| Codex | 机制未最终确认，暂按"只吃单一规则文件"处理 | 拼接生成 `~/.codex/skills-library.md`（`adapters/codex.sh`），若后续确认有独立目录机制会切换为 symlink |
+| Codex | 机制未最终确认，暂按"只吃单一规则文件"处理 | 拼接生成 `~/.codex/capability-library.md`（`adapters/codex.sh`），若后续确认有独立目录机制会切换为 symlink |
 | Kimi / Grok / workbuddy / zcode / traework / Qoder | 未知，需要官方文档或实际配置路径确认 | 待补，届时退化为 symlink 型或拼接型两种 fallback 之一 |

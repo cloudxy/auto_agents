@@ -64,7 +64,7 @@ const SkillsMatrix: React.FC<{ skillNames: string[]; canAdmin?: boolean }> = ({ 
         {canAdmin && <Button type="primary" icon={<SyncOutlined />} onClick={runSync}>触发 sync.sh 分发</Button>}
       </Space>
       {loading ? <Spin /> : tools.length === 0 ? (
-        <Text type="secondary">manifests 目录为空——在 skills-library/manifests/ 添加 <Text code>{'<tool>.yaml'}</Text> 后刷新</Text>
+        <Text type="secondary">manifests 目录为空——在 capability-library/manifests/ 添加 <Text code>{'<tool>.yaml'}</Text> 后刷新</Text>
       ) : (
         <Table
           rowKey="name" size="small" pagination={false}

@@ -3,15 +3,15 @@
 # 先按"只吃单一规则文件"处理：把 manifests/codex.yaml 里启用的 skill 的
 # SKILL.md 正文（去掉 YAML frontmatter）拼接成一份生成文件。
 #
-# 输出路径待确认，暂定 ~/.codex/skills-library.md，此文件是生成物，
-# 不要手动改，源头永远是 skills-library/skills/*/SKILL.md。
+# 输出路径待确认，暂定 ~/.codex/capability-library.md，此文件是生成物，
+# 不要手动改，源头永远是 capability-library/skills/*/SKILL.md。
 #
-# 用法: adapters/codex.sh <skills-library-root>
+# 用法: adapters/codex.sh <capability-library-root>
 set -euo pipefail
 
-ROOT="${1:?usage: codex.sh <skills-library-root>}"
+ROOT="${1:?usage: codex.sh <capability-library-root>}"
 MANIFEST="$ROOT/manifests/codex.yaml"
-OUT="$HOME/.codex/skills-library.md"
+OUT="$HOME/.codex/capability-library.md"
 
 if [[ ! -f "$MANIFEST" ]]; then
   echo "no manifest: $MANIFEST, skip" >&2
@@ -36,8 +36,8 @@ def strip_frontmatter(text: str) -> str:
     return text[m.end():] if m else text
 
 sections = [
-    "<!-- 本文件由 skills-library/adapters/codex.sh 自动生成，请勿手动编辑。 -->",
-    "<!-- 源头: skills-library/skills/<name>/SKILL.md，改动请回到源头再跑 sync.sh -->",
+    "<!-- 本文件由 capability-library/adapters/codex.sh 自动生成，请勿手动编辑。 -->",
+    "<!-- 源头: capability-library/skills/<name>/SKILL.md，改动请回到源头再跑 sync.sh -->",
     "",
 ]
 missing = []

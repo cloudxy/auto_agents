@@ -93,7 +93,7 @@ def _read_skill_md(row: Skill) -> str:
 
     from config import settings
 
-    md = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "skills-library"))) / row.file_path / "SKILL.md"
+    md = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library"))) / row.file_path / "SKILL.md"
     try:
         return md.read_text(encoding="utf-8") if md.exists() else ""
     except OSError:

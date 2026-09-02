@@ -20,7 +20,7 @@ else
   PYTHON="python3"
 fi
 
-echo "== syncing skills-library ($ROOT) =="
+echo "== syncing capability-library ($ROOT) =="
 
 for adapter in "$ROOT"/adapters/*.sh; do
   [[ -f "$adapter" ]] || continue

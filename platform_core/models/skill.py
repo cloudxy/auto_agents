@@ -1,7 +1,7 @@
 """技能域模型（方案 A：技能管理中心）
 
 三表职责（总方案 §5.1）：
-- Skill          治理真相源 + 文件镜像索引（内容真相源在 skills-library/skills/<name>/ 文件）
+- Skill          治理真相源 + 文件镜像索引（内容真相源在 capability-library/skills/<name>/ 文件）
 - SkillReview    AI 与人工评审全留痕（矫正可追溯；AI 永不写人工权威分）
 - SkillJob       扫描/评分批/导入 运行记录（轻量观测，不做通用 job 框架）
 
@@ -43,7 +43,7 @@ class Skill(Base):
     reviewed_at = Column(DateTime, comment="终评时间")
     review_notes = Column(Text, comment="终评笔记")
     similar_to = Column(JSON, comment="同类技能 name 数组（已确认）")
-    file_path = Column(String(512), nullable=False, comment="skills-library 内相对路径")
+    file_path = Column(String(512), nullable=False, comment="capability-library 内相对路径")
     sync_state = Column(String(16), nullable=False, default="ok",
                         comment="ok/hash_changed/missing/parse_error")
     tenant_id = Column(Integer, comment="D3 预留：平台级恒 NULL")

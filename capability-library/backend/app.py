@@ -13,7 +13,7 @@
 - PUT  /api/manifests/{tool}            编辑某工具启用的 skill 列表
 - GET  /api/taxonomy                    industries.yaml + rubric.md 内容
 
-用法: python3 backend/app.py <skills-library-root> [--port 8765]
+用法: python3 backend/app.py <capability-library-root> [--port 8765]
 """
 import hashlib
 import subprocess
@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 ROOT: Path
-app = FastAPI(title="skills-library backend")
+app = FastAPI(title="capability-library backend")
 
 
 def skill_dir(name: str) -> Path:
@@ -258,7 +258,7 @@ def index_html():
 def main():
     global ROOT
     if len(sys.argv) < 2:
-        print("usage: app.py <skills-library-root> [--port 8765]", file=sys.stderr)
+        print("usage: app.py <capability-library-root> [--port 8765]", file=sys.stderr)
         sys.exit(1)
     ROOT = Path(sys.argv[1]).resolve()
     port = 8765

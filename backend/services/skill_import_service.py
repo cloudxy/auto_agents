@@ -232,7 +232,7 @@ class SkillImportService:
     ) -> Path:
         from config import settings
 
-        library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "skills-library")))
+        library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library")))
         skill_dir = library_root / "skills" / name
         if skill_dir.exists():
             raise ValidationException(message=f"目标目录已存在: {skill_dir}", field="url")
@@ -332,7 +332,7 @@ class SkillImportService:
     def _local_skill_md(self, row: Skill) -> Optional[str]:
         from config import settings
 
-        md = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "skills-library"))) / row.file_path / "SKILL.md"
+        md = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library"))) / row.file_path / "SKILL.md"
         try:
             return md.read_text(encoding="utf-8") if md.exists() else None
         except OSError:

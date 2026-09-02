@@ -4,7 +4,7 @@
 index.db 是纯派生缓存，删除后重跑本脚本即可重建，不是权威数据源。
 权威数据源始终是 skills/<name>/{SKILL.md,meta.yaml,SOURCE.md,CHANGELOG.md}。
 
-用法: build_index.py <skills-library-root>
+用法: build_index.py <capability-library-root>
 """
 import json
 import re
@@ -118,7 +118,7 @@ def build(root: Path) -> int:
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("usage: build_index.py <skills-library-root>", file=sys.stderr)
+        print("usage: build_index.py <capability-library-root>", file=sys.stderr)
         sys.exit(1)
     n = build(Path(sys.argv[1]).resolve())
     print(f"indexed {n} skills -> index/index.db")
