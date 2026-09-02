@@ -64,3 +64,48 @@ async def get_capability_detail(
         "similar_to": asset.similar_to, "file_path": asset.file_path,
         "sync_state": asset.sync_state,
     })
+
+
+# ---------- P6 C3/C4：插件域（扫描/详情/验证） ----------
+
+
+@router.post("/scan-plugins")
+async def scan_plugins(
+    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """扫描 capability-library/plugins/（plugin.json 解析入库）"""
+    from backend.services.plugin_service import PluginService
+
+    result = await PluginService(session).scan_plugins()
+    await session.commit()
+    return ok(data=result)
+
+
+@router.get("/plugins/{name}")
+async def get_plugin(
+    name: str,
+    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """插件详情（manifest/mcp_servers/健康态）"""
+    from backend.services.plugin_service import PluginService
+
+    return ok(data=await PluginService(session).get_plugin_detail(name))
+
+
+@router.post("/plugins/{name}/verify")
+async def verify_plugin(
+    name: str,
+    user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """插件验证管线（ADR-0001）：MCP 连接→tools/list→抽样 call→健康落库"""
+    from backend.app.api._helpers import record_audit
+    from backend.services.plugin_service import PluginService
+
+    result = await PluginService(session).verify_plugin(name)
+    await session.commit()
+    await record_audit(session, user, "plugin.verify", f"plugin#{name}",
+                       detail={"health": result["health"]})
+    return ok(data=result)
