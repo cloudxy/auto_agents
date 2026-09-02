@@ -34,7 +34,7 @@ export const TemplateModal: React.FC<TemplateModalProps> = ({
         params: task.params || '',
       })
     }
-  }, [visible, task])
+  }, [visible, task]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const onSubmit = async () => {
     try {

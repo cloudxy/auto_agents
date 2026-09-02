@@ -69,7 +69,6 @@ const LlmProviders: React.FC = () => {
   const [presets, setPresets] = useState<PlatformPreset[]>([])
   const [probing, setProbing] = useState(false)
   const [probedModels, setProbedModels] = useState<string[]>([])
-  const [probeSearched, setProbeSearched] = useState(false)
   const [probeTestResult, setProbeTestResult] = useState<{ ok: boolean; latency_ms: number; error: string } | null>(null)
   const [probeTesting, setProbeTesting] = useState(false)
 
@@ -137,7 +136,6 @@ const LlmProviders: React.FC = () => {
     setEditing(null)
     form.resetFields()
     setProbedModels([])
-    setProbeSearched(false)
     setProbeTestResult(null)
     setModalOpen(true)
   }
@@ -190,11 +188,11 @@ const LlmProviders: React.FC = () => {
         api_key: apiKeyValue || '',
       })
       setProbedModels(data.models.map((m) => m.id))
-      setProbeSearched(true)
+      
       message.success(`拉到 ${data.models.length} 个模型（对话模型 ${data.chat_only_count} 个）`)
     } catch (error) {
       message.error(apiErrorMessage(error, '拉取模型列表失败（可手填模型名兜底）'))
-      setProbeSearched(true)
+      
     } finally {
       setProbing(false)
     }

@@ -4,7 +4,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch,
+  Alert, Button, Form, Input, Modal, Select, Space, Switch,
   Table, Tag, Typography, message,
 } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'

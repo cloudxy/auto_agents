@@ -103,7 +103,7 @@ const Skills: React.FC<{ canEdit?: boolean; canAdmin?: boolean }> = ({ canEdit =
 
   const columns: ColumnsType<SkillItem> = [
     { title: '技能', dataIndex: 'name', render: (_, r) => (
-      <a onClick={() => openDetail(r.name)}>{r.title || r.name}</a>
+      <span onClick={() => openDetail(r.name)} style={{ cursor: 'pointer' }}>{r.title || r.name}</span>
     )},
     { title: '分类', dataIndex: 'category', width: 140 },
     { title: '状态', dataIndex: 'status', width: 110, render: (s: string) => (

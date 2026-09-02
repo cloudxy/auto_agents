@@ -8,7 +8,7 @@ import {
 import { ReloadOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import {
-  fetchTemplates, createTemplate, deleteTemplate, runFromTemplate,
+  fetchTemplates, deleteTemplate, runFromTemplate,
 } from '../../services/spiders'
 import { PRIORITY_META } from './types'
 import type { TaskTemplate, Task, SpiderMap } from './types'

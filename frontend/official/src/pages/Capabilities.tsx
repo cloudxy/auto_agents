@@ -1,7 +1,7 @@
 /**
  * 能力广场页（P6 C9）：四类资产公开浏览（skill/plugin/expert/expert_team）
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Card, Empty, Spin, Tabs, Tag, Typography } from 'antd'
 
 import api from '../services/api'
