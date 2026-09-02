@@ -67,6 +67,17 @@ const PlatformOps: React.FC = () => {
     }
   }
 
+  const onToggleStatus = async (row: TenantRow) => {
+    try {
+      await api.patch(`/admin/tenants/${row.id}`,
+                      { status: row.status === 'active' ? 'disabled' : 'active' })
+      message.success(`租户 ${row.slug} 已${row.status === 'active' ? '禁用' : '启用'}`)
+      load()
+    } catch (e) {
+      message.error(`操作失败: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
   const columns: ColumnsType<TenantRow> = [
     { title: 'Slug', dataIndex: 'slug', render: (v: string) => <Text code>{v}</Text> },
     { title: '企业名称', dataIndex: 'name' },
@@ -89,7 +100,12 @@ const PlatformOps: React.FC = () => {
     {
       title: '操作', width: 100,
       render: (_: unknown, row: TenantRow) => (
-        <Button size="small" icon={<SettingOutlined />}
+        <Space size={0}>
+          <Button size="small" danger={row.status === 'active'}
+                  onClick={() => onToggleStatus(row)}>
+            {row.status === 'active' ? '禁用' : '启用'}
+          </Button>
+          <Button size="small" icon={<SettingOutlined />}
                 onClick={() => {
                   setEditing(row)
                   form.setFieldsValue({
@@ -99,6 +115,7 @@ const PlatformOps: React.FC = () => {
                     expires_at: row.expires_at ? dayjs(row.expires_at) : undefined,
                   })
                 }}>编辑</Button>
+        </Space>
       ),
     },
   ]

@@ -129,7 +129,10 @@ async def patch_tenant(
             row.expires_at = datetime.fromisoformat(str(raw).replace("Z", ""))
         else:
             row.expires_at = None
-        row.status = "active"  # 续期即恢复
+            row.status = "active"  # 清除到期时间 = 续期恢复
+    # status 显式白名单透传（R7：禁用语义不再被挡——body 传 disabled/expired 即生效）
+    if "status" in body and str(body["status"]) in ("active", "expired", "disabled"):
+        row.status = str(body["status"])
     await session.commit()
     await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
     return ok(data={"id": tenant_id, "updated": True})

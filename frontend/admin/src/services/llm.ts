@@ -106,14 +106,14 @@ export interface ProbeModel {
 }
 
 export const getPlatformPresets = (): Promise<PlatformPreset[]> =>
-  api.get('/llm/providers/platform-presets').then((r) => unwrap<PlatformPreset[]>(r.data))
+  api.get('/llm/providers/platform-presets').then((r) => unwrap<PlatformPreset[]>(r))
 
 export const probeModels = (payload: {
   provider_type: string
   base_url: string
   api_key: string
 }): Promise<{ models: ProbeModel[]; chat_only_count: number }> =>
-  api.post('/llm/providers/models/probe', payload).then((r) => unwrap(r.data))
+  api.post('/llm/providers/models/probe', payload).then((r) => unwrap(r))
 
 export const probeTest = (payload: {
   provider_type: string
@@ -121,7 +121,7 @@ export const probeTest = (payload: {
   api_key: string
   model: string
 }): Promise<{ ok: boolean; latency_ms: number; model: string; error: string }> =>
-  api.post('/llm/providers/models/probe-test', payload).then((r) => unwrap(r.data))
+  api.post('/llm/providers/models/probe-test', payload).then((r) => unwrap(r))
 
 export interface ProviderModelRow {
   model_id: string
@@ -136,21 +136,21 @@ export interface ProviderModelRow {
 }
 
 export const getLlmProviderModels = (providerId: number): Promise<ProviderModelRow[]> =>
-  api.get(`/llm/providers/${providerId}/models`).then((r) => unwrap<ProviderModelRow[]>(r.data))
+  api.get(`/llm/providers/${providerId}/models`).then((r) => unwrap<ProviderModelRow[]>(r))
 
 export const putLlmProviderModels = (
   providerId: number,
   models: Array<Pick<ProviderModelRow, 'model_id' | 'alias' | 'model_tier' | 'priority' | 'is_default' | 'enabled'>>,
 ): Promise<ProviderModelRow[]> =>
-  api.put(`/llm/providers/${providerId}/models`, { models }).then((r) => unwrap<ProviderModelRow[]>(r.data))
+  api.put(`/llm/providers/${providerId}/models`, { models }).then((r) => unwrap<ProviderModelRow[]>(r))
 
 export const fetchModelsDiff = (
   providerId: number,
 ): Promise<{ new: string[]; existing: string[]; vanished: string[] }> =>
-  api.post(`/llm/providers/${providerId}/models/fetch`).then((r) => unwrap(r.data))
+  api.post(`/llm/providers/${providerId}/models/fetch`).then((r) => unwrap(r))
 
 export const testLlmProviderModel = (
   providerId: number,
   modelId: string,
 ): Promise<{ ok: boolean; latency_ms: number; model: string; error: string; health_status: string }> =>
-  api.post(`/llm/providers/${providerId}/models/${encodeURIComponent(modelId)}/test`).then((r) => unwrap(r.data))
+  api.post(`/llm/providers/${providerId}/models/${encodeURIComponent(modelId)}/test`).then((r) => unwrap(r))

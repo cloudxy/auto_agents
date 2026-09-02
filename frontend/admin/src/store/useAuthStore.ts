@@ -21,6 +21,11 @@ export const useAuthStore = create<AuthState>()(
       login: async (params) => {
         const { rememberMe, ...loginParams } = params
         const data = await apiLogin(loginParams)
+        // R5：登录即拉取权限单真相源缓存（后端 _ROLE_PERMISSIONS 下发）
+        try {
+          const { refreshPermissions } = await import('../hooks/usePermission')
+          await refreshPermissions()
+        } catch { /* 权限拉取失败=空缓存（全只读安全侧），不阻断登录 */ }
         set({ 
           token: data.access_token, 
           user: data, 
