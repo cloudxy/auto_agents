@@ -95,9 +95,6 @@ jobs:
   frontend-build:
     name: Frontend Build (admin + official)
     runs-on: ubuntu-latest
-    env:
-      # CRA 的 CI 检测是 !!process.env.CI——设空字符串使其为假值（warning 不当 error）
-      CI: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -115,11 +112,7 @@ jobs:
         working-directory: frontend/admin
         run: |
           npm ci
-          echo "=== node/npm versions ==="
-          node --version
-          npm --version
-          echo "=== env CI=$CI DISABLE_ESLINT_PLUGIN=$DISABLE_ESLINT_PLUGIN ==="
-          npm run build
+          CI= npm run build
 
       - name: Test admin
         working-directory: frontend/admin
@@ -129,7 +122,7 @@ jobs:
         working-directory: frontend/official
         run: |
           npm ci
-          npm run build
+          CI= npm run build
 
       - name: Test official
         working-directory: frontend/official
