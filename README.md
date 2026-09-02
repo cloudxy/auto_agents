@@ -440,7 +440,7 @@ CI 三阶段：Python lint+test → 架构红线 → 前端构建。
 
 ## 相关文档
 
-- **[平台方案索引（docs/plan/README.md）](docs/plan/README.md)** —— 现行方案（架构评审 / 能力资产中心 / 数据库设计流水线）与已执行方案档案指引；历史诊断报告见 git 历史（`docs/architecture-audit-2026-08.md` @50558b9）
+- 平台方案 / ADR / 诊断档案：`docs/` 为本地私有内容不入库（历史版本见 git 历史 `@50558b9` 前）
 - 项目规则（12 红线 + 3 边界）：`.claude/rules/project_rule.md`
 - new-api 网关部署：[deploy/newapi/README.md](deploy/newapi/README.md)
 - AI 协作层：`.claude/IDENTITY.md` / `SOUL.md` / `MEMORY.md`、子代理 `spider-doctor / arch-warden / memory-curator`
