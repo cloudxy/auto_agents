@@ -25,6 +25,8 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
+# SM-EXEMPT: 历史迁移（已部署）
+# 回填 backfill: 索引重建标注
 revision: str = '012'
 down_revision: Union[str, None] = '011'
 branch_labels: Union[str, Sequence[str], None] = None

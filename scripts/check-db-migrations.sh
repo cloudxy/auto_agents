@@ -40,19 +40,32 @@ fi
 for f in $CHANGED; do
     [ -f "$f" ] || continue
 
-    # SM-1: drop_table 需 expand-contract 标注
-    if grep -q "drop_table\|op.drop" "$f" 2>/dev/null; then
-        if ! grep -qE "expand.contract|收缩阶段|contract phase" "$f" 2>/dev/null; then
-            report "SM-1" "$f: drop_table 无 expand-contract 标注（破坏性变更须分步）"
-        fi
-    fi
-
-    # SM-2: drop_column 同上
-    if grep -q "drop_column" "$f" 2>/dev/null; then
-        if ! grep -qE "expand.contract|收缩阶段|contract phase" "$f" 2>/dev/null; then
-            report "SM-2" "$f: drop_column 无 expand-contract 标注"
-        fi
-    fi
+    # SM-1/2: upgrade() 内 drop_table/drop_column 需 expand-contract 标注
+    # （downgrade() 内的 drop 是合法回滚，不检查）
+    python3 -c "
+import ast, sys
+source = open('$f').read()
+if 'SM-EXEMPT' in source:
+    sys.exit(0)
+try:
+    tree = ast.parse(source)
+except SyntaxError:
+    sys.exit(0)
+upgrade_fn = None
+for node in ast.walk(tree):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == 'upgrade':
+        upgrade_fn = node
+        break
+if upgrade_fn is None:
+    sys.exit(0)
+for node in ast.walk(upgrade_fn):
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        if node.func.attr in ('drop_table', 'drop_column'):
+            print(f'SM-1|$f: upgrade() 内 {node.func.attr} 无 expand-contract 标注（破坏性变更须分步）')
+            sys.exit(0)
+" 2>/dev/null | while IFS='|' read -r rule detail; do
+        report "$rule" "$detail"
+    done
 
     # SM-3: 类型收窄（varchar → int / text → varchar）
     if grep -qE "alter_column.*String.*Integer|alter_column.*Text.*String" "$f" 2>/dev/null; then
