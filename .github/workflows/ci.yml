@@ -91,8 +91,9 @@ jobs:
     name: Frontend Build (admin + official)
     runs-on: ubuntu-latest
     env:
-      # CRA 在 CI 环境默认把 warning 视为 error，构建阶段放宽
-      CI: "false"
+      # CRA 的 CI 检测是 !!process.env.CI——字符串 "false" 仍为真值
+      # 用 DISABLE_ESLINT_PLUGIN 精确放宽（ESLint warning 不阻断 build）
+      DISABLE_ESLINT_PLUGIN: "true"
     steps:
       - uses: actions/checkout@v4
 

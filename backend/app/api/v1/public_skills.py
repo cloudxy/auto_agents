@@ -9,7 +9,7 @@
 from typing import Optional
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict
 
 from backend.app.responses import ok
@@ -157,32 +157,24 @@ async def public_list_capabilities(
     category: str = None,
     page: int = 1,
     page_size: int = 20,
+    session: AsyncSession = Depends(get_async_db),
 ):
     """官网能力广场：四类资产公开列表（仅发布态 + 白名单投影 + IP 限流）"""
     from backend.services.capability_service import CapabilityService
-    from platform_core.db import get_async_db as _get_db
-    from fastapi import Depends as _D
 
     await _enforce_rate_limit(request)
     if type not in ("skill", "plugin", "expert", "expert_team"):
         type = "skill"
-    session = _D(_get_db)
-    # 手动取 session（本端点不经 Depends 链注入 service）
-    from platform_core.db import get_manager
-    from sqlalchemy.ext.asyncio import AsyncSession as _AS
+    svc = CapabilityService(session)
+    rows, total = await svc.list_assets(
+        asset_type=type, category=category, status="stable",
+        offset=(page - 1) * page_size, limit=page_size,
+    )
 
-    manager = get_manager()
-    async with _AS(manager.async_engines["DEFAULT"]) as db_session:
-        svc = CapabilityService(db_session)
-        rows, total = await svc.list_assets(
-            asset_type=type, category=category, status="stable",
-            offset=(page - 1) * page_size, limit=page_size,
-        )
-
-        items = []
-        for r in rows:
-            item = {f: getattr(r, f) for f in _PUBLIC_ASSET_FIELDS if hasattr(r, f)}
-            item["updated_at"] = r.updated_at.isoformat() if r.updated_at else None
-            item["score"] = float(r.score) if r.score is not None else None
-            items.append(item)
+    items = []
+    for r in rows:
+        item = {f: getattr(r, f) for f in _PUBLIC_ASSET_FIELDS if hasattr(r, f)}
+        item["updated_at"] = r.updated_at.isoformat() if r.updated_at else None
+        item["score"] = float(r.score) if r.score is not None else None
+        items.append(item)
     return ok(data={"total": total, "items": items})
