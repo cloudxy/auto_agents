@@ -72,13 +72,13 @@ export interface ScanSummary {
 }
 
 export const listSkills = (params: SkillListParams): Promise<SkillListResult> =>
-  api.get('/skills', { params }).then((r) => unwrap<SkillListResult>(r.data))
+  api.get('/skills', { params }).then((r) => unwrap<SkillListResult>(r))
 
 export const getSkillDetail = (name: string): Promise<SkillDetail> =>
-  api.get(`/skills/${encodeURIComponent(name)}`).then((r) => unwrap<SkillDetail>(r.data))
+  api.get(`/skills/${encodeURIComponent(name)}`).then((r) => unwrap<SkillDetail>(r))
 
 export const scanSkills = (): Promise<ScanSummary> =>
-  api.post('/skills/scan').then((r) => unwrap<ScanSummary>(r.data))
+  api.post('/skills/scan').then((r) => unwrap<ScanSummary>(r))
 
 export interface CorrectionPayload {
   category?: string
@@ -97,7 +97,7 @@ export const correctSkillMeta = (name: string, payload: CorrectionPayload): Prom
   api.put(`/skills/${encodeURIComponent(name)}/meta`, payload).then((r) => unwrap(r))
 
 export const listManifests = (): Promise<Record<string, string[]>> =>
-  api.get('/skills/manifests').then((r) => unwrap<Record<string, string[]>>(r.data))
+  api.get('/skills/manifests').then((r) => unwrap<Record<string, string[]>>(r))
 
 export const updateManifest = (tool: string, names: string[]): Promise<{ tool: string; names: string[] }> =>
   api.put('/skills/manifests', { tool, names }).then((r) => unwrap(r))
@@ -117,7 +117,7 @@ export interface SkillCandidate {
 }
 
 export const listSkillCandidates = (): Promise<{ total: number; items: SkillCandidate[] }> =>
-  api.get('/skills/candidates').then((r) => unwrap<{ total: number; items: SkillCandidate[] }>(r.data))
+  api.get('/skills/candidates').then((r) => unwrap<{ total: number; items: SkillCandidate[] }>(r))
 
 export const approveSkillCandidate = (resultId: number): Promise<{ name?: string; imported: boolean }> =>
   api.post(`/skills/candidates/${resultId}/approve`).then((r) => unwrap(r))

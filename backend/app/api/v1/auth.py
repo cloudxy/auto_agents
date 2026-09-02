@@ -150,18 +150,23 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
 
 
 # 角色 → 权限映射（前端按此控制菜单/按钮可见性，后端守卫为最终防线）
+# 权限单真相源（R5）：前端登录后从 /permissions 读取，不再硬编码
 _ROLE_PERMISSIONS = {
     "viewer": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
+        'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
     ],
     "operator": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
-        'menu:data', 'btn:create',
+        'menu:data', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
+        'btn:create', 'btn:skill:edit',
     ],
     "admin": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
-        'menu:users', 'menu:data', 'menu:settings', 'btn:create', 'btn:delete',
-        'btn:schedule', 'menu:ai', 'menu:logs', 'menu:llm', 'menu:newapi',
+        'menu:users', 'menu:data', 'menu:settings', 'menu:ai', 'menu:skills',
+        'menu:members', 'menu:usage', 'menu:platform-ops', 'menu:logs',
+        'menu:llm', 'menu:newapi',
+        'btn:create', 'btn:delete', 'btn:schedule', 'btn:skill:edit', 'btn:skill:admin',
     ],
 }
 

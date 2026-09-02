@@ -1,26 +1,39 @@
 /**
- * 权限控制 Hook - 用于菜单和按钮级权限控制（角色与后端 RBAC 对齐）
+ * 权限控制 Hook - 消费后端 /permissions 下发（R5 单真相源）
+ *
+ * 登录/刷新时经 refreshPermissions() 拉取当前角色权限码缓存到本模块
+ * （非 Zustand 持久化——权限随 token 生命周期，重登自动刷新）。
+ * 后端 _ROLE_PERMISSIONS 是唯一权威源（auth.py）。
  */
 import { useAuthStore } from '../store/useAuthStore'
 import { menuConfig } from '../config/menuConfig'
 import type { MenuItem } from '../config/menuConfig'
+import api from '../services/api'
 
-// 角色 → 权限码（与后端 /auth/permissions 的 _ROLE_PERMISSIONS 保持一致）
-const ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: ['menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 'menu:spiders.nodes', 'menu:users', 'menu:data', 'menu:settings', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage', 'menu:platform-ops', 'menu:llm', 'menu:newapi', 'menu:logs', 'btn:create', 'btn:delete', 'btn:schedule', 'btn:skill:edit', 'btn:skill:admin'],
-  operator: ['menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 'menu:spiders.nodes', 'menu:data', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage', 'menu:logs', 'btn:create', 'btn:skill:edit'],
-  viewer: ['menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 'menu:spiders.nodes', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage'],
+// 模块级缓存（登录后由 refreshPermissions 填充；未登录时为空数组=全只读）
+let cachedPermissions: string[] = []
+let lastRole: string | null = null
+
+export const refreshPermissions = async (): Promise<string[]> => {
+  try {
+    const resp = await api.get('/auth/permissions')
+    const body = resp as unknown as { data?: string[] }
+    cachedPermissions = Array.isArray(body?.data) ? body.data : []
+  } catch {
+    cachedPermissions = []
+  }
+  return cachedPermissions
 }
 
 export const usePermission = () => {
   const { user } = useAuthStore()
-  // 登录后后端返回 role；兼容旧会话（无 role 时回退 is_admin）
   const role = user?.role || (user?.is_admin ? 'admin' : 'viewer')
-  const permissions = ROLE_PERMISSIONS[role] || []
+
+  // 下发未就绪时兜底：菜单全部隐藏（安全侧），按钮全禁
+  const permissions = cachedPermissions
 
   const hasPermission = (code: string) => permissions.includes(code)
 
-  // 递归过滤菜单树
   const filterMenu = (menus: MenuItem[]): MenuItem[] => {
     return menus
       .filter(menu => !menu.permission || hasPermission(menu.permission))
@@ -28,13 +41,14 @@ export const usePermission = () => {
         ...menu,
         children: menu.children ? filterMenu(menu.children) : undefined
       }))
-      .filter(menu => !menu.children || menu.children.length > 0) // 移除没有子项的父菜单
+      .filter(menu => !menu.children || menu.children.length > 0)
   }
 
   return {
     hasPermission,
     role,
     isAdmin: role === 'admin',
+    permissions,
     filteredMenus: filterMenu(menuConfig),
   }
 }
