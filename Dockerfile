@@ -26,10 +26,10 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 
-# uv workspace 解析需要根配置 + 全部成员 manifest
+# uv workspace 解析需要根配置 + 全部成员 manifest（含 README：包构建 readme 字段引用）
 COPY pyproject.toml uv.lock README.md ./
 COPY backend/pyproject.toml backend/
-COPY scrapy/pyproject.toml scrapy/
+COPY scrapy/pyproject.toml scrapy/README.md scrapy/
 RUN uv sync --package auto-agents-backend --no-dev --frozen
 
 # 应用源码（platform_core 为源码包，经 run_backend.py 注入 sys.path）
