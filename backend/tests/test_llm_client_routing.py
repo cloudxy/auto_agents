@@ -29,7 +29,7 @@ def _patch_env(monkeypatch, resp_body: dict) -> dict:
     async def _record(**kwargs):
         env["usage"] = kwargs
 
-    async def _month(dim):
+    async def _month(dim, **kw):
         return 0
 
     monkeypatch.setattr("backend.services.ai_planner_service._resolve_llm_runtime_config", _resolve)

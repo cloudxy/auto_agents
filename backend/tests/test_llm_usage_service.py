@@ -33,10 +33,10 @@ async def test_record_usage_increments_daily_and_monthly():
     today = date.today()
     daily = _daily_key(today)
     fields = redis.hashes[daily]
-    assert fields["provider:9|gpt-4o-mini|total"] == "22"      # 15 + 7
-    assert fields["provider:9|gpt-4o-mini|prompt"] == "10"
-    assert fields["provider:9|gpt-4o-mini|completion"] == "5"
-    assert fields["provider:9|gpt-4o-mini|requests"] == "2"
+    assert fields["default|provider:9|gpt-4o-mini|total"] == "22"      # 15 + 7
+    assert fields["default|provider:9|gpt-4o-mini|prompt"] == "10"
+    assert fields["default|provider:9|gpt-4o-mini|completion"] == "5"
+    assert fields["default|provider:9|gpt-4o-mini|requests"] == "2"
 
     monthly = redis.hashes[_monthly_key(today)]
     assert monthly["provider:9|total"] == "22"                  # 预算读数口径
@@ -64,7 +64,7 @@ async def test_record_usage_swallows_redis_failure():
 @pytest.mark.asyncio
 async def test_get_month_used_returns_value_and_zero():
     redis = FakeRedis()
-    redis.hashes[_monthly_key(date.today())] = {"provider:9|total": "123"}
+    redis.hashes[_monthly_key(date.today())] = {"default|provider:9|total": "123"}
     with patch.object(usage_mod, "_IN_PYTEST", False), \
          patch.object(usage_mod, "get_async_redis", lambda: redis):
         assert await get_month_used("provider:9") == 123
@@ -135,8 +135,8 @@ class _FakeSessionCtx:
 async def test_flush_once_persists_rows_and_deletes_claimed_keys():
     redis = FakeRedis()
     redis.hashes[_daily_key(date(2026, 8, 31))] = {
-        "provider:9|gpt-a|total": "100",
-        "provider:9|gpt-a|requests": "2",
+        "default|provider:9|gpt-a|total": "100",
+        "default|provider:9|gpt-a|requests": "2",
     }
     svc = LlmUsageFlushService()
     svc._redis = redis
@@ -145,10 +145,14 @@ async def test_flush_once_persists_rows_and_deletes_claimed_keys():
     repo_cls = MagicMock(return_value=MagicMock(upsert_daily=upsert))
     # 自洽修复：该测试曾顺序耦合于其它测试初始化 DBManager（单跑必 KeyError DEFAULT）；
     # 显式 patch _engine 注入假引擎键，消除顺序依赖
+    async def _fake_default_tid(session):
+        return 1
+
     with patch.object(usage_mod, "LlmTokenUsageRepository", repo_cls), \
          patch.object(usage_mod, "AsyncSession", _FakeSessionCtx), \
          patch.object(usage_mod.LlmUsageFlushService, "_engine",
-                      staticmethod(lambda: object())):
+                      staticmethod(lambda: object())), \
+         patch("backend.services.background_session.default_tenant_id", _fake_default_tid):
         rows = await svc.flush_once()
 
     assert rows == 1
@@ -158,6 +162,7 @@ async def test_flush_once_persists_rows_and_deletes_claimed_keys():
     assert row["model"] == "gpt-a"
     assert row["stat_date"] == date(2026, 8, 31)
     assert row["total_tokens"] == 100 and row["request_count"] == 2
+    assert row["tenant_id"] == 1  # legacy 三段 → 默认租户解析
     # 认领键与原键都已删除（ack 语义）
     assert not redis.hashes
 

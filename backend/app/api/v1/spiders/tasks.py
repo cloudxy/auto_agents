@@ -62,7 +62,8 @@ async def run_spider(
 ) -> ApiResponse[SpiderTaskResponse]:
     """入队一次爬虫任务（params 为 JSON 字符串，如 '{"urls": ["https://..."]}'；可指定优先级）"""
     task = await service.enqueue(
-        spider_name=payload.spider_name, params=payload.params, priority=payload.priority
+        spider_name=payload.spider_name, params=payload.params,
+        priority=payload.priority, tenant_id=user.tenant_id,
     )
     await record_audit(session, user, "task.run", f"task#{task.id}",
                  {"spider": payload.spider_name, "priority": payload.priority})

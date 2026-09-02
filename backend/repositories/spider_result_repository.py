@@ -118,11 +118,14 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
         result = await self.session.execute(stmt)
         return [(str(d), int(n)) for d, n in result.all()]
 
-    async def find_by_content_hash(self, content_hash: str) -> Optional[SpiderResult]:
-        """按 content_hash 查重（增量去重用）"""
-        result = await self.session.execute(
-            select(SpiderResult).where(SpiderResult.content_hash == content_hash).limit(1)
-        )
+    async def find_by_content_hash(
+        self, content_hash: str, tenant_id: Optional[int] = None
+    ) -> Optional[SpiderResult]:
+        """按 (tenant_id, content_hash) 复合查重（增量去重，S1 接线：跨租户互不可见）"""
+        stmt = select(SpiderResult).where(SpiderResult.content_hash == content_hash)
+        if tenant_id is not None:
+            stmt = stmt.where(SpiderResult.tenant_id == tenant_id)
+        result = await self.session.execute(stmt.limit(1))
         return result.scalar_one_or_none()
 
     async def query_by_spider(

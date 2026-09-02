@@ -649,7 +649,7 @@ class SpiderTaskConsumer:
                 # 增量去重（B5）：task params.incremental=true 时跳过重复
                 params = task_params_cache.get(task_id, {})
                 if params.get("incremental") and content_hash:
-                    existing = await result_repo.find_by_content_hash(content_hash)
+                    existing = await result_repo.find_by_content_hash(content_hash, tenant_id=msg.get("tenant_id"))
                     if existing:
                         logger.debug(
                             f"增量去重：重复内容已跳过: hash={content_hash}, url={url_val}"
@@ -666,6 +666,7 @@ class SpiderTaskConsumer:
                     SpiderResult(
                         task_id=task_id,
                         spider_name=spider_name,
+                        tenant_id=msg.get("tenant_id"),
                         item_type=item_type,
                         url=url_val or None,
                         title=item.get("title"),
@@ -682,8 +683,13 @@ class SpiderTaskConsumer:
                 )
                 mirror_msgs.append((task_id, msg))
 
-            # ── 3. 批量插入 ──
+            # ── 3. 批量插入（含租户配额·结果存储检查）──
             if instances:
+                _tenants = {msg.get("tenant_id") for _, msg in mirror_msgs if msg.get("tenant_id")}
+                for tid in _tenants:
+                    from backend.services.quota_service import QuotaService
+
+                    await QuotaService(session).check_result_storage(tid)
                 session.add_all(instances)
 
             # ── 4. 批量累加 result_count ──

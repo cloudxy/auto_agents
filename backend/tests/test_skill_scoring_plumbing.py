@@ -90,7 +90,7 @@ async def test_llm_chat_usage_dim_records_under_custom_dim(monkeypatch):
     async def _fake_record(**kwargs):
         recorded.update(kwargs)
 
-    async def _fake_month(dim):
+    async def _fake_month(dim, **kw):
         return 0
 
     monkeypatch.setattr(
@@ -112,7 +112,7 @@ async def test_llm_chat_budget_override_independent(monkeypatch):
     """budget_override 独立熔断：评分维度超预算被拒，不影响默认预算路径"""
     import backend.services.ai_planner.llm_client as lc
 
-    async def _fake_month(dim):
+    async def _fake_month(dim, **kw):
         return 100 if dim == "skill_scoring" else 0
 
     async def _fake_record(**kwargs):

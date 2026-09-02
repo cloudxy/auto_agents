@@ -19,3 +19,7 @@ dependencies = [
 dev = [
     "pytest>=9.0.3",
 ]
+
+[tool.setuptools]
+# 平铺多包显式声明（防 flat-layout 误判）
+packages = ["spiders", "middlewares", "pipelines", "items", "extensions", "utils"]

@@ -71,8 +71,10 @@ def _parse_provider_id(dim: str) -> Optional[int]:
 
 # 记录一次 LLM 调用用量（实时 INCRBY；任何失败仅记日志，不影响主调用路径）。
 # dim 即 llm_client 的用量维度："provider:<id>" 或 "config"。
-async def record_usage(dim: str, model: str, prompt_tokens: int = 0, completion_tokens: int = 0, total_tokens: int = 0, failed: bool = False) -> None:
-    logger.debug(f"记录 LLM 用量: dim={dim}, model={model}, total={total_tokens}, failed={failed}")
+async def record_usage(dim: str, model: str, prompt_tokens: int = 0, completion_tokens: int = 0, total_tokens: int = 0, failed: bool = False, tenant_id: Optional[int] = None) -> None:
+    logger.debug(f"记录 LLM 用量: dim={dim}, model={model}, total={total_tokens}, failed={failed}, tenant={tenant_id}")
+    # S1 接线：Redis field 四段（tenant|dim|model|metric），旧三段数据 flush 时归默认租户
+    tkey = str(tenant_id) if tenant_id is not None else "default"
     if _IN_PYTEST:
         return
     total = int(total_tokens or 0)
@@ -86,31 +88,34 @@ async def record_usage(dim: str, model: str, prompt_tokens: int = 0, completion_
         daily = _daily_key(today)
         # LLM 调用频率低（AI 规划场景），直连 INCRBY 足够；非 pipeline 便于桩测
         if prompt:
-            await redis.hincrby(daily, f"{dim}|{model}|prompt", prompt)
+            await redis.hincrby(daily, f"{tkey}|{dim}|{model}|prompt", prompt)
         if completion:
-            await redis.hincrby(daily, f"{dim}|{model}|completion", completion)
+            await redis.hincrby(daily, f"{tkey}|{dim}|{model}|completion", completion)
         if total:
-            await redis.hincrby(daily, f"{dim}|{model}|total", total)
-            await redis.hincrby(daily, f"{dim}|{model}|requests", 1)
+            await redis.hincrby(daily, f"{tkey}|{dim}|{model}|total", total)
+            await redis.hincrby(daily, f"{tkey}|{dim}|{model}|requests", 1)
             # 月度汇总（预算读数口径）
             monthly = _monthly_key(today)
             await redis.hincrby(monthly, f"{dim}|total", total)
             await redis.expire(monthly, _MONTHLY_TTL)
         if failed:
-            await redis.hincrby(daily, f"{dim}|{model}|failed", 1)
+            await redis.hincrby(daily, f"{tkey}|{dim}|{model}|failed", 1)
     except Exception as e:  # noqa: BLE001 用量记录失败不影响 LLM 主路径
         logger.debug(f"LLM 用量 Redis 记录失败（忽略，预算回退内存读数）: dim={dim}, error={e}")
 
 
 # 读取当月累计 token 用量（预算熔断读数）；返回 None 表示 Redis 不可用/测试态，
 # 调用方（llm_client）应回退进程内存计数。
-async def get_month_used(dim: str) -> Optional[int]:
+async def get_month_used(dim: str, tenant_id: Optional[int] = None) -> Optional[int]:
     logger.debug(f"读取月度 LLM 用量: dim={dim}")
     if _IN_PYTEST:
         return None
     try:
         redis = get_async_redis()
-        raw = await redis.hget(_monthly_key(_today()), f"{dim}|total")
+        tkey = str(tenant_id) if tenant_id is not None else "default"
+        raw = await redis.hget(_monthly_key(_today()), f"{tkey}|{dim}|total")
+        if not raw and tkey != "default":
+            raw = await redis.hget(_monthly_key(_today()), f"{dim}|total")  # 旧三段兜底
         return int(raw) if raw else 0
     except Exception as e:  # noqa: BLE001
         logger.debug(f"LLM 月度用量读取失败（回退内存读数）: dim={dim}, error={e}")
@@ -212,7 +217,20 @@ class LlmUsageFlushService:
         rows = self._build_rows(fields, stat_date)
         row_count = 0
         if rows:
+            from backend.services.background_session import default_tenant_id
+
             async with AsyncSession(self._engine()) as session:
+                # tenant_key（数字串/default）→ tenant_id；default 按需查建
+                default_tid = None
+                for row in rows:
+                    if row.get("tenant_key") in (None, "default", "legacy"):
+                        default_tid = default_tid or await default_tenant_id(session)
+                        row["tenant_id"] = default_tid
+                    else:
+                        try:
+                            row["tenant_id"] = int(row["tenant_key"])
+                        except (TypeError, ValueError):
+                            row["tenant_id"] = default_tid or await default_tenant_id(session)
                 await LlmTokenUsageRepository(session).upsert_daily(rows)
                 await session.commit()
             row_count = len(rows)
@@ -224,17 +242,21 @@ class LlmUsageFlushService:
     @staticmethod
     def _build_rows(fields: dict, stat_date: date) -> list[dict]:
         """把 hash fields 解析为 upsert 行（坏字段值按 0 容错跳过）"""
-        grouped: dict[tuple[str, str], dict] = {}
+        grouped: dict[tuple[str, str, str], dict] = {}
         for field, value in fields.items():
             parts = field.split("|")
-            if len(parts) != 3:
+            if len(parts) == 4:
+                _tkey, dim, model, metric = parts
+            elif len(parts) == 3:
+                _tkey, dim, model, metric = "legacy", *parts  # 旧三段标记 legacy（flush 侧归默认租户）
+            else:
                 continue
-            dim, model, metric = parts
             if metric not in _METRICS:
                 continue
             row = grouped.setdefault(
-                (dim, model),
+                (_tkey, dim, model),
                 {
+                    "tenant_key": _tkey,
                     "provider_id": _parse_provider_id(dim),
                     "provider_name": dim,
                     "model": model,

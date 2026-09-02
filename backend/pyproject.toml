@@ -39,3 +39,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
 ]
+
+[tool.setuptools]
+# 平铺布局显式声明（temp/files/runtime 为运行期目录不入包）
+packages = ["app", "services", "repositories", "tasks", "utils", "alembic", "tests"]
