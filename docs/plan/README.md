@@ -5,7 +5,8 @@
 > 背景诊断：[`docs/architecture-audit-2026-08.md`](../architecture-audit-2026-08.md)（四轮审计 + §10 复核，本方案与其结论一脉相承并在其上修正）。
 > **实施状态：E0 + A(P1-P5) + B(M1-M4) + SaaS S1-S5 已全部落地（工单 01-43 全 resolved，至 `474089e`）。**
 > **下一轮整理：[`architecture-review-2026-09.md`](./architecture-review-2026-09.md)**——全栈架构评审与 7 个深化候选（含 SaaS 接线 P0 断点 / 权限单真相源 / 管理闭环缺口清单），**待审核**。
-> **第三批（进行中）：[`capability-hub-p6.md`](./capability-hub-p6.md)**——能力资产中心（skill/plugin/expert/expert_team 四类资产 + MCP 工具桥验证，ADR-0001），两轮拷问 12 决策已锁；与修复线（评审候选 1/2/3）并行，工单 44-59 见 `.scratch/platform-v3/`。
+> **第三批（进行中）：[`capability-hub-p6.md`](./capability-hub-p6.md)**——能力资产中心（skill/plugin/expert/expert_team 四类资产 + MCP 工具桥验证，ADR-0001），两轮拷问 12 决策已锁；与修复线（评审候选 1/2/3）**并行**；工单 44-63 见 `.scratch/platform-v3/`。
+> **D 线（同批）：[`db-design-pipeline.md`](./db-design-pipeline.md)**——数据库设计流水线（AI 产出目标态 / 工具产出迁移路径与行为判决，ADR-0002；行为验证环复用 MYSQL_FIDELITY），工单 60-63。
 
 ---
 

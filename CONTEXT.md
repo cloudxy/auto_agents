@@ -17,6 +17,17 @@
 | **候选**（candidate） | 市场采集产出的待审条目（spider_results.source=marketplace），人工闸门（approve/reject）后转正式资产。 |
 | **适配器**（adapter） | 把资产分发到外部工具的安装脚本（capability-library/adapters/）：技能安装 / 插件安装 / 专家导出（如 `~/.claude/agents/*.md`）。 |
 
+## 数据库设计域（D 线）
+
+| 术语 | 含义 |
+|---|---|
+| **数据契约 Spec**（db spec） | S0 产物：实体/关系/业务唯一键 + **访问模式**（Top-N 查询与频率）+ 容量预估 + 一致性边界 + 保留策略。索引由此推导，不由 LLM 脑补。 |
+| **访问模式**（access pattern） | 业务真实的查询清单与频率——索引设计的唯一合法输入（ADR-0002）。 |
+| **DBML IR** | S1 中间表示（*.dbml，holistics/dbml 标准，pydbml 解析）：可 lint / 可 diff / 可渲染 ER 图。 |
+| **行为验证环**（behavior verification loop） | S4：真实 MySQL 上逐迁移 upgrade/downgrade + EXPLAIN access type 断言 + 约束注入（唯一键/FK/NOT NULL 拒脏）。demo 与工业标准的分水岭。 |
+| **expand-contract** | 破坏性变更（drop/rename/类型收窄）的安全迁移法：先扩展（新旧并存）→ 迁数据 → 后收缩；lint 强制拆分。 |
+| **目标态 / 路径**（target state / path） | ADR-0002 分工：AI 产出目标态（Spec/DBML/ORM），确定性工具产出路径（autogenerate 迁移）与判决（EXPLAIN/约束注入）。 |
+
 ## 既有域（速览）
 
 | 术语 | 含义 |
