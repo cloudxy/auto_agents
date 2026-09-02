@@ -50,8 +50,14 @@ export const menuConfig: MenuItem[] = [
     permission: 'menu:ai'
   },
   {
+    key: '/capabilities',
+    label: '能力中心',
+    icon: React.createElement(FileTextOutlined),
+    permission: 'menu:skills'
+  },
+  {
     key: '/skills',
-    label: '技能中心',
+    label: '技能库',
     icon: React.createElement(FileTextOutlined),
     permission: 'menu:skills'
   },

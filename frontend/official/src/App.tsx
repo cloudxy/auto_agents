@@ -6,6 +6,7 @@ import Home from './pages/Home'
 import SkillsSquare from './pages/SkillsSquare'
 import Register from './pages/Register'
 import Pricing from './pages/Pricing'
+import Capabilities from './pages/Capabilities'
 import './App.css'
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/skills" element={<SkillsSquare />} />
+          <Route path="/capabilities" element={<Capabilities />} />
           <Route path="/register" element={<Register />} />
           <Route path="/pricing" element={<Pricing />} />
         </Routes>
