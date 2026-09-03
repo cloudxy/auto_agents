@@ -1,0 +1,24 @@
+{
+  "name": "@auto-agents/frontend-shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "admin/official 跨应用共享层（编译产物模式：main 指向 dist，CRA 直引零适配）",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "codegen:api": "openapi-typescript ../../openapi.json --output src/api/schema.d.ts"
+  },
+  "peerDependencies": {
+    "axios": "^1.15.0"
+  },
+  "devDependencies": {
+    "axios": "^1.15.0",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^4.9.5"
+  }
+}

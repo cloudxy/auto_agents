@@ -1,0 +1,17 @@
+{
+  "name": "auto-agents",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend/*"
+  ],
+  "scripts": {
+    "build:shared": "npm run build -w @auto-agents/frontend-shared",
+    "build:admin": "npm run build -w admin",
+    "build:official": "npm run build -w official",
+    "start:admin": "npm run start -w admin",
+    "start:official": "npm run start -w official",
+    "check-frontend": "bash scripts/check-frontend.sh",
+    "gen:api": "uv run python scripts/dump_openapi.py && npm run codegen:api -w @auto-agents/frontend-shared && npm run build -w @auto-agents/frontend-shared"
+  }
+}

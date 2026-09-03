@@ -49,3 +49,11 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      # 工单 68：前端工程门禁（规则随批次启用，当前 F-5/F-6）
+      - id: check-frontend
+        name: 前端工程门禁（F-5 互引禁令 / F-6 Envelope 单源）
+        entry: bash scripts/check-frontend.sh
+        language: system
+        pass_filenames: false
+        always_run: true
