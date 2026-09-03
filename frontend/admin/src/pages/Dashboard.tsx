@@ -8,7 +8,7 @@
  * - 质量概览：最近任务的质量评分分布（B1）
  */
 import React, { useEffect, useState } from 'react'
-import { Typography, Card, Row, Col, Statistic, Button, Empty, Spin, message, Space } from 'antd'
+import { Alert, Typography, Card, Row, Col, Statistic, Button, Empty, Spin, message, Space } from 'antd'
 import {
   CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, ThunderboltOutlined,
   SafetyCertificateOutlined, PlusOutlined, RobotOutlined,
@@ -19,7 +19,9 @@ import {
 } from 'recharts'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
-import api from '../services/api'
+import { fetchAdminStats, fetchQualityReport, fetchRecentCompletedTasks } from '../services/admin'
+import { apiErrorMessage } from '../utils/errorMessage'
+import { BRAND_TOKENS } from '@auto-agents/frontend-shared'
 
 const { Title } = Typography
 
@@ -61,16 +63,13 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     Promise.all([
-      api.get<Stats>('/admin/stats').then((res) => setStats(res.data)),
+      fetchAdminStats<Stats>().then((res) => setStats(res)),
       // 获取最近完成的任务列表，取第一个查质量报告
-      api.get<{ items: { id: number }[] }>('/spiders/tasks', { params: { status: 'completed', limit: 5 } })
-        .then((res) => {
-          const tasks = res.data?.items || []
-          setRecentTaskIds(tasks.map((t) => t.id))
-        })
+      fetchRecentCompletedTasks(5)
+        .then((ids) => setRecentTaskIds(ids))
         .catch(() => {}),
     ])
-      .catch(() => message.error('获取运行统计失败'))
+      .catch((e) => message.error(apiErrorMessage(e, '获取运行统计失败')))
       .finally(() => setLoading(false))
   }, [])
 
@@ -78,8 +77,8 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     if (recentTaskIds.length === 0) return
     const taskId = recentTaskIds[0]
-    api.get<QualityReport>(`/spiders/tasks/${taskId}/quality`)
-      .then((res) => setQualityData(res.data))
+    fetchQualityReport<QualityReport>(taskId)
+      .then((res) => setQualityData(res))
       .catch(() => {})
   }, [recentTaskIds])
 
@@ -101,6 +100,30 @@ const Dashboard: React.FC = () => {
 
   return (
     <div style={{ padding: 0 }}>
+      {/* UX2（工单 90）：新用户 onboarding——零任务时三步快速开始引导 */}
+      {!loading && stats && (stats.total_tasks ?? 0) === 0 && (
+        <Alert type="info" showIcon style={{ marginBottom: 16 }}
+               message="从这里开始你的第一次智能采集（三步）"
+               description={
+                 <ol style={{ margin: '8px 0 0', paddingLeft: 20, lineHeight: 2 }}>
+                   <li>
+                     配置 LLM 供应商（AI 规划的"大脑"）：前往
+                     <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/llm')}>LLM 配置</Button>
+                     添加 Key 并激活
+                   </li>
+                   <li>
+                     创建第一个采集任务：在
+                     <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/spiders/tasks')}>采集任务</Button>
+                     页选择爬虫并提交
+                   </li>
+                   <li>
+                     或直接体验 <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/ai')}>AI 采集规划</Button>
+                     ：粘贴链接，AI 自动生成方案、试采并上线
+                   </li>
+                 </ol>
+               }
+        />
+      )}
       {/* U1-4：行动入口（原第二套页头已移除——AdminLayout 已有全局页头与退出登录） */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }} align="middle">
         <Col flex="auto">
@@ -184,7 +207,7 @@ const Dashboard: React.FC = () => {
                       <YAxis allowDecimals={false} />
                       <Tooltip />
                       <Legend />
-                      <Line type="monotone" dataKey="tasks" name="任务数" stroke="#1677ff" strokeWidth={2} />
+                      <Line type="monotone" dataKey="tasks" name="任务数" stroke={BRAND_TOKENS.primary} strokeWidth={2} />
                       <Line type="monotone" dataKey="results" name="结果数" stroke="#52c41a" strokeWidth={2} />
                     </LineChart>
                   </ResponsiveContainer>
@@ -194,7 +217,7 @@ const Dashboard: React.FC = () => {
               </Card>
             </Col>
             <Col xs={24} lg={10}>
-              <Card title="爬虫采集结果 Top5">
+              <Card title="采集结果 Top5">
                 {(stats?.top_spiders || []).length ? (
                   <ResponsiveContainer width="100%" height={280}>
                     <BarChart
@@ -266,7 +289,7 @@ const Dashboard: React.FC = () => {
                       <Tooltip />
                       <Bar dataKey="count" name="数据条数" barSize={36}>
                         <Cell fill="#52c41a" />
-                        <Cell fill="#1677ff" />
+                        <Cell fill={BRAND_TOKENS.primary} />
                         <Cell fill="#faad14" />
                         <Cell fill="#ff4d4f" />
                       </Bar>

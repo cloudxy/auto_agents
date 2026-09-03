@@ -2,8 +2,8 @@
  * 系统设置页面 - 管理网站基础信息
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Form, Input, Button, Card, message, Divider, Spin } from 'antd'
-import api from '../services/api'
+import { Tag, Form, Input, Button, Card, message, Divider, Spin } from 'antd'
+import { fetchSiteConfigs, fetchWebhookStatus, updateSiteConfig, type WebhookStatus } from '../services/settings'
 
 /** 表单值契约（与 initialValues 的字段一致） */
 interface SiteConfigValues {
@@ -15,12 +15,15 @@ const Settings: React.FC = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(true)
+  const [webhook, setWebhook] = useState<WebhookStatus | null>(null)
+
+  useEffect(() => {
+    fetchWebhookStatus().then(setWebhook).catch(() => setWebhook(null))
+  }, [])
 
   const fetchConfigs = useCallback(async () => {
     try {
-      // /configs/ 信封 data 为 {key: value} 字典（ADR-001），需解包 data
-      const res = await api.get<Record<string, unknown>>('/configs/')
-      form.setFieldsValue(res.data || {})
+      form.setFieldsValue(await fetchSiteConfigs())
     } catch (error) {
       message.error('获取配置失败')
     } finally {
@@ -38,7 +41,7 @@ const Settings: React.FC = () => {
       // 遍历所有字段进行更新（entries 避免字符串索引触发 TS7053）
       await Promise.all(
         Object.entries(values).map(([key, value]) =>
-          api.put(`/configs/${key}`, { value })
+          updateSiteConfig(key, value)
         )
       )
       message.success('系统配置已成功保存')
@@ -93,6 +96,27 @@ const Settings: React.FC = () => {
             </Button>
           </Form.Item>
         </Form>
+      </Card>
+
+      <Card title="Webhook 与通知渠道状态" style={{ marginTop: 16 }}>
+        {webhook === null ? <Spin /> : (
+          <>
+            <p style={{ margin: '6px 0' }}>
+              签名密钥：<Tag color={webhook.secret_configured ? 'success' : 'error'}>
+                {webhook.secret_configured ? '已配置' : '未配置（外部回调可被伪造）'}
+              </Tag>
+              {webhook.env_override_active && <Tag color="blue">env 覆盖生效</Tag>}
+            </p>
+            <p style={{ margin: '6px 0', color: 'rgba(0,0,0,0.45)', fontSize: 13 }}>
+              密钥仅经 config/&lt;env&gt;/.env 注入（AUTO_AGENTS_WEBHOOK__SECRET_KEY），刻意不入库——此处只展示配置态。
+            </p>
+            <p style={{ margin: '6px 0' }}>
+              通知渠道：Webhook <Tag color={webhook.notify_webhook_url_configured ? 'success' : 'default'}>{webhook.notify_webhook_url_configured ? '已配置' : '未配置'}</Tag>
+              钉钉 <Tag color={webhook.dingtalk_configured ? 'success' : 'default'}>{webhook.dingtalk_configured ? '已配置' : '未配置'}</Tag>
+              企业微信 <Tag color={webhook.wechat_work_configured ? 'success' : 'default'}>{webhook.wechat_work_configured ? '已配置' : '未配置'}</Tag>
+            </p>
+          </>
+        )}
       </Card>
     </div>
   )

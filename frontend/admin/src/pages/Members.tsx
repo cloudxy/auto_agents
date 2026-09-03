@@ -3,44 +3,28 @@
  * Users 页归平台超管（页面分叉）——本页是租户视角。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import {
+import { Card,
   Alert, Button, Form, Input, Modal, Select, Space, Switch,
   Table, Tag, Typography, message,
 } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 
-import api, { unwrap } from '../services/api'
+import {
+  createMember, listMemberAudit, listMembers, patchMember, resetMemberPassword,
+  type MemberAuditRow, type MemberRow,
+} from '../services/members'
+import { apiErrorMessage } from '../utils/errorMessage'
 
 const { Text } = Typography
-
-interface MemberRow {
-  id: number
-  username: string
-  email: string
-  tenant_role: string
-  is_active: boolean
-  created_at?: string | null
-}
 
 const ROLE_COLORS: Record<string, string> = {
   owner: 'gold', admin: 'green', operator: 'blue', viewer: 'default',
 }
 
-const listMembers = (): Promise<MemberRow[]> =>
-  api.get('/members').then((r) => unwrap<MemberRow[]>(r))
-
-const createMember = (payload: Record<string, unknown>): Promise<MemberRow> =>
-  api.post('/members', payload).then((r) => unwrap<MemberRow>(r))
-
-const patchMember = (id: number, payload: Record<string, unknown>): Promise<MemberRow> =>
-  api.patch(`/members/${id}`, payload).then((r) => unwrap<MemberRow>(r))
-
-const resetPassword = (id: number, newPassword: string): Promise<void> =>
-  api.post(`/members/${id}/reset-password`, { new_password: newPassword }).then(() => undefined)
-
 const Members: React.FC = () => {
   const [rows, setRows] = useState<MemberRow[]>([])
+  const [audit, setAudit] = useState<MemberAuditRow[]>([])
   const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [form] = Form.useForm()
@@ -52,10 +36,11 @@ const Members: React.FC = () => {
     try {
       setRows(await listMembers())
     } catch (e) {
-      message.error(`成员加载失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '成员加载失败'))
     } finally {
       setLoading(false)
     }
+    try { setAudit(await listMemberAudit()) } catch { /* 审计非关键路径 */ }
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -75,7 +60,7 @@ const Members: React.FC = () => {
       message.success(active ? `已启用 ${row.username}` : `已禁用 ${row.username}`)
       load()
     } catch (e) {
-      message.error(`操作失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '操作失败'))
     }
   }
 
@@ -85,14 +70,14 @@ const Members: React.FC = () => {
       message.success(`${row.username} → ${role}`)
       load()
     } catch (e) {
-      message.error(`角色变更失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '角色变更失败'))
     }
   }
 
   const onReset = async () => {
     if (!resetTarget) return
     const values = await resetForm.validateFields()
-    await resetPassword(resetTarget.id, values.new_password)
+    await resetMemberPassword(resetTarget.id, values.new_password)
     message.success(`${resetTarget.username} 密码已重置`)
     setResetTarget(null)
   }
@@ -171,6 +156,21 @@ const Members: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+      <Card title="成员操作审计（本租户，近 50 条）" style={{ marginTop: 16 }}>
+        <Table<MemberAuditRow>
+          rowKey="id"
+          size="small"
+          pagination={{ pageSize: 10 }}
+          dataSource={audit}
+          columns={[
+            { title: '时间', dataIndex: 'created_at', width: 180,
+              render: (v: string | null) => (v ? new Date(v).toLocaleString('zh-CN') : '-') },
+            { title: '操作人', dataIndex: 'actor_name', width: 120 },
+            { title: '动作', dataIndex: 'action', width: 150, render: (v: string) => <Tag>{v}</Tag> },
+            { title: '对象', dataIndex: 'target', ellipsis: true },
+          ]}
+        />
+      </Card>
     </div>
   )
 }

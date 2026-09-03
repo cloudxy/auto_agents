@@ -6,28 +6,10 @@ import { Layout, Menu, Typography, Button } from 'antd'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
 import { usePermission } from '../hooks/usePermission'
+import { pageTitleFor } from '../config/menuConfig'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
-
-// 路由 → 顶部标题映射
-const PAGE_TITLES: Record<string, string> = {
-  '/dashboard': '控制面板',
-  '/settings': '系统设置',
-  '/spiders/tasks': '任务管理',
-  '/spiders/logs': '运行日志',
-  '/spiders/nodes': '节点监控',
-  '/ai': 'AI 采集',
-  '/skills': '技能中心',
-  '/members': '成员管理',
-  '/usage': '用量看板',
-  '/platform-ops': '平台运营台',
-  '/llm': 'LLM 配置',
-  '/newapi': '中转站管控',
-  '/logs': '日志中心',
-  '/users': '用户管理',
-  '/data': '数据中心',
-}
 
 const AdminLayout: React.FC = () => {
   const navigate = useNavigate()
@@ -63,7 +45,7 @@ const AdminLayout: React.FC = () => {
       <Layout>
         <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 1px 4px rgba(0,21,41,0.08)' }}>
           <div style={{ fontSize: '18px', fontWeight: 500 }}>
-            {PAGE_TITLES[location.pathname] || '后台管理'}
+            {pageTitleFor(location.pathname)}
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <span style={{ marginRight: '16px' }}>欢迎回来，<strong>{user?.username || '用户'}</strong></span>

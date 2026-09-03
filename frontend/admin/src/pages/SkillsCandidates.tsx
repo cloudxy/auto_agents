@@ -8,6 +8,7 @@ import {
   approveSkillCandidate, listSkillCandidates, rejectSkillCandidate,
   type SkillCandidate,
 } from '../services/skills'
+import { apiErrorMessage } from '../utils/errorMessage'
 
 const { Text } = Typography
 
@@ -24,7 +25,7 @@ const SkillsCandidates: React.FC<{ canAdmin?: boolean }> = ({ canAdmin = false }
       setItems(data.items)
       setTotal(data.total)
     } catch (e) {
-      message.error(`候选加载失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '候选加载失败'))
     } finally {
       setLoading(false)
     }
@@ -39,7 +40,7 @@ const SkillsCandidates: React.FC<{ canAdmin?: boolean }> = ({ canAdmin = false }
       message.success(`已转正：${result.name ?? ''}（进入评分队列）`)
       load()
     } catch (e) {
-      message.error(`转正失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '转正失败'))
     } finally {
       setActing(null)
     }
@@ -52,7 +53,7 @@ const SkillsCandidates: React.FC<{ canAdmin?: boolean }> = ({ canAdmin = false }
       message.success(result.blacklisted ? `已拒绝（同名技能 ${result.blacklisted} 已置 blacklist）` : '已拒绝')
       load()
     } catch (e) {
-      message.error(`拒绝失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '拒绝失败'))
     } finally {
       setActing(null)
     }

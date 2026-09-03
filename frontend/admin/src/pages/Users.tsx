@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from 'react'
 import { Card, Table, Tag, message, Space, Avatar } from 'antd'
 import { UserOutlined } from '@ant-design/icons'
-import api from '../services/api'
+import { fetchUsersPage } from '../services/admin'
 
 interface UserItem {
   id: number
@@ -26,12 +26,9 @@ const Users: React.FC = () => {
   const loadUsers = async (p: number) => {
     setLoading(true)
     try {
-      // /admin/users 带 ApiResponse 信封，需解包 data
-      const res = await api.get<{ items: UserItem[]; total: number }>('/admin/users', {
-        params: { skip: (p - 1) * pageSize, limit: pageSize }
-      })
-      setUsers(res.data?.items || [])
-      setTotal(res.data?.total || 0)
+      const res = await fetchUsersPage<UserItem>({ skip: (p - 1) * pageSize, limit: pageSize })
+      setUsers(res.items || [])
+      setTotal(res.total || 0)
     } catch (error) {
       message.error('获取用户列表失败')
     } finally {

@@ -18,6 +18,7 @@ import type { AiPlan, AiPlanTestHistory, FlowConfig } from '../services/ai'
 import { fetchTaskLogs, runSpider } from '../services/spiders'
 import type { Task } from '../components/spider/types'
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
+import { useQuery } from '@tanstack/react-query'
 
 /** 表单草稿行（antd validateFields 返回 any，显式窄化以通过 noImplicitAny） */
 interface SelectorRowDraft { name?: unknown; type?: string; expr?: unknown }
@@ -69,33 +70,36 @@ export const useAiPlanFlow = (): AiPlanFlow => {
   const history: AiPlanTestHistory[] = plan?.plan_json?.test_history || []
   const latestPassed = isLatestTestPassed(plan)
 
-  // ---------------- 计划状态轮询（2.5s，仅进行中）----------------
+  // ---------------- 计划状态轮询（工单 78：react-query 托管，2.5s，仅进行中）----------------
+  const { data: freshPlan } = useQuery({
+    queryKey: ['ai-plan-poll', plan?.id],
+    queryFn: () => fetchAiPlan(plan!.id),
+    enabled: !!plan && isPlanPolling(plan),
+    refetchInterval: 2500,
+  })
   useEffect(() => {
-    if (!plan || !isPlanPolling(plan)) return
-    const planId = plan.id
-    const timer = setInterval(async () => {
-      try {
-        const fresh = await fetchAiPlan(planId)
-        setPlan(fresh)
-        if (fresh.status === 'testing' || fresh.status === 'registered') {
-          setStep((s) => (s < 2 ? 2 : s))
-        }
-      } catch (error) { /* 轮询静默失败 */ }
-    }, 2500)
-    return () => clearInterval(timer)
-  }, [plan])
+    if (!freshPlan) return
+    setPlan(freshPlan)
+    if (freshPlan.status === 'testing' || freshPlan.status === 'registered') {
+      setStep((s) => (s < 2 ? 2 : s))
+    }
+  }, [freshPlan])
 
-  // ---------------- 调整方案试采任务状态轮询（3s，仅进行中）----------------
+  // ---------------- 调整方案试采任务状态轮询（react-query 托管，3s，仅进行中）----------------
+  const pollingTaskId = customTask && (customTask.status === 'pending' || customTask.status === 'running') ? customTask.id : 0
+  const { data: polledTaskStatus } = useQuery({
+    queryKey: ['ai-plan-task-poll', pollingTaskId],
+    queryFn: () => fetchTaskLogs(pollingTaskId, 5),
+    enabled: pollingTaskId > 0,
+    refetchInterval: (query) => {
+      const s = query.state.data?.status
+      return s === 'pending' || s === 'running' ? 3000 : false
+    },
+  })
   useEffect(() => {
-    if (!customTask || !(customTask.status === 'pending' || customTask.status === 'running')) return
-    const taskId = customTask.id
-    const timer = setInterval(() => {
-      fetchTaskLogs(taskId, 5)
-        .then((data) => setCustomTask((prev) => (prev && prev.id === taskId ? { ...prev, status: data.status } : prev)))
-        .catch(() => { /* 静默 */ })
-    }, 3000)
-    return () => clearInterval(timer)
-  }, [customTask])
+    if (!polledTaskStatus) return
+    setCustomTask((prev) => (prev && prev.id === pollingTaskId ? { ...prev, status: polledTaskStatus.status } : prev))
+  }, [polledTaskStatus, pollingTaskId])
 
   // ---------------- 服务端 flow 变化时同步本地编辑表单 ----------------
   useEffect(() => {
