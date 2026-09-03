@@ -21,6 +21,8 @@ export interface MenuItem {
   label: string
   icon?: React.ReactNode
   permission?: string // 访问该菜单所需的权限代码
+  /** 租户视角页：端点要求租户 owner/admin（纯平台超管 tenant_id=NULL 不可入，菜单隐藏） */
+  tenantOnly?: boolean
   children?: MenuItem[]
 }
 
@@ -34,7 +36,7 @@ export const menuConfig: MenuItem[] = [
     icon: React.createElement(DashboardOutlined),
     children: [
       { key: '/dashboard', label: '仪表盘', permission: 'menu:dashboard' },
-      { key: '/usage', label: '用量看板', permission: 'menu:usage' },
+      { key: '/usage', label: '用量看板', permission: 'menu:usage', tenantOnly: true },
     ],
   },
   {
@@ -62,7 +64,7 @@ export const menuConfig: MenuItem[] = [
     label: '运营管理',
     icon: React.createElement(TeamOutlined),
     children: [
-      { key: '/members', label: '成员管理', permission: 'menu:members' },
+      { key: '/members', label: '成员管理', permission: 'menu:members', tenantOnly: true },
       { key: '/platform-ops', label: '平台运营台', permission: 'menu:platform-ops' },
       { key: '/logs', label: '日志中心', permission: 'menu:logs' },
     ],
