@@ -200,7 +200,7 @@ class TestCrud:
     async def test_create_with_api_key_without_master_key_rejected(self, monkeypatch):
         """未配置主密钥 + 带 api_key：拒绝且不落库"""
         monkeypatch.delenv("LLM_ENCRYPTION_KEY", raising=False)
-        with patch("backend.services.llm_provider_service.settings", _fake_settings()):
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings()):
             svc = _service()
             payload = LlmProviderCreate(name="p", base_url="https://llm.test/v1",
                                         model="m", api_key=_PLAIN_KEY)
