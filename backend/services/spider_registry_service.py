@@ -321,7 +321,7 @@ class SpiderRegistryService:
         items = await repo.list_all()
         return [TaskTemplateResponse.model_validate(item) for item in items]
 
-    async def create_template(self, payload: dict, created_by: int | None = None) -> TaskTemplateResponse:
+    async def create_template(self, payload: dict, created_by: str | None = None) -> TaskTemplateResponse:
         """创建任务模板（名称唯一性校验）"""
         logger.info(f"创建任务模板: name={payload.get('name')}")
         repo = TaskTemplateRepository(self.session)

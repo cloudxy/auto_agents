@@ -14,10 +14,10 @@ from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
-from platform_core.models.mixins import TenantMixin
+from platform_core.models.mixins import AuditMixin, SoftDeleteMixin, TenantMixin
 
 
-class AiPlan(TenantMixin, Base):
+class AiPlan(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
     """AI 采集计划表（LLM 规划状态机，可查询进度）"""
 
     __tablename__ = "ai_plans"
@@ -34,7 +34,6 @@ class AiPlan(TenantMixin, Base):
     iteration_count = Column(Integer, nullable=False, default=0, server_default="0",
                              comment="自动修复迭代次数（上限 LLM.MAX_ITERATIONS）")
     error_message = Column(Text, nullable=True, comment="失败原因（failed 状态可追溯）")
-    created_by = Column(String(64), nullable=True, comment="创建人用户名")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(),
                         comment="更新时间")

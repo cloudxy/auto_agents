@@ -7,14 +7,15 @@
 
 tenant_id 预留恒 NULL（D3：平台级统一技能库，进 S1 豁免白名单）。
 """
-from sqlalchemy import Column, DateTime, Integer, Numeric, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
+from platform_core.models.mixins import AuditMixin, SoftDeleteMixin
 
 
-class Skill(Base):
+class Skill(SoftDeleteMixin, AuditMixin, Base):
     """技能主表（治理真相源）"""
 
     __tablename__ = "skills"
@@ -58,7 +59,8 @@ class SkillReview(Base):
     __tablename__ = "skill_reviews"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="主键")
-    skill_id = Column(Integer, nullable=False, index=True, comment="技能 ID")
+    skill_id = Column(Integer, ForeignKey("skills.id"), nullable=False, index=True,
+                       comment="技能 ID")
     reviewer_type = Column(String(8), nullable=False, comment="ai/human")
     reviewer = Column(String(64), nullable=False, comment="模型名 / 用户名")
     score = Column(Numeric(3, 1), comment="综合分")

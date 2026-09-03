@@ -14,10 +14,10 @@ from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, 
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
-from platform_core.models.mixins import TenantMixin
+from platform_core.models.mixins import AuditMixin, SoftDeleteMixin, TenantMixin
 
 
-class LlmProvider(TenantMixin, Base):
+class LlmProvider(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
     """LLM 供应商表（OpenAI 兼容协议为主，provider_type 预留扩展）"""
 
     __tablename__ = "llm_providers"

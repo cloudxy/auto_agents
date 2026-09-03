@@ -3,16 +3,17 @@
 统一目录层（capability_assets）+ 类型化细节表（plugin/expert/team）。
 skills 三表保留为 skill 类型细节（D10），治理字段经 asset 层收口。
 """
-from sqlalchemy import Column, DateTime, Integer, Numeric, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
+from platform_core.models.mixins import AuditMixin, SoftDeleteMixin
 
 ASSET_TYPES = ("skill", "plugin", "expert", "expert_team")
 
 
-class CapabilityAsset(Base):
+class CapabilityAsset(SoftDeleteMixin, AuditMixin, Base):
     """统一资产目录（治理真相源，四类共用；平台级公共资产 tenant_id 恒 NULL）"""
 
     __tablename__ = "capability_assets"
@@ -54,7 +55,8 @@ class CapabilityPlugin(Base):
     __tablename__ = "capability_plugins"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    asset_id = Column(Integer, nullable=False, index=True)
+    asset_id = Column(Integer, ForeignKey("capability_assets.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
     version = Column(String(32), default="")
     author = Column(String(128), default="")
     license = Column(String(64), default="")
@@ -77,7 +79,8 @@ class CapabilityExpert(Base):
     __tablename__ = "capability_experts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    asset_id = Column(Integer, nullable=False, index=True)
+    asset_id = Column(Integer, ForeignKey("capability_assets.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
     persona_md = Column(Text, comment="正文 = system prompt")
     tools = Column(JSON, comment="frontmatter tools 数组")
     bundled_skills = Column(JSON, comment="捆绑技能资产名")
@@ -93,7 +96,8 @@ class CapabilityTeam(Base):
     __tablename__ = "capability_teams"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    asset_id = Column(Integer, nullable=False, index=True)
+    asset_id = Column(Integer, ForeignKey("capability_assets.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
     leader_expert = Column(String(128), comment="团长专家资产名")
     members = Column(JSON, comment="成员专家资产名数组")
     workflow_md = Column(Text, comment="协作流程描述")

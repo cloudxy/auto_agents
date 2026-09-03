@@ -2,9 +2,10 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, UniqueConstraint
 from sqlalchemy.sql import func
 from platform_core.models.base import Base
+from platform_core.models.mixins import SoftDeleteMixin
 
 
-class User(Base):
+class User(SoftDeleteMixin, Base):
     """用户表（S1 租户化：tenant_id/tenant_role/is_platform_admin；唯一改 (tenant_id, username)）"""
     __tablename__ = "users"
     __table_args__ = (

@@ -1,11 +1,15 @@
 """爬虫任务模型"""
-from sqlalchemy import Column, Integer, String, DateTime, Text, Enum
+from sqlalchemy import Column, Integer, String, DateTime, Text, Enum, Index
 from sqlalchemy.sql import func
 from .base import Base
-from .mixins import TenantMixin
+from .mixins import AuditMixin, SoftDeleteMixin, TenantMixin
 
-class SpiderTask(TenantMixin, Base):
+
+class SpiderTask(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
     __tablename__ = "spider_tasks"
+    __table_args__ = (
+        Index("ix_spider_tasks_tenant_status", "tenant_id", "status"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     spider_name = Column(String(100), nullable=False, index=True)
