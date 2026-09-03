@@ -94,3 +94,30 @@ def test_model_test_writes_health_states(db_client, db_engine, db_session, monke
     _patch_execute(monkeypatch, error=ProtocolError("网络错误: read timeout"))
     db_client.post(f"/api/v1/llm/providers/{pid}/models/m-a/test")
     assert asyncio.run(_status("m-a"))[0] == "degraded"
+
+
+def test_model_test_unsaved_model_one_shot(db_client, db_engine, monkeypatch):
+    """导入新增的未落库模型：测试不 404，一次性结果即回（保存后才持久化）"""
+    import backend.services.llm_provider_service as svc_mod
+    from backend.services.llm_protocol import ProtocolError
+
+    provider_id = _setup(db_client)
+
+    async def _ok(client, method, url, headers, json_payload=None):
+        return {"choices": [{"message": {"content": "pong"}}]}
+
+    async def _unauth(client, method, url, headers, json_payload=None):
+        raise ProtocolError("HTTP 401 Unauthorized")
+
+    # 未保存模型 → 一次性 healthy
+    monkeypatch.setattr(svc_mod, "execute_json", _ok)
+    resp = db_client.post(f"/api/v1/llm/providers/{provider_id}/models/ghost-model/test")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["ok"] is True and data["model"] == "ghost-model" and data["health_status"] == "healthy"
+
+    # 一次性 down（401 语义）也不落库、不 404
+    monkeypatch.setattr(svc_mod, "execute_json", _unauth)
+    resp2 = db_client.post(f"/api/v1/llm/providers/{provider_id}/models/ghost-model/test")
+    assert resp2.status_code == 200
+    assert resp2.json()["data"]["health_status"] == "down"

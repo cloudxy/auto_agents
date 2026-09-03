@@ -275,7 +275,7 @@ class LlmProviderService:
         }
 
     async def test_model(self, provider_id: int, model_id: str) -> dict:
-        """单模型 1-token 测试并落健康态：200→healthy / 401·403→down / 其余→degraded"""
+        """单模型 1-token 测试（落库行持久化健康态；未落库行一次性测试即回）：200→healthy / 401·403→down / 其余→degraded"""
         import time
 
         logger.info(f"模型连通测试 | provider={provider_id} model={model_id}")
@@ -288,8 +288,6 @@ class LlmProviderService:
                 LlmProviderModel.model_id == model_id,
             )
         )).scalar_one_or_none()
-        if row is None:
-            raise NotFoundException(resource=f"模型 {model_id}")
 
         api_key = self.decrypt_api_key(provider.api_key_encrypted)
         adapter = get_adapter(provider.provider_type or "openai_compatible")
@@ -308,10 +306,15 @@ class LlmProviderService:
             status = "down" if any(f"HTTP {code}" in str(exc) for code in (401, 403)) else "degraded"
         latency_ms = int((time.perf_counter() - started) * 1000)
 
-        row.health_status = status
-        row.last_latency_ms = latency_ms
-        row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        await self.session.flush()
+        if row is not None:
+            row.health_status = status
+            row.last_latency_ms = latency_ms
+            row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            await self.session.flush()
+        else:
+            # 未落库模型（导入新增的预览测试）：一次性测试，结果即回不落库——
+            # 保存（put_models）后再次测试才持久化健康态
+            logger.debug(f"模型未落库，一次性测试 | provider={provider_id} model={model_id}")
         return {"ok": ok, "latency_ms": latency_ms, "model": model_id, "error": error, "health_status": status}
 
     # ---------- B-M2-1 多模型（全量替换 + 默认冗余同步） ----------
