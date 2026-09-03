@@ -55,16 +55,36 @@ const ModelSetDrawer: React.FC<Props> = ({ provider, onClose, onSaved }) => {
     }
   }, [provider])
 
-  const importNewModels = () => {
-    if (!diff) return
+  const importNewModels = async () => {
+    if (!diff || !provider) return
+    const fresh = diff.new.filter((id) => !models.some((m) => m.model_id === id))
     setModels((prev) => [
       ...prev,
-      ...diff.new.filter((id) => !prev.some((m) => m.model_id === id)).map((model_id) => ({
+      ...fresh.map((model_id) => ({
         model_id, alias: '', model_tier: 'basic' as const, priority: 100,
         is_default: false, enabled: true, health_status: 'unknown' as const,
       })),
     ])
-    message.success(`已导入 ${diff.new.length} 个新模型（保存后生效）`)
+    message.success(`已导入 ${fresh.length} 个新模型，正在用供应商 API Key 自动连通测试…`)
+    // 供应商级 API Key 对全部模型生效（模型行不单独存 key）：导入后立即
+    // 逐个 1-token 实测，健康态即时呈现——key 是否配置正确一目了然
+    for (const model_id of fresh) {
+      try {
+        setRowTesting(model_id)
+        const res = await testLlmProviderModel(provider.id, model_id)
+        patchModel(model_id, {
+          health_status: res.health_status as ProviderModelRow['health_status'],
+          last_latency_ms: res.latency_ms,
+        })
+        if (!res.ok && /401|403|Unauthorized|api[_ ]?key/i.test(res.error || '')) {
+          message.warning(`${model_id}：鉴权失败（${res.error}）——请检查供应商 API Key`)
+        }
+      } catch (e) {
+        message.error(apiErrorMessage(e, `${model_id} 测试请求异常`))
+      } finally {
+        setRowTesting(null)
+      }
+    }
   }
 
   const patchModel = (modelId: string, patch: Partial<ProviderModelRow>) => {
@@ -121,7 +141,7 @@ const ModelSetDrawer: React.FC<Props> = ({ provider, onClose, onSaved }) => {
                message={
                  <Space wrap>
                    <span>新增 {diff.new.length} / 已有 {diff.existing.length} / 远端已消失 {diff.vanished.length}</span>
-                   {diff.new.length > 0 && <Button size="small" onClick={importNewModels}>导入新增</Button>}
+                   {diff.new.length > 0 && <Button size="small" onClick={importNewModels}>导入新增（自动测试）</Button>}
                    {diff.vanished.length > 0 && <Text type="warning">建议清理：{diff.vanished.join(', ')}</Text>}
                  </Space>
                } />
