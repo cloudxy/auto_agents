@@ -62,7 +62,10 @@ export const usePermission = () => {
 
   const filterMenu = (menus: MenuItem[]): MenuItem[] => {
     void revision  // 依赖 revision 触发 filterMenu 重算
+    // 租户视角页：无租户归属的纯平台超管不可入（端点 403），菜单隐藏
+    const tenantBound = user?.tenant_id != null
     return menus
+      .filter(menu => !menu.tenantOnly || tenantBound)
       .filter(menu => !menu.permission || hasPermission(menu.permission))
       .map(menu => ({
         ...menu,

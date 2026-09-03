@@ -81,7 +81,9 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
             "token_type": token_response.token_type,
             "username": token_response.username,
             "is_admin": token_response.is_admin,
-            "role": user_data.get("role", "operator")
+            "role": user_data.get("role", "operator"),
+            "tenant_id": user_data.get("tenant_id"),
+            "tenant_role": user_data.get("tenant_role"),
         },
         message="登录成功"
     )

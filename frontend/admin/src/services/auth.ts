@@ -15,6 +15,9 @@ export interface LoginResponse {
   username: string
   is_admin: boolean
   role?: 'admin' | 'operator' | 'viewer' | string
+  /** 租户维度（与 JWT 同源）：租户视角菜单可见性判定（NULL=纯平台超管） */
+  tenant_id?: number | null
+  tenant_role?: string | null
 }
 
 
