@@ -26,6 +26,7 @@ const Capabilities = React.lazy(() => import('./pages/Capabilities'))
 const PlatformOps = React.lazy(() => import('./pages/PlatformOps'))
 const Unauthorized = React.lazy(() => import('./pages/Unauthorized'))
 const NotFound = React.lazy(() => import('./pages/NotFound'))
+const RbacManagement = React.lazy(() => import('./pages/RbacManagement'))
 
 const PageLoading = (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 12, justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
@@ -75,6 +76,14 @@ function App() {
               <Route path="spiders/logs" element={<Page label="spider-logs"><SpiderLogs /></Page>} />
               <Route path="spiders/nodes" element={<Page label="nodes"><Nodes /></Page>} />
               <Route path="ai" element={<Page label="ai"><AiPlans /></Page>} />
+              <Route
+                path="rbac"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <Page label="rbac"><RbacManagement /></Page>
+                  </ProtectedRoute>
+                }
+              />
               {/* 能力资产单入口（工单 73）：技能 Tab 内嵌 Skills 组件，权限由其内部 usePermission 控制 */}
               <Route path="capabilities" element={<Page label="capabilities"><Capabilities /></Page>} />
               {/* 成员管理（SaaS S2）：租户内部事务，owner/admin 语义在页内守卫 */}

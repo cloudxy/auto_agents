@@ -13,6 +13,8 @@ export interface UserItem {
   tenant_id?: number | null
   tenant_name?: string | null
   tenant_role?: string | null
+  department_id?: number | null
+  department_name?: string | null
   is_platform_admin?: boolean
   created_at?: string | null
 }
@@ -29,6 +31,7 @@ export interface UserUpdatePayload {
   role?: string
   is_active?: boolean
   tenant_id?: number | null
+  department_id?: number | null
 }
 
 export const createUser = (payload: UserCreatePayload): Promise<UserItem> =>

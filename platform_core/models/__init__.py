@@ -37,6 +37,8 @@ from platform_core.models.workflow import (
 from platform_core.models.archive import ArchiveRecord
 from platform_core.models.i18n import I18nLocale, I18nTranslation
 from platform_core.models.system_cache import SystemCache
+from platform_core.models.role import Role
+from platform_core.models.department import Department
 
 __all__ = [
     "Base", "SpiderTask", "SpiderResult", "SpiderSchedule", "SpiderDefinition",
@@ -48,4 +50,5 @@ __all__ = [
     "Tag", "Tagging", "Attachment", "Notification", "ResourceVersion",
     "WorkflowDefinition", "WorkflowInstance", "WorkflowStep", "WorkflowTransition",
     "ArchiveRecord", "I18nLocale", "I18nTranslation", "SystemCache",
+    "Role", "Department",
 ]

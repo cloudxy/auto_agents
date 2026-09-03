@@ -32,7 +32,7 @@ def _service(users: list, total: int) -> UserService:
     第一次调用返回 (user, tenant_name) 行集，第二次返回 count 标量。"""
     from unittest.mock import MagicMock
 
-    rows = [(u, "默认租户" if getattr(u, "tenant_id", None) else None) for u in users]
+    rows = [(u, "默认租户" if getattr(u, "tenant_id", None) else None, None) for u in users]
     join_result = MagicMock()
     join_result.all = MagicMock(return_value=rows)
     count_result = MagicMock()

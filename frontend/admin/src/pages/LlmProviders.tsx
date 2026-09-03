@@ -5,7 +5,7 @@
  * components/llm/{ProviderWizardModal,ModelSetDrawer}。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Select,
+import { Switch, Select,
   Alert, Button, Card, message, Popconfirm, Space, Table, Tag, Tooltip, Typography,
 } from 'antd'
 import {
@@ -14,7 +14,7 @@ import {
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import {
-  activateLlmProvider, deleteLlmProvider, fetchActiveLlmProvider, fetchLlmProviders,
+  activateLlmProvider, deactivateLlmProvider, deleteLlmProvider, fetchActiveLlmProvider, fetchLlmProviders,
   getLlmProviderModels, getPlatformPresets, testLlmProvider,
   type LlmProvider, type LlmTestResult, type PlatformPreset, type ProviderModelRow,
 } from '../services/llm'
@@ -94,19 +94,6 @@ const LlmProviders: React.FC = () => {
   }
 
   // ---------------- 行操作 ----------------
-  const onActivate = async (row: LlmProvider) => {
-    try {
-      setActivatingId(row.id)
-      await activateLlmProvider(row.id)
-      message.success(`已激活供应商「${row.name}」`)
-      refreshAll()
-    } catch (error) {
-      message.error(apiErrorMessage(error, '激活失败'))
-    } finally {
-      setActivatingId(null)
-    }
-  }
-
   const onTest = async (row: LlmProvider) => {
     try {
       setTestingId(row.id)
@@ -160,8 +147,22 @@ const LlmProviders: React.FC = () => {
     },
     { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 80, render: (v: boolean) => (v ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>) },
     {
-      title: '激活', dataIndex: 'is_active', key: 'is_active', width: 100,
-      render: (v: boolean) => (v ? <Tag color="gold" icon={<CheckCircleOutlined />}>已激活</Tag> : <Text type="secondary">-</Text>),
+      title: '激活', dataIndex: 'is_active', key: 'is_active', width: 90,
+      render: (v: boolean, record: LlmProvider) => (canOperate ? (
+        <Switch
+          checked={v} checkedChildren="已激活" unCheckedChildren="未激活"
+          loading={activatingId === record.id}
+          onChange={async (checked) => {
+            try {
+              setActivatingId(record.id)
+              await (checked ? activateLlmProvider(record.id) : deactivateLlmProvider(record.id))
+              message.success(checked ? `已激活「${record.name}」` : `已取消激活「${record.name}」（运行时回退默认配置）`)
+              refreshAll()
+            } catch (e) { message.error(apiErrorMessage(e, checked ? '激活失败' : '取消激活失败')) }
+            finally { setActivatingId(null) }
+          }}
+        />
+      ) : (v ? <Tag color="gold" icon={<CheckCircleOutlined />}>已激活</Tag> : <Text type="secondary">-</Text>)),
     },
     { title: '备注', dataIndex: 'remark', key: 'remark', ellipsis: true, render: (v: string | null) => v || '-' },
     {
@@ -170,11 +171,6 @@ const LlmProviders: React.FC = () => {
         const res = testResults[record.id]
         return (
           <Space size={0} wrap>
-            {canOperate && (
-              <Button type="link" size="small" icon={<CheckCircleOutlined />}
-                      disabled={record.is_active} loading={activatingId === record.id}
-                      onClick={() => onActivate(record)}>激活</Button>
-            )}
             {canOperate && (
               <Button type="link" size="small" icon={<ThunderboltOutlined />}
                       loading={testingId === record.id} onClick={() => onTest(record)}>测试</Button>
@@ -238,7 +234,7 @@ const LlmProviders: React.FC = () => {
                 <Select size="small" style={{ width: 110 }} value={filterActive}
                         onChange={setFilterActive}
                         options={[
-                          { value: 'all', label: '激活位' },
+                          { value: 'all', label: '全部激活位' },
                           { value: 'active', label: '已激活' },
                           { value: 'inactive', label: '未激活' },
                         ]} />

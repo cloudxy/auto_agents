@@ -85,6 +85,10 @@ export const deleteLlmProvider = (id: number): Promise<unknown> =>
 export const activateLlmProvider = (id: number): Promise<unknown> =>
   api.put(`/llm/providers/${id}/activate`).then((res) => unwrap<unknown>(res))
 
+/** 取消激活（全部下线：运行时解析回退 yml/env 兜底；行保留可再激活） */
+export const deactivateLlmProvider = (id: number): Promise<LlmProvider> =>
+  api.put(`/llm/providers/${id}/deactivate`).then((r) => unwrap<LlmProvider>(r))
+
 /** 连通性测试（信封 data={ok, latency_ms, model, error}；可能较慢，单独放宽超时到 30s） */
 export const testLlmProvider = (id: number): Promise<LlmTestResult> =>
   api

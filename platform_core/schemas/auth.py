@@ -47,6 +47,8 @@ class UserResponse(BaseModel):
     tenant_id: Optional[int] = None
     tenant_name: Optional[str] = None  # 归属公司（JOIN tenants，平台超管为 NULL）
     tenant_role: Optional[str] = None
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None  # 所属部门（JOIN departments）
     is_platform_admin: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -65,11 +67,12 @@ class AdminUserCreateRequest(RequestBody):
 
 
 class AdminUserUpdateRequest(RequestBody):
-    """平台超管编辑账户：角色分配 / 启停 / 归属调整"""
+    """平台超管编辑账户：角色分配 / 启停 / 归属调整 / 部门挂接"""
 
     role: Optional[str] = Field(None, pattern="^(admin|operator|viewer)$")
     is_active: Optional[bool] = None
     tenant_id: Optional[int] = None
+    department_id: Optional[int] = None
 
 
 class UserListResponse(BaseModel):
