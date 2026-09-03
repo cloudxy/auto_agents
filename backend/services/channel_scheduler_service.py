@@ -40,6 +40,7 @@ from backend.services.newapi_api import (
 )
 from backend.services.notify_service import NotifyService
 from config import settings
+from backend.app.core.config_consts import (NEWAPI_ENABLED)
 from platform_core.logger import get_logger
 from platform_core.queues import distributed_lock
 
@@ -120,7 +121,7 @@ class ChannelSchedulerService:
         """启动调度循环（幂等；NEWAPI.ENABLED / SCHEDULER_ENABLED 分层开关，关闭时 log 一行）"""
         if self._running:
             return
-        if not settings.get("NEWAPI.ENABLED", False):
+        if not settings.get("NEWAPI.ENABLED", NEWAPI_ENABLED):
             logger.info("new-api 集成总开关关闭（NEWAPI.ENABLED=false），渠道调度器不启动")
             return
         if not settings.get("NEWAPI.SCHEDULER_ENABLED", False):
@@ -133,7 +134,9 @@ class ChannelSchedulerService:
                 "（.env 经 AUTO_AGENTS_NEWAPI__DB_DSN 注入）"
             )
             return
-        self._redis = aioredis.from_url(settings.REDIS.DEFAULT.URL, decode_responses=True)
+        from platform_core.redis_async import get_async_redis as _get_async_redis
+
+        self._redis = _get_async_redis()  # B3 归一门面
         # 独立 engine：直连 new-api 库（蓝本缺陷①规避：DSN 即真相），
         # 完全独立于主库 engine manager（platform_core.db），两侧连接互不共享
         self._engine = create_async_engine(dsn, pool_pre_ping=True, pool_recycle=1800)

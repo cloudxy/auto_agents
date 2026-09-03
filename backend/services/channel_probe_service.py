@@ -27,6 +27,7 @@ from backend.services.newapi_api import (
 )
 from backend.services.notify_service import NotifyService
 from config import settings
+from backend.app.core.config_consts import (NEWAPI_ENABLED)
 from platform_core.logger import get_logger
 from platform_core.queues import distributed_lock
 
@@ -288,13 +289,15 @@ class ChannelProbeService:
         """启动探针循环（幂等；NEWAPI.ENABLED / PROBE_ENABLED 分层开关，关闭时 log 一行）"""
         if self._running:
             return
-        if not settings.get("NEWAPI.ENABLED", False):
+        if not settings.get("NEWAPI.ENABLED", NEWAPI_ENABLED):
             logger.info("new-api 集成总开关关闭（NEWAPI.ENABLED=false），渠道探针不启动")
             return
         if not settings.get("NEWAPI.PROBE_ENABLED", False):
             logger.info("渠道真伪探针已禁用（NEWAPI.PROBE_ENABLED=false），不启动")
             return
-        self._redis = aioredis.from_url(settings.REDIS.DEFAULT.URL, decode_responses=True)
+        from platform_core.redis_async import get_async_redis as _get_async_redis
+
+        self._redis = _get_async_redis()  # B3 归一门面
         self._api = NewapiApiClient()
         self._running = True
         self._loop_task = asyncio.create_task(self._tick_loop(), name="newapi-channel-probe")

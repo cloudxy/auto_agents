@@ -25,6 +25,7 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
+from backend.app.core.config_consts import (TASKS_STALE_TASK_HOURS)
 from platform_core.db import get_manager
 from platform_core.logger import get_logger
 from platform_core.queues import (
@@ -155,9 +156,10 @@ class SpiderTaskConsumer:
         """启动两个消费循环（幂等：重复调用不叠加）"""
         if self._running:
             return
-        self._redis = aioredis.from_url(
-            settings.REDIS.DEFAULT.URL, decode_responses=True
-        )
+        # B3：归一异步 Redis 门面（共享连接池，键契约见 platform_core.queues）
+        from platform_core.redis_async import get_async_redis
+
+        self._redis = get_async_redis()
         await self._purge_legacy_active_keys()
         self._running = True
         self._loops = [
@@ -166,7 +168,7 @@ class SpiderTaskConsumer:
             asyncio.create_task(self._retry_loop(), name="spider-retry-scan"),
         ]
         # P0-1b：running 任务超时回收循环（STALE_TASK_HOURS=0 时关闭）
-        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", 6) or 0)
+        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", TASKS_STALE_TASK_HOURS) or 0)
         if stale_hours > 0:
             self._loops.append(
                 asyncio.create_task(self._recover_loop(), name="spider-stale-recover")
@@ -434,7 +436,7 @@ class SpiderTaskConsumer:
         信号。Redis 异常时保守跳过（member 视为存在，不误杀存活任务）。
         不做自动重试：坏站点/失效选择器会形成无限失败循环，交由用户重新运行。
         """
-        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", 6) or 0)
+        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", TASKS_STALE_TASK_HOURS) or 0)
         if stale_hours <= 0 or self._redis is None:
             return
         cutoff = datetime.now() - timedelta(hours=stale_hours)
@@ -469,7 +471,7 @@ class SpiderTaskConsumer:
         任务永久 pending——超过阈值且从未启动的任务重建消息重新入队；
         同一任务重投超过 _MAX_REQUEUE_ATTEMPTS 次仍无效则置 failed 闭环。
         """
-        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", 6) or 0)
+        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", TASKS_STALE_TASK_HOURS) or 0)
         if stale_hours <= 0 or self._redis is None:
             return
         cutoff = datetime.now() - timedelta(hours=stale_hours)

@@ -4,6 +4,7 @@
 专家团一期仅定义层（leader + members + workflow），执行引擎二期。
 """
 from pathlib import Path
+from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
 from typing import Optional
 
 import yaml
@@ -31,7 +32,7 @@ class ExpertService:
         from config import settings
 
         if root is None:
-            library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library")))
+            library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT)))
             root = library_root / "experts"
         root = Path(root)
 

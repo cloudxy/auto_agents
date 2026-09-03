@@ -10,6 +10,7 @@
 全部外呼 httpx 且 trust_env=False（3.2-A-8，防本机代理劫持）。
 """
 import hashlib
+from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
 import io
 import re
 import zipfile
@@ -232,7 +233,7 @@ class SkillImportService:
     ) -> Path:
         from config import settings
 
-        library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library")))
+        library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT)))
         skill_dir = library_root / "skills" / name
         if skill_dir.exists():
             raise ValidationException(message=f"目标目录已存在: {skill_dir}", field="url")
@@ -332,7 +333,7 @@ class SkillImportService:
     def _local_skill_md(self, row: Skill) -> Optional[str]:
         from config import settings
 
-        md = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library"))) / row.file_path / "SKILL.md"
+        md = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT))) / row.file_path / "SKILL.md"
         try:
             return md.read_text(encoding="utf-8") if md.exists() else None
         except OSError:

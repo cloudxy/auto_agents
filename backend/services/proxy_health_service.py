@@ -52,9 +52,10 @@ class ProxyHealthService:
         if not settings.get("PROXY_HEALTH.ENABLED", False):
             logger.info("代理健康管理已禁用（PROXY_HEALTH.ENABLED=false）")
             return
-        self._redis = aioredis.from_url(
-            settings.REDIS.DEFAULT.URL, decode_responses=True
-        )
+        # B3：归一异步 Redis 门面（共享连接池，键契约见 platform_core.queues）
+        from platform_core.redis_async import get_async_redis
+
+        self._redis = get_async_redis()
         self._running = True
         self._loop_task = asyncio.create_task(
             self._tick_loop(), name="proxy-health-checker"

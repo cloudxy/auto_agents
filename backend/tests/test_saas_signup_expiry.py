@@ -12,6 +12,21 @@ from platform_core.models.tenant import Tenant
 from platform_core.models.user import User
 
 
+
+import pytest
+from unittest.mock import AsyncMock
+
+
+@pytest.fixture(autouse=True)
+def _no_signup_rate_limit(monkeypatch):
+    """B1 限流与业务测试解耦：同 IP 连续 signup 用例会打满 5 次/15 分钟窗口（fail-closed 429）；
+    限流语义由 test_b1_rate_limiter.py 专项覆盖。"""
+    monkeypatch.setattr(
+        "backend.app.api.v1.tenant_signup.enforce_request_limit",
+        AsyncMock(return_value=None),
+    )
+
+
 def test_signup_creates_tenant_and_owner(db_client, db_engine, db_session):
     resp = db_client.post(
         "/api/v1/public/tenant/signup",

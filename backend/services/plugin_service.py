@@ -1,5 +1,6 @@
 """插件资产域服务（P6 C3）：plugin.json 解析 + 扫描入库 + CRUD + MCP 验证"""
 import json
+from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -32,7 +33,7 @@ class PluginService:
         from config import settings
 
         if root is None:
-            library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library")))
+            library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT)))
             root = library_root / "plugins"
         root = Path(root)
 

@@ -16,6 +16,7 @@ from platform_core.models.llm_token_usage import LlmTokenUsage
 from platform_core.models.spider_result import SpiderResult
 from platform_core.models.spider_task import SpiderTask
 from platform_core.models.tenant import Tenant
+from platform_core.redis_async import get_async_redis
 
 logger = get_logger("service.quota")
 
@@ -43,8 +44,27 @@ def quota_of(tenant: Tenant) -> dict:
     return merged
 
 
+# B4：计数缓存 TTL——结果回流逐行检查不再每行 COUNT 全表（60s 窗口内复用；
+# 配额语义容忍短窗滞后，Redis 故障自动回退 DB COUNT）
+_COUNT_CACHE_TTL = 60
+_QUOTA_COUNT_PREFIX = "quota:count:"
+
+
 class QuotaService:
     """配额检查点（session 注入；调用方在写入路径前置调用）"""
+
+    async def _cached_count(self, key: str, count_fn) -> int:
+        """Redis TTL 缓存的计数（B4）：命中免 COUNT；miss/故障回源 DB"""
+        try:
+            redis = get_async_redis()
+            cached = await redis.get(f"{_QUOTA_COUNT_PREFIX}{key}")
+            if cached is not None:
+                return int(cached)
+            value = int(await count_fn())
+            await redis.set(f"{_QUOTA_COUNT_PREFIX}{key}", value, ex=_COUNT_CACHE_TTL)
+            return value
+        except Exception:  # noqa: BLE001 Redis 故障回源 DB（配额不可因缓存故障失效）
+            return int(await count_fn())
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -61,12 +81,15 @@ class QuotaService:
         """任务入队前：本租户 running/pending 任务数 < task_concurrency"""
         tenant = await self._tenant(tenant_id)
         limit = int(quota_of(tenant)["task_concurrency"])
-        active = (await self.session.execute(
-            select(func.count()).select_from(SpiderTask).where(
-                SpiderTask.tenant_id == tenant_id,
-                SpiderTask.status.in_(("pending", "running")),
-            )
-        )).scalar_one()
+        async def _count_active() -> int:
+            return int((await self.session.execute(
+                select(func.count()).select_from(SpiderTask).where(
+                    SpiderTask.tenant_id == tenant_id,
+                    SpiderTask.status.in_(("pending", "running")),
+                )
+            )).scalar_one())
+
+        active = await self._cached_count(f"active_tasks:{tenant_id}", _count_active)
         if active >= limit:
             raise QuotaExceededException(
                 f"任务并发已达配额上限（{active}/{limit}）：请等待运行中任务完成，"
@@ -78,11 +101,14 @@ class QuotaService:
         """结果回流前：本租户 spider_results 行数 < result_storage"""
         tenant = await self._tenant(tenant_id)
         limit = int(quota_of(tenant)["result_storage"])
-        stored = (await self.session.execute(
-            select(func.count()).select_from(SpiderResult).where(
-                SpiderResult.tenant_id == tenant_id
-            )
-        )).scalar_one()
+        async def _count_results() -> int:
+            return int((await self.session.execute(
+                select(func.count()).select_from(SpiderResult).where(
+                    SpiderResult.tenant_id == tenant_id
+                )
+            )).scalar_one())
+
+        stored = await self._cached_count(f"results:{tenant_id}", _count_results)
         if stored >= limit:
             raise QuotaExceededException(
                 f"结果存储已达配额上限（{stored}/{limit}）：请清理历史结果，"
@@ -107,6 +133,31 @@ class QuotaService:
                 "或联系平台管理员提升套餐"
             )
         logger.debug(f"配额检查·LLM 月度 | tenant={tenant_id} {used}/{limit}")
+
+    async def usage_by_member(self, tenant_id: int) -> list[dict]:
+        """成员维度用量分摊（B6 工单 91）：spider_tasks 按 created_by 聚合
+
+        LLM token 用量暂无操作人维度（llm_token_usage 按 provider/model 聚合），
+        先落任务创建分摊；created_by 为 AuditMixin 用户名（NULL 归系统/调度触发）。
+        """
+        logger.debug(f"用量成员分摊 | tenant={tenant_id}")
+        rows = (await self.session.execute(
+            select(
+                SpiderTask.created_by.label("member"),
+                func.count().label("tasks"),
+                func.max(SpiderTask.created_at).label("last_active_at"),
+            ).where(
+                SpiderTask.tenant_id == tenant_id,
+            ).group_by(SpiderTask.created_by)
+        )).all()
+        return [
+            {
+                "member": r.member or "（系统/调度）",
+                "tasks": int(r.tasks),
+                "last_active_at": r.last_active_at.isoformat() if r.last_active_at else None,
+            }
+            for r in rows
+        ]
 
     async def usage_overview(self, tenant_id: int, year_month: str) -> dict:
         """用量看板数据（S3-2 消费）：三指标当前值 vs 配额 + 成员分摊"""

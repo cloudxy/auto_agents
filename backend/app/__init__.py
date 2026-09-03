@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
+from backend.app.core.config_consts import (NEWAPI_ENABLED)
 from platform_core.logger import get_logger
 
 # Webhook 签名密钥的默认占位符（config/default/webhook.yml）——已随仓库公开，
@@ -42,6 +43,30 @@ def _validate_runtime_secrets() -> None:
             "（Backend 与 Scrapy 两侧一致），"
             "生成命令：python -c \"import secrets; print(secrets.token_urlsafe(48))\""
         )
+
+    # B1（工单 76）：LLM 主密钥占位符/格式 fail-fast——密钥已配置但为占位符或非法
+    # Fernet 格式时拒绝启动（否则保存的 api_key 密文将不可解）；
+    # 空值 = yml/env 兜底模式（不落库加密），放行
+    import os as _os
+
+    llm_key = str(
+        _os.environ.get("LLM_ENCRYPTION_KEY")
+        or settings.get("LLM_ENCRYPTION_KEY", "")
+        or ""
+    ).strip()
+    if llm_key == _WEBHOOK_SECRET_PLACEHOLDER:
+        raise RuntimeError(
+            "LLM_ENCRYPTION_KEY 仍为默认占位符，拒绝启动。"
+            "生成命令：python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\""
+        )
+    if llm_key:
+        try:
+            from cryptography.fernet import Fernet as _F
+
+            _F(llm_key.encode("utf-8"))
+        except Exception as exc:  # noqa: BLE001 任何格式错误均属启动期拒绝范围
+            raise RuntimeError(f"LLM_ENCRYPTION_KEY 非法 Fernet 密钥，拒绝启动: {exc}")
 
 
 def create_app():
@@ -113,7 +138,7 @@ def create_app():
         # 失败仅告警不阻断启动（外部系统依赖故障不影响主平台可用性）
         newapi_scheduler = None
         newapi_probe = None
-        if settings.get("NEWAPI.ENABLED", False):
+        if settings.get("NEWAPI.ENABLED", NEWAPI_ENABLED):
             if settings.get("NEWAPI.SCHEDULER_ENABLED", False):
                 from backend.services.channel_scheduler_service import ChannelSchedulerService
 

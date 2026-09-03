@@ -88,6 +88,25 @@ SKILL_SCORER_LOCK: Final[str] = "skill:scorer:lock"
 SKILL_SCAN_LOCK: Final[str] = "skill:scan:lock"
 # 公开 API 按 IP 限流计数（INCR+EXPIRE 每分钟窗口，A-P4-1 第三道闸）
 SKILL_PUBLIC_RATE_PREFIX: Final[str] = "skill:public:rl:"
+# ── B1 限流键契约（backend/app/core/rate_limiter.py 策略表引用）──
+# 登录失败计数（按用户名，15 分钟窗口，达 5 次锁）
+LOGIN_FAIL_PREFIX: Final[str] = "login_fail:"
+# 注册尝试计数（按 IP，成功失败均计）
+REGISTER_ATTEMPT_PREFIX: Final[str] = "register_fail:"
+# 租户自助注册限流（按 IP，无鉴权写面 fail-closed）
+SIGNUP_RATE_PREFIX: Final[str] = "tenant:signup:rl:"
+# 配额检查计数缓存（B4：60s TTL，免逐行回流 COUNT 全表）
+QUOTA_COUNT_PREFIX: Final[str] = "quota:count:"
+# ── B3：LLM 用量与 new-api 渠道调度键契约（原散落字符串字面量收口）──
+# LLM token 用量：日明细 hash（30 天 TTL）/ 月汇总 hash（93 天 TTL）/ 聚合锁
+LLM_USAGE_DAILY_PREFIX: Final[str] = "llm:usage:d:"
+LLM_USAGE_MONTHLY_PREFIX: Final[str] = "llm:usage:m:"
+LLM_USAGE_FLUSH_LOCK: Final[str] = "llm:usage:flush:lock"
+# new-api 渠道调度：渠道级配置 hash / 探针锁 / 调度器锁与状态
+NEWAPI_CHANNEL_CFG_PREFIX: Final[str] = "newapi:channel:cfg:"
+NEWAPI_PROBE_LOCK: Final[str] = "newapi:probe:lock"
+NEWAPI_SCHEDULER_LOCK: Final[str] = "newapi:scheduler:lock"
+NEWAPI_SCHEDULER_STATE: Final[str] = "newapi:scheduler:state"
 # LLM 周期健康巡检分布式锁（B-M4-2，多实例单跑）
 LLM_PATROL_LOCK: Final[str] = "llm:patrol:lock"
 
@@ -239,6 +258,17 @@ __all__ = [
     "SKILL_SCORER_LOCK",
     "SKILL_SCAN_LOCK",
     "SKILL_PUBLIC_RATE_PREFIX",
+    "LOGIN_FAIL_PREFIX",
+    "REGISTER_ATTEMPT_PREFIX",
+    "SIGNUP_RATE_PREFIX",
+    "QUOTA_COUNT_PREFIX",
+    "LLM_USAGE_DAILY_PREFIX",
+    "LLM_USAGE_MONTHLY_PREFIX",
+    "LLM_USAGE_FLUSH_LOCK",
+    "NEWAPI_CHANNEL_CFG_PREFIX",
+    "NEWAPI_PROBE_LOCK",
+    "NEWAPI_SCHEDULER_LOCK",
+    "NEWAPI_SCHEDULER_STATE",
     "LLM_PATROL_LOCK",
     "distributed_lock",
 ]
