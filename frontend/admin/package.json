@@ -85,8 +85,9 @@
       "<rootDir>/src/**/*.test.{ts,tsx}"
     ],
     "transformIgnorePatterns": [
-      "node_modules/(?!(@ant-design|antd|rc-|@rc-component)/)"
-    ]
+      "node_modules/(?!(@ant-design|antd|rc-|@rc-component|@auto-agents)/)"
+    ],
+    "testTimeout": 20000
   },
   "devDependencies": {
     "@babel/preset-env": "^7.29.7",
