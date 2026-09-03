@@ -34,6 +34,9 @@ export const useAuthStore = create<AuthState>()(
         })
       },
       logout: () => {
+        // 权限缓存随登录态失效（防跨账号残留；下次 login 重新拉取）
+        import('../hooks/usePermission').then(({ clearCachedPermissions }) =>
+          clearCachedPermissions())
         set({ token: null, user: null, isAuthenticated: false, rememberMe: false })
       },
     }),
