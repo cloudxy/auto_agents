@@ -11,10 +11,10 @@ last_run_at / next_run_at（由 croniter 基于当前时间计算）。
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.sql import func
 from .base import Base
-from .mixins import TenantMixin
+from .mixins import AuditMixin, SoftDeleteMixin, TenantMixin
 
 
-class SpiderSchedule(TenantMixin, Base):
+class SpiderSchedule(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
     __tablename__ = "spider_schedules"
 
     id = Column(Integer, primary_key=True, index=True)

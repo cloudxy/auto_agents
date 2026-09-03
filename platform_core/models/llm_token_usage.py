@@ -1,5 +1,5 @@
 """LLM token 用量模型 - 按供应商/模型/日聚合（P0-3 用量持久化）"""
-from sqlalchemy import BigInteger, Column, Date, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, Column, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
@@ -23,7 +23,8 @@ class LlmTokenUsage(TenantMixin, Base):
     )
 
     id = Column(Integer, primary_key=True, comment="ID")
-    provider_id = Column(Integer, nullable=True, comment="供应商 ID（兜底路径为 NULL）")
+    provider_id = Column(Integer, ForeignKey("llm_providers.id"), nullable=True,
+                         comment="供应商 ID（兜底路径为 NULL）")
     provider_name = Column(String(64), nullable=False, index=True, comment="用量维度：provider:<id> 或 config")
     model = Column(String(128), nullable=False, comment="模型名")
     stat_date = Column(Date, nullable=False, comment="统计日期")

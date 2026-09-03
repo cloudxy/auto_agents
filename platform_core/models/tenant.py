@@ -3,9 +3,10 @@ from sqlalchemy import JSON, Column, DateTime, Integer, String
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
+from platform_core.models.mixins import SoftDeleteMixin
 
 
-class Tenant(Base):
+class Tenant(SoftDeleteMixin, Base):
     """租户表：slug 全局唯一；quota 为三类配额 JSON（S3 消费）；status 含到期降级语义"""
 
     __tablename__ = "tenants"

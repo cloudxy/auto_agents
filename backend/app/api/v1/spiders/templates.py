@@ -40,7 +40,7 @@ async def create_template(
 ) -> ApiResponse[TaskTemplateResponse]:
     """创建任务模板（收藏当前任务配置）"""
     template = await service.create_template(
-        payload.model_dump(), created_by=user.id
+        payload.model_dump(), created_by=user.username
     )
     await record_audit(session, user, "template.create", f"template#{template.id}",
                  {"name": payload.name, "spider": payload.spider_name})

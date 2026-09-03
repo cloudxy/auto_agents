@@ -39,6 +39,20 @@ ALL_ORM_TABLES = {
     "capability_plugins",
     "capability_experts",
     "capability_teams",
+    # DB 升级 2026-09 Phase B/C 横切功能表（13 张）
+    "tags",
+    "taggings",
+    "attachments",
+    "notifications",
+    "resource_versions",
+    "workflow_definitions",
+    "workflow_instances",
+    "workflow_steps",
+    "workflow_transitions",
+    "archive_records",
+    "i18n_locales",
+    "i18n_translations",
+    "system_caches",
 }
 
 

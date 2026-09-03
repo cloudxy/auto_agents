@@ -7,10 +7,10 @@ from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, UniqueC
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
-from platform_core.models.mixins import TenantMixin
+from platform_core.models.mixins import AuditMixin, SoftDeleteMixin, TenantMixin
 
 
-class SpiderDefinition(TenantMixin, Base):
+class SpiderDefinition(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
     """爬虫定义表（注册表元数据，可调度爬虫清单的 DB 数据源）"""
 
     __tablename__ = "spider_definitions"

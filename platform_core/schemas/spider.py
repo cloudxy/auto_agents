@@ -360,6 +360,6 @@ class TaskTemplateResponse(BaseModel):
     spider_name: str
     params: Optional[str] = None
     priority: str = "normal"
-    created_by: Optional[int] = None
+    created_by: Optional[str] = None
     created_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
