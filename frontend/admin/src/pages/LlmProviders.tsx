@@ -5,7 +5,7 @@
  * components/llm/{ProviderWizardModal,ModelSetDrawer}。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import {
+import { Select,
   Alert, Button, Card, message, Popconfirm, Space, Table, Tag, Tooltip, Typography,
 } from 'antd'
 import {
@@ -46,6 +46,10 @@ const LlmProviders: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<LlmProvider | null>(null)
   const [drawerProvider, setDrawerProvider] = useState<LlmProvider | null>(null)
+  // 列表筛选（本地过滤：列表量级小无分页）
+  const [filterProtocol, setFilterProtocol] = useState<string>('all')
+  const [filterEnabled, setFilterEnabled] = useState<string>('all')
+  const [filterActive, setFilterActive] = useState<string>('all')
 
   const loadList = useCallback(async (showSpin = true) => {
     if (showSpin) setLoading(true)
@@ -215,13 +219,39 @@ const LlmProviders: React.FC = () => {
 
       <Card title="LLM 供应商配置"
             extra={
-              <Space>
+              <Space wrap>
+                <Select size="small" style={{ width: 140 }} value={filterProtocol}
+                        onChange={setFilterProtocol}
+                        options={[
+                          { value: 'all', label: '全部协议' },
+                          { value: 'openai_compatible', label: 'OpenAI 兼容' },
+                          { value: 'anthropic', label: 'Anthropic' },
+                          { value: 'google_gemini', label: 'Gemini' },
+                        ]} />
+                <Select size="small" style={{ width: 110 }} value={filterEnabled}
+                        onChange={setFilterEnabled}
+                        options={[
+                          { value: 'all', label: '全部状态' },
+                          { value: 'enabled', label: '启用' },
+                          { value: 'disabled', label: '停用' },
+                        ]} />
+                <Select size="small" style={{ width: 110 }} value={filterActive}
+                        onChange={setFilterActive}
+                        options={[
+                          { value: 'all', label: '激活位' },
+                          { value: 'active', label: '已激活' },
+                          { value: 'inactive', label: '未激活' },
+                        ]} />
                 {canOperate && <Button type="primary" icon={<PlusOutlined />}
                                        onClick={() => { setEditing(null); setModalOpen(true) }}>新建供应商</Button>}
                 <Button icon={<ReloadOutlined />} onClick={refreshAll}>刷新</Button>
               </Space>
             }>
-        <Table columns={columns} dataSource={rows} rowKey="id" loading={loading}
+        <Table columns={columns} dataSource={rows.filter((r) =>
+          (filterProtocol === 'all' || (r.provider_type || 'openai_compatible') === filterProtocol) &&
+          (filterEnabled === 'all' || (filterEnabled === 'enabled') === r.enabled) &&
+          (filterActive === 'all' || (filterActive === 'active') === r.is_active)
+        )} rowKey="id" loading={loading}
                pagination={false} scroll={{ x: 1400 }}
                locale={{ emptyText: canOperate ? '暂无 LLM 供应商，点击右上角「新建供应商」添加' : '暂无 LLM 供应商' }} />
       </Card>

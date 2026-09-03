@@ -247,12 +247,13 @@ class TestCrud:
         """激活位随行删除：激活行也允许删除（resolve 无激活行时自动走兜底）"""
         svc = _service()
         svc.repo.get_by_id = AsyncMock(return_value=_provider(id=1, is_active=True))
-        svc.repo.delete = AsyncMock(return_value=True)
+        svc.repo.delete = AsyncMock(return_value=True)  # 旧物理删除桩保留兼容
+        svc.repo.soft_delete = AsyncMock(return_value=True)
         with patch("backend.services.llm_provider_service._invalidate_llm_clients",
                    new=AsyncMock()) as inv:
             result = await svc.delete_provider(1)
         assert result == {"id": 1, "deleted": True}
-        svc.repo.delete.assert_awaited_once_with(1)
+        svc.repo.soft_delete.assert_awaited_once_with(1)
         inv.assert_awaited_once_with(1)  # 定向失效该供应商的共享连接
 
     @pytest.mark.asyncio
@@ -371,7 +372,8 @@ class TestResolveRuntimeConfig:
         monkeypatch.setenv("LLM_API_KEY", "env-key")
         svc = _service()
         svc.repo.get_by_id = AsyncMock(return_value=_provider(id=1, is_active=True))
-        svc.repo.delete = AsyncMock(return_value=True)
+        svc.repo.delete = AsyncMock(return_value=True)  # 旧物理删除桩保留兼容
+        svc.repo.soft_delete = AsyncMock(return_value=True)
         with patch("backend.services.llm_provider_service._invalidate_llm_clients",
                    new=AsyncMock()):
             await svc.delete_provider(1)
