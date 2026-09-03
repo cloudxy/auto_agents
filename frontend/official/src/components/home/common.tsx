@@ -4,7 +4,7 @@
  * SectionTitle：章节标题（眉标 + 主标题 + 描述）
  */
 import React from 'react'
-import { motion } from 'framer-motion'
+import { useReducedMotion, motion } from 'framer-motion'
 
 /** 页面内容容器最大宽度 */
 export const CONTENT_MAX_WIDTH = 1200
@@ -24,17 +24,24 @@ interface FadeInProps {
 /**
  * 滚动入场动画容器：进入视口时淡入上浮，只触发一次
  */
-export const FadeIn: React.FC<FadeInProps> = ({ delay = 0, y = 28, style, children }) => (
-  <motion.div
-    initial={{ opacity: 0, y }}
-    whileInView={{ opacity: 1, y: 0 }}
-    viewport={{ once: true, amount: 0.18 }}
-    transition={{ duration: 0.65, delay, ease: EASE_OUT_EXPO }}
-    style={style}
-  >
-    {children}
-  </motion.div>
-)
+export const FadeIn: React.FC<FadeInProps> = ({ delay = 0, y = 28, style, children }) => {
+  // 87（工单）：尊重 prefers-reduced-motion——用户偏好减少动效时直接呈现终态
+  const reduceMotion = useReducedMotion()
+  if (reduceMotion) {
+    return <div style={style}>{children}</div>
+  }
+  return (
+    <motion.div
+      initial={{ opacity: 0, y }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.18 }}
+      transition={{ duration: 0.65, delay, ease: EASE_OUT_EXPO }}
+      style={style}
+    >
+      {children}
+    </motion.div>
+  )
+}
 
 interface SectionTitleProps {
   /** 眉标（小标签文字） */

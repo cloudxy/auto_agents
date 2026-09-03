@@ -23,7 +23,7 @@ interface ArchNode {
 const ARCH_NODES: ArchNode[] = [
   {
     icon: <DesktopOutlined />,
-    color: '#1890ff',
+    color: 'var(--site-primary, #1677ff)',
     tint: 'rgba(24, 144, 255, 0.09)',
     title: '管理后台',
     subtitle: '可视化控制台',

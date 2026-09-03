@@ -12,8 +12,8 @@ if (typeof (global as any).TextDecoder === 'undefined') {
 // 不能用 worker_threads 的实现——其句柄会吊住 jest 进程，故以 setTimeout stub）
 if (typeof (global as any).MessageChannel === 'undefined') {
   (global as any).MessageChannel = class SimpleMessageChannel {
-    port1 = { onmessage: null as any, postMessage: (_data: any) => undefined };
-    port2 = { onmessage: null as any, postMessage: (_data: any) => undefined };
+    port1 = { onmessage: null as any, postMessage: (_data: any) => undefined as void };
+    port2 = { onmessage: null as any, postMessage: (_data: any) => undefined as void };
     constructor() {
       this.port1.postMessage = (data: any) =>
         setTimeout(() => this.port2.onmessage?.({ data }), 0);

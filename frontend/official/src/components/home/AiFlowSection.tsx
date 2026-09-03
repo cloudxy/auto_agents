@@ -25,8 +25,8 @@ const FLOW_STEPS: FlowStep[] = [
   {
     no: '01',
     icon: <LinkOutlined />,
-    color: '#1890ff',
-    gradient: 'linear-gradient(135deg, #1890ff, #40a9ff)',
+    color: 'var(--site-primary, #1677ff)',
+    gradient: 'linear-gradient(135deg, var(--site-primary, #1677ff), #40a9ff)',
     title: '粘贴链接',
     desc: '输入目标页面地址，用一句话描述你想提取的字段，无需编写任何代码。',
   },
@@ -61,7 +61,7 @@ const MockInput = () => (
   <div className="mock-panel">
     <div style={{ color: '#8494ab', marginBottom: 8 }}>目标地址</div>
     <div className="mock-input">
-      <LinkOutlined style={{ color: '#1890ff', flex: 'none' }} />
+      <LinkOutlined style={{ color: 'var(--site-primary, #1677ff)', flex: 'none' }} />
       <span>https://example.com/news</span>
       <span className="mock-caret" />
     </div>
@@ -71,7 +71,7 @@ const MockInput = () => (
           key={t}
           style={{
             fontSize: 11,
-            color: '#1890ff',
+            color: 'var(--site-primary, #1677ff)',
             background: 'rgba(24,144,255,0.08)',
             border: '1px solid rgba(24,144,255,0.25)',
             borderRadius: 999,

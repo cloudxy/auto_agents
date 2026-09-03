@@ -4,6 +4,8 @@
  * 沿用 FeaturesSection 卡片范式 + common 的 FadeIn/SectionTitle。
  */
 import React, { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { TIER_COLORS } from '@auto-agents/frontend-shared'
 import { Card, Tag, Typography } from 'antd'
 import { ArrowRightOutlined } from '@ant-design/icons'
 
@@ -12,7 +14,6 @@ import { FadeIn, SectionTitle } from './common'
 
 const { Paragraph, Text } = Typography
 
-const TIER_COLORS: Record<string, string> = { S: 'gold', A: 'green', B: 'blue', C: 'default' }
 
 const SkillsSection: React.FC = () => {
   const [items, setItems] = useState<PublicSkill[]>([])
@@ -70,9 +71,9 @@ const SkillsSection: React.FC = () => {
         </div>
         <FadeIn delay={0.2}>
           <div style={{ textAlign: 'center', marginTop: 32 }}>
-            <a href="/skills" style={{ fontSize: 16, color: '#1677ff' }}>
+            <Link to='/skills' style={{ fontSize: 16, color: '#1677ff' }}>
               查看全部技能 <ArrowRightOutlined />
-            </a>
+            </Link>
           </div>
         </FadeIn>
       </div>

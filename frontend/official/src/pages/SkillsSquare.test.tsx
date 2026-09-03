@@ -22,10 +22,10 @@ jest.mock('../services/skills', () => ({
 
 import SkillsSquare from './SkillsSquare';
 
-const renderPage = (props: { initialQuery?: string } = {}) =>
+const renderPage = () =>
   render(
     <MemoryRouter>
-      <SkillsSquare {...props} />
+      <SkillsSquare />
     </MemoryRouter>
   );
 

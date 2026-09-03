@@ -2,31 +2,15 @@
  * 能力广场页（P6 C9）：四类资产公开浏览（skill/plugin/expert/expert_team）
  */
 import React, { useEffect, useState } from 'react'
+import { TIER_COLORS, ASSET_TYPE_LABELS as TYPE_LABELS, type PublicAsset } from '@auto-agents/frontend-shared'
 import { Card, Empty, Spin, Tabs, Tag, Typography } from 'antd'
+import { listPublicAssets } from '../services/capabilities'
 
-import api from '../services/api'
 
 const { Text, Paragraph } = Typography
 
-interface PublicAsset {
-  asset_type: string
-  name: string
-  title: string
-  description?: string | null
-  category: string
-  tier?: string | null
-  score?: number | null
-}
 
-const TIER_COLORS: Record<string, string> = { S: 'gold', A: 'green', B: 'blue', C: 'default' }
-
-const TYPE_LABELS: Record<string, string> = {
-  skill: '技能', plugin: '插件', expert: '专家', expert_team: '专家团',
-}
-
-const listPublic = (type: string): Promise<{ items: PublicAsset[] }> =>
-  api.get('/public/capabilities', { params: { type, page_size: 50 } })
-    .then((r) => (r as unknown as { data: { items: PublicAsset[] } }).data)
+const listPublic = (type: string): Promise<{ items: PublicAsset[] }> => listPublicAssets(type)
 
 const AssetGrid: React.FC<{ type: string }> = ({ type }) => {
   const [items, setItems] = useState<PublicAsset[]>([])
@@ -63,11 +47,6 @@ const AssetGrid: React.FC<{ type: string }> = ({ type }) => {
 
 const Capabilities: React.FC = () => (
   <div style={{ minHeight: '100vh', background: '#f7f9fc' }}>
-    <div style={{ background: '#001529', padding: '14px 24px', display: 'flex',
-                 justifyContent: 'space-between', alignItems: 'center' }}>
-      <a href="/" style={{ color: '#fff', fontSize: 18, fontWeight: 700 }}>AutoAgents</a>
-      <Text style={{ color: 'rgba(255,255,255,0.65)' }}>能力广场</Text>
-    </div>
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 24px 64px' }}>
       <Tabs items={[
         { key: 'skill', label: '技能', children: <AssetGrid type="skill" /> },

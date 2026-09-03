@@ -24,7 +24,7 @@ interface Feature {
 const FEATURES: Feature[] = [
   {
     icon: <SettingOutlined />,
-    color: '#1890ff',
+    color: 'var(--site-primary, #1677ff)',
     tint: 'rgba(24, 144, 255, 0.09)',
     title: '爬虫配置管理',
     desc: '可视化定义采集站点、解析规则与运行参数，配置中心化托管，一次定义多节点即时生效。',
