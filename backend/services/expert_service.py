@@ -4,7 +4,7 @@
 专家团一期仅定义层（leader + members + workflow），执行引擎二期。
 """
 from pathlib import Path
-from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
+from backend.config_consts import (SKILLS_LIBRARY_ROOT)
 from typing import Optional
 
 import yaml

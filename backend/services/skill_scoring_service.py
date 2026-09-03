@@ -11,7 +11,7 @@ LLM.MAX_TOKENS_BUDGET 互不挤占（llm_chat 的 usage_dim/budget_override）�
 素材，输出仅限结构化 JSON（经 SkillScoringResult 入口校验）。
 """
 import asyncio
-from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
+from backend.config_consts import (SKILLS_LIBRARY_ROOT)
 import json
 from typing import Optional
 

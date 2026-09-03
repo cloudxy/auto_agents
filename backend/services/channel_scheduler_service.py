@@ -40,7 +40,7 @@ from backend.services.newapi_api import (
 )
 from backend.services.notify_service import NotifyService
 from config import settings
-from backend.app.core.config_consts import (NEWAPI_ENABLED)
+from backend.config_consts import (NEWAPI_ENABLED)
 from platform_core.logger import get_logger
 from platform_core.queues import distributed_lock
 

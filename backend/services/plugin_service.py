@@ -1,6 +1,6 @@
 """插件资产域服务（P6 C3）：plugin.json 解析 + 扫描入库 + CRUD + MCP 验证"""
 import json
-from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
+from backend.config_consts import (SKILLS_LIBRARY_ROOT)
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional

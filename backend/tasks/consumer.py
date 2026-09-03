@@ -25,7 +25,7 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from backend.app.core.config_consts import (TASKS_STALE_TASK_HOURS)
+from backend.config_consts import (TASKS_STALE_TASK_HOURS)
 from platform_core.db import get_manager
 from platform_core.logger import get_logger
 from platform_core.queues import (

@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
-from backend.app.core.config_consts import (NEWAPI_ENABLED)
+from backend.config_consts import (NEWAPI_ENABLED)
 from platform_core.logger import get_logger
 
 # Webhook 签名密钥的默认占位符（config/default/webhook.yml）——已随仓库公开，

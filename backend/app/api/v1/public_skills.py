@@ -7,7 +7,7 @@
 不复用 external_api 的 X-API-Key 体系（Key 不能嵌进官网前端）。
 """
 from typing import Optional
-from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
+from backend.config_consts import (SKILLS_LIBRARY_ROOT)
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
