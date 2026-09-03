@@ -77,7 +77,7 @@ async def test_probe_key_never_logged_nor_persisted(db_client, db_engine, db_ses
 
 
 def test_probe_test_ok_and_error_masked(db_client, db_engine, monkeypatch):
-    import backend.services.llm_provider_service as svc_mod
+    import backend.services.llm_probe_engine as probe_engine_mod
     from backend.services.llm_protocol import ProtocolError
 
     async def _ok(client, method, url, headers, json_payload=None):
@@ -87,7 +87,7 @@ def test_probe_test_ok_and_error_masked(db_client, db_engine, monkeypatch):
         raise ProtocolError("HTTP 401 Unauthorized")
 
     monkeypatch.setattr(adapters_mod, "execute_json", _ok)
-    monkeypatch.setattr(svc_mod, "execute_json", _ok)
+    monkeypatch.setattr(probe_engine_mod, "execute_json", _ok)
     resp = db_client.post(
         "/api/v1/llm/providers/models/probe-test",
         json={"provider_type": "openai_compatible", "base_url": "https://api.test/v1",
@@ -97,7 +97,7 @@ def test_probe_test_ok_and_error_masked(db_client, db_engine, monkeypatch):
     assert data["ok"] is True and data["latency_ms"] >= 0 and data["model"] == "gpt-4o"
 
     monkeypatch.setattr(adapters_mod, "execute_json", _bad)
-    monkeypatch.setattr(svc_mod, "execute_json", _bad)
+    monkeypatch.setattr(probe_engine_mod, "execute_json", _bad)
     resp2 = db_client.post(
         "/api/v1/llm/providers/models/probe-test",
         json={"provider_type": "openai_compatible", "base_url": "https://api.test/v1",

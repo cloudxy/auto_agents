@@ -103,7 +103,7 @@ class TestEncryption:
     async def test_encrypt_without_master_key_rejected(self, monkeypatch):
         """未配置 LLM_ENCRYPTION_KEY：保存带 api_key 的请求直接拒绝（不降级明文入库）"""
         monkeypatch.delenv("LLM_ENCRYPTION_KEY", raising=False)
-        with patch("backend.services.llm_provider_service.settings", _fake_settings()):
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings()):
             svc = _service()
             with pytest.raises(BusinessException) as ei:
                 svc.encrypt_api_key(_PLAIN_KEY)
@@ -127,7 +127,7 @@ class TestEncryption:
     async def test_decrypt_without_master_key_treated_as_missing(self, monkeypatch):
         """读取时未配置主密钥：按密钥缺失处理（log warning + 空串），不影响请求链路"""
         monkeypatch.delenv("LLM_ENCRYPTION_KEY", raising=False)
-        with patch("backend.services.llm_provider_service.settings", _fake_settings()):
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings()):
             svc = _service()
             assert svc.decrypt_api_key("whatever-cipher") == ""
 
@@ -496,7 +496,7 @@ class TestConnectivity:
         client_cls.return_value = AsyncMock()
         client_cls.return_value.__aenter__.return_value = client
         client_cls.return_value.__aexit__.return_value = False
-        with patch("backend.services.llm_provider_service.httpx.AsyncClient", client_cls):
+        with patch("backend.services.llm_probe_engine.httpx.AsyncClient", client_cls):
             result = await svc.test_connectivity(1)
         assert result.ok is True
         assert result.error is None
@@ -520,7 +520,7 @@ class TestConnectivity:
         client_cls.return_value = AsyncMock()
         client_cls.return_value.__aenter__.return_value = client
         client_cls.return_value.__aexit__.return_value = False
-        with patch("backend.services.llm_provider_service.httpx.AsyncClient", client_cls):
+        with patch("backend.services.llm_probe_engine.httpx.AsyncClient", client_cls):
             result = await svc.test_connectivity(1)
         assert result.ok is False
         assert result.error == "HTTP 403 Forbidden"
@@ -536,7 +536,7 @@ class TestConnectivity:
         client_cls.return_value = AsyncMock()
         client_cls.return_value.__aenter__.return_value = client
         client_cls.return_value.__aexit__.return_value = False
-        with patch("backend.services.llm_provider_service.httpx.AsyncClient", client_cls):
+        with patch("backend.services.llm_probe_engine.httpx.AsyncClient", client_cls):
             result = await svc.test_connectivity(1)
         assert result.ok is False
         assert "boom" in result.error
@@ -595,7 +595,7 @@ class TestPrivateUrlSwitch:
     async def test_switch_on_rejects_private_create(self, monkeypatch):
         """开关 true：创建私网 base_url 被拒"""
         monkeypatch.setenv("LLM_ENCRYPTION_KEY", _FERNET_KEY)
-        with patch("backend.services.llm_provider_service.settings", _fake_settings(
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings(
                 **{"LLM.PROVIDER_BLOCK_PRIVATE_URL": True})):
             svc = _service()
             svc.repo.get_by_name = AsyncMock(return_value=None)
@@ -609,7 +609,7 @@ class TestPrivateUrlSwitch:
     @pytest.mark.asyncio
     async def test_switch_on_rejects_private_update(self, monkeypatch):
         """开关 true：更新为私网 base_url 被拒"""
-        with patch("backend.services.llm_provider_service.settings", _fake_settings(
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings(
                 **{"LLM.PROVIDER_BLOCK_PRIVATE_URL": True})):
             svc = _service()
             svc.repo.get_by_id = AsyncMock(return_value=_provider(id=1))
@@ -622,7 +622,7 @@ class TestPrivateUrlSwitch:
     async def test_switch_off_allows_private(self, monkeypatch):
         """开关 false（默认）：本地 new-api/ollama 合法路径正常创建"""
         monkeypatch.setenv("LLM_ENCRYPTION_KEY", _FERNET_KEY)
-        with patch("backend.services.llm_provider_service.settings", _fake_settings(
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings(
                 **{"LLM.PROVIDER_BLOCK_PRIVATE_URL": False})):
             svc = _service()
             svc.repo.get_by_name = AsyncMock(return_value=None)
@@ -636,7 +636,7 @@ class TestPrivateUrlSwitch:
     @pytest.mark.asyncio
     async def test_switch_default_off(self):
         """默认配置（llm.yml false / 缺省）不拦截私网"""
-        with patch("backend.services.llm_provider_service.settings", _fake_settings()):
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings()):
             assert LlmProviderService._ensure_public_base_url(
                 "http://127.0.0.1:18901/v1") is None
 

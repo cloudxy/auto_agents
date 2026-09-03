@@ -7,6 +7,7 @@
 不复用 external_api 的 X-API-Key 体系（Key 不能嵌进官网前端）。
 """
 from typing import Optional
+from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
@@ -93,7 +94,7 @@ def _read_skill_md(row: Skill) -> str:
 
     from config import settings
 
-    md = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library"))) / row.file_path / "SKILL.md"
+    md = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT))) / row.file_path / "SKILL.md"
     try:
         return md.read_text(encoding="utf-8") if md.exists() else ""
     except OSError:

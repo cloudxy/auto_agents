@@ -7,14 +7,16 @@ fail-open 约定（任务 #35 显式化）：限流是可用性加固而非安�
 （RedisError）时检查放行、计数跳过——只捕获 RedisError，其他异常照常冒泡。
 """
 from fastapi import APIRouter, Depends, Request
-from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 from platform_core.db import get_async_db
 from backend.services.auth_service import AuthService
 from backend.app.api.deps import CurrentUser, get_current_user
 from platform_core.logger import get_logger
 from platform_core.redis_async import get_async_redis
-from platform_core.exceptions import AuthenticationException, RateLimitException
+from backend.app.core.rate_limiter import (
+    LOGIN_FAIL_POLICY, REGISTER_ATTEMPT_POLICY, check_rate_limit, record_attempt,
+)
+from platform_core.exceptions import AuthenticationException
 from platform_core.schemas import LoginRequest, RegisterRequest  # 统一参数接收器
 from backend.app.responses import ApiResponse, ok
 
@@ -24,91 +26,27 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 
 
 async def check_login_rate_limit(username: str):
-    """检查登录频率限制（每用户 15 分钟内最多 5 次失败）
-
-    fail-open：Redis 故障时放行登录（不因限流基础设施故障阻断用户）。
-    """
+    """检查登录频率限制（每用户 15 分钟内最多 5 次失败；策略见 rate_limiter.LOGIN_FAIL_POLICY）"""
     redis = get_async_redis()
-    key = f"login_fail:{username}"
-
-    try:
-        fail_count = await redis.get(key)
-        if fail_count and int(fail_count) >= 5:
-            ttl = await redis.ttl(key)
-            # ttl<=0（无过期/-1）时给保守值，避免出现"请0分钟/请-1分钟后再试"（E7）
-            minutes = max(1, -(-max(ttl, 0) // 60))
-            raise RateLimitException(
-                message=f"登录失败次数过多，请{minutes}分钟后再试",
-                retry_after=max(ttl, 60)
-            )
-    except RedisError:
-        logger.warning(f"登录限流检查失败，fail-open 放行 | key={key}")
+    await check_rate_limit(redis, LOGIN_FAIL_POLICY, username)
 
 
 async def record_login_failure(username: str):
-    """记录登录失败（Redis 计数器，pipeline 原子提交）
-
-    与 record_register_attempt 同构：INCR+EXPIRE 两次独立往返改为 pipeline
-    原子提交，消除两步之间进程崩溃留下的无 TTL 永久计数器（用户名被永久 429）。
-    fail-open：Redis 故障时跳过计数（失败路径不因基础设施故障 500）。
-    """
+    """记录登录失败（pipeline 原子计数；策略见 rate_limiter.LOGIN_FAIL_POLICY）"""
     redis = get_async_redis()
-    key = f"login_fail:{username}"
-
-    try:
-        pipe = redis.pipeline(transaction=True)
-        pipe.incr(key)
-        pipe.expire(key, 900)  # 15 分钟过期（与 check 窗口一致）
-        await pipe.execute()
-    except RedisError:
-        logger.warning(f"登录失败计数写入失败，跳过计数 | key={key}")
-
-
-# 注册限流（防批量注册滥用）：与 login_fail 同构的 Redis 计数器模式，
-# 按来源 IP 限制（注册不存在"失败重试"语义，成功失败均计数）
-_REGISTER_WINDOW_SECONDS = 900   # 15 分钟窗口（与 login_fail 一致）
-_REGISTER_MAX_ATTEMPTS = 5       # 每窗口每 IP 最多 5 次注册请求
+    await record_attempt(redis, LOGIN_FAIL_POLICY, username)
 
 
 async def check_register_rate_limit(client_ip: str):
-    """检查注册频率限制（每 IP 15 分钟内最多 5 次注册请求，模式与 login 限流一致）
-
-    fail-open：与 check_login_rate_limit 一致，Redis 故障时放行。
-    """
+    """检查注册频率限制（每 IP 15 分钟 5 次；策略见 rate_limiter.REGISTER_ATTEMPT_POLICY）"""
     redis = get_async_redis()
-    key = f"register_fail:{client_ip}"
-
-    try:
-        attempt_count = await redis.get(key)
-        if attempt_count and int(attempt_count) >= _REGISTER_MAX_ATTEMPTS:
-            ttl = await redis.ttl(key)
-            raise RateLimitException(
-                message=f"注册请求过于频繁，请{ttl // 60}分钟后再试",
-                retry_after=ttl
-            )
-    except RedisError:
-        logger.warning(f"注册限流检查失败，fail-open 放行 | key={key}")
+    await check_rate_limit(redis, REGISTER_ATTEMPT_POLICY, client_ip)
 
 
 async def record_register_attempt(client_ip: str):
-    """记录一次注册请求（Redis 计数器）
-
-    m-4 评审修复：INCR+EXPIRE 两次独立往返改为 pipeline 原子提交。
-    原写法在两步之间进程崩溃 / 连接中断时会留下无 TTL 的永久计数器，
-    累计到阈值后该 IP 被永久限流（只能手工清键）；pipeline 保证
-    INCR 与 EXPIRE 同批提交，窗口计数始终带过期时间。
-    fail-open：Redis 故障时跳过计数（注册主流程不因限流基础设施故障 500）。
-    """
+    """记录一次注册请求（pipeline 原子计数；策略见 rate_limiter.REGISTER_ATTEMPT_POLICY）"""
     redis = get_async_redis()
-    key = f"register_fail:{client_ip}"
-
-    try:
-        pipe = redis.pipeline(transaction=True)
-        pipe.incr(key)
-        pipe.expire(key, _REGISTER_WINDOW_SECONDS)
-        await pipe.execute()
-    except RedisError:
-        logger.warning(f"注册计数写入失败，跳过计数 | key={key}")
+    await record_attempt(redis, REGISTER_ATTEMPT_POLICY, client_ip)
 
 
 @router.post("/login", response_model=ApiResponse)

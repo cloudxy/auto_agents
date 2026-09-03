@@ -83,3 +83,41 @@ async def reset_member_password(
     await session.commit()
     await record_audit(session, user, "member.reset_password", f"user#{member_id}")
     return ok(data=result)
+
+
+@router.get("/audit")
+async def member_audit_logs(
+    limit: int = 50,
+    user: CurrentUser = Depends(require_tenant_manager),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """成员操作审计·租户视角（B6）：本租户成员的近期高危操作留痕
+
+    平台审计全量仍在 /admin/audit-logs（平台超管）；此处按租户收窄，
+    经 actor_id ∈ 本租户 users 过滤（行级隔离之外的显式维度收口）。
+    """
+    from sqlalchemy import select
+
+    from platform_core.models.operation_log import OperationLog
+    from platform_core.models.user import User
+
+    stmt = (
+        select(OperationLog)
+        .join(User, User.id == OperationLog.actor_id)
+        .where(User.tenant_id == user.tenant_id)
+        .order_by(OperationLog.id.desc())
+        .limit(min(max(1, limit), 200))
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    logger.info(f"成员审计·租户视角 | tenant={user.tenant_id} count={len(rows)}")
+    return ok(data=[
+        {
+            "id": r.id,
+            "actor_name": r.actor_name,
+            "action": r.action,
+            "target": r.target,
+            "detail": r.detail,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ])

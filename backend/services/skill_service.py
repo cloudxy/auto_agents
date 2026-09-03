@@ -6,6 +6,7 @@
 已入库行的人工治理字段（score/tier/category/status...）永不被扫描覆盖。
 """
 import asyncio
+from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
 import hashlib
 import os
 from datetime import date, datetime, timezone
@@ -112,7 +113,7 @@ class SkillService:
         from config import settings
 
         if root is None:
-            library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library")))
+            library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT)))
             root = library_root / "skills"
         root = Path(root)
 
@@ -529,7 +530,7 @@ class SkillService:
     def _library_root(self) -> Path:
         from config import settings
 
-        return Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library")))
+        return Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT)))
 
     def _write_back_meta(self, row: Skill) -> bool:
         """DB → meta.yaml 原子写回（tmp 文件 + rename，单写者=主后端）"""

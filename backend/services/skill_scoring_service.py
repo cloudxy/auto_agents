@@ -11,6 +11,7 @@ LLM.MAX_TOKENS_BUDGET 互不挤占（llm_chat 的 usage_dim/budget_override）�
 素材，输出仅限结构化 JSON（经 SkillScoringResult 入口校验）。
 """
 import asyncio
+from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
 import json
 from typing import Optional
 
@@ -148,7 +149,7 @@ class SkillScoringService:
         from config import settings
         from pathlib import Path
 
-        skill_dir = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library"))) / row.file_path
+        skill_dir = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT))) / row.file_path
         md = skill_dir / "SKILL.md"
         try:
             return md.read_text(encoding="utf-8") if md.exists() else ""

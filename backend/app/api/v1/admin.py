@@ -136,3 +136,70 @@ async def patch_tenant(
     await session.commit()
     await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
     return ok(data={"id": tenant_id, "updated": True})
+
+
+# ---------------- 死信队列（B6 工单 91：排障刚需，admin 专属） ----------------
+
+@router.get("/dead-items")
+async def list_dead_items(
+    limit: int = 100,
+    _user: CurrentUser = Depends(require_admin),
+):
+    """查看结果回流死信（缺 task_id 等无法归属的载荷留档）"""
+    from backend.services.dead_item_service import DeadItemService
+
+    return ok(data=await DeadItemService().list_items(limit=limit))
+
+
+@router.delete("/dead-items/{index}")
+async def discard_dead_item(
+    index: int,
+    user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """丢弃单条死信（按队列 index）"""
+    from backend.services.dead_item_service import DeadItemService
+
+    removed = await DeadItemService().discard(index)
+    if not removed:
+        from platform_core.exceptions import NotFoundException
+
+        raise NotFoundException(resource=f"死信 #{index}")
+    await record_audit(session, user, "dead_item.discard", f"dead_item#{index}")
+    return ok(data={"index": index, "removed": True})
+
+
+@router.delete("/dead-items")
+async def clear_dead_items(
+    user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """清空死信队列（排障终态动作）"""
+    from backend.services.dead_item_service import DeadItemService
+
+    removed = await DeadItemService().clear()
+    await record_audit(session, user, "dead_item.clear", f"dead_items:{removed}")
+    return ok(data={"removed": removed})
+
+
+@router.get("/webhook-status")
+async def webhook_status(
+    _user: CurrentUser = Depends(require_admin),
+):
+    """Webhook 配置状态（B6 工单 91）：只读展示，密钥仅回显配置态（布尔）不回显值
+
+    密钥经 env/.env 注入（AUTO_AGENTS_WEBHOOK__SECRET_KEY），刻意不经
+    system_configs 落库——API 无法读出明文，仅暴露「已配置/未配置」。
+    """
+    import os
+
+    from config import settings
+
+    secret = str(settings.get("WEBHOOK.SECRET_KEY", "") or "").strip()
+    return ok(data={
+        "secret_configured": bool(secret) and secret != "change-me-in-production",
+        "notify_webhook_url_configured": bool(str(settings.get("NOTIFY.WEBHOOK_URL", "") or "")),
+        "dingtalk_configured": bool(str(settings.get("NOTIFY.DINGTALK.WEBHOOK_URL", "") or "")),
+        "wechat_work_configured": bool(str(settings.get("NOTIFY.WECHAT_WORK.WEBHOOK_URL", "") or "")),
+        "env_override_active": "AUTO_AGENTS_WEBHOOK__SECRET_KEY" in os.environ,
+    })

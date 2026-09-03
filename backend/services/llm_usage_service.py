@@ -25,6 +25,7 @@ import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
+from backend.app.core.config_consts import (LLM_USAGE_FLUSH_INTERVAL)
 from platform_core.db import get_manager
 from platform_core.logger import get_logger
 from platform_core.queues import distributed_lock
@@ -43,6 +44,8 @@ _CLAIM_SUFFIX = "#claim"
 _FLUSH_LOCK_KEY = "llm:usage:flush:lock"
 # 月度键 TTL：覆盖当月 + 跨月查询余量（93 天）
 _MONTHLY_TTL = 93 * 86400
+# B3：日明细 30 天 TTL（聚合 flush 后即可过期，防永生 hash）
+_DAILY_TTL = 30 * 86400
 # hash field 指标名（写入与聚合解析共用）
 _METRICS = ("prompt", "completion", "total", "requests", "failed")
 
@@ -100,6 +103,7 @@ async def record_usage(dim: str, model: str, prompt_tokens: int = 0, completion_
             await redis.expire(monthly, _MONTHLY_TTL)
         if failed:
             await redis.hincrby(daily, f"{tkey}|{dim}|{model}|failed", 1)
+        await redis.expire(daily, _DAILY_TTL)
     except Exception as e:  # noqa: BLE001 用量记录失败不影响 LLM 主路径
         logger.debug(f"LLM 用量 Redis 记录失败（忽略，预算回退内存读数）: dim={dim}, error={e}")
 
@@ -134,12 +138,13 @@ class LlmUsageFlushService:
         if not settings.get("LLM.USAGE_PERSIST_ENABLED", True):
             logger.info("LLM 用量落库已禁用（LLM.USAGE_PERSIST_ENABLED=false）")
             return
-        self._redis = aioredis.from_url(
-            settings.REDIS.DEFAULT.URL, decode_responses=True
-        )
+        # B3：归一异步 Redis 门面（共享连接池，键契约见 platform_core.queues）
+        from platform_core.redis_async import get_async_redis
+
+        self._redis = get_async_redis()
         self._running = True
         self._loop_task = asyncio.create_task(self._flush_loop(), name="llm-usage-flush")
-        interval = int(settings.get("LLM.USAGE_FLUSH_INTERVAL", 60) or 60)
+        interval = int(settings.get("LLM.USAGE_FLUSH_INTERVAL", LLM_USAGE_FLUSH_INTERVAL) or 60)
         logger.info(f"LLM 用量聚合任务已启动: interval={interval}s")
 
     async def stop(self) -> None:
@@ -157,7 +162,7 @@ class LlmUsageFlushService:
         logger.info("LLM 用量聚合任务已停止")
 
     async def _flush_loop(self) -> None:
-        interval = int(settings.get("LLM.USAGE_FLUSH_INTERVAL", 60) or 60)
+        interval = int(settings.get("LLM.USAGE_FLUSH_INTERVAL", LLM_USAGE_FLUSH_INTERVAL) or 60)
         while self._running:
             try:
                 await self.flush_once()
@@ -181,7 +186,7 @@ class LlmUsageFlushService:
         keys = [k async for k in self._redis.scan_iter(match=f"{_DAILY_KEY_PREFIX}*")]
         if not keys:
             return 0
-        lock_ttl = max(60, int(settings.get("LLM.USAGE_FLUSH_INTERVAL", 60) or 60) * 2)
+        lock_ttl = max(60, int(settings.get("LLM.USAGE_FLUSH_INTERVAL", LLM_USAGE_FLUSH_INTERVAL) or 60) * 2)
         async with distributed_lock(self._redis, _FLUSH_LOCK_KEY, ttl=lock_ttl) as lock:
             if lock is None:
                 return 0  # 其他实例聚合中

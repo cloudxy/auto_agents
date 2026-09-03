@@ -22,6 +22,7 @@ from backend.repositories.newapi_repository import (
 )
 from backend.services.newapi_api import NewapiApiClient
 from config import settings
+from backend.app.core.config_consts import (NEWAPI_ENABLED)
 from platform_core.logger import get_logger
 from platform_core.schemas.newapi import (
     ChannelEventListResponse,
@@ -132,7 +133,7 @@ class NewapiOverviewService:
 
     async def _fetch_channels(self) -> _ChannelFetchResult:
         """拉取远程渠道列表；开关关闭/不可达/超时统一降级，不向上抛"""
-        if not bool(settings.get("NEWAPI.ENABLED", False)):
+        if not bool(settings.get("NEWAPI.ENABLED", NEWAPI_ENABLED)):
             return _ChannelFetchResult(False, "newapi disabled", [])
         base_url = str(settings.get("NEWAPI.BASE_URL", "") or "")
         if not base_url:

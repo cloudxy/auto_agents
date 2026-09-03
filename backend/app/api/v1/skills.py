@@ -1,10 +1,11 @@
 """技能管理中心管理端 API（方案 A）
 
-路由注册顺序约束（总方案 3.2-A-5）：静态段（scan/jobs/compare/categories/manifests/
+路由注册顺序约束（总方案 3.2-A-5）：静态段（scan/jobs/similar-suggest/similar-confirm/candidates/manifests/
 sync-adapters/import-url）必须先于 /{name} 注册，否则被动态段吞掉。
 本文件落地：列表 / 详情 / 扫描 / 任务记录；其余静态段随对应工单补充（同样置于 {name} 之前）。
 """
 from pathlib import Path
+from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -318,7 +319,7 @@ def _read_skill_files(file_path: str) -> tuple[str, str]:
     """读技能目录的 SKILL.md 与 meta.yaml 原文（缺失容忍为空串）"""
     from config import settings
 
-    library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", "capability-library")))
+    library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT)))
     skill_dir = library_root / file_path
     skill_md = meta_yaml = ""
     try:
