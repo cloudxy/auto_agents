@@ -282,7 +282,7 @@ class LlmProviderService:
         adapter = get_adapter(provider.provider_type or "openai_compatible")
         request = adapter.build_chat(
             provider.base_url, api_key, model_id,
-            [{"role": "user", "content": "ping"}], max_tokens=1,
+            [{"role": "user", "content": "ping"}], max_tokens=16,
         )
         started = time.perf_counter()
         try:
