@@ -1,12 +1,14 @@
 /**
  * 后台管理布局 - 包含侧边栏、顶部导航和内容区
  */
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Layout, Menu, Typography, Button } from 'antd'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
 import { usePermission } from '../hooks/usePermission'
-import { pageTitleFor } from '../config/menuConfig'
+import { pageTitleFor, MENU_ICON_MAP } from '../config/menuConfig'
+import { useQuery } from '@tanstack/react-query'
+import { fetchDynamicMenus, type DynamicMenuNode } from '../services/menus'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
@@ -17,16 +19,38 @@ const AdminLayout: React.FC = () => {
   const { user, logout } = useAuthStore()
   const { filteredMenus } = usePermission()
 
-  // 将菜单配置转换为 Ant Design Menu 组件所需的格式
-  const menuItems = filteredMenus.map(item => ({
-    key: item.key,
-    icon: item.icon,
-    label: item.label,
-    children: item.children?.map(child => ({
-      key: child.key,
-      label: child.label
+  // 动态菜单（SaaS 化：menus 表经 /auth/menus 下发，按权限已过滤）；
+  // 空响应/失败回退前端静态 menuConfig（登录链路永不因菜单故障阻断）
+  const { data: dynamicMenus } = useQuery({
+    queryKey: ['dynamic-menus'],
+    queryFn: fetchDynamicMenus,
+    staleTime: 60_000,
+  })
+
+  const menuItems = useMemo(() => {
+    if (dynamicMenus && dynamicMenus.length) {
+      // 平台超管（无租户）隐藏租户视角菜单
+      const tenantBound = user?.tenant_id != null
+      const toItems = (nodes: DynamicMenuNode[]): any[] => nodes
+        .filter((n) => !n.tenantOnly || tenantBound)
+        .map((n) => ({
+          key: n.key,
+          icon: n.icon ? MENU_ICON_MAP[n.icon] : undefined,
+          label: n.label,
+          children: n.children?.length ? toItems(n.children) : undefined,
+        }))
+      return toItems(dynamicMenus)
+    }
+    return filteredMenus.map(item => ({
+      key: item.key,
+      icon: item.icon,
+      label: item.label,
+      children: item.children?.map(child => ({
+        key: child.key,
+        label: child.label
+      }))
     }))
-  }))
+  }, [dynamicMenus, filteredMenus, user?.tenant_id])
 
   return (
     <Layout style={{ minHeight: '100vh' }}>

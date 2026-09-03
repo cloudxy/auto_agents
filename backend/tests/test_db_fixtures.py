@@ -56,6 +56,8 @@ ALL_ORM_TABLES = {
     # SaaS 化拓展（迁移 022）
     "roles",
     "departments",
+    "menus",
+    "permissions",
 }
 
 

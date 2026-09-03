@@ -94,3 +94,12 @@ export const pageTitleFor = (pathname: string): string => {
   }
   return '后台管理'
 }
+
+/** DB 动态菜单 icon 标识 → 组件映射（/auth/menus 下发 icon 字符串经此渲染） */
+export const MENU_ICON_MAP: Record<string, React.ReactNode> = {
+  DashboardOutlined: React.createElement(DashboardOutlined),
+  BugOutlined: React.createElement(BugOutlined),
+  AppstoreOutlined: React.createElement(AppstoreOutlined),
+  TeamOutlined: React.createElement(TeamOutlined),
+  ToolOutlined: React.createElement(ToolOutlined),
+}

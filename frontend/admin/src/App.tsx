@@ -27,6 +27,7 @@ const PlatformOps = React.lazy(() => import('./pages/PlatformOps'))
 const Unauthorized = React.lazy(() => import('./pages/Unauthorized'))
 const NotFound = React.lazy(() => import('./pages/NotFound'))
 const RbacManagement = React.lazy(() => import('./pages/RbacManagement'))
+const EnterpriseManagement = React.lazy(() => import('./pages/EnterpriseManagement'))
 
 const PageLoading = (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 12, justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
@@ -76,6 +77,14 @@ function App() {
               <Route path="spiders/logs" element={<Page label="spider-logs"><SpiderLogs /></Page>} />
               <Route path="spiders/nodes" element={<Page label="nodes"><Nodes /></Page>} />
               <Route path="ai" element={<Page label="ai"><AiPlans /></Page>} />
+              <Route
+                path="enterprise"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <Page label="enterprise"><EnterpriseManagement /></Page>
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="rbac"
                 element={

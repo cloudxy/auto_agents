@@ -135,6 +135,68 @@ async def get_permissions(
     except Exception as e:  # noqa: BLE001 配置读失败回退内置映射（可用性优先）
         logger.warning(f"角色权限 DB 读取失败，回退内置映射: {e}")
     return ok(data=_ROLE_PERMISSIONS.get(user.role, _ROLE_PERMISSIONS["viewer"]))
+@router.get("/menus", response_model=ApiResponse)
+async def get_dynamic_menus(
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """动态菜单（menus 表按权限过滤下发；DB miss/异常回退空——前端用静态配置兜底）"""
+    from sqlalchemy import select
+
+    from platform_core.models.menu import Menu
+
+    try:
+        rows = (await session.execute(
+            select(Menu).where(Menu.visible == True).order_by(Menu.sort_order.asc(), Menu.id.asc())  # noqa: E712
+        )).scalars().all()
+        if not rows:
+            return ok(data=[])
+        perms = set(await _permissions_of(session, user.role))
+        nodes = {}
+        tree = []
+        for m in rows:
+            if m.permission and m.permission not in perms:
+                continue
+            nodes[m.id] = {"key": m.path or f"grp-{m.id}", "label": m.name,
+                           "icon": m.icon, "permission": m.permission,
+                           "tenantOnly": m.path in ("/members", "/usage"), "children": []}
+        for m in rows:
+            node = nodes.get(m.id)
+            if node is None:
+                continue
+            if m.parent_id and m.parent_id in nodes:
+                nodes[m.parent_id]["children"].append(node)
+            else:
+                tree.append(node)
+        # 剔除空分组
+        def prune(ns):
+            out = []
+            for n in ns:
+                if n["children"]:
+                    n["children"] = prune(n["children"])
+                if n["children"] or n["permission"] or not n["key"].startswith("grp-"):
+                    out.append(n)
+            return out
+        return ok(data=prune(tree))
+    except Exception as e:  # noqa: BLE001 菜单故障不阻断登录链路
+        logger.warning(f"动态菜单读取失败，回退前端静态配置: {e}")
+        return ok(data=[])
+
+
+async def _permissions_of(session, role: str) -> list[str]:
+    """角色权限码（roles 表 DB 单源 → 内置映射回退）"""
+    from platform_core.models.role import Role
+    from sqlalchemy import select as _s
+
+    try:
+        row = (await session.execute(_s(Role.permissions).where(Role.role_key == role))).scalar_one_or_none()
+        if row:
+            return list(row)
+    except Exception:  # noqa: BLE001
+        pass
+    return list(_ROLE_PERMISSIONS.get(role, _ROLE_PERMISSIONS["viewer"]))
+
+
 @router.post("/register", response_model=ApiResponse)
 async def register(
     request: RegisterRequest,

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import CurrentUser, require_admin, require_login, require_platform_admin
 from platform_core.schemas.auth import AdminUserCreateRequest, AdminUserUpdateRequest
-from backend.app.responses import ok
+from backend.app.responses import ok, created
 from backend.app.api._helpers import record_audit
 from backend.services.audit_service import AuditService
 from backend.services.spider_service import SpiderService
@@ -144,6 +144,39 @@ async def list_tenants(
         }
         for r in rows
     ])
+
+
+@router.post("/tenants", status_code=201)
+async def create_tenant_minimal(
+    body: dict,
+    user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """新建公司（最小语义：名称+可选 slug；配额/到期走平台运营台编辑）"""
+    import re as _re
+    from unicodedata import normalize as _norm
+
+    from platform_core.exceptions import ValidationException
+    from platform_core.models.tenant import Tenant
+
+    name = str(body.get("name") or "").strip()
+    if len(name) < 2:
+        raise ValidationException(message="公司名至少 2 个字符", field="name")
+    slug = str(body.get("slug") or "").strip() or _re.sub(
+        r"[^a-z0-9]+", "-",
+        _norm("NFKD", name).encode("ascii", "ignore").decode().lower()).strip("-") or f"co-{int(__import__('time').time()) % 100000}"
+    dup = (await session.execute(
+        __import__("sqlalchemy").select(Tenant).where(Tenant.slug == slug)
+    )).scalar_one_or_none()
+    if dup is not None:
+        slug = f"{slug}-{int(__import__('time').time()) % 10000}"
+    row = Tenant(slug=slug, name=name, status="active", quota=None)
+    session.add(row)
+    await session.flush()
+    tid = int(row.id)
+    await session.commit()
+    await record_audit(session, user, "tenant.create", f"tenant#{tid}", detail={"name": name, "slug": slug})
+    return created(data={"id": tid, "slug": slug})
 
 
 @router.patch("/tenants/{tenant_id}")
