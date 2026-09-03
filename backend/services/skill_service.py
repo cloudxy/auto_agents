@@ -6,7 +6,7 @@
 已入库行的人工治理字段（score/tier/category/status...）永不被扫描覆盖。
 """
 import asyncio
-from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
+from backend.config_consts import (SKILLS_LIBRARY_ROOT)
 import hashlib
 import os
 from datetime import date, datetime, timezone

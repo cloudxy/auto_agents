@@ -5,7 +5,7 @@ sync-adapters/import-url）必须先于 /{name} 注册，否则被动态段吞�
 本文件落地：列表 / 详情 / 扫描 / 任务记录；其余静态段随对应工单补充（同样置于 {name} 之前）。
 """
 from pathlib import Path
-from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
+from backend.config_consts import (SKILLS_LIBRARY_ROOT)
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession

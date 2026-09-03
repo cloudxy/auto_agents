@@ -62,7 +62,7 @@ class SkillRepository(BaseRepository[Skill]):
         ).scalar_one()
 
         sort_col = _SORT_COLUMNS.get(sort, Skill.updated_at)
-        stmt = stmt.order_by(sort_col.desc().nullslast(), Skill.id.asc()).offset(offset).limit(limit)
+        stmt = stmt.order_by(sort_col.desc(), Skill.id.asc()).offset(offset).limit(limit)
         rows = (await self.session.execute(stmt)).scalars().all()
         return list(rows), int(total)
 

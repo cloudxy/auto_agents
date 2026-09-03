@@ -50,7 +50,7 @@ class CapabilityService:
             select(func.count()).select_from(stmt.subquery())
         )).scalar_one()
         rows = (await self.session.execute(
-            stmt.order_by(CapabilityAsset.updated_at.desc().nullslast(), CapabilityAsset.id.asc())
+            stmt.order_by(CapabilityAsset.updated_at.desc(), CapabilityAsset.id.asc())
             .offset(offset).limit(limit)
         )).scalars().all()
         return list(rows), int(total)

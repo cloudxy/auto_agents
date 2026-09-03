@@ -10,7 +10,7 @@
 全部外呼 httpx 且 trust_env=False（3.2-A-8，防本机代理劫持）。
 """
 import hashlib
-from backend.app.core.config_consts import (SKILLS_LIBRARY_ROOT)
+from backend.config_consts import (SKILLS_LIBRARY_ROOT)
 import io
 import re
 import zipfile

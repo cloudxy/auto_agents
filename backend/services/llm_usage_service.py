@@ -25,7 +25,7 @@ import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from backend.app.core.config_consts import (LLM_USAGE_FLUSH_INTERVAL)
+from backend.config_consts import (LLM_USAGE_FLUSH_INTERVAL)
 from platform_core.db import get_manager
 from platform_core.logger import get_logger
 from platform_core.queues import distributed_lock
