@@ -2,10 +2,11 @@
  * 爬虫运行日志页面 - 选择任务查看 Worker 实时日志
  * 支持全文关键词搜索和日志级别过滤
  */
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Card, Select, Space, Tag, Empty, Button, Typography, Input } from 'antd'
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { fetchTaskLogs, Task, TaskLogResponse } from '../services/spiders'
+import { useQuery } from '@tanstack/react-query'
 
 const { Text } = Typography
 
@@ -28,11 +29,8 @@ const LOG_LEVELS = [
 const SpiderLogs: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([])
   const [taskId, setTaskId] = useState<number | null>(null)
-  const [logData, setLogData] = useState<TaskLogResponse | null>(null)
   const [keyword, setKeyword] = useState<string>('')
   const [level, setLevel] = useState<string>('')
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null)
-
   useEffect(() => {
     import('../services/spiders').then(({ fetchTasks }) =>
       fetchTasks(0, 50)
@@ -47,34 +45,16 @@ const SpiderLogs: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 选中任务后轮询日志（未终态 2 秒一次）
-  useEffect(() => {
-    if (!taskId) return
-    const pull = () => {
-      fetchTaskLogs(taskId, 200, keyword || undefined, level || undefined)
-        .then((data) => {
-          setLogData(data)
-          // 终态后停止轮询
-          if (data.status === 'completed' || data.status === 'failed') {
-            if (timer.current) {
-              clearInterval(timer.current)
-              timer.current = null
-            }
-          }
-        })
-        .catch(() => { /* 轮询静默失败 */ })
-    }
-    pull()
-    if (!timer.current) {
-      timer.current = setInterval(pull, 2000)
-    }
-    return () => {
-      if (timer.current) {
-        clearInterval(timer.current)
-        timer.current = null
-      }
-    }
-  }, [taskId, keyword, level])
+  // 工单 78：日志轮询交 react-query（2s 一次，终态自动停——refetchInterval 按数据判定）
+  const { data: logData, refetch: refetchLogs } = useQuery({
+    queryKey: ['task-logs', taskId, keyword, level],
+    queryFn: () => fetchTaskLogs(taskId!, 200, keyword || undefined, level || undefined),
+    enabled: !!taskId,
+    refetchInterval: (query) => {
+      const s = query.state.data?.status
+      return s === 'completed' || s === 'failed' ? false : 2000
+    },
+  })
 
   const status = logData?.status
   const meta = status ? STATUS_META[status] : null
@@ -105,7 +85,7 @@ const SpiderLogs: React.FC = () => {
           {meta && <Tag color={meta.color}>{meta.label}</Tag>}
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => taskId && fetchTaskLogs(taskId, 200, keyword || undefined, level || undefined).then(setLogData).catch(() => {})}
+            onClick={() => refetchLogs()}
           >
             刷新
           </Button>

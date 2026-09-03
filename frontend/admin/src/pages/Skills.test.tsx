@@ -18,6 +18,18 @@ jest.mock('../services/skills', () => ({
   correctSkillMeta: jest.fn(),
 }));
 
+// 工单 69：权限改为组件内 usePermission——测试统一 mock 只读权限
+jest.mock('../hooks/usePermission', () => ({
+  usePermission: () => ({
+    hasPermission: () => false,
+    role: 'viewer',
+    isAdmin: false,
+    permissions: [],
+    filteredMenus: [],
+  }),
+}))
+
+
 test('renders skill list with dual score columns', async () => {
   render(<Skills />);
   expect(await screen.findByText('阿尔法')).toBeInTheDocument();
@@ -28,7 +40,7 @@ test('renders skill list with dual score columns', async () => {
 });
 
 test('readonly mode hides correction column and shows hint', () => {
-  render(<Skills canEdit={false} />);
+  render(<Skills />);
   expect(screen.getByText(/当前角色只读/)).toBeInTheDocument();
   expect(screen.queryByText('矫正')).toBeNull();
 });

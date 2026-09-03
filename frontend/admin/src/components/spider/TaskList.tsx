@@ -64,7 +64,7 @@ export const TaskList: React.FC<TaskListProps> = ({
   const columns: ColumnsType<Task> = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 70 },
     {
-      title: '爬虫',
+      title: '采集方案',
       dataIndex: 'spider_name',
       key: 'spider_name',
       render: (name: string) => (
@@ -149,7 +149,7 @@ export const TaskList: React.FC<TaskListProps> = ({
             <>
               <Popconfirm
                 title="确认暂停该任务？"
-                description="暂停后爬虫将跳过后续请求，直到点击恢复。"
+                description="暂停后将跳过后续请求，直到点击恢复。"
                 okText="暂停"
                 onConfirm={() => onPause(record)}
               >
@@ -159,7 +159,7 @@ export const TaskList: React.FC<TaskListProps> = ({
               </Popconfirm>
               <Popconfirm
                 title="确认终止该任务？"
-                description="终止后爬虫将立即停止，任务置为失败状态。"
+                description="终止后将立即停止，任务置为失败状态。"
                 okText="终止"
                 okButtonProps={{ danger: true }}
                 onConfirm={() => onStop(record)}
@@ -265,7 +265,7 @@ export const TaskList: React.FC<TaskListProps> = ({
           <Select
             allowClear
             showSearch
-            placeholder="按爬虫筛选"
+            placeholder="按采集方案筛选"
             style={{ width: 180 }}
             value={spiderFilter}
             onChange={(v) => onSpiderFilterChange(v)}

@@ -3,26 +3,19 @@
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Button, DatePicker, Form, InputNumber, Modal, Space, Table, Tag,
+  Alert, Button, DatePicker, Form, InputNumber, Modal, Popconfirm, Space, Table, Tag,
   Typography, message,
 } from 'antd'
 import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { Dayjs } from 'dayjs'
+import { Tabs } from 'antd'
+import { listTenants, patchTenant, type TenantRow } from '../services/platformOps'
+import { clearDeadItems, discardDeadItem, listDeadItems, type DeadItem } from '../services/deadItems'
+import { apiErrorMessage } from '../utils/errorMessage'
 
-import api, { unwrap } from '../services/api'
 
 const { Text } = Typography
-
-interface TenantRow {
-  id: number
-  slug: string
-  name: string
-  status: string
-  quota: { task_concurrency?: number; result_storage?: number; llm_tokens_month?: number } | null
-  expires_at: string | null
-  created_at?: string | null
-}
 
 const STATUS_COLORS: Record<string, string> = {
   active: 'success', expired: 'error', disabled: 'warning',
@@ -37,9 +30,9 @@ const PlatformOps: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setRows(await api.get('/admin/tenants').then((r) => unwrap<TenantRow[]>(r)))
+      setRows(await listTenants())
     } catch (e) {
-      message.error(`租户列表加载失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '租户列表加载失败'))
     } finally {
       setLoading(false)
     }
@@ -58,23 +51,23 @@ const PlatformOps: React.FC = () => {
     if (Object.keys(quota).length) payload.quota = quota
     if (values.expires_at) payload.expires_at = (values.expires_at as Dayjs).toISOString()
     try {
-      await api.patch(`/admin/tenants/${editing.id}`, payload)
+      await patchTenant(editing.id, payload)
       message.success(`租户 ${editing.slug} 已更新`)
       setEditing(null)
       load()
     } catch (e) {
-      message.error(`保存失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '保存失败'))
     }
   }
 
   const onToggleStatus = async (row: TenantRow) => {
     try {
-      await api.patch(`/admin/tenants/${row.id}`,
+      await patchTenant(row.id,
                       { status: row.status === 'active' ? 'disabled' : 'active' })
       message.success(`租户 ${row.slug} 已${row.status === 'active' ? '禁用' : '启用'}`)
       load()
     } catch (e) {
-      message.error(`操作失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '操作失败'))
     }
   }
 
@@ -120,14 +113,104 @@ const PlatformOps: React.FC = () => {
     },
   ]
 
+
+// ---------------- 死信队列 Tab（B6 工单 91：排障刚需） ----------------
+const DeadItemsTab: React.FC = () => {
+  const [items, setItems] = useState<DeadItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await listDeadItems()
+      setItems(data.items)
+      setTotal(data.total)
+    } catch (e) {
+      message.error(apiErrorMessage(e, '死信队列加载失败'))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const onDiscard = async (index: number) => {
+    try {
+      await discardDeadItem(index)
+      message.success('已丢弃')
+      load()
+    } catch (e) { message.error(apiErrorMessage(e, '丢弃失败')) }
+  }
+
+  const onClear = () => {
+    Modal.confirm({
+      title: `确认清空全部 ${total} 条死信？`,
+      content: '死信是结果回流留档（缺 task_id 等无法归属的载荷），清空后不可恢复。',
+      okText: '清空', okButtonProps: { danger: true }, cancelText: '取消',
+      onOk: async () => {
+        try {
+          const r = await clearDeadItems()
+          message.success(`已清除 ${r.removed} 条`)
+          load()
+        } catch (e) { message.error(apiErrorMessage(e, '清空失败')) }
+      },
+    })
+  }
+
   return (
     <div>
+      <Alert
+        type="info" showIcon style={{ marginBottom: 12 }}
+        message={`共 ${total} 条死信（最新在前）`}
+        description="结果消息缺少 task_id 等无法归属时转入此队列留档；确认无用后可单条丢弃或清空。"
+      />
+      <Space style={{ marginBottom: 12 }}>
+        <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
+        <Button danger disabled={total === 0} onClick={onClear}>清空全部</Button>
+      </Space>
+      <Table
+        rowKey="index" size="small" loading={loading} dataSource={items}
+        pagination={{ pageSize: 20, showTotal: (t2) => `共 ${t2} 条` }}
+        columns={[
+          { title: '#', dataIndex: 'seq', width: 60 },
+          { title: '采集方案', dataIndex: 'spider_name', width: 120, render: (v: string | null) => v || <Tag>未知</Tag> },
+          { title: '载荷', dataIndex: 'raw', ellipsis: true, render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text> },
+          { title: '解析', dataIndex: 'payload', width: 90, render: (v: DeadItem['payload']) => (v ? <Tag color="success">JSON</Tag> : <Tag color="error">损坏</Tag>) },
+          { title: '操作', width: 90, render: (_: unknown, r: DeadItem) => (
+            <Popconfirm title="确认丢弃该条死信？" okText="丢弃" okButtonProps={{ danger: true }} cancelText="取消"
+                        onConfirm={() => onDiscard(r.index)}>
+              <Button type="link" danger size="small">丢弃</Button>
+            </Popconfirm>
+          )},
+        ]}
+      />
+    </div>
+  )
+}
+
+  return (
+    <div>
+      <Tabs
+        defaultActiveKey="tenants"
+        items={[
+          {
+            key: 'tenants', label: '租户管理',
+            children: (
+              <>
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
              message="平台运营台为平台超管专属；到期租户会被登录拒绝（可行动文案），此处可续期/调整套餐" />
       <Space style={{ marginBottom: 12 }}>
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
       </Space>
       <Table rowKey="id" size="middle" loading={loading} columns={columns} dataSource={rows} pagination={false} />
+
+              </>
+            ),
+          },
+          { key: 'dead-items', label: '死信队列', children: <DeadItemsTab /> },
+        ]}
+      />
 
       <Modal title={`编辑租户：${editing?.slug ?? ''}`} open={!!editing} onOk={onSave}
              onCancel={() => setEditing(null)} okText="保存">

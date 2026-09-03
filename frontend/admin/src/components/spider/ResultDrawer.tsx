@@ -41,7 +41,7 @@ export const ResultDrawer: React.FC<ResultDrawerProps> = ({ task, spiderMap, onC
         setResults(res.items || [])
         setResultTotal(res.total || 0)
       })
-      .catch(() => message.error('获取采集结果失败'))
+      .catch((e) => message.error(apiErrorMessage(e, '获取采集结果失败')))
       .finally(() => setResultLoading(false))
   }, [task, resultPage])
 

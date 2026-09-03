@@ -10,6 +10,8 @@
  * 约定：全只读无写操作；状态 Tag 颜色对齐 new-api 语义（1 绿 / 2 橙 / 3 红 / 未知灰）。
  */
 import React, { useCallback, useEffect, useState } from 'react'
+import ProbeResults from '../components/newapi/ProbeResults'
+import EventsList from '../components/newapi/EventsList'
 import {
   Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Space, Statistic,
   Table, Tabs, Tag, Tooltip, Typography, message,
@@ -123,7 +125,7 @@ const NewApiOps: React.FC = () => {
       message.success(`渠道 #${cfgTarget.id} 额度配置已保存（调度器下一轮巡检生效）`)
       setCfgTarget(null)
       loadChannelsCfg(false)
-      loadEvents(false) // config_updated 事件已落库
+      setConfigSaved((s) => s + 1) // config_updated 事件已落库
     } catch (error) {
       if ((error as { errorFields?: unknown })?.errorFields) return
       message.error('保存渠道配置失败')
@@ -140,7 +142,7 @@ const NewApiOps: React.FC = () => {
       message.success(`渠道 #${cfgTarget.id} 已清除渠道级配置（回退全局默认）`)
       setCfgTarget(null)
       loadChannelsCfg(false)
-      loadEvents(false)
+      setConfigSaved((s) => s + 1)
     } catch (error) {
       message.error('清除渠道配置失败')
     } finally {
@@ -148,81 +150,21 @@ const NewApiOps: React.FC = () => {
     }
   }
 
-  // ---------------- 事件时间线 ----------------
-  const [events, setEvents] = useState<ChannelEventItem[]>([])
-  const [eventsTotal, setEventsTotal] = useState(0)
-  const [eventsPage, setEventsPage] = useState(1)
-  const [eventsPageSize, setEventsPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [eventsChannelId, setEventsChannelId] = useState<number | undefined>(undefined)
-  const [eventsLoading, setEventsLoading] = useState(false)
-
-  const loadEvents = useCallback(async (showSpin = true) => {
-    if (showSpin) setEventsLoading(true)
-    try {
-      const data = await fetchNewapiEvents({
-        page: eventsPage,
-        page_size: eventsPageSize,
-        channel_id: eventsChannelId,
-      })
-      setEvents(data.items || [])
-      setEventsTotal(data.total || 0)
-    } catch (error) {
-      message.error('获取渠道事件失败')
-    } finally {
-      if (showSpin) setEventsLoading(false)
-    }
-  }, [eventsPage, eventsPageSize, eventsChannelId])
-
-  // ---------------- 探针结果 ----------------
-  const [probes, setProbes] = useState<ChannelProbeResultItem[]>([])
-  const [probesTotal, setProbesTotal] = useState(0)
-  const [probesPage, setProbesPage] = useState(1)
-  const [probesPageSize, setProbesPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [probesChannelId, setProbesChannelId] = useState<number | undefined>(undefined)
-  const [probesLoading, setProbesLoading] = useState(false)
-
-  const loadProbes = useCallback(async (showSpin = true) => {
-    if (showSpin) setProbesLoading(true)
-    try {
-      const data = await fetchNewapiProbeResults({
-        page: probesPage,
-        page_size: probesPageSize,
-        channel_id: probesChannelId,
-      })
-      setProbes(data.items || [])
-      setProbesTotal(data.total || 0)
-    } catch (error) {
-      message.error('获取探针结果失败')
-    } finally {
-      if (showSpin) setProbesLoading(false)
-    }
-  }, [probesPage, probesPageSize, probesChannelId])
-
   useEffect(() => {
     loadOverview()
     loadChannelsCfg()
   }, [loadOverview, loadChannelsCfg])
 
-  useEffect(() => {
-    loadEvents()
-  }, [loadEvents])
-
-  useEffect(() => {
-    loadProbes()
-  }, [loadProbes])
-
+  // 工单 80：子组件经 refreshSignal 联动刷新（events/probes 状态已下沉组件）
+  const [refreshSignal, setRefreshSignal] = useState(0)
+  const [configSaved, setConfigSaved] = useState(0)
   const refreshAll = () => {
     loadOverview(false)
     loadChannelsCfg(false)
-    loadEvents(false)
-    loadProbes(false)
+    setRefreshSignal((s) => s + 1)
   }
 
   /** 渠道 ID 过滤输入解析（非正整数视为清空过滤） */
-  const parseChannelId = (raw: string): number | undefined => {
-    const n = Number(raw.trim())
-    return raw.trim() && Number.isInteger(n) && n > 0 ? n : undefined
-  }
 
   // ---------------- 表格列 ----------------
   const channelColumns: ColumnsType<ChannelWithConfig> = [
@@ -305,70 +247,6 @@ const NewApiOps: React.FC = () => {
     },
   ]
 
-  const probeColumns: ColumnsType<ChannelProbeResultItem> = [
-    {
-      title: '时间', dataIndex: 'created_at', key: 'created_at', width: 170,
-      render: (v: string | null) => fmtTime(v),
-    },
-    { title: '渠道 ID', dataIndex: 'channel_id', key: 'channel_id', width: 90 },
-    {
-      title: '模型', dataIndex: 'model', key: 'model', width: 180, ellipsis: true,
-      render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text>,
-    },
-    {
-      title: '判定', dataIndex: 'verdict', key: 'verdict', width: 140,
-      render: (v: ProbeVerdict) => {
-        const meta = VERDICT_TAG[v] || { color: 'default', text: v }
-        return <Tag color={meta.color}>{meta.text}</Tag>
-      },
-    },
-    {
-      title: '延迟', dataIndex: 'latency_ms', key: 'latency_ms', width: 100, align: 'right',
-      render: (v: number | null | undefined) => fmtLatency(v),
-    },
-    {
-      title: '批次', dataIndex: 'batch_id', key: 'batch_id', width: 140, ellipsis: true,
-      render: (v: string) => <Tooltip title={v}><Text code style={{ fontSize: 12 }}>{v}</Text></Tooltip>,
-    },
-  ]
-
-  const eventColumns: ColumnsType<ChannelEventItem> = [
-    {
-      title: '时间', dataIndex: 'created_at', key: 'created_at', width: 170,
-      render: (v: string | null) => fmtTime(v),
-    },
-    { title: '渠道 ID', dataIndex: 'channel_id', key: 'channel_id', width: 90 },
-    {
-      title: '动作', dataIndex: 'action', key: 'action', width: 90,
-      render: (v: string) => {
-        const meta = ACTION_TAG[v] || { color: 'default', text: v }
-        return <Tag color={meta.color}>{meta.text}</Tag>
-      },
-    },
-    {
-      title: '用量', dataIndex: 'usage', key: 'usage', width: 100, align: 'right',
-      render: (v: number | null | undefined) => fmtQuota(v),
-    },
-    {
-      title: '上限', dataIndex: 'limit_quota', key: 'limit_quota', width: 100, align: 'right',
-      render: (v: number | null | undefined) => fmtQuota(v),
-    },
-    {
-      title: '窗口', dataIndex: 'window_hours', key: 'window_hours', width: 80, align: 'right',
-      render: (v: number | null | undefined) => (v ? `${v}h` : '-'),
-    },
-    {
-      title: '原因', dataIndex: 'reason', key: 'reason', ellipsis: true,
-      render: (v: string | null) => v || '-',
-    },
-    {
-      title: '来源', dataIndex: 'source', key: 'source', width: 100,
-      render: (v: string) => (
-        <Tag color={v === 'scheduler' ? 'geekblue' : 'gold'}>{v}</Tag>
-      ),
-    },
-  ]
-
   /** verdict 概览计数（original 绿 / spoofed 红 / offline 灰） */
   const verdicts = overview?.latest_batch_verdicts || {}
 
@@ -413,85 +291,6 @@ const NewApiOps: React.FC = () => {
     </>
   )
 
-  const renderProbeTab = () => (
-    <>
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Text type="secondary">按渠道 ID 过滤：</Text>
-        <Input.Search
-          placeholder="如 5"
-          allowClear
-          style={{ width: 180 }}
-          onSearch={(v) => {
-            setProbesChannelId(parseChannelId(v))
-            setProbesPage(1)
-          }}
-        />
-      </Space>
-      <Table
-        columns={probeColumns}
-        dataSource={probes}
-        rowKey="id"
-        loading={probesLoading}
-        scroll={{ x: 900 }}
-        expandable={{
-          rowExpandable: (record) =>
-            !!record.scores && Object.keys(record.scores).length > 0,
-          expandedRowRender: (record) => (
-            <pre style={{ margin: 0, fontSize: 12, whiteSpace: 'pre-wrap' }}>
-              {JSON.stringify(record.scores, null, 2)}
-            </pre>
-          ),
-        }}
-        pagination={{
-          current: probesPage,
-          pageSize: probesPageSize,
-          total: probesTotal,
-          showSizeChanger: true,
-          showTotal: (t) => `共 ${t} 条`,
-          onChange: (p, ps) => {
-            setProbesPage(p)
-            setProbesPageSize(ps)
-          },
-        }}
-      />
-    </>
-  )
-
-  const renderEventsTab = () => (
-    <>
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Text type="secondary">按渠道 ID 过滤：</Text>
-        <Input.Search
-          placeholder="如 5"
-          allowClear
-          style={{ width: 180 }}
-          onSearch={(v) => {
-            setEventsChannelId(parseChannelId(v))
-            setEventsPage(1)
-          }}
-        />
-      </Space>
-      <Table
-        columns={eventColumns}
-        dataSource={events}
-        rowKey="id"
-        loading={eventsLoading}
-        scroll={{ x: 900 }}
-        pagination={{
-          current: eventsPage,
-          pageSize: eventsPageSize,
-          total: eventsTotal,
-          showSizeChanger: true,
-          showTotal: (t) => `共 ${t} 条`,
-          onChange: (p, ps) => {
-            setEventsPage(p)
-            setEventsPageSize(ps)
-          },
-        }}
-      />
-    </>
-  )
-
   return (
     <Card
       title="中转站管控（new-api）"
@@ -505,8 +304,8 @@ const NewApiOps: React.FC = () => {
         defaultActiveKey="overview"
         items={[
           { key: 'overview', label: '渠道总览', children: renderOverviewTab() },
-          { key: 'probes', label: '探针结果', children: renderProbeTab() },
-          { key: 'events', label: '事件时间线', children: renderEventsTab() },
+          { key: 'probes', label: '探针结果', children: <ProbeResults refreshSignal={refreshSignal} /> },
+          { key: 'events', label: '事件时间线', children: <EventsList refreshSignal={refreshSignal} configSaved={configSaved} /> },
         ]}
       />
 

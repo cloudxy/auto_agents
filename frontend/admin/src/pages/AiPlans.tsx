@@ -9,7 +9,7 @@
  * 本文件仅保留组合职责：Tabs 编排、权限注入、日志/结果抽屉。
  */
 import React, { useState } from 'react'
-import { Button, Card, Tabs } from 'antd'
+import { Button, Card, Steps, Tabs } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import type { AiPlan } from '../services/ai'
 import { LogDrawer } from '../components/spider/LogDrawer'
@@ -74,12 +74,25 @@ const AiPlans: React.FC = () => {
             key: 'wizard',
             label: '采集向导',
             children: (
+              <>
+              {/* UX1（工单 89）：流程阶段指示——输入目标 → 方案与试采 → 上线 */}
+              <Steps
+                size="small"
+                current={wizard.step}
+                style={{ marginBottom: 20, maxWidth: 640 }}
+                items={[
+                  { title: '输入目标' },
+                  { title: '方案与试采' },
+                  { title: '上线' },
+                ]}
+              />
               <PlanDetail
                 flow={wizard}
                 canOperate={canOperate}
                 onOpenLog={openLog}
                 onOpenResult={openResult}
               />
+              </>
             ),
           },
           {

@@ -7,6 +7,7 @@ import { Alert, Button, Checkbox, message, Space, Spin, Table, Tag, Typography }
 import { SyncOutlined } from '@ant-design/icons'
 
 import { listManifests, syncAdapters, updateManifest } from '../services/skills'
+import { apiErrorMessage } from '../utils/errorMessage'
 
 const { Text } = Typography
 
@@ -21,7 +22,7 @@ const SkillsMatrix: React.FC<{ skillNames: string[]; canAdmin?: boolean }> = ({ 
     try {
       setManifests(await listManifests())
     } catch (e) {
-      message.error(`矩阵加载失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '矩阵加载失败'))
     } finally {
       setLoading(false)
     }
@@ -37,7 +38,7 @@ const SkillsMatrix: React.FC<{ skillNames: string[]; canAdmin?: boolean }> = ({ 
       await updateManifest(tool, next)
       setManifests((m) => ({ ...m, [tool]: next }))
     } catch (e) {
-      message.error(`保存失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '保存失败'))
       load()
     } finally {
       setSavingTool(null)
@@ -50,7 +51,7 @@ const SkillsMatrix: React.FC<{ skillNames: string[]; canAdmin?: boolean }> = ({ 
       setSyncOutput(result.output || `returncode=${result.returncode}`)
       result.ok ? message.success('适配器同步完成') : message.error('适配器同步失败，见输出')
     } catch (e) {
-      message.error(`同步失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '同步失败'))
     }
   }
 

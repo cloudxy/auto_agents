@@ -6,6 +6,7 @@
  * + 人工矫正 Modal（走 PUT /skills/{name}/meta，操作人=当前登录用户）。
  */
 import React, { useCallback, useEffect, useState } from 'react'
+import { TIER_COLORS } from '@auto-agents/frontend-shared'
 import {
   Alert, Button, Drawer, Form, Input, InputNumber, message, Modal, Select,
   Space, Table, Tabs, Tag, Typography,
@@ -17,8 +18,10 @@ import {
   correctSkillMeta, getSkillDetail, listSkills, scanSkills,
   type CorrectionPayload, type ScanSummary, type SkillDetail, type SkillItem,
 } from '../services/skills'
+import { usePermission } from '../hooks/usePermission'
 import SkillsCandidates from './SkillsCandidates'
 import SkillsMatrix from './SkillsMatrix'
+import { apiErrorMessage } from '../utils/errorMessage'
 
 const { Text, Paragraph } = Typography
 
@@ -29,10 +32,13 @@ const STATUS_COLORS: Record<string, string> = {
 const SYNC_COLORS: Record<string, string> = {
   ok: 'success', hash_changed: 'warning', missing: 'error', parse_error: 'error',
 }
-const TIER_COLORS: Record<string, string> = { S: 'gold', A: 'green', B: 'blue', C: 'default' }
 const RUBRIC_DIMS = ['completeness', 'doc_quality', 'maintenance', 'real_world_effect'] as const
 
-const Skills: React.FC<{ canEdit?: boolean; canAdmin?: boolean }> = ({ canEdit = false, canAdmin = false }) => {
+const Skills: React.FC = () => {
+  // 工单 69：按钮级权限单源（R5）——移除调用方硬编码 props，组件内读 usePermission
+  const { hasPermission } = usePermission()
+  const canEdit = hasPermission('btn:skill:edit')
+  const canAdmin = hasPermission('btn:skill:admin')
   const [items, setItems] = useState<SkillItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -50,7 +56,7 @@ const Skills: React.FC<{ canEdit?: boolean; canAdmin?: boolean }> = ({ canEdit =
       setItems(data.items)
       setTotal(data.total)
     } catch (e) {
-      message.error(`技能列表加载失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '技能列表加载失败'))
     } finally {
       setLoading(false)
     }
@@ -63,7 +69,7 @@ const Skills: React.FC<{ canEdit?: boolean; canAdmin?: boolean }> = ({ canEdit =
       setDetail(await getSkillDetail(name))
       setDetailOpen(true)
     } catch (e) {
-      message.error(`详情加载失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '详情加载失败'))
     }
   }
 
@@ -73,7 +79,7 @@ const Skills: React.FC<{ canEdit?: boolean; canAdmin?: boolean }> = ({ canEdit =
       message.success(`扫描完成：${summary.succeeded}/${summary.total} 成功，缺失 ${summary.missing.length} 个`)
       load()
     } catch (e) {
-      message.error(`扫描失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '扫描失败'))
     }
   }
 
@@ -97,7 +103,7 @@ const Skills: React.FC<{ canEdit?: boolean; canAdmin?: boolean }> = ({ canEdit =
       setCorrectTarget(null)
       load()
     } catch (e) {
-      message.error(`矫正失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '矫正失败'))
     }
   }
 

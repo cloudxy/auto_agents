@@ -4,16 +4,10 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { Alert, Card, Col, Progress, Row, Spin, Table, Typography, message } from 'antd'
 
-import api, { unwrap } from '../services/api'
+import { fetchUsageByMember, fetchUsageOverview, type MemberUsageRow, type UsageOverview } from '../services/usage'
+import { apiErrorMessage } from '../utils/errorMessage'
 
 const { Title, Text } = Typography
-
-interface UsageOverview {
-  tenant_id: number
-  quota: { task_concurrency: number; result_storage: number; llm_tokens_month: number }
-  usage: { task_concurrency: number; result_storage: number; llm_tokens_month: number }
-  llm_by_provider: Record<string, number>
-}
 
 const METRICS: Array<{ key: keyof UsageOverview['usage']; label: string; unit: string }> = [
   { key: 'task_concurrency', label: '任务并发', unit: '个运行中' },
@@ -25,15 +19,19 @@ const Usage: React.FC = () => {
   const [data, setData] = useState<UsageOverview | null>(null)
   const [loading, setLoading] = useState(false)
 
+  const [byMember, setByMember] = useState<MemberUsageRow[]>([])
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setData(await api.get('/tenants/me/usage').then((r) => unwrap<UsageOverview>(r)))
+      setData(await fetchUsageOverview())
     } catch (e) {
-      message.error(`用量加载失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '用量加载失败'))
     } finally {
       setLoading(false)
     }
+    try {
+      setByMember(await fetchUsageByMember())
+    } catch { /* 成员分摊非关键路径 */ }
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -74,6 +72,20 @@ const Usage: React.FC = () => {
             { title: 'Tokens', dataIndex: 'tokens', render: (v: number) => v.toLocaleString() },
           ]}
           locale={{ emptyText: '本月暂无 LLM 用量' }}
+        />
+      </Card>
+      <Card title="成员用量分摊（任务创建数）" style={{ marginTop: 16 }}>
+        <Table<MemberUsageRow>
+          rowKey="member"
+          size="small"
+          pagination={false}
+          dataSource={byMember}
+          columns={[
+            { title: '成员', dataIndex: 'member' },
+            { title: '任务数', dataIndex: 'tasks', width: 120 },
+            { title: '最近活跃', dataIndex: 'last_active_at', width: 200,
+              render: (v: string | null) => (v ? new Date(v).toLocaleString('zh-CN') : '-') },
+          ]}
         />
       </Card>
     </div>

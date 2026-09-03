@@ -1,6 +1,6 @@
 /**
  * 能力中心页（P6 C9）：四类资产统一管理——技能/插件/专家/专家团
- * 技能 Tab 复用 Skills 组件；插件含验证按钮；专家/专家团为定义管理。
+ * 技能 Tab 复用 Skills 组件（按钮级权限由 Skills 内部 usePermission 决定）；插件含验证按钮；专家/专家团为定义管理。
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import {
@@ -9,30 +9,19 @@ import {
 } from 'antd'
 import { ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 
-import api, { unwrap } from '../services/api'
 import Skills from './Skills'
+import {
+  createTeam, listAssets, scanExperts, scanPlugins, verifyPlugin, type AssetRow,
+} from '../services/capabilities'
+import { apiErrorMessage } from '../utils/errorMessage'
 
 const { Text } = Typography
 
-interface AssetRow {
-  id: number
-  asset_type: string
-  name: string
-  title: string
-  category: string
-  status: string
-  tier?: string | null
-  score?: number | null
-  sync_state: string
-}
 
 const STATUS_COLORS: Record<string, string> = {
   experimental: 'default', testing: 'processing', stable: 'success',
   recommended: 'gold', deprecated: 'warning', blacklist: 'error',
 }
-
-const listAssets = (type: string): Promise<{ total: number; items: AssetRow[] }> =>
-  api.get('/capabilities', { params: { type, page_size: 50 } }).then((r) => unwrap<{ total: number; items: AssetRow[] }>(r))
 
 const Capabilities: React.FC = () => {
   const [tab, setTab] = useState('skills')
@@ -40,7 +29,7 @@ const Capabilities: React.FC = () => {
   return (
     <div>
       <Tabs activeKey={tab} onChange={setTab} items={[
-        { key: 'skills', label: '技能', children: <Skills canEdit canAdmin /> },
+        { key: 'skills', label: '技能', children: <Skills /> },
         { key: 'plugins', label: '插件', children: <PluginTab /> },
         { key: 'experts', label: '专家', children: <ExpertTab /> },
         { key: 'teams', label: '专家团', children: <TeamTab /> },
@@ -62,23 +51,22 @@ const PluginTab: React.FC = () => {
 
   const scan = async () => {
     try {
-      await api.post('/capabilities/scan-plugins')
+      await scanPlugins()
       message.success('插件扫描完成')
       load()
-    } catch (e) { message.error(`扫描失败: ${e instanceof Error ? e.message : String(e)}`) }
+    } catch (e) { message.error(apiErrorMessage(e, '扫描失败')) }
   }
 
   const verify = async (name: string) => {
     try {
       setVerifying(name)
-      const result = await api.post(`/capabilities/plugins/${encodeURIComponent(name)}/verify`)
-        .then((r) => unwrap<{ health: string; detail: Record<string, { health: string; detail: string }> }>(r))
+      const result = await verifyPlugin(name)
       const serverResults = Object.entries(result.detail || {})
         .map(([srv, r]) => `${srv}: ${r.health}`).join('; ')
       message.info(`验证 ${name}: ${result.health}${serverResults ? ` (${serverResults})` : ''}`)
       load()
     } catch (e) {
-      message.error(`验证失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '验证失败'))
     } finally { setVerifying(null) }
   }
 
@@ -117,10 +105,10 @@ const ExpertTab: React.FC = () => {
 
   const scan = async () => {
     try {
-      await api.post('/capabilities/scan-experts')
+      await scanExperts()
       message.success('专家扫描完成')
       load()
-    } catch (e) { message.error(`扫描失败: ${e instanceof Error ? e.message : String(e)}`) }
+    } catch (e) { message.error(apiErrorMessage(e, '扫描失败')) }
   }
 
   return (
@@ -159,13 +147,13 @@ const TeamTab: React.FC = () => {
   const onCreate = async () => {
     const values = await form.validateFields()
     try {
-      await api.post('/capabilities/teams', values)
+      await createTeam(values)
       message.success(`专家团「${values.name}」已创建`)
       setFormOpen(false)
       form.resetFields()
       load()
     } catch (e) {
-      message.error(`创建失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '创建失败'))
     }
   }
 

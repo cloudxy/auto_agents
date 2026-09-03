@@ -1,8 +1,9 @@
 /**
  * LogDrawer - 日志查看抽屉（轮询 + 搜索 + 级别筛选）
  */
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useState } from 'react'
 import { Drawer, Input, Select, Space, Tag, Typography, Empty } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import { fetchTaskLogs } from '../../services/spiders'
 import { STATUS_META } from './types'
 import type { Task, TaskLogResponse, SpiderMap } from './types'
@@ -16,35 +17,22 @@ export interface LogDrawerProps {
 }
 
 export const LogDrawer: React.FC<LogDrawerProps> = ({ task, spiderMap, onClose }) => {
-  const [logData, setLogData] = useState<TaskLogResponse | null>(null)
   const [logKeyword, setLogKeyword] = useState<string>('')
   const [logLevel, setLogLevel] = useState<string>('')
-  const logTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useEffect(() => {
-    if (!task) return
-    const pull = () => {
-      fetchTaskLogs(task.id, 200, logKeyword || undefined, logLevel || undefined)
-        .then((data) => {
-          setLogData(data)
-          // U1-6：任务已达终态后停止轮询（避免无意义的持续请求）
-          if (data.status === 'completed' || data.status === 'failed') {
-            if (logTimer.current) clearInterval(logTimer.current)
-            logTimer.current = null
-          }
-        })
-        .catch(() => { /* 轮询静默失败 */ })
-    }
-    pull()
-    logTimer.current = setInterval(pull, 2000)
-    return () => {
-      if (logTimer.current) clearInterval(logTimer.current)
-      logTimer.current = null
-    }
-  }, [task, logKeyword, logLevel])
+  // 工单 78：轮询交 react-query（U1-6 终态自动停）
+  const taskId = task?.id ?? 0
+  const { data: logData } = useQuery({
+    queryKey: ['task-logs', taskId, logKeyword, logLevel],
+    queryFn: () => fetchTaskLogs(taskId, 200, logKeyword || undefined, logLevel || undefined),
+    enabled: !!task,
+    refetchInterval: (query) => {
+      const s = query.state.data?.status
+      return s === 'completed' || s === 'failed' ? false : 2000
+    },
+  })
 
   const handleClose = () => {
-    setLogData(null)
     setLogKeyword('')
     setLogLevel('')
     onClose()

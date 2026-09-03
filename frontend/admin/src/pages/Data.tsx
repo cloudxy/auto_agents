@@ -16,7 +16,6 @@ import {
   ReloadOutlined, SearchOutlined, DownloadOutlined, DeleteOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import api from '../services/api'
 import { fetchRegistry, searchResults, deleteResult } from '../services/spiders'
 import type { SpiderResult, SpiderInfo } from '../services/spiders'
 import { usePermission } from '../hooks/usePermission'
@@ -24,6 +23,7 @@ import { ResultDrawer } from '../components/spider/ResultDrawer'
 import type { Task, SpiderMap } from '../components/spider/types'
 import { apiErrorMessage } from '../utils/errorMessage'
 import type { Dayjs } from 'dayjs'
+import { fetchAdminStats } from '../services/admin'
 
 const { Text } = Typography
 
@@ -94,9 +94,7 @@ const Data: React.FC = () => {
 
   const loadStats = useCallback(async () => {
     try {
-      // /admin/stats 带 ApiResponse 信封，需解包 data
-      const res = await api.get<StatsData>('/admin/stats')
-      setStats(res.data)
+      setStats(await fetchAdminStats<StatsData>())
     } catch (error) {
       message.error('获取统计数据失败')
     } finally {
@@ -149,7 +147,7 @@ const Data: React.FC = () => {
     setLoading(true)
     searchResults({ page: 1, page_size: 20 })
       .then((res) => { setRows(res.items || []); setTotal(res.total || 0) })
-      .catch(() => message.error('获取采集结果失败'))
+      .catch((e) => message.error(apiErrorMessage(e, '获取采集结果失败')))
       .finally(() => setLoading(false))
   }
 
@@ -188,7 +186,7 @@ const Data: React.FC = () => {
   const columns: ColumnsType<SpiderResult> = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 70 },
     {
-      title: '爬虫', dataIndex: 'spider_name', key: 'spider_name', width: 160,
+      title: '采集方案', dataIndex: 'spider_name', key: 'spider_name', width: 160,
       render: (name: string) => (
         <Space direction="vertical" size={0}>
           <Text strong>{spiderMap[name]?.title || name}</Text>
@@ -268,7 +266,7 @@ const Data: React.FC = () => {
             allowClear
             showSearch
             optionFilterProp="label"
-            placeholder="按爬虫筛选"
+            placeholder="按采集方案筛选"
             style={{ width: 240 }}
             value={spiderName}
             onChange={(v) => setSpiderName(v)}

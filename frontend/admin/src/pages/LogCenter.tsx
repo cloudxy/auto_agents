@@ -11,10 +11,10 @@ import {
 } from 'antd'
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import api from '../services/api'
 import SpiderLogs from './SpiderLogs'
 import { usePermission } from '../hooks/usePermission'
 import type { Dayjs } from 'dayjs'
+import { fetchAuditLogs } from '../services/admin'
 
 const { Text } = Typography
 
@@ -53,12 +53,9 @@ const AuditLogsTab: React.FC = () => {
     if (!isAdmin) return
     if (showSpin) setLoading(true)
     try {
-      // /admin/audit-logs 带 ApiResponse 信封，需解包 data
-      const res = await api.get<{ items: AuditLogItem[]; total: number }>('/admin/audit-logs', {
-        params: { skip: (p - 1) * 20, limit: 20, ...buildQuery() },
-      })
-      setRows(res.data?.items || [])
-      setTotal(res.data?.total || 0)
+      const res = await fetchAuditLogs<AuditLogItem>({ skip: (p - 1) * 20, limit: 20, ...buildQuery() })
+      setRows(res.items || [])
+      setTotal(res.total || 0)
     } catch (error) {
       message.error('获取审计日志失败')
     } finally {

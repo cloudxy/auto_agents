@@ -236,14 +236,14 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
         {plan.status === 'registered' && (
           <Alert
             type="success" showIcon style={{ marginBottom: 16 }}
-            title={`已上线为爬虫定义：${plan.plan_json?.registered_definition || '-'}`}
-            description="可在「爬虫管理 → 任务列表」中选择该 flow 类型爬虫发起正式采集。"
+            title={`已上线为采集方案：${plan.plan_json?.registered_definition || '-'}`}
+            description="可在「数据工厂 → 采集任务」中选择该方案发起正式采集。"
           />
         )}
         {testing && latestPassed && (
           <Alert
             type="success" showIcon style={{ marginBottom: 16 }}
-            title="最近一次试采通过，可一键上线注册为 flow 类型爬虫定义"
+            title="最近一次试采通过，可一键上线注册为正式采集方案"
           />
         )}
         {testing && !latestPassed && (

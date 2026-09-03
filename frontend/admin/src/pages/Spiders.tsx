@@ -31,6 +31,7 @@ import { AlertRulesTab } from '../components/spider/AlertRulesTab'
 import { TemplateTab } from '../components/spider/TemplateTab'
 import { TemplateModal } from '../components/spider/TemplateModal'
 import { TaskEditModal } from '../components/spider/TaskEditModal'
+import { useQuery } from '@tanstack/react-query'
 
 const PAGE_SIZE = 20
 
@@ -42,9 +43,6 @@ const Spiders: React.FC = () => {
   const canSchedule = hasPermission('btn:schedule')
   const canOperate = hasPermission('btn:create') // 暂停/终止与创建共享 operator 权限
 
-  const [loading, setLoading] = useState(false)
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [priorityFilter, setPriorityFilter] = useState<string | undefined>(undefined)
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
@@ -77,23 +75,23 @@ const Spiders: React.FC = () => {
     return m
   }, [registry])
 
-  // U1-1：服务端真分页 + 状态/爬虫/优先级筛选（翻到哪页拉哪页，不再只取前 50 条）
-  const loadTasks = useCallback(async (showSpin = true, targetPage = page) => {
-    if (showSpin) setLoading(true)
-    try {
-      const res = await fetchTasks((targetPage - 1) * PAGE_SIZE, PAGE_SIZE, {
-        priority: priorityFilter,
-        status: statusFilter,
-        spider_name: spiderFilter,
-      })
-      setTasks(res.items || [])
-      setTotal(res.total || 0)
-    } catch (error) {
-      message.error('获取任务列表失败')
-    } finally {
-      if (showSpin) setLoading(false)
-    }
-  }, [page, priorityFilter, statusFilter, spiderFilter])
+  // 工单 78：任务列表交 react-query（U1-1 服务端真分页；存在未终态任务时 3s 轮询）
+  const { data: tasksRes, isLoading: loading, refetch: refetchTasks } = useQuery({
+    queryKey: ['spider-tasks', page, priorityFilter, statusFilter, spiderFilter],
+    queryFn: () => fetchTasks((page - 1) * PAGE_SIZE, PAGE_SIZE, {
+      priority: priorityFilter,
+      status: statusFilter,
+      spider_name: spiderFilter,
+    }),
+    refetchInterval: (query) => {
+      const active = (query.state.data?.items || []).some(
+        (t) => t.status === 'pending' || t.status === 'running')
+      return active ? 3000 : false
+    },
+  })
+  const tasks = tasksRes?.items || []
+  const total = tasksRes?.total || 0
+  const loadTasks = async (_showSpin = true, _targetPage?: number) => { await refetchTasks() }
 
   // 筛选/翻页变化：只改状态，由 useEffect([loadTasks]) 依赖驱动自动重载
   // （避免闭包旧值；筛选变化时同时回到第 1 页）
@@ -112,18 +110,11 @@ const Spiders: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    fetchRegistry().then(setRegistry).catch(() => message.error('获取爬虫注册表失败'))
+    fetchRegistry().then(setRegistry).catch((e) => message.error(apiErrorMessage(e, '获取爬虫注册表失败')))
     loadTasks()
     loadTemplates()
   }, [loadTasks, loadTemplates])
 
-  // 存在未终态任务时每 3 秒静默刷新（状态/结果数实时推进）
-  useEffect(() => {
-    const hasActive = tasks.some((t) => t.status === 'pending' || t.status === 'running')
-    if (!hasActive) return
-    const timer = setInterval(() => loadTasks(false), 3000)
-    return () => clearInterval(timer)
-  }, [tasks, loadTasks])
 
   // ---------------- 新增任务弹窗 ----------------
   const openModal = (presetArg?: TaskPreset | null) => {
@@ -178,7 +169,7 @@ const Spiders: React.FC = () => {
   }
 
   return (
-    <Card title="爬虫管理">
+    <Card title="采集任务">
       <Tabs
         items={[
           {
@@ -241,7 +232,7 @@ const Spiders: React.FC = () => {
           },
           {
             key: 'files',
-            label: '爬虫定义',
+            label: '采集方案',
             children: (
               <FileTab isAdmin={isAdmin} />
             ),
