@@ -1,5 +1,9 @@
 // jsdom 环境补齐（E0.3 工单 06）：react-router v7 与 antd 6 的运行时依赖
 import { TextEncoder, TextDecoder } from 'util';
+import { configure } from '@testing-library/dom'
+
+// 并行负载下 findBy* 默认 1s 超时易抖动：全局放宽到 8s（waitFor 语义不变）
+configure({ asyncUtilTimeout: 8000 })
 
 if (typeof (global as any).TextEncoder === 'undefined') {
   (global as any).TextEncoder = TextEncoder;
