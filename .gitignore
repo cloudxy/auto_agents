@@ -9,10 +9,8 @@ venv/
 dist/
 build/
 
-# UV
-# 根 uv.lock 应提交以保证可复现构建；子项目 lock 由 workspace 接管，不应存在
-
 # Node
+openapi.json
 node_modules/
 npm-debug.log*
 yarn-debug.log*
@@ -34,12 +32,7 @@ runtime/
 temp/
 
 # Files (不提交，但保留目录结构)
-files/uploads/*
-files/downloads/*
-files/exports/*
-!files/uploads/.gitkeep
-!files/downloads/.gitkeep
-!files/exports/.gitkeep
+files/
 
 # Environment
 .env
@@ -75,12 +68,11 @@ ai_tool/*
 .qoder/*
 .idea/*
 
-# 运行期导出数据（storage/exports 等由 STORAGE 配置指向）
+
 storage/
-# 技能工单暂存区（本地 markdown 工单，见 docs/agents/issue-tracker.md）
+
 .scratch/
 
-# 私人内容：docs/（方案/ADR/工程技能配置）与 files/（上传/下载/导出运行时目录）
-# 均不入库，仅本地保留；应用启动自建 files/* 目录（platform_core/storage.py）
 docs/
-files/
+
+.video_agent/

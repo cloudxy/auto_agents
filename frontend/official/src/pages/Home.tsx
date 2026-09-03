@@ -1,6 +1,6 @@
 /**
  * 官方网站 - 首页（智能数据采集系统产品页）
- * 章节：Header → Hero → 核心功能 → AI 采集流程 → 系统架构 → CTA → Footer
+ * 章节：Hero → 核心功能 → AI 采集流程 → 系统架构 → CTA（Header/Footer 归 SiteLayout，工单 70）
  * 说明：纯静态展示，不依赖后端接口；管理后台地址经环境变量注入
  */
 import React from 'react'
@@ -27,89 +27,12 @@ const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
 const SITE_NAME = 'AutoAgents'
 const SITE_SLOGAN = 'AI 驱动的智能数据采集系统'
 
-/** 页头锚点导航 */
-const NAV_LINKS = [
-  { label: '核心功能', href: '#features' },
-  { label: 'AI 采集流程', href: '#ai-flow' },
-  { label: '系统架构', href: '#architecture' },
-  { label: '技能广场', href: '/skills' },
-  { label: '能力广场', href: '/capabilities' },
-  { label: '定价', href: '/pricing' },
-  { label: '注册', href: '/register' },
-]
-
 /** Hero 平台能力概览（静态示意数据） */
 const HERO_STATS = [
   { value: '128,000+', label: '累计执行任务', color: '#40a9ff' },
   { value: '12 节点', label: '分布式 Worker 在线', color: '#13c2c2' },
   { value: '3.2 亿条', label: '累计采集数据', color: '#95de64' },
 ]
-
-/** 平滑滚动到锚点 */
-const scrollToAnchor = (href: string) => {
-  document.querySelector(href)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-/** 页头：站点标识 + 锚点导航 + 管理后台入口 */
-const SiteHeader: React.FC = () => (
-  <header
-    style={{
-      position: 'sticky',
-      top: 0,
-      zIndex: 1000,
-      width: '100%',
-      background: 'rgba(255,255,255,0.86)',
-      backdropFilter: 'blur(12px)',
-      WebkitBackdropFilter: 'blur(12px)',
-      borderBottom: '1px solid rgba(18,35,63,0.06)',
-    }}
-  >
-    <div
-      style={{
-        maxWidth: CONTENT_MAX_WIDTH,
-        margin: '0 auto',
-        padding: '0 24px',
-        height: 64,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            background: 'linear-gradient(135deg, #1890ff, #13c2c2)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-            fontSize: 17,
-          }}
-        >
-          <RocketOutlined />
-        </div>
-        <span style={{ fontSize: 18, fontWeight: 800, color: '#12233f', letterSpacing: '-0.01em' }}>
-          {SITE_NAME}
-        </span>
-      </div>
-
-      <nav className="header-nav" style={{ display: 'flex', gap: 34 }}>
-        {NAV_LINKS.map((l) => (
-          <span key={l.href} className="header-nav-link" onClick={() => scrollToAnchor(l.href)}>
-            {l.label}
-          </span>
-        ))}
-      </nav>
-
-      <Button type="primary" shape="round" href={ADMIN_URL} icon={<ArrowRightOutlined />}>
-        管理后台
-      </Button>
-    </div>
-  </header>
-)
 
 /** Hero：产品定位 + 双 CTA + 能力概览（深空指挥中心视觉） */
 const Hero: React.FC = () => (
@@ -206,12 +129,12 @@ const Hero: React.FC = () => (
           size="large"
           shape="round"
           icon={<RocketOutlined />}
-          onClick={() => scrollToAnchor('#ai-flow')}
+          onClick={() => document.getElementById('ai-flow')?.scrollIntoView({ behavior: 'smooth' })}
           style={{
             height: 54,
             padding: '0 40px',
             fontSize: 16,
-            background: 'linear-gradient(92deg, #1890ff, #13c2c2)',
+            background: 'linear-gradient(92deg, var(--site-primary, #1677ff), #13c2c2)',
             border: 'none',
             boxShadow: '0 8px 24px rgba(24, 144, 255, 0.4)',
           }}
@@ -296,7 +219,7 @@ const CtaBand: React.FC = () => (
             padding: '0 38px',
             fontSize: 16,
             marginTop: 32,
-            background: 'linear-gradient(92deg, #1890ff, #13c2c2)',
+            background: 'linear-gradient(92deg, var(--site-primary, #1677ff), #13c2c2)',
             border: 'none',
             boxShadow: '0 8px 24px rgba(19, 194, 194, 0.35)',
           }}
@@ -308,76 +231,10 @@ const CtaBand: React.FC = () => (
   </section>
 )
 
-/** 页脚：站点信息 + 锚点导航 + 版权 */
-const SiteFooter: React.FC = () => (
-  <footer className="home-footer" style={{ padding: '56px 24px 32px' }}>
-    <div
-      style={{
-        maxWidth: CONTENT_MAX_WIDTH,
-        margin: '0 auto',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        flexWrap: 'wrap',
-        gap: 24,
-      }}
-    >
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 9,
-              background: 'linear-gradient(135deg, #1890ff, #13c2c2)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontSize: 15,
-            }}
-          >
-            <RocketOutlined />
-          </div>
-          <span style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>{SITE_NAME}</span>
-        </div>
-        <p style={{ margin: '12px 0 0', fontSize: 13.5, color: 'rgba(255,255,255,0.45)' }}>
-          {SITE_SLOGAN} · 让数据获取稳定、高效、可控
-        </p>
-      </div>
-
-      <nav style={{ display: 'flex', gap: 28 }}>
-        {NAV_LINKS.map((l) => (
-          <span key={l.href} className="footer-nav-link" onClick={() => scrollToAnchor(l.href)}>
-            {l.label}
-          </span>
-        ))}
-        <a className="footer-nav-link" href={ADMIN_URL} style={{ textDecoration: 'none' }}>
-          管理后台
-        </a>
-      </nav>
-    </div>
-
-    <div
-      style={{
-        maxWidth: CONTENT_MAX_WIDTH,
-        margin: '40px auto 0',
-        paddingTop: 22,
-        borderTop: '1px solid rgba(255,255,255,0.08)',
-        textAlign: 'center',
-        fontSize: 13,
-      }}
-    >
-      {SITE_NAME} ©2026 Created by xuyun
-    </div>
-  </footer>
-)
-
 /** 首页：多节产品官网页 */
 const Home: React.FC = () => {
   return (
-    <div style={{ minHeight: '100vh', background: '#fff' }}>
-      <SiteHeader />
+    <div style={{ background: '#fff' }}>
       <main>
         <Hero />
         <FeaturesSection />
@@ -386,7 +243,6 @@ const Home: React.FC = () => {
         <SkillsSection />
         <CtaBand />
       </main>
-      <SiteFooter />
     </div>
   )
 }

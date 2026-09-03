@@ -1,24 +1,15 @@
 /**
- * Axios 实例配置
+ * Axios 实例（工单 66：client 由 shared createApiClient 工厂创建）
+ *
+ * 官网无鉴权：只传 baseURL，调 /public/* 端点。
  */
-import axios from 'axios'
+import { createApiClient } from '@auto-agents/frontend-shared'
 
-const api = axios.create({
+const api = createApiClient({
   baseURL: process.env.REACT_APP_API_BASE_URL || 'http://localhost:9111/api/v1',
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 })
 
-// 响应拦截器
-api.interceptors.response.use(
-  (response) => {
-    return response.data
-  },
-  (error) => {
-    return Promise.reject(error)
-  }
-)
-
 export default api
+
+// 信封解包单源在 shared（F-6），经此再导出供 service 层使用
+export { unwrap } from '@auto-agents/frontend-shared'

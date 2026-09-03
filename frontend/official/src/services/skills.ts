@@ -5,30 +5,10 @@
  */
 import api from './api'
 
-export interface PublicSkill {
-  name: string
-  title: string
-  description?: string | null
-  category: string
-  industries?: string[] | null
-  tier?: string | null
-  score?: number | null
-  status: string
-  source_url?: string
-  source_author?: string
-  updated_at?: string | null
-  skill_md?: string | null
-}
+// 信封解包与公开类型单源在 shared（F-6）
+import { unwrap, type PublicSkill } from '@auto-agents/frontend-shared'
 
-interface Envelope<T> {
-  success: boolean
-  code: string
-  message: string
-  data: T
-}
-
-/** 拦截器运行时已剥 AxiosResponse 壳（类型声明仍是 AxiosResponse），unknown 收窄解包 */
-const unwrap = <T,>(r: unknown): T => (r as Envelope<T>).data
+export type { PublicSkill }
 
 export const listPublicSkills = (params?: {
   q?: string

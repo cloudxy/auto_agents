@@ -3,6 +3,7 @@
  */
 import React from 'react'
 import { Button, Card, Col, Row, Tag, Typography } from 'antd'
+import { useNavigate } from 'react-router-dom'
 
 const { Title, Text } = Typography
 
@@ -27,13 +28,10 @@ const PLANS = [
   },
 ]
 
-const Pricing: React.FC = () => (
+const Pricing: React.FC = () => {
+  const navigate = useNavigate()
+  return (
   <div style={{ minHeight: '100vh', background: '#f7f9fc' }}>
-    <div style={{ background: '#001529', padding: '14px 24px', display: 'flex',
-                 justifyContent: 'space-between', alignItems: 'center' }}>
-      <a href="/" style={{ color: '#fff', fontSize: 18, fontWeight: 700 }}>AutoAgents</a>
-      <Text style={{ color: 'rgba(255,255,255,0.65)' }}>定价</Text>
-    </div>
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '48px 24px 64px' }}>
       <div style={{ textAlign: 'center', marginBottom: 40 }}>
         <Title level={2} style={{ marginBottom: 8 }}>选择适合你的套餐</Title>
@@ -41,7 +39,7 @@ const Pricing: React.FC = () => (
       </div>
       <Row gutter={24}>
         {PLANS.map((plan) => (
-          <Col span={8} key={plan.name}>
+          <Col xs={24} md={8} key={plan.name}>
             <Card hoverable style={{ textAlign: 'center', height: '100%',
                                      border: plan.highlight ? `2px solid ${plan.color}` : undefined }}>
               {plan.highlight && <Tag color={plan.color} style={{ marginBottom: 8 }}>推荐</Tag>}
@@ -50,7 +48,7 @@ const Pricing: React.FC = () => (
               {plan.features.map((f) => (
                 <p key={f} style={{ textAlign: 'left', padding: '4px 0' }}>✓ {f}</p>
               ))}
-              <Button type="primary" block href={plan.cta.href}
+              <Button type="primary" block onClick={() => navigate(plan.cta.href)}
                       style={{ marginTop: 16, background: plan.color }}>{plan.cta.label}</Button>
             </Card>
           </Col>
@@ -58,6 +56,7 @@ const Pricing: React.FC = () => (
       </Row>
     </div>
   </div>
-)
+  )
+}
 
 export default Pricing

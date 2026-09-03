@@ -2,10 +2,12 @@
  * 企业注册页（SaaS S5-1）：公司名 + 管理员邮箱/密码 → tenant + owner（免费档）。
  */
 import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Alert, Button, Card, Form, Input, Typography, message } from 'antd'
 import { CheckCircleOutlined } from '@ant-design/icons'
+import { tenantSignup } from '../services/signup'
+import { apiErrorMessage } from '../utils/errorMessage'
 
-import api from '../services/api'
 
 const { Title, Text } = Typography
 
@@ -23,12 +25,12 @@ const Register: React.FC = () => {
     const values = await form.validateFields()
     try {
       setSubmitting(true)
-      const result = await api.post('/public/tenant/signup', values)
+      const result = await tenantSignup(values)
         .then((r) => (r as unknown as { data: SignupResult }).data)
       setDone(result)
       message.success('注册成功，即可登录开始第一次采集')
     } catch (e) {
-      message.error(`注册失败: ${e instanceof Error ? e.message : String(e)}`)
+      message.error(apiErrorMessage(e, '注册失败'))
     } finally {
       setSubmitting(false)
     }
@@ -39,7 +41,7 @@ const Register: React.FC = () => {
                  alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <Card style={{ width: 420 }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <a href="/" style={{ fontSize: 20, fontWeight: 700, color: '#12233f' }}>AutoAgents</a>
+          <Link to='/' style={{ fontSize: 20, fontWeight: 700, color: '#12233f', textDecoration: 'none' }}>AutoAgents</Link>
           <Title level={4} style={{ margin: '12px 0 4px' }}>企业注册</Title>
           <Text type="secondary">免费档：5 并发 / 10000 条结果 / 20 万 tokens/月</Text>
         </div>

@@ -1,0 +1,13 @@
+/**
+ * 官网设计令牌（工单 77）：--site-* CSS 变量，与 shared BRAND_TOKENS 单源对齐
+ * 内联样式用 var(--site-primary, #1677ff) 引用；品牌换色只改此文件
+ */
+:root {
+  --site-primary: #1677ff;
+  --site-accent: #13c2c2;
+  --site-success: #52c41a;
+  --site-warning: #faad14;
+  --site-danger: #ff4d4f;
+  --site-deep-space: #001529;
+  --site-text-secondary: rgba(0, 0, 0, 0.45);
+}

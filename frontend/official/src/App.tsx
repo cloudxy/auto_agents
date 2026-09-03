@@ -1,25 +1,39 @@
-import React from 'react'
+import React, { Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import { ConfigProvider } from 'antd'
+import { ConfigProvider, Spin } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
-import Home from './pages/Home'
-import SkillsSquare from './pages/SkillsSquare'
-import Register from './pages/Register'
-import Pricing from './pages/Pricing'
-import Capabilities from './pages/Capabilities'
-import './App.css'
+import SiteLayout from './components/layout/SiteLayout'
+
+// 工单 70：页面 lazy 分包 + SiteLayout 统一壳 + 404 兜底
+const Home = React.lazy(() => import('./pages/Home'))
+const SkillsSquare = React.lazy(() => import('./pages/SkillsSquare'))
+const Capabilities = React.lazy(() => import('./pages/Capabilities'))
+const Register = React.lazy(() => import('./pages/Register'))
+const Pricing = React.lazy(() => import('./pages/Pricing'))
+const NotFound = React.lazy(() => import('./pages/NotFound'))
+
+const PageLoading = (
+  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+    <Spin size="large" />
+  </div>
+)
 
 function App() {
   return (
     <ConfigProvider locale={zhCN}>
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/skills" element={<SkillsSquare />} />
-          <Route path="/capabilities" element={<Capabilities />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/pricing" element={<Pricing />} />
-        </Routes>
+        <Suspense fallback={PageLoading}>
+          <Routes>
+            <Route element={<SiteLayout />}>
+              <Route path="/" element={<Home />} />
+              <Route path="/skills" element={<SkillsSquare />} />
+              <Route path="/capabilities" element={<Capabilities />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/pricing" element={<Pricing />} />
+              <Route path="*" element={<NotFound />} />
+            </Route>
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </ConfigProvider>
   )
