@@ -216,15 +216,10 @@ class LlmProviderService:
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
-        # 子表显式清理（Core delete 不触发 ORM cascade，SQLite 默认不启用 FK——
-        # 显式语句与 MySQL FK ON DELETE CASCADE 语义对齐的双保险）
-        await self.session.execute(
-            delete(LlmProviderModel).where(LlmProviderModel.provider_id == provider_id)
-        )
-        # commit 会 expire ORM 对象且行已删除（refresh 会抛 ObjectDeletedError），
-        # 名称必须在 commit 前固化为普通字符串
         deleted_name = str(getattr(item, "name", "") or "")
-        deleted = await self.repo.delete(provider_id)
+        # Phase A 矩阵：软删除（deleted_at 置位，列表/激活/解析全链自动排除；
+        # 子表行保留跟随父行隐藏，审计可追溯）
+        deleted = await self.repo.soft_delete(provider_id)
         await self.session.commit()
         await _invalidate_llm_clients(provider_id)
         logger.info(f"LLM 供应商已删除: id={provider_id}, name={deleted_name}")
@@ -398,6 +393,7 @@ class LlmProviderService:
                     LlmProvider.is_active == True,  # noqa: E712
                     LlmProvider.enabled == True,  # noqa: E712
                     LlmProvider.tenant_id == tenant_id,
+                    LlmProvider.deleted_at.is_(None),  # 软删行不参与运行时解析
                 )
             )).scalar_one_or_none()
             if active is None:
@@ -406,6 +402,7 @@ class LlmProviderService:
                     select(LlmProvider).where(
                         LlmProvider.enabled == True,  # noqa: E712
                         LlmProvider.tenant_id.is_(None),
+                        LlmProvider.deleted_at.is_(None),
                     ).order_by(LlmProvider.id.asc())
                 )).scalars().first()
         else:

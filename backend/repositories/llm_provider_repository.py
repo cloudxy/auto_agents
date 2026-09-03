@@ -17,18 +17,23 @@ class LlmProviderRepository(BaseRepository[LlmProvider]):
 
     async def get_by_name(self, name: str) -> Optional[LlmProvider]:
         """按名称查询（唯一性校验）"""
-        result = await self.session.execute(select(LlmProvider).where(LlmProvider.name == name))
+        result = await self.session.execute(
+            select(LlmProvider).where(LlmProvider.name == name, LlmProvider.deleted_at.is_(None))
+        )
         return result.scalar_one_or_none()
 
     async def list_providers(self) -> List[LlmProvider]:
         """全量列表（id 倒序：新供应商优先；激活位随行返回；量级小无分页）"""
-        stmt = select(LlmProvider).order_by(LlmProvider.id.desc())
+        stmt = select(LlmProvider).where(LlmProvider.deleted_at.is_(None)).order_by(LlmProvider.id.desc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_active(self) -> Optional[LlmProvider]:
         """当前激活行（全表至多一行；无激活行返回 None，调用方走 yml/env 兜底）"""
-        result = await self.session.execute(select(LlmProvider).where(LlmProvider.is_active == true()))
+        result = await self.session.execute(
+            select(LlmProvider).where(
+                LlmProvider.is_active == true(), LlmProvider.deleted_at.is_(None))
+        )
         return result.scalar_one_or_none()
 
     async def activate_exclusive(self, provider_id: int, tenant_id: int | None = None) -> None:

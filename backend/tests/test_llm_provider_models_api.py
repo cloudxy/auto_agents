@@ -70,6 +70,8 @@ def test_multiple_defaults_returns_422(db_client, db_engine, db_session):
 
 
 def test_delete_provider_cascades_models(db_client, db_engine, db_session):
+    """软删除语义（Phase A 矩阵）：父行 deleted_at 置位（列表排除），
+    子表模型行保留跟随隐藏（审计可追溯），物理行不清空"""
     provider_id = _create_provider(db_client, "cascade-me")
     put = db_client.put(
         f"/api/v1/llm/providers/{provider_id}/models",
@@ -82,8 +84,19 @@ def test_delete_provider_cascades_models(db_client, db_engine, db_session):
 
     import asyncio
 
-    async def _count():
+    async def _state():
         async with db_session() as s:
-            return (await s.execute(select(func.count()).select_from(LlmProviderModel))).scalar_one()
+            models = (await s.execute(
+                select(func.count()).select_from(LlmProviderModel))).scalar_one()
+            father = (await s.execute(
+                select(LlmProvider.deleted_at).where(LlmProvider.id == provider_id))).scalar_one()
+            return models, father
 
-    assert asyncio.run(_count()) == 0  # 级联清空
+    models, father_deleted_at = asyncio.run(_state())
+    assert models == 2  # 子表保留（跟随父行隐藏）
+    assert father_deleted_at is not None  # 父行软删除
+
+    # 列表与详情链路排除软删行
+    listing = db_client.get("/api/v1/llm/providers")
+    names = [p["name"] for p in listing.json()["data"]]
+    assert "cascade-me" not in names
