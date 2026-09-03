@@ -138,7 +138,12 @@ class LlmProviderService:
             raise BusinessException(f"LLM 供应商 '{payload.name}' 已存在")
         LlmSecretVault.ensure_public_base_url(payload.base_url)
         encrypted = self.encrypt_api_key(payload.api_key)
+        # 归属随上下文：平台态 → 公共行（tenant NULL，兜底可见）；租户态 → 本租户 BYOK
+        # （否则租户写入断言拒绝归属 None 的行）
+        from platform_core.tenant_context import current_tenant_id
+
         item = await self.repo.create(
+            tenant_id=current_tenant_id(),
             name=payload.name,
             provider_type=payload.provider_type,
             base_url=payload.base_url,

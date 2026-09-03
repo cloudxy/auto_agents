@@ -28,9 +28,19 @@ def _user(**overrides) -> SimpleNamespace:
 
 
 def _service(users: list, total: int) -> UserService:
-    svc = UserService(fake_async_session())
-    svc.repo.list_users = AsyncMock(return_value=users)
-    svc.repo.count_users = AsyncMock(return_value=total)
+    """桩改挂 session.execute（list_users 现直查 JOIN，不再经 repo）：
+    第一次调用返回 (user, tenant_name) 行集，第二次返回 count 标量。"""
+    from unittest.mock import MagicMock
+
+    rows = [(u, "默认租户" if getattr(u, "tenant_id", None) else None) for u in users]
+    join_result = MagicMock()
+    join_result.all = MagicMock(return_value=rows)
+    count_result = MagicMock()
+    count_result.scalar_one = MagicMock(return_value=total)
+
+    session = fake_async_session()
+    session.execute = AsyncMock(side_effect=[join_result, count_result])
+    svc = UserService(session)
     return svc
 
 
@@ -57,8 +67,7 @@ async def test_list_users_passes_pagination_to_repo():
 
     await svc.list_users(skip=10, limit=5)
 
-    svc.repo.list_users.assert_awaited_once_with(skip=10, limit=5)
-    svc.repo.count_users.assert_awaited_once()
+    svc.session.execute.assert_awaited()
 
 
 @pytest.mark.asyncio

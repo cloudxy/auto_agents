@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import CurrentUser, require_admin, require_login, require_platform_admin
+from platform_core.schemas.auth import AdminUserCreateRequest, AdminUserUpdateRequest
 from backend.app.responses import ok
 from backend.app.api._helpers import record_audit
 from backend.services.audit_service import AuditService
@@ -51,6 +52,50 @@ async def list_users(
     """用户列表（用户管理页陈列，不含密码哈希）"""
     data = await service.list_users(skip=skip, limit=limit)
     return ok(data=data.model_dump())
+
+
+@router.post("/users", status_code=201)
+async def admin_create_user(
+    payload: AdminUserCreateRequest,
+    user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_async_db),
+    service: UserService = Depends(_user_service),
+):
+    """创建账户（平台超管；角色分配 role 单源，归属公司可选）"""
+    created = await service.create_user(payload)
+    await session.commit()
+    await record_audit(session, user, "user.create", f"user#{created.id}",
+                       detail={"username": created.username, "role": created.role, "tenant_id": created.tenant_id})
+    return ok(data=created.model_dump())
+
+
+@router.patch("/users/{user_id}")
+async def admin_update_user(
+    user_id: int,
+    payload: AdminUserUpdateRequest,
+    user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_async_db),
+    service: UserService = Depends(_user_service),
+):
+    """编辑账户：角色分配/启停/归属调整（防自锁：不可降级/停用/删除自己）"""
+    updated = await service.update_user(user_id, payload, actor_id=int(user.id))
+    await session.commit()
+    await record_audit(session, user, "user.update", f"user#{user_id}", detail=payload.model_dump(exclude_unset=True))
+    return ok(data=updated.model_dump())
+
+
+@router.delete("/users/{user_id}")
+async def admin_delete_user(
+    user_id: int,
+    user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_async_db),
+    service: UserService = Depends(_user_service),
+):
+    """软删除账户（防删自己；防删最后一个平台超管）"""
+    await service.delete_user(user_id, actor_id=int(user.id))
+    await session.commit()
+    await record_audit(session, user, "user.delete", f"user#{user_id}")
+    return ok(data={"id": user_id, "deleted": True})
 
 
 @router.get("/audit-logs")
@@ -180,6 +225,71 @@ async def clear_dead_items(
     removed = await DeadItemService().clear()
     await record_audit(session, user, "dead_item.clear", f"dead_items:{removed}")
     return ok(data={"removed": removed})
+
+
+# ---------------- 通知渠道配置（B6：webhook/钉钉/企微 URL 运营面可写） ----------------
+
+_NOTIFY_CFG_KEYS = {
+    "webhook_url": "notify.webhook_url",
+    "dingtalk_url": "notify.dingtalk_webhook_url",
+    "wechat_work_url": "notify.wechat_work_webhook_url",
+}
+
+
+@router.get("/notify-config")
+async def get_notify_config(
+    _user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """通知渠道配置（三渠道 URL；密钥类仍走 env，不入库不入此接口）"""
+    from sqlalchemy import select
+
+    from platform_core.models.system_config import SystemConfig
+
+    rows = (await session.execute(
+        select(SystemConfig.config_key, SystemConfig.config_value)
+        .where(SystemConfig.config_key.in_(_NOTIFY_CFG_KEYS.values()))
+    )).all()
+    stored = dict(rows)
+    return ok(data={
+        field: stored.get(key) or "" for field, key in _NOTIFY_CFG_KEYS.items()
+    })
+
+
+@router.put("/notify-config")
+async def put_notify_config(
+    body: dict,
+    user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """更新通知渠道 URL（空串=清除覆盖，回退 settings 默认）"""
+    from sqlalchemy import select
+
+    from platform_core.exceptions import ValidationException
+    from platform_core.models.system_config import SystemConfig
+
+    updates = {}
+    for field, key in _NOTIFY_CFG_KEYS.items():
+        if field in body:
+            value = str(body[field] or "").strip()
+            if value and not value.startswith(("http://", "https://")):
+                raise ValidationException(message=f"{field} 必须是 http(s) 地址", field=field)
+            updates[key] = value
+    if not updates:
+        raise ValidationException(message="无可更新字段（webhook_url/dingtalk_url/wechat_work_url）")
+    for key, value in updates.items():
+        row = (await session.execute(
+            select(SystemConfig).where(SystemConfig.config_key == key)
+        )).scalar_one_or_none()
+        if row is None:
+            session.add(SystemConfig(config_key=key, config_value=value,
+                                     description="通知渠道 URL（运营面配置）"))
+        else:
+            row.config_value = value
+    await session.commit()
+    await record_audit(session, user, "notify_config.update", "notify_config",
+                       detail={k: (v[:40] + "…") if len(v) > 40 else v for k, v in updates.items()})
+    return ok(data={"updated": sorted(updates.keys())})
 
 
 @router.get("/webhook-status")

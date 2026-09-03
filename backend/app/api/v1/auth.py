@@ -84,6 +84,7 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
             "role": user_data.get("role", "operator"),
             "tenant_id": user_data.get("tenant_id"),
             "tenant_role": user_data.get("tenant_role"),
+            "is_platform_admin": bool(user_data.get("is_platform_admin", False)),
         },
         message="登录成功"
     )
