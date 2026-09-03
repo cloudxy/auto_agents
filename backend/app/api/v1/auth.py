@@ -113,9 +113,27 @@ _ROLE_PERMISSIONS = {
 
 
 @router.get("/permissions", response_model=ApiResponse)
-async def get_permissions(user: CurrentUser = Depends(get_current_user)):
-    """获取当前用户的权限列表（按角色动态返回，角色已在鉴权时快照）"""
+async def get_permissions(
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """获取当前用户的权限列表（roles 表 DB 单源；角色管理页改动即时生效）
+
+    DB miss（表空/角色被删）回退内置硬编码映射——登录链路不被配置问题阻断。
+    """
+    from sqlalchemy import select
+
+    from platform_core.models.role import Role
+
     logger.info(f"查询权限 | user={user.username} role={user.role}")
+    try:
+        row = (await session.execute(
+            select(Role.permissions).where(Role.role_key == user.role)
+        )).scalar_one_or_none()
+        if row:
+            return ok(data=row)
+    except Exception as e:  # noqa: BLE001 配置读失败回退内置映射（可用性优先）
+        logger.warning(f"角色权限 DB 读取失败，回退内置映射: {e}")
     return ok(data=_ROLE_PERMISSIONS.get(user.role, _ROLE_PERMISSIONS["viewer"]))
 @router.post("/register", response_model=ApiResponse)
 async def register(

@@ -236,6 +236,19 @@ class LlmProviderService:
         logger.info(f"LLM 供应商热切换完成: active_id={provider_id}")
         return await self.get_provider(provider_id)
 
+    async def deactivate_provider(self, provider_id: int) -> LlmProviderResponse:
+        """取消激活（全部下线：运行时解析回退 yml/env 兜底；行保留可再激活）"""
+        item = await self.repo.get_by_id(provider_id)
+        if item is None:
+            raise NotFoundException("LLM 供应商")
+        if not item.is_active:
+            return await self.get_provider(provider_id)  # 幂等
+        item.is_active = False
+        await self.session.commit()
+        await _invalidate_llm_clients()
+        logger.info(f"LLM 供应商已取消激活: id={provider_id}")
+        return await self.get_provider(provider_id)
+
     # ------------------------------------------------------------------
     # 连通性测试（一次性 client，10s 超时，1-token 请求，不落库）
     # ------------------------------------------------------------------
@@ -372,8 +385,26 @@ class LlmProviderService:
 
 
     async def test_connectivity(self, provider_id: int) -> LlmProviderTestResponse:
-        """入库连通测试 → llm_probe_engine（B2 薄委托）"""
-        return await LlmProbeEngine.test_connectivity(self.repo, provider_id)
+        """入库连通测试（结果同步默认模型行健康态——管理模型抽屉即时可见）"""
+        result = await LlmProbeEngine.test_connectivity(self.repo, provider_id)
+        try:
+            row = (await self.session.execute(
+                select(LlmProviderModel).where(
+                    LlmProviderModel.provider_id == provider_id,
+                    LlmProviderModel.model_id == result.model,
+                )
+            )).scalar_one_or_none()
+            if row is not None:
+                row.health_status = "healthy" if result.ok else "down"
+                if result.latency_ms is not None:
+                    row.last_latency_ms = result.latency_ms
+                from datetime import datetime, timezone
+
+                row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                await self.session.commit()
+        except Exception as e:  # noqa: BLE001 健康态同步失败不影响测试结果返回
+            logger.warning(f"连通测试健康态同步失败: provider={provider_id}, error={e}")
+        return result
 
     
     # ------------------------------------------------------------------

@@ -20,6 +20,7 @@ class User(SoftDeleteMixin, Base):
     is_admin = Column(Boolean, default=False, comment="是否管理员（存量标记，等价 admin 角色）")
     tenant_id = Column(Integer, index=True, comment="所属租户（NULL=平台超管）")
     tenant_role = Column(String(20), comment="租户角色：owner/admin/operator/viewer")
+    department_id = Column(Integer, comment="所属部门（departments.id；SaaS 组织树一层）")
     is_platform_admin = Column(Boolean, nullable=False, default=False, server_default="0",
                                comment="平台超级管理员（跨租户，tenant_id 恒 NULL）")
     role = Column(String(20), nullable=False, default="operator", server_default="operator",

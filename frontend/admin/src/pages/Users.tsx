@@ -15,6 +15,7 @@ import {
   createUser, deleteUser, updateUser,
   type UserCreatePayload, type UserItem, type UserUpdatePayload,
 } from '../services/users'
+import { listDepartments, type DepartmentRow } from '../services/rbac'
 import { listTenants, type TenantRow } from '../services/platformOps'
 import { apiErrorMessage } from '../utils/errorMessage'
 
@@ -31,6 +32,13 @@ const Users: React.FC = () => {
   const [page, setPage] = useState(1)
   const pageSize = 20
   const [tenants, setTenants] = useState<TenantRow[]>([])
+  const [departments, setDepartments] = useState<DepartmentRow[]>([])
+  // 列表筛选（本地过滤：搜索/角色/公司/状态/部门）
+  const [filterText, setFilterText] = useState('')
+  const [filterRole, setFilterRole] = useState('all')
+  const [filterTenant, setFilterTenant] = useState<number | 'all'>('all')
+  const [filterDept, setFilterDept] = useState<number | 'all'>('all')
+  const [filterActive, setFilterActive] = useState('all')
   // 弹窗态
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<UserItem | null>(null)
@@ -59,6 +67,11 @@ const Users: React.FC = () => {
   useEffect(() => {
     listTenants().then(setTenants).catch(() => setTenants([]))
   }, [])
+  // 部门跟随公司筛选联动（全部公司时聚合不重复部门意义不大，清空部门筛）
+  useEffect(() => {
+    if (filterTenant === 'all') { setFilterDept('all'); setDepartments([]); return }
+    listDepartments(filterTenant as number).then(setDepartments).catch(() => setDepartments([]))
+  }, [filterTenant])
 
   const tenantOptions = [
     { value: 0, label: '（平台账户，不挂公司）' },
@@ -96,7 +109,11 @@ const Users: React.FC = () => {
       role: u.role || (u.is_admin ? 'admin' : 'operator'),
       is_active: u.is_active,
       tenant_id: u.tenant_id ?? 0,
+      department_id: u.department_id ?? 0,
     })
+    if (u.tenant_id) {
+      listDepartments(u.tenant_id).then(setDepartments).catch(() => setDepartments([]))
+    }
   }
 
   const onEdit = async () => {
@@ -108,6 +125,7 @@ const Users: React.FC = () => {
         role: values.role,
         is_active: values.is_active,
         tenant_id: values.tenant_id || null,
+        department_id: values.department_id || null,
       }
       await updateUser(editing.id, payload)
       message.success(`用户「${editing.username}」已更新`)
@@ -151,6 +169,10 @@ const Users: React.FC = () => {
         record.tenant_name ? <Tag color="geekblue">{record.tenant_name}</Tag> : <Tag>平台</Tag>,
     },
     {
+      title: '部门', dataIndex: 'department_name', width: 100,
+      render: (v: string | null) => v || <Tag>未分组</Tag>,
+    },
+    {
       title: '角色', key: 'role', width: 100,
       render: (_: unknown, record: UserItem) => {
         const role = record.role || (record.is_admin ? 'admin' : 'operator')
@@ -187,11 +209,50 @@ const Users: React.FC = () => {
   return (
     <Card
       title={`用户管理（共 ${total} 人）`}
-      extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建用户</Button>}
+      extra={
+        <Space wrap>
+          <Input.Search placeholder="搜索用户名/邮箱" allowClear style={{ width: 180 }}
+                        onSearch={setFilterText} />
+          <Select size="small" style={{ width: 110 }} value={filterRole} onChange={setFilterRole}
+                  options={[
+                    { value: 'all', label: '全部角色' },
+                    { value: 'admin', label: '管理员' },
+                    { value: 'operator', label: '操作员' },
+                    { value: 'viewer', label: '只读' },
+                  ]} />
+          <Select size="small" style={{ width: 130 }} value={filterTenant}
+                  onChange={(v) => setFilterTenant(v)}
+                  options={[
+                    { value: 'all', label: '全部公司' },
+                    ...tenants.map((tt) => ({ value: tt.id, label: tt.name })),
+                  ]} />
+          <Select size="small" style={{ width: 110 }} value={filterDept}
+                  onChange={setFilterDept} disabled={filterTenant === 'all'}
+                  options={[
+                    { value: 'all', label: '全部部门' },
+                    ...departments.map((d) => ({ value: d.id, label: d.name })),
+                  ]} />
+          <Select size="small" style={{ width: 100 }} value={filterActive} onChange={setFilterActive}
+                  options={[
+                    { value: 'all', label: '全部状态' },
+                    { value: 'active', label: '激活' },
+                    { value: 'disabled', label: '停用' },
+                  ]} />
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建用户</Button>
+        </Space>
+      }
     >
       <Table
         columns={columns}
-        dataSource={users}
+        dataSource={users.filter((u) => {
+          const kw = filterText.trim().toLowerCase()
+          if (kw && !(u.username.toLowerCase().includes(kw) || (u.email || '').toLowerCase().includes(kw))) return false
+          if (filterRole !== 'all' && (u.role || (u.is_admin ? 'admin' : 'operator')) !== filterRole) return false
+          if (filterTenant !== 'all' && (u.tenant_id ?? null) !== (filterTenant as number)) return false
+          if (filterDept !== 'all' && (u.department_id ?? null) !== (filterDept as number)) return false
+          if (filterActive !== 'all' && ((filterActive === 'active') !== u.is_active)) return false
+          return true
+        })}
         rowKey="id"
         loading={loading}
         pagination={{
@@ -236,6 +297,12 @@ const Users: React.FC = () => {
           </Form.Item>
           <Form.Item name="tenant_id" label="归属公司">
             <Select options={tenantOptions} />
+          </Form.Item>
+          <Form.Item name="department_id" label="所属部门" tooltip="部门须属于该公司；0=未分组">
+            <Select options={[
+              { value: 0, label: '（未分组）' },
+              ...departments.map((d) => ({ value: d.id, label: `${d.name}（${d.member_count}人）` })),
+            ]} />
           </Form.Item>
           <Form.Item name="is_active" label="启用" valuePropName="checked">
             <Switch checkedChildren="激活" unCheckedChildren="停用" />

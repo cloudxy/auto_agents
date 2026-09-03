@@ -53,6 +53,9 @@ ALL_ORM_TABLES = {
     "i18n_locales",
     "i18n_translations",
     "system_caches",
+    # SaaS 化拓展（迁移 022）
+    "roles",
+    "departments",
 }
 
 

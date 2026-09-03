@@ -193,6 +193,19 @@ async def activate_provider(
     return updated(item)
 
 
+@router.put("/providers/{provider_id}/deactivate", response_model=ApiResponse[LlmProviderResponse])
+async def deactivate_provider(
+    provider_id: int = Path(..., ge=1),
+    service: LlmProviderService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+    user: CurrentUser = Depends(require_admin),
+) -> ApiResponse[LlmProviderResponse]:
+    """取消激活（全部下线走 yml/env 兜底；行保留可再激活）"""
+    item = await service.deactivate_provider(provider_id)
+    await record_audit(session, user, "llm.provider.deactivate", f"llm_provider#{provider_id}")
+    return updated(item)
+
+
 @router.post("/providers/{provider_id}/test", response_model=ApiResponse[LlmProviderTestResponse])
 async def test_provider_connectivity(
     provider_id: int = Path(..., ge=1),

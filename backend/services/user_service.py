@@ -25,12 +25,15 @@ class UserService:
         logger.info(f"查询用户列表: skip={skip}, limit={limit}")
         from sqlalchemy import func, select
 
+        from platform_core.models.department import Department
         from platform_core.models.tenant import Tenant
         from platform_core.models.user import User
 
         rows = (await self.session.execute(
-            select(User, Tenant.name.label("tenant_name"))
+            select(User, Tenant.name.label("tenant_name"),
+                   Department.name.label("department_name"))
             .outerjoin(Tenant, Tenant.id == User.tenant_id)
+            .outerjoin(Department, Department.id == User.department_id)
             .where(User.deleted_at.is_(None))  # 软删除行不陈列（回收站语义见操作审计）
             .order_by(User.id.asc())
             .offset(skip).limit(limit)
@@ -39,9 +42,10 @@ class UserService:
             select(func.count()).select_from(User).where(User.deleted_at.is_(None))
         )).scalar_one()
         items = []
-        for user, tenant_name in rows:
+        for user, tenant_name, department_name in rows:
             resp = UserResponse.model_validate(user)
             resp.tenant_name = tenant_name
+            resp.department_name = department_name
             items.append(resp)
         return UserListResponse(total=total, items=items)
 
@@ -126,10 +130,31 @@ class UserService:
                     raise ValidationException(message=f"租户不存在: {changes['tenant_id']}", field="tenant_id")
             user.tenant_id = changes["tenant_id"]
             user.tenant_role = None if changes["tenant_id"] is None else (user.role or "operator")
+        if "department_id" in changes:
+            if changes["department_id"] is not None:
+                from platform_core.models.department import Department
+
+                dept = (await self.session.execute(
+                    select(Department).where(
+                        Department.id == changes["department_id"],
+                        Department.deleted_at.is_(None))
+                )).scalar_one_or_none()
+                if dept is None:
+                    raise ValidationException(message=f"部门不存在: {changes['department_id']}", field="department_id")
+                if user.tenant_id is None or dept.tenant_id != user.tenant_id:
+                    raise ValidationException(message="部门必须属于用户所在公司", field="department_id")
+            user.department_id = changes["department_id"]
         await self.session.flush()
         await self.session.refresh(user)
         logger.info(f"更新用户 | id={user_id} fields={sorted(changes.keys())}")
-        return UserResponse.model_validate(user)
+        resp = UserResponse.model_validate(user)
+        if user.department_id is not None:
+            from platform_core.models.department import Department
+
+            resp.department_name = (await self.session.execute(
+                select(Department.name).where(Department.id == user.department_id)
+            )).scalar_one_or_none()
+        return resp
 
     async def delete_user(self, user_id: int, actor_id: int) -> None:
         """软删除账户（防删自己；防删最后一个平台超管）"""
