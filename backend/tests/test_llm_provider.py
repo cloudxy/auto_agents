@@ -505,7 +505,7 @@ class TestConnectivity:
         url = client.post.await_args.args[0]
         assert url == "https://llm.test/v1/chat/completions"
         payload = client.post.await_args.kwargs["json"]
-        assert payload["max_tokens"] == 1
+        assert payload["max_tokens"] == 16
         assert client.post.await_args.kwargs["headers"]["Authorization"] == f"Bearer {_PLAIN_KEY}"
 
     @pytest.mark.asyncio

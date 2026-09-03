@@ -55,7 +55,12 @@ class OpenAICompatibleAdapter:
         )
 
     def parse_chat(self, resp_json: dict) -> str:
-        content = ((resp_json.get("choices") or [{}])[0].get("message") or {}).get("content")
+        message = ((resp_json.get("choices") or [{}])[0].get("message")) or {}
+        content = message.get("content")
+        if not content:
+            # reasoning 模型（max_tokens 极小时 content 常为空，思考字段有产出）：
+            # DeepSeek-R1 风格 reasoning_content / 部分兼容网关 reasoning，连通即视为有响应
+            content = message.get("reasoning_content") or message.get("reasoning")
         return str(content or "")
 
     def is_chat_model(self, model_id: str) -> bool:

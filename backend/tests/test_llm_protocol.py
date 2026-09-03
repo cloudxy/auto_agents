@@ -170,3 +170,25 @@ class TestRegistry:
     )
     def test_is_chat_model_keywords(self, model_id, expected):
         assert get_adapter("openai_compatible").is_chat_model(model_id) is expected
+
+
+# ---------------- 连通探测 reasoning 兜底（max_tokens 极小致 content 空）----------------
+
+def test_openai_parse_chat_falls_back_to_reasoning_content():
+    """DeepSeek-R1 风格：content 空但 reasoning_content 有产出 → 判有响应（连通）"""
+    from backend.services.llm_protocol.adapters import OpenAICompatibleAdapter
+
+    adapter = OpenAICompatibleAdapter()
+    assert adapter.parse_chat({
+        "choices": [{"message": {"content": "", "reasoning_content": "thinking..."}}]
+    }) == "thinking..."
+    # 部分兼容网关用 reasoning 字段
+    assert adapter.parse_chat({
+        "choices": [{"message": {"reasoning": "partial gateway"}}]
+    }) == "partial gateway"
+    # 正常路径不受影响
+    assert adapter.parse_chat({
+        "choices": [{"message": {"content": "pong"}}]
+    }) == "pong"
+    # 真空响应仍为空（结构异常继续报错）
+    assert adapter.parse_chat({"choices": [{"message": {}}]}) == ""

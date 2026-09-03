@@ -20,7 +20,7 @@ from platform_core.schemas.llm_provider import LlmProviderTestResponse
 logger = get_logger("service.llm_probe")
 
 _PROBE_TIMEOUT_SECONDS = 10.0
-_PROBE_MAX_TOKENS = 1
+_PROBE_MAX_TOKENS = 16
 
 
 class LlmProbeEngine:
@@ -46,7 +46,7 @@ class LlmProbeEngine:
         validated = LlmSecretVault.validated_probe_base_url(base_url)
         adapter = get_adapter(provider_type)
         request = adapter.build_chat(
-            validated, api_key, model, [{"role": "user", "content": "ping"}], max_tokens=1
+            validated, api_key, model, [{"role": "user", "content": "ping"}], max_tokens=_PROBE_MAX_TOKENS
         )
         started = time.perf_counter()
         try:
