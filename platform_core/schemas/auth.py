@@ -44,8 +44,32 @@ class UserResponse(BaseModel):
     is_active: bool = True
     is_admin: bool = False
     role: str = "operator"
+    tenant_id: Optional[int] = None
+    tenant_name: Optional[str] = None  # 归属公司（JOIN tenants，平台超管为 NULL）
+    tenant_role: Optional[str] = None
+    is_platform_admin: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+class AdminUserCreateRequest(RequestBody):
+    """平台超管创建账户（用户管理页）"""
+
+    username: str = Field(..., min_length=3, max_length=50)
+    email: str = Field(..., max_length=100)
+    password: str = Field(..., min_length=8, max_length=128)
+    role: str = Field("operator", pattern="^(admin|operator|viewer)$")
+    is_active: bool = True
+    # 归属公司（NULL=平台超管账户，不挂租户）
+    tenant_id: Optional[int] = None
+
+
+class AdminUserUpdateRequest(RequestBody):
+    """平台超管编辑账户：角色分配 / 启停 / 归属调整"""
+
+    role: Optional[str] = Field(None, pattern="^(admin|operator|viewer)$")
+    is_active: Optional[bool] = None
+    tenant_id: Optional[int] = None
 
 
 class UserListResponse(BaseModel):

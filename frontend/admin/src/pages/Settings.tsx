@@ -4,6 +4,8 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { Tag, Form, Input, Button, Card, message, Divider, Spin } from 'antd'
 import { fetchSiteConfigs, fetchWebhookStatus, updateSiteConfig, type WebhookStatus } from '../services/settings'
+import { fetchNotifyConfig, updateNotifyConfig, type NotifyChannelConfig } from '../services/users'
+import { apiErrorMessage } from '../utils/errorMessage'
 
 /** 表单值契约（与 initialValues 的字段一致） */
 interface SiteConfigValues {
@@ -16,9 +18,15 @@ const Settings: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(true)
   const [webhook, setWebhook] = useState<WebhookStatus | null>(null)
+  const [notifyCfg, setNotifyCfg] = useState<NotifyChannelConfig | null>(null)
+  const [notifySaving, setNotifySaving] = useState(false)
+  const [notifyForm] = Form.useForm()
 
   useEffect(() => {
     fetchWebhookStatus().then(setWebhook).catch(() => setWebhook(null))
+    fetchNotifyConfig().then((cfg) => { setNotifyCfg(cfg); notifyForm.setFieldsValue(cfg) })
+      .catch(() => setNotifyCfg(null))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const fetchConfigs = useCallback(async () => {
@@ -34,6 +42,20 @@ const Settings: React.FC = () => {
   useEffect(() => {
     fetchConfigs()
   }, [fetchConfigs])
+
+  const onSaveNotify = async () => {
+    try {
+      const values = await notifyForm.validateFields()
+      setNotifySaving(true)
+      await updateNotifyConfig(values)
+      message.success('通知渠道配置已保存（下次通知即生效）')
+    } catch (e) {
+      if ((e as { errorFields?: unknown })?.errorFields) return
+      message.error(apiErrorMessage(e, '保存通知渠道配置失败'))
+    } finally {
+      setNotifySaving(false)
+    }
+  }
 
   const onFinish = async (values: SiteConfigValues) => {
     setLoading(true)
@@ -98,24 +120,41 @@ const Settings: React.FC = () => {
         </Form>
       </Card>
 
-      <Card title="Webhook 与通知渠道状态" style={{ marginTop: 16 }}>
+      <Card title="Webhook 与通知渠道" style={{ marginTop: 16 }}>
         {webhook === null ? <Spin /> : (
-          <>
-            <p style={{ margin: '6px 0' }}>
-              签名密钥：<Tag color={webhook.secret_configured ? 'success' : 'error'}>
-                {webhook.secret_configured ? '已配置' : '未配置（外部回调可被伪造）'}
-              </Tag>
-              {webhook.env_override_active && <Tag color="blue">env 覆盖生效</Tag>}
-            </p>
-            <p style={{ margin: '6px 0', color: 'rgba(0,0,0,0.45)', fontSize: 13 }}>
-              密钥仅经 config/&lt;env&gt;/.env 注入（AUTO_AGENTS_WEBHOOK__SECRET_KEY），刻意不入库——此处只展示配置态。
-            </p>
-            <p style={{ margin: '6px 0' }}>
-              通知渠道：Webhook <Tag color={webhook.notify_webhook_url_configured ? 'success' : 'default'}>{webhook.notify_webhook_url_configured ? '已配置' : '未配置'}</Tag>
-              钉钉 <Tag color={webhook.dingtalk_configured ? 'success' : 'default'}>{webhook.dingtalk_configured ? '已配置' : '未配置'}</Tag>
-              企业微信 <Tag color={webhook.wechat_work_configured ? 'success' : 'default'}>{webhook.wechat_work_configured ? '已配置' : '未配置'}</Tag>
-            </p>
-          </>
+          <p style={{ margin: '6px 0' }}>
+            签名密钥：<Tag color={webhook.secret_configured ? 'success' : 'error'}>
+              {webhook.secret_configured ? '已配置' : '未配置（外部回调可被伪造）'}
+            </Tag>
+            {webhook.env_override_active && <Tag color="blue">env 覆盖生效</Tag>}
+            <span style={{ color: 'rgba(0,0,0,0.45)', fontSize: 13, marginLeft: 8 }}>
+              密钥仅经 config/&lt;env&gt;/.env 注入（AUTO_AGENTS_WEBHOOK__SECRET_KEY），刻意不入库
+            </span>
+          </p>
+        )}
+        {notifyCfg === null ? <Spin /> : (
+          <Form form={notifyForm} layout="vertical" style={{ marginTop: 8 }}>
+            <Form.Item
+              name="webhook_url" label="通用 Webhook 地址"
+              rules={[{ pattern: /^https?:\/\/.+/, message: '必须是 http(s) 地址' }]}
+              extra="任务终态/告警的通用回调；留空回退 .env 默认"
+            >
+              <Input placeholder="https://hooks.example.com/xxx" allowClear />
+            </Form.Item>
+            <Form.Item
+              name="dingtalk_url" label="钉钉机器人 Webhook"
+              rules={[{ pattern: /^https?:\/\/.+/, message: '必须是 http(s) 地址' }]}
+            >
+              <Input placeholder="https://oapi.dingtalk.com/robot/send?access_token=…" allowClear />
+            </Form.Item>
+            <Form.Item
+              name="wechat_work_url" label="企业微信群机器人 Webhook"
+              rules={[{ pattern: /^https?:\/\/.+/, message: '必须是 http(s) 地址' }]}
+            >
+              <Input placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…" allowClear />
+            </Form.Item>
+            <Button type="primary" loading={notifySaving} onClick={onSaveNotify}>保存渠道配置</Button>
+          </Form>
         )}
       </Card>
     </div>

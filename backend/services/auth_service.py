@@ -75,9 +75,10 @@ class AuthService:
             "email": user.email,
             "is_admin": user.is_admin,
             "role": role or ("admin" if user.is_admin else "operator"),
-            # 租户维度（与 JWT payload 同源）：前端租户视角菜单可见性据此判定
+            # 租户/平台维度（与 JWT payload 同源）：中间件平台态判定 + 前端菜单可见性
             "tenant_id": getattr(user, "tenant_id", None),
             "tenant_role": getattr(user, "tenant_role", None),
+            "is_platform_admin": bool(getattr(user, "is_platform_admin", False)),
         }
 
     async def create_token(self, user_data: dict) -> TokenResponse:

@@ -49,6 +49,7 @@ class NotifyService:
         channels = settings.get("NOTIFY.CHANNELS", ["log"])
         self._channels = list(channels) if channels else ["log"]
         self._webhook_url: str = str(settings.get("NOTIFY.WEBHOOK_URL", "") or "")
+        # 三渠道 URL 支持运行面覆盖（system_configs，配置页可写）；发送时惰性解析
         self._timeout: float = float(settings.get("NOTIFY.TIMEOUT_SECONDS", 10))
         # 阶段 4.3 新增渠道配置（缺失时对应渠道自动跳过）
         self._email_host: str = str(settings.get("NOTIFY.EMAIL.SMTP_HOST", "") or "")
@@ -101,6 +102,35 @@ class NotifyService:
             except Exception as e:  # noqa: BLE001 通知失败不影响主流程
                 logger.error(f"通知渠道执行失败: channel={channel}, task_id={task_id}, error={e}")
 
+    async def _channel_url(self, channel: str) -> str:
+        """渠道 URL 惰性解析：system_configs（配置页可写）优先，回退 settings 固化值。
+
+        通知低频（告警/终态），每次发送查一次 DB 可接受；查询失败回退默认（可用性优先）。
+        """
+        from sqlalchemy import select
+
+        from platform_core.db import get_async_db
+        from platform_core.models.system_config import SystemConfig
+
+        key_map = {
+            "webhook": ("notify.webhook_url", self._webhook_url),
+            "dingtalk": ("notify.dingtalk_webhook_url", self._dingtalk_url),
+            "wechat_work": ("notify.wechat_work_webhook_url", self._wechat_url),
+        }
+        cfg_key, fallback = key_map[channel]
+        try:
+            session_gen = get_async_db()
+            session = await anext(session_gen)
+            try:
+                value = (await session.execute(
+                    select(SystemConfig.config_value).where(SystemConfig.config_key == cfg_key)
+                )).scalar_one_or_none()
+                return str(value or "") or fallback
+            finally:
+                await session_gen.aclose()
+        except Exception:  # noqa: BLE001 配置读取失败不阻断通知主路径
+            return fallback
+
     async def notify_text(self, event: str, text: str) -> None:
         """通用文本通知（渠道调度器/探针等后台事件复用通知栈；吞掉所有异常）
 
@@ -114,24 +144,33 @@ class NotifyService:
             try:
                 if channel == "log":
                     logger.info(full)
-                elif channel == "webhook" and self._webhook_url:
+                elif channel == "webhook":
+                    url = await self._channel_url("webhook")
+                    if not url:
+                        continue
                     async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
                         resp = await client.post(
-                            self._webhook_url, json={"event": event, "text": text}
+                            url, json={"event": event, "text": text}
                         )
                         if resp.status_code >= 400:
                             logger.warning(
                                 f"webhook 通知返回异常状态: event={event}, http={resp.status_code}"
                             )
-                elif channel == "dingtalk" and self._dingtalk_url:
+                elif channel == "dingtalk":
+                    url = await self._channel_url("dingtalk")
+                    if not url:
+                        continue
                     async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
                         await client.post(
-                            self._dingtalk_url, json={"msgtype": "text", "text": {"content": full}}
+                            url, json={"msgtype": "text", "text": {"content": full}}
                         )
-                elif channel == "wechat_work" and self._wechat_url:
+                elif channel == "wechat_work":
+                    url = await self._channel_url("wechat_work")
+                    if not url:
+                        continue
                     async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
                         await client.post(
-                            self._wechat_url,
+                            url,
                             json={"msgtype": "markdown", "markdown": {"content": full}},
                         )
                 elif channel == "email" and self._email_host and self._email_to:
@@ -178,11 +217,12 @@ class NotifyService:
         trust_env=False：目标是外部服务时同样禁止走系统代理，
         规避本机代理软件（如 Clash）拦截 httpx 请求的陷阱。
         """
-        if not self._webhook_url:
+        url = await self._channel_url("webhook")
+        if not url:
             logger.debug("NOTIFY.WEBHOOK_URL 未配置，跳过 webhook 渠道")
             return
         async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
-            resp = await client.post(self._webhook_url, json=payload)
+            resp = await client.post(url, json=payload)
             if resp.status_code >= 400:
                 logger.warning(
                     f"webhook 通知返回异常状态: task_id={payload['task_id']}, "
@@ -218,10 +258,11 @@ class NotifyService:
 
     async def _notify_dingtalk(self, payload: dict) -> None:
         """钉钉渠道：群机器人 webhook；配置了 SECRET 时附 HmacSHA256 加签"""
-        if not self._dingtalk_url:
+        url = await self._channel_url("dingtalk")
+        if not url:
             logger.debug("NOTIFY.DINGTALK.WEBHOOK_URL 未配置，跳过 dingtalk 渠道")
             return
-        url = self._dingtalk_url
+        # url 已由上方 _channel_url 解析
         if self._dingtalk_secret:
             timestamp = str(round(time.time() * 1000))
             string_to_sign = f"{timestamp}\n{self._dingtalk_secret}"
@@ -246,12 +287,13 @@ class NotifyService:
 
     async def _notify_wechat_work(self, payload: dict) -> None:
         """企业微信渠道：群机器人 webhook，markdown 消息"""
-        if not self._wechat_url:
+        url = await self._channel_url("wechat_work")
+        if not url:
             logger.debug("NOTIFY.WECHAT_WORK.WEBHOOK_URL 未配置，跳过 wechat_work 渠道")
             return
         body = {"msgtype": "markdown", "markdown": {"content": _render_text(payload)}}
         async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
-            resp = await client.post(self._wechat_url, json=body)
+            resp = await client.post(url, json=body)
             if resp.status_code >= 400:
                 logger.warning(
                     f"wechat_work 通知返回异常状态: task_id={payload['task_id']}, "
