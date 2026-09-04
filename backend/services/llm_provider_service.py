@@ -307,6 +307,10 @@ class LlmProviderService:
         latency_ms = int((time.perf_counter() - started) * 1000)
 
         if row is not None:
+            # feat-llm-cooldown：连通成功立即清除冷却
+            if ok:
+                from backend.services.ai_planner._cooldown import clear
+                await clear(provider_id, model_id)
             row.health_status = status
             row.last_latency_ms = latency_ms
             row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -390,6 +394,10 @@ class LlmProviderService:
     async def test_connectivity(self, provider_id: int) -> LlmProviderTestResponse:
         """入库连通测试（结果同步默认模型行健康态——管理模型抽屉即时可见）"""
         result = await LlmProbeEngine.test_connectivity(self.repo, provider_id)
+        # feat-llm-cooldown（QA-7）：连通成功清除默认模型冷却
+        if result.ok and result.model:
+            from backend.services.ai_planner._cooldown import clear
+            await clear(provider_id, result.model)
         try:
             row = (await self.session.execute(
                 select(LlmProviderModel).where(
