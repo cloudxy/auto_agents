@@ -1,5 +1,5 @@
 """feat-llm-cooldown：候选链冷却过滤（FR-01~04 + NFR-01/02）——QA-6 补齐版"""
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -102,7 +102,7 @@ async def test_fr03_ttl_expiry(mock_redis):
 async def test_fr04_clear(mock_redis):
     """FR-04：连通成功 → 冷却清除"""
     _, store = mock_redis
-    from backend.services.ai_planner._cooldown import record_failure, clear, is_cooled_down
+    from backend.services.ai_planner._cooldown import clear, is_cooled_down
 
     store["llm:cooldown:1:m-y"] = "3"
     assert await is_cooled_down(1, "m-y") is True
