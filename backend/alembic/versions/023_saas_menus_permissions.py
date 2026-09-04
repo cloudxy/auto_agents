@@ -63,7 +63,6 @@ _PERMS = [
 
 
 def upgrade() -> None:
-    import json
 
     op.create_table(
         "menus",
