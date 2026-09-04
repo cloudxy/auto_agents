@@ -97,6 +97,8 @@ REGISTER_ATTEMPT_PREFIX: Final[str] = "register_fail:"
 SIGNUP_RATE_PREFIX: Final[str] = "tenant:signup:rl:"
 # 配额检查计数缓存（B4：60s TTL，免逐行回流 COUNT 全表）
 QUOTA_COUNT_PREFIX: Final[str] = "quota:count:"
+# LLM 模型冷却（值=连续失败次数，TTL=冷却窗口）
+LLM_COOLDOWN_PREFIX: Final[str] = "llm:cooldown:"
 # ── B3：LLM 用量与 new-api 渠道调度键契约（原散落字符串字面量收口）──
 # LLM token 用量：日明细 hash（30 天 TTL）/ 月汇总 hash（93 天 TTL）/ 聚合锁
 LLM_USAGE_DAILY_PREFIX: Final[str] = "llm:usage:d:"
@@ -262,6 +264,7 @@ __all__ = [
     "REGISTER_ATTEMPT_PREFIX",
     "SIGNUP_RATE_PREFIX",
     "QUOTA_COUNT_PREFIX",
+    "LLM_COOLDOWN_PREFIX",
     "LLM_USAGE_DAILY_PREFIX",
     "LLM_USAGE_MONTHLY_PREFIX",
     "LLM_USAGE_FLUSH_LOCK",

@@ -200,7 +200,15 @@ async def _query_chain(session, provider_id: int):
         .order_by(LlmProviderModel.priority.asc(), LlmProviderModel.id.asc())
     )).scalars().all()
     ordered = sorted(rows, key=lambda r: (not r.is_default,))
-    return [(r.model_id, r.model_tier) for r in ordered]
+    # feat-llm-cooldown：批量过滤冷却模型（单次 MGET，NFR-02）
+    from backend.services.ai_planner._cooldown import filter_cooled
+
+    all_ids = [r.model_id for r in ordered]
+    active_ids = set(await filter_cooled(provider_id, all_ids))
+    if len(active_ids) < len(all_ids):
+        skipped = [m for m in all_ids if m not in active_ids]
+        logger.info(f"候选链跳过冷却模型 | models={skipped}")
+    return [(r.model_id, r.model_tier) for r in ordered if r.model_id in active_ids]
 
 
 async def _failover(messages, *, usage_dim, budget_override, cfg, primary_error):

@@ -49,3 +49,7 @@ LLM:
   # 预算熔断降级方向（10.2-D）：true=Redis 读数不可用即拒绝 LLM 调用（保成本）；
   # false=回退进程内存计数（保可用，测试/CI 无 Redis）。prod 置 true（见 config/prod/llm.yml）
   BUDGET_FAIL_CLOSED: false
+  # ── 候选链冷却（feat-llm-cooldown）──
+  FAILOVER:
+    COOLDOWN_THRESHOLD: 2    # 连续失败达此值进入冷却
+    COOLDOWN_SECONDS: 300    # 冷却窗口（秒），过期自动恢复

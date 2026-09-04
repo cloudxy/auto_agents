@@ -1,0 +1,27 @@
+feature: feat-checksdlc-stats
+lane: L2
+appetite: 45m
+current_hat: done
+hats_done: [定义, 实现, 验证, 审查]
+gates:
+  - {name: sdlc, kind: script, result: pass, cmd: "bash check-sdlc.sh .sdlc/feat-checksdlc-stats", exit_code: 0, at: "2026-09-04T11:59:30"}
+  - {name: test, kind: script, result: null, reason: 纯插件 shell 脚本，不触 Python/前端运行时}
+  - {name: fresh-context, kind: fresh-context, findings_total: 10, blocker: 2, major: 2, minor: {fixed: 5, waived: 3}, at: "2026-09-04T11:59:30"}
+review_findings:
+  - {id: QA-1, severity: blocker, status: fixed, note: 全局 want→按 FR 号数组+证据区重锚}
+  - {id: QA-2, severity: major, status: fixed, note: awk 移入循环}
+  - {id: QA-3, severity: major, status: fixed, note: 纳入 IMPL_DONE}
+  - {id: QA-4, severity: blocker, status: fixed, note: ESC-8 原案例修复后实抓验证}
+  - {id: QA-5, severity: minor, status: fixed}
+  - {id: QA-6, severity: minor, status: waived, reason: mktemp 回退路径仅极端环境}
+  - {id: QA-7, severity: minor, status: fixed, note: trap PIPE}
+  - {id: QA-8, severity: minor, status: fixed}
+  - {id: QA-9, severity: minor, status: fixed}
+  - {id: QA-10, severity: minor, status: waived, reason: 既有 off-by-one 沿上票豁免}
+stale_artifacts: []
+open_questions: [多 FR 夹具 exit=4 根因（夹具非规范形态，下票核对）]
+lane_changes: []
+metrics:
+  duration_min: 55
+  review_intercepts: 9
+  rework_rounds: 2
