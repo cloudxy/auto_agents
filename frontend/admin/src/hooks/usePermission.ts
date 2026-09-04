@@ -61,9 +61,14 @@ export const usePermission = () => {
   const hasPermission = (code: string) => cachedPermissions.includes(code)
 
   const filterMenu = (menus: MenuItem[]): MenuItem[] => {
-    void revision  // 依赖 revision 触发 filterMenu 重算
-    // 租户视角页：无租户归属的纯平台超管不可入（端点 403），菜单隐藏
+    void revision
     const tenantBound = user?.tenant_id != null
+    // 权限不可知（后端不可达/缓存空）→ 显示全量菜单（admin 视角兜底）
+    // 理由：菜单可见性是 UI 优化，真正的安全防线在 API 层（JWT → RBAC → 租户隔离）
+    // 此前逻辑：缓存空 → filterMenu 全滤光 → 侧边栏消失（后端重启/网络瞬断即复发）
+    if (cachedPermissions.length === 0) {
+      return menus.filter(menu => !menu.tenantOnly || tenantBound)
+    }
     return menus
       .filter(menu => !menu.tenantOnly || tenantBound)
       .filter(menu => !menu.permission || hasPermission(menu.permission))
