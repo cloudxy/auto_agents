@@ -6,10 +6,25 @@
 #   docker compose down -v         # 停止并清除数据卷
 #
 # 注意：密码为开发默认值（与 config/local/.env 对齐），严禁用于生产
+# 生产部署（镜像 tag 规范/迁移顺序/回滚步骤/验证清单）：docs/ops/deploy.md
 
 services:
   mysql:
     image: mysql:8
+    # T11: 宿主机重启 / dockerd 抖动后自愈（僵死不退出的场景由 watchdog 兜底，
+    # restart 只覆盖"进程退出"型故障）
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: # dev 联调量级；跑大迁移 OOM-kill 时按 docs/ops/deploy.md 上调
+          memory: 512m
+          cpus: "1.0"
+    # T11: 日志必须有上限（json-file 默认无限制，可写满宿主磁盘）
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       MYSQL_ROOT_PASSWORD: "123456"
       MYSQL_DATABASE: "auto_agents"
@@ -25,6 +40,13 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+    logging: *default-logging
     command: redis-server --requirepass 123456
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "123456", "ping"]
@@ -34,6 +56,13 @@ services:
 
   backend:
     build: .
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
+    logging: *default-logging
     command: ["uv", "run", "python", "run_backend.py", "--no-reload", "--env", "local"]
     ports:
       - "9111:9111"
@@ -42,6 +71,9 @@ services:
       # 容器内必须监听 0.0.0.0（P1-2 修复：API.HOST 默认 127.0.0.1 会让
       # 发布端口 9111 在容器外不可达，且容器内 HEALTHCHECK 通过造成假象）
       AUTO_AGENTS_API__HOST: "0.0.0.0"
+      # 端口显式化（缺省与 config/default/api.yml 的 9111 一致）：
+      # 改端口时同步上方 ports 映射；下方 healthcheck 从本变量拼接，避免双写漂移
+      AUTO_AGENTS_API__PORT: "9111"
       # Dynaconf 嵌套覆盖（双下划线分隔层级）：指向 compose 服务名
       AUTO_AGENTS_MYSQL__DEFAULT__HOST: "mysql"
       AUTO_AGENTS_REDIS__DEFAULT__HOST: "redis"
@@ -51,6 +83,15 @@ services:
       AUTO_AGENTS_JWT__SECRET_KEY: "auto-agents-dev-secret-key-2026"
       # Webhook 守卫（P0-2）拒绝默认占位符启动，dev 栈显式注入 dev 密钥
       AUTO_AGENTS_WEBHOOK__SECRET_KEY: "auto-agents-dev-webhook-secret-2026"
+    healthcheck:
+      # T11 深探测：/api/v1/health/deep = MySQL SELECT 1 + Redis PING，
+      # 任一失败返回 503 → urllib 抛错 → 探测失败。旧浅探测 /api/v1/health
+      # 恒 200，依赖挂掉也"健康"（见 docs/ops/incident-2026-08-backend-freeze.md）
+      test: ["CMD-SHELL", "python -c \"import urllib.request, os; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('AUTO_AGENTS_API__PORT', '9111') + '/api/v1/health/deep', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       mysql:
         condition: service_healthy
