@@ -1,0 +1,32 @@
+# SDLC assessment · 2026-09-05 · 项目体检 + P0/P1 整治 + 重审（全流程闭环）
+task: "评估 auto_agents 项目存在的问题 → P0→P1 整治 → 重审"
+mode: multi-role-assessment → ticket-remediation(13票) → fresh-context-rereview
+started_at: "2026-09-05"
+finished_at: "2026-09-05"
+
+assessment:
+  roles: [architect, reviewer, qa, dba, sre]
+  findings_raw: 45 → 17 问题（P0×4 / P1×7 / P2×3簇）
+  report: 00-summary.md
+
+remediation:  # 提交区间 c1b302a..fdeedfe（13 提交）
+  P0: { T1: 7504ab9, T2: 85c84bc, T3: c1b302a, T4: "7504ab9+e88cef6", T5: c406075 }
+  P1: { T6: 20b9521, T7: 1b1d4ce, T8: 2ef52dd, T9: 3cda226, T10: f294fd1, T11: df5db02 }
+  rereview_closeout: { T12: fdeedfe }
+  evidence: ../.scratch/p0-p1-2026-09/issues/T*.md
+  migrations_added: [024_users_tenant_not_null, 025_softdelete_unique_recreate]
+  adr_added: [ADR-0006-service-dep-layering, ADR-0007-transaction-ownership]
+
+rereview:
+  report: rereview-findings.md
+  verdict: "17 问题：fixed 12 / partial 4 / open 1；新 findings 0 blocker / 3 major / 7 minor"
+  majors_closed: { F-01: fdeedfe, F-02: fdeedfe, F-T10-1: fdeedfe }
+  remaining: [P1-6 余量(55 路由零覆盖→38%), P1-7 余量(监控栈/回滚演练/tenant域3处commit残留), P2 池(dba索引/JSON-RBAC/ENUM等), 产品线(LiteLLM L1-L5, SaaS 计费)]
+
+product_review: ../.scratch/p0-p1-2026-09/product-review.md  # 四板块水位 + LiteLLM 冲击面 + L1-L5 重拟（原计划文档已散佚）
+
+final_gates:
+  pytest: "836 passed / 12 skipped, exit 0"
+  check_arch: "13红线+3边界, exit 0"
+  check_db: "ir+migrations, exit 0"
+  admin: "jest 13 passed + build exit 0"
