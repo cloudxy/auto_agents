@@ -66,11 +66,13 @@ class TenantSignupService:
         )
         self.session.add(owner)
         await self.session.flush()
-        logger.success(f"企业注册完成 | tenant={slug} owner={owner.username}")
-        return {
+        snapshot = {
             "tenant": {"id": tenant.id, "slug": tenant.slug, "name": tenant.name},
             "owner": {"id": owner.id, "username": owner.username, "email": owner.email},
-        }
+        }  # 先固化再提交（ADR-0007 D2）
+        logger.success(f"企业注册完成 | tenant={slug} owner={owner.username}")
+        await self.session.commit()
+        return snapshot
 
     async def _unique_slug(self, base: str) -> str:
         slug = base
