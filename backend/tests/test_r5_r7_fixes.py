@@ -26,8 +26,14 @@ def _platform_admin_token(db_session):
 
     async def _go():
         async with db_session() as s:
+            # T5 后平台超管挂 platform 租户（DB 行不再 NULL）；token claims 保留
+            # tenant_id=None + is_platform_admin=True 形态——中间件收紧后该旧
+            # token 形态仍须经 is_platform_admin 分支正常进 platform_scope
+            platform = Tenant(slug="platform", name="平台租户")
+            s.add(platform)
+            await s.flush()
             s.add(User(username="r7root", email="r7root@x.com", password_hash="x",
-                       role="admin", tenant_id=None, tenant_role=None,
+                       role="admin", tenant_id=platform.id, tenant_role=None,
                        is_platform_admin=True))
             await s.commit()
             root = (await s.execute(select(User).where(User.username == "r7root"))).scalar_one()

@@ -14,15 +14,17 @@ from platform_core.tenant_context import current_tenant_id, is_platform_mode
 async def _seed(db_session) -> dict:
     async with db_session() as s:
         t = Tenant(slug="acme", name="ACME")
-        s.add(t)
+        platform = Tenant(slug="platform", name="平台租户")
+        s.add_all([t, platform])
         await s.flush()
         users = {
             "owner": User(username="o1", email="o1@t.local", password_hash="x",
                           role="admin", tenant_id=t.id, tenant_role="owner"),
             "member": User(username="m1", email="m1@t.local", password_hash="x",
                            role="viewer", tenant_id=t.id, tenant_role="viewer"),
+            # T5 后平台超管挂 platform 租户（users.tenant_id NOT NULL）
             "platform": User(username="p1", email="p1@t.local", password_hash="x",
-                             role="admin", tenant_id=None, tenant_role=None,
+                             role="admin", tenant_id=platform.id, tenant_role=None,
                              is_platform_admin=True),
         }
         for u in users.values():

@@ -8,10 +8,16 @@ from platform_core.schemas.validators import validate_email
 
 
 class LoginRequest(RequestBody):
-    """登录请求"""
-    
+    """登录请求（T5 决策 A：tenant_slug 为未来租户级登录入口预留）
+
+    tenant_slug 暂不消费（可选、缺省走密码消歧，现有前端零改动）；租户级
+    登录入口（子域名/租户选择页）上线时，届时带 slug 精确 (tenant, username) 查询。
+    """
+
     username: str = Field(..., min_length=3, max_length=50, description="用户名")
     password: str = Field(..., min_length=6, max_length=128, description="密码")
+    tenant_slug: Optional[str] = Field(
+        None, max_length=64, description="租户标识（预留字段，暂不消费）")
 
 
 class RegisterRequest(RequestBody):

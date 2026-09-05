@@ -3,9 +3,10 @@
 租户 owner/admin 自助管理子账号：创建/列表/角色分配（tenant_role）/禁用/重置密码。
 守卫语义：viewer/operator 无管理权（端点层租户级守卫）。
 
-跨租户隔离机制（真实归因）：users 表未继承 TenantMixin（tenant_id 为手写列），
-tenant_context 的读侧自动过滤（with_loader_criteria）不覆盖 User——本服务每个
-查询显式 where(User.tenant_id == tenant_id)，跨租户 id 一律按"不存在"处理（404）。
+跨租户隔离机制（T5 后双保险）：User 已继承 TenantMixin——tenant_scope 下
+读侧自动过滤（with_loader_criteria）+ 写侧 before_flush 断言；本服务各查询
+保留显式 where(User.tenant_id == tenant_id)（同值幂等），跨租户 id 一律按
+"不存在"处理（404）。
 """
 import asyncio
 

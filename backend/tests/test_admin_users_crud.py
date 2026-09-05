@@ -15,15 +15,18 @@ def _seed(db_session):
 
         async with db_session() as s:
             t = Tenant(slug="uc-co", name="测试公司甲")
-            s.add(t)
+            platform = Tenant(slug="platform", name="平台租户")
+            s.add_all([t, platform])
             await s.flush()
             # 顺序即 id：1=uc-admin（actor，conftest 鉴权 override 的 CurrentUser.id=1）
             s.add(User(username="uc-admin", email="uc-admin@x.co", password_hash="x",
                        role="admin", is_admin=True, tenant_id=t.id, tenant_role="admin"))
             s.add(User(username="uc-op", email="uc-op@x.co", password_hash="x",
                        role="operator", tenant_id=t.id))
+            # T5 后平台超管挂 platform 租户（users.tenant_id NOT NULL，NULL 语义消灭）
             s.add(User(username="uc-super", email="uc-super@x.co", password_hash="x",
-                       role="admin", is_admin=True, is_platform_admin=True))
+                       role="admin", is_admin=True, is_platform_admin=True,
+                       tenant_id=platform.id))
             await s.commit()
             STATE["tenant_id"] = t.id
     STATE = {}
@@ -32,13 +35,13 @@ def _seed(db_session):
 
 
 def test_list_users_includes_tenant_name(db_client, _seed):
-    """列表带归属公司名（JOIN tenants；平台账户为 null）"""
+    """列表带归属公司名（JOIN tenants；T5 后平台超管挂 platform 租户）"""
     resp = db_client.get("/api/v1/admin/users?limit=50")
     assert resp.status_code == 200
     rows = {u["username"]: u for u in resp.json()["data"]["items"]}
     assert rows["uc-op"]["tenant_name"] == "测试公司甲"
     assert rows["uc-admin"]["tenant_name"] == "测试公司甲"
-    assert rows["uc-super"]["tenant_name"] is None  # 平台超管不挂公司
+    assert rows["uc-super"]["tenant_name"] == "平台租户"  # T5：平台超管显式挂 platform 租户
 
 
 def test_create_user_with_role_and_tenant(db_client, _seed):
@@ -54,9 +57,21 @@ def test_create_user_with_role_and_tenant(db_client, _seed):
 
 
 def test_create_user_duplicate_username_rejected(db_client, _seed):
+    """同租户同名 → 400（T5 后查重按 (目标租户, username) 口径）"""
+    resp = db_client.post("/api/v1/admin/users", json={
+        "username": "uc-op", "email": "other@x.co", "password": "Passw0rd!",
+        "role": "viewer", "tenant_id": _seed["tenant_id"]})
+    assert resp.status_code == 400
+
+
+def test_create_user_same_name_in_platform_tenant_allowed(db_client, _seed):
+    """跨租户同名合法（T5 语义）：不带 tenant_id 落 platform 租户，与业务租户
+    的 uc-op 同名不冲突（旧全局查重会误杀）"""
     resp = db_client.post("/api/v1/admin/users", json={
         "username": "uc-op", "email": "other@x.co", "password": "Passw0rd!", "role": "viewer"})
-    assert resp.status_code == 400
+    assert resp.status_code == 201
+    data = resp.json()["data"]
+    assert data["tenant_name"] == "平台租户" and data["is_platform_admin"] is False
 
 
 def test_update_user_role(db_client, _seed):

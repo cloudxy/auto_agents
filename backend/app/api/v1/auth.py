@@ -61,6 +61,9 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
         ApiResponse: 包含 access_token 的响应
     """
     logger.info(f"登录请求 | username={request.username}")
+    # T5 决策 A：tenant_slug 为未来租户级登录入口预留（暂不消费，仅观测流量）
+    if request.tenant_slug:
+        logger.info(f"登录携带租户标识（预留字段未消费） | tenant_slug={request.tenant_slug}")
     
     # 检查频率限制
     await check_login_rate_limit(request.username)

@@ -196,6 +196,16 @@ def test_delete_member_cross_tenant_404_and_untouched(db_client, db_session):
 
 def test_delete_member_is_soft_delete_and_blocks_login(db_client, db_session):
     """F-02 口径：删除=软删（行保留+停用）——审计归因不丢的前提；登录即时失效"""
+    # 加固：本用例每次运行都产生一次 401 登录失败计数（真 Redis 持久化），
+    # 连续多轮重跑会累积到限流阈值（5 次/15 分钟）→ 429 污染断言。开跑前清计数。
+    # 同步测试上下文（非 async），两段式同步调用合规（R11 只禁 async 链式直调）
+    from platform_core.db import redis_client
+
+    try:
+        r = redis_client("DEFAULT")
+        r.delete("login_fail:soft-del")
+    except Exception:  # noqa: BLE001 Redis 不可达时 fail-open（限流本身同口径）
+        pass
     created = db_client.post(
         "/api/v1/members", headers=_auth("owner"),
         json={"username": "soft-del", "email": "sdl@x.local",

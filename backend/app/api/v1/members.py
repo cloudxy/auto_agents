@@ -1,9 +1,9 @@
 """租户成员管理 API（SaaS S2-1）——仅租户 owner/admin 可管理
 
 守卫：require_tenant_manager（owner/admin）；viewer/operator 403。
-跨租户隔离：MemberService 各查询显式 where(User.tenant_id == tenant_id)——
-users 表未继承 TenantMixin（tenant_id 为手写列），tenant_context 的读侧自动
-过滤不覆盖 User，隔离完全依赖服务层显式条件；跨租户 id 一律 404。
+跨租户隔离（T5 后双保险）：User 继承 TenantMixin，tenant_scope 下读侧自动
+过滤 + 写侧断言；MemberService 仍保留显式 where(User.tenant_id == tenant_id)
+（同值幂等）。跨租户 id 一律 404。
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
