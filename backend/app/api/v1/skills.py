@@ -18,7 +18,6 @@ from backend.services.skill_service import SkillService
 from platform_core.db import get_async_db
 from platform_core.exceptions import NotFoundException, ValidationException
 from platform_core.logger import get_logger
-from platform_core.models.skill import SkillJob
 from platform_core.schemas.skill import (
     SkillDetailResponse,
     SkillListResponse,
@@ -26,7 +25,6 @@ from platform_core.schemas.skill import (
     SkillResponse,
     SkillReviewResponse,
 )
-from sqlalchemy import select
 
 logger = get_logger("api.skills")
 
@@ -189,26 +187,10 @@ async def list_skill_jobs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     user: CurrentUser = Depends(require_login),
-    session: AsyncSession = Depends(get_async_db),
+    service: SkillService = Depends(_service),
 ):
     """任务运行记录（scan/score_batch/import/export_meta）"""
-    from sqlalchemy import func
-
-    total = (await session.execute(select(func.count()).select_from(SkillJob))).scalar_one()
-    rows = (
-        await session.execute(
-            select(SkillJob).order_by(SkillJob.id.desc()).offset((page - 1) * page_size).limit(page_size)
-        )
-    ).scalars().all()
-    items = [
-        {
-            "id": r.id, "job_type": r.job_type, "status": r.status,
-            "total": r.total or 0, "succeeded": r.succeeded or 0, "failed": r.failed or 0,
-            "detail": r.detail, "started_at": r.started_at, "finished_at": r.finished_at,
-        }
-        for r in rows
-    ]
-    return ok(data={"total": int(total), "items": items})
+    return ok(data=await service.list_jobs(page=page, page_size=page_size))
 
 
 # ---------- 动态段 ----------

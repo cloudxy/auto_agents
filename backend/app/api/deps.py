@@ -14,11 +14,11 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.user_service import get_user_for_auth
 from backend.utils.auth import decode_access_token
 from platform_core.db import get_async_db
 from platform_core.exceptions import AuthenticationException, AuthorizationException
 from platform_core.logger import get_logger
-from platform_core.models.user import User
 
 logger = get_logger("api")
 
@@ -47,8 +47,12 @@ class CurrentUser:
     is_platform_admin: bool = False
 
 
-def effective_role(user: User) -> str:
-    """生效角色：历史 is_admin 标记等价 admin；未知/空角色按最小权限 viewer（B1）"""
+def effective_role(user) -> str:
+    """生效角色：历史 is_admin 标记等价 admin；未知/空角色按最小权限 viewer（B1）
+
+    T1 收口（R7）：入参为鉴权用户实体（经 services.user_service.get_user_for_auth
+    取得，duck-typed 只读 is_admin/role 两属性），API 层不再 import ORM 类型。
+    """
     if user.is_admin:
         return "admin"
     return user.role or "viewer"
@@ -69,7 +73,7 @@ async def get_current_user(
     if not user_id:
         raise AuthenticationException(message="Token 缺少用户信息")
     tenant_id = payload.get("tenant_id")  # 身份字段（非权限）
-    user = await session.get(User, user_id)
+    user = await get_user_for_auth(session, user_id)
     if not user or not user.is_active:
         raise AuthenticationException(message="用户不存在或已停用")
     # claims 只承身份：tenant 字段取自 claims；权限字段一律从 DB 行快照重算

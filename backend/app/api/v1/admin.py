@@ -13,7 +13,9 @@ from platform_core.schemas.auth import AdminUserCreateRequest, AdminUserUpdateRe
 from backend.app.responses import ok, created
 from backend.app.api._helpers import record_audit
 from backend.services.audit_service import AuditService
+from backend.services.config_service import ConfigService
 from backend.services.spider_service import SpiderService
+from backend.services.tenant_admin_service import TenantAdminService
 from backend.services.user_service import UserService
 from platform_core.db import get_async_db
 
@@ -30,6 +32,14 @@ def _user_service(session: AsyncSession = Depends(get_async_db)) -> UserService:
 
 def _audit_service(session: AsyncSession = Depends(get_async_db)) -> AuditService:
     return AuditService(session)
+
+
+def _tenant_service(session: AsyncSession = Depends(get_async_db)) -> TenantAdminService:
+    return TenantAdminService(session)
+
+
+def _config_service(session: AsyncSession = Depends(get_async_db)) -> ConfigService:
+    return ConfigService(session)
 
 
 @router.get("/stats")
@@ -127,23 +137,10 @@ async def list_audit_logs(
 @router.get("/tenants")
 async def list_tenants(
     _user: CurrentUser = Depends(require_platform_admin),
-    session: AsyncSession = Depends(get_async_db),
+    service: TenantAdminService = Depends(_tenant_service),
 ):
     """租户列表（平台超管）"""
-    from sqlalchemy import select
-
-    from platform_core.models.tenant import Tenant
-
-    rows = (await session.execute(select(Tenant).order_by(Tenant.id.asc()))).scalars().all()
-    return ok(data=[
-        {
-            "id": r.id, "slug": r.slug, "name": r.name, "status": r.status,
-            "quota": r.quota,
-            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ])
+    return ok(data=await service.list_tenants())
 
 
 @router.post("/tenants", status_code=201)
@@ -151,32 +148,15 @@ async def create_tenant_minimal(
     body: dict,
     user: CurrentUser = Depends(require_admin),
     session: AsyncSession = Depends(get_async_db),
+    service: TenantAdminService = Depends(_tenant_service),
 ):
     """新建公司（最小语义：名称+可选 slug；配额/到期走平台运营台编辑）"""
-    import re as _re
-    from unicodedata import normalize as _norm
-
-    from platform_core.exceptions import ValidationException
-    from platform_core.models.tenant import Tenant
-
-    name = str(body.get("name") or "").strip()
-    if len(name) < 2:
-        raise ValidationException(message="公司名至少 2 个字符", field="name")
-    slug = str(body.get("slug") or "").strip() or _re.sub(
-        r"[^a-z0-9]+", "-",
-        _norm("NFKD", name).encode("ascii", "ignore").decode().lower()).strip("-") or f"co-{int(__import__('time').time()) % 100000}"
-    dup = (await session.execute(
-        __import__("sqlalchemy").select(Tenant).where(Tenant.slug == slug)
-    )).scalar_one_or_none()
-    if dup is not None:
-        slug = f"{slug}-{int(__import__('time').time()) % 10000}"
-    row = Tenant(slug=slug, name=name, status="active", quota=None)
-    session.add(row)
-    await session.flush()
-    tid = int(row.id)
+    result = await service.create_tenant_minimal(
+        str(body.get("name") or ""), slug=str(body.get("slug") or "") or None)
     await session.commit()
-    await record_audit(session, user, "tenant.create", f"tenant#{tid}", detail={"name": name, "slug": slug})
-    return created(data={"id": tid, "slug": slug})
+    await record_audit(session, user, "tenant.create", f"tenant#{result['id']}",
+                       detail={"name": str(body.get("name") or "").strip(), "slug": result["slug"]})
+    return created(data={"id": result["id"], "slug": result["slug"]})
 
 
 @router.patch("/tenants/{tenant_id}")
@@ -185,32 +165,10 @@ async def patch_tenant(
     body: dict,
     user: CurrentUser = Depends(require_platform_admin),
     session: AsyncSession = Depends(get_async_db),
+    service: TenantAdminService = Depends(_tenant_service),
 ):
     """套餐/配额/到期编辑（平台超管）"""
-    from sqlalchemy import select
-
-    from platform_core.exceptions import NotFoundException
-    from platform_core.models.tenant import Tenant
-
-    row = (await session.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
-    if row is None:
-        raise NotFoundException(resource=f"租户 {tenant_id}")
-    if "quota" in body and isinstance(body["quota"], dict):
-        merged = dict(row.quota or {})
-        merged.update({k: v for k, v in body["quota"].items() if v is not None})
-        row.quota = merged
-    if "expires_at" in body:
-        from datetime import datetime
-
-        raw = body.get("expires_at")
-        if raw:
-            row.expires_at = datetime.fromisoformat(str(raw).replace("Z", ""))
-        else:
-            row.expires_at = None
-            row.status = "active"  # 清除到期时间 = 续期恢复
-    # status 显式白名单透传（R7：禁用语义不再被挡——body 传 disabled/expired 即生效）
-    if "status" in body and str(body["status"]) in ("active", "expired", "disabled"):
-        row.status = str(body["status"])
+    await service.patch_tenant(tenant_id, body)
     await session.commit()
     await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
     return ok(data={"id": tenant_id, "updated": True})
@@ -272,18 +230,10 @@ _NOTIFY_CFG_KEYS = {
 @router.get("/notify-config")
 async def get_notify_config(
     _user: CurrentUser = Depends(require_admin),
-    session: AsyncSession = Depends(get_async_db),
+    service: ConfigService = Depends(_config_service),
 ):
     """通知渠道配置（三渠道 URL；密钥类仍走 env，不入库不入此接口）"""
-    from sqlalchemy import select
-
-    from platform_core.models.system_config import SystemConfig
-
-    rows = (await session.execute(
-        select(SystemConfig.config_key, SystemConfig.config_value)
-        .where(SystemConfig.config_key.in_(_NOTIFY_CFG_KEYS.values()))
-    )).all()
-    stored = dict(rows)
+    stored = await service.get_configs(list(_NOTIFY_CFG_KEYS.values()))
     return ok(data={
         field: stored.get(key) or "" for field, key in _NOTIFY_CFG_KEYS.items()
     })
@@ -294,12 +244,10 @@ async def put_notify_config(
     body: dict,
     user: CurrentUser = Depends(require_admin),
     session: AsyncSession = Depends(get_async_db),
+    service: ConfigService = Depends(_config_service),
 ):
     """更新通知渠道 URL（空串=清除覆盖，回退 settings 默认）"""
-    from sqlalchemy import select
-
     from platform_core.exceptions import ValidationException
-    from platform_core.models.system_config import SystemConfig
 
     updates = {}
     for field, key in _NOTIFY_CFG_KEYS.items():
@@ -310,15 +258,7 @@ async def put_notify_config(
             updates[key] = value
     if not updates:
         raise ValidationException(message="无可更新字段（webhook_url/dingtalk_url/wechat_work_url）")
-    for key, value in updates.items():
-        row = (await session.execute(
-            select(SystemConfig).where(SystemConfig.config_key == key)
-        )).scalar_one_or_none()
-        if row is None:
-            session.add(SystemConfig(config_key=key, config_value=value,
-                                     description="通知渠道 URL（运营面配置）"))
-        else:
-            row.config_value = value
+    await service.upsert_configs(updates, description="通知渠道 URL（运营面配置）")
     await session.commit()
     await record_audit(session, user, "notify_config.update", "notify_config",
                        detail={k: (v[:40] + "…") if len(v) > 40 else v for k, v in updates.items()})
