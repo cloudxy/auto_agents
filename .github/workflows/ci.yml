@@ -1,10 +1,11 @@
-# Auto Agents CI - lint + test + arch-check + frontend build + docker validate
+# Auto Agents CI - lint + test + arch-check + db-migration-gate + frontend build + docker validate
 #
-# 四阶段质量关卡（对齐 /cicd Skill 与 /verify Skill 的验证约定）：
+# 五阶段质量关卡（对齐 /cicd Skill 与 /verify Skill 的验证约定）：
 # 1. python-lint-test:  ruff lint + pytest（backend/tests）
 # 2. arch-check:        scripts/check-arch.sh 的 12 条架构红线 + 3 条核心边界
-# 3. frontend-build:    admin + official 两个 React 应用构建
-# 4. docker-validate:   Dockerfile 构建 + compose 语法校验
+# 3. db-migration-gate: scripts/check-db-ir.sh + check-db-migrations.sh 迁移破坏性变更门禁
+# 4. frontend-build:    admin + official 两个 React 应用构建
+# 5. docker-validate:   Dockerfile 构建 + compose 语法校验
 #
 # 触发：推送任意分支 + 向 main 发起 PR
 
@@ -91,6 +92,21 @@ jobs:
 
       - name: Run check-arch.sh
         run: bash scripts/check-arch.sh
+
+  db-migration-gate:
+    name: DB Migration Gate (check-db-ir + check-db-migrations)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 纯静态检查（AST + grep，仅需 runner 自带的 python3 与 git），无 DB 依赖，
+      # 故不挂 MySQL service 容器。脚本退出码 = 违规数，非零即红。
+      # CI 下 git diff 无增量 → 脚本自动兜底扫描 backend/alembic/versions 全部迁移。
+      - name: Run check-db-ir.sh (DBML IR lint)
+        run: bash scripts/check-db-ir.sh
+
+      - name: Run check-db-migrations.sh (strong_migrations 语义)
+        run: bash scripts/check-db-migrations.sh
 
   frontend-build:
     name: Frontend Build (admin + official)
