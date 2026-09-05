@@ -13,6 +13,16 @@ from platform_core.schemas.auth import UserListResponse, UserResponse
 logger = get_logger("api")
 
 
+# 鉴权用主键直查（含已软删行——删除时 is_active 已同步置 False，快照口径由调用方判定）。
+# T1 收口（R7）：backend/app/api/deps.py 此前模块级 import User ORM 模型，改经本函数取实体；
+# 保持 session.get 形态（不经软删过滤，行为与收口前一致）。
+async def get_user_for_auth(session: AsyncSession, user_id: int):
+    logger.debug(f"鉴权加载用户 | user_id={user_id}")
+    from platform_core.models.user import User
+
+    return await session.get(User, user_id)
+
+
 class UserService:
     """用户管理编排"""
 

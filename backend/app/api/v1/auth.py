@@ -121,15 +121,11 @@ async def get_permissions(
 
     DB miss（表空/角色被删）回退内置硬编码映射——登录链路不被配置问题阻断。
     """
-    from sqlalchemy import select
-
-    from platform_core.models.role import Role
+    from backend.services.rbac_service import RbacService
 
     logger.info(f"查询权限 | user={user.username} role={user.role}")
     try:
-        row = (await session.execute(
-            select(Role.permissions).where(Role.role_key == user.role)
-        )).scalar_one_or_none()
+        row = await RbacService(session).get_role_permissions(user.role)
         if row:
             return ok(data=row)
     except Exception as e:  # noqa: BLE001 配置读失败回退内置映射（可用性优先）
@@ -141,31 +137,27 @@ async def get_dynamic_menus(
     session: AsyncSession = Depends(get_async_db),
 ):
     """动态菜单（menus 表按权限过滤下发；DB miss/异常回退空——前端用静态配置兜底）"""
-    from sqlalchemy import select
-
-    from platform_core.models.menu import Menu
+    from backend.services.rbac_service import RbacService
 
     try:
-        rows = (await session.execute(
-            select(Menu).where(Menu.visible == True).order_by(Menu.sort_order.asc(), Menu.id.asc())  # noqa: E712
-        )).scalars().all()
+        rows = await RbacService(session).list_visible_menus()
         if not rows:
             return ok(data=[])
         perms = set(await _permissions_of(session, user.role))
         nodes = {}
         tree = []
         for m in rows:
-            if m.permission and m.permission not in perms:
+            if m["permission"] and m["permission"] not in perms:
                 continue
-            nodes[m.id] = {"key": m.path or f"grp-{m.id}", "label": m.name,
-                           "icon": m.icon, "permission": m.permission,
-                           "tenantOnly": m.path in ("/members", "/usage"), "children": []}
+            nodes[m["id"]] = {"key": m["path"] or f"grp-{m['id']}", "label": m["name"],
+                              "icon": m["icon"], "permission": m["permission"],
+                              "tenantOnly": m["path"] in ("/members", "/usage"), "children": []}
         for m in rows:
-            node = nodes.get(m.id)
+            node = nodes.get(m["id"])
             if node is None:
                 continue
-            if m.parent_id and m.parent_id in nodes:
-                nodes[m.parent_id]["children"].append(node)
+            if m["parent_id"] and m["parent_id"] in nodes:
+                nodes[m["parent_id"]]["children"].append(node)
             else:
                 tree.append(node)
         # 剔除空分组
@@ -185,11 +177,10 @@ async def get_dynamic_menus(
 
 async def _permissions_of(session, role: str) -> list[str]:
     """角色权限码（roles 表 DB 单源 → 内置映射回退）"""
-    from platform_core.models.role import Role
-    from sqlalchemy import select as _s
+    from backend.services.rbac_service import RbacService
 
     try:
-        row = (await session.execute(_s(Role.permissions).where(Role.role_key == role))).scalar_one_or_none()
+        row = await RbacService(session).get_role_permissions(role)
         if row:
             return list(row)
     except Exception:  # noqa: BLE001

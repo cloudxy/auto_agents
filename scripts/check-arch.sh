@@ -68,8 +68,19 @@ else
 fi
 
 # --- 模型即契约 ---
+# R7: API 层禁止 import ORM 模型（Router→Service→Repository→ORM 单向依赖）。
+# 旧正则 `from.*\.models import` 匹配不到 `from platform_core.models.<子模块> import X`
+# （模块路径以子模块名结尾而非 models），导致 API 层 ORM 直连漏检——本正则同时覆盖：
+#   1) from <pkg>.models import X        （models 包直入）
+#   2) from <pkg>.models.<sub> import X  （子模块，含相对导入 from .models import）
+#   3) from <pkg>.models.<sub>.<sub2> import X（多级子模块）
+#   4) 裸 import <pkg>.models[.<sub>]    （全限定名访问，同样泄漏 ORM）
+# 扫描范围含 external_api/（同属 API 协议层）。
 report "R7" "API 层 import models" \
-    "$(grep -rnE "${GREP_EXCLUDES[@]}" 'from.*\.models import' backend/app/api/ 2>/dev/null || true)"
+    "$(grep -rnE "${GREP_EXCLUDES[@]}" \
+        -e 'from +[a-zA-Z0-9_.]*\.models(\.[a-zA-Z0-9_]+)* +import' \
+        -e '(^|[[:space:]])import +[a-zA-Z0-9_.]*\.models(\.[a-zA-Z0-9_]+)*([[:space:]]|$)' \
+        backend/app/api/ backend/app/external_api/ 2>/dev/null || true)"
 
 report "R8" "models 反向 import schemas" \
     "$(grep -rnE "${GREP_EXCLUDES[@]}" 'from.*\.schemas import' platform_core/models/ 2>/dev/null || true)"

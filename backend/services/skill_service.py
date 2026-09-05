@@ -389,6 +389,33 @@ class SkillService:
 
     # ---------- 市场候选审核（A-P5-2） ----------
 
+    async def list_jobs(self, page: int = 1, page_size: int = 20) -> dict:
+        """任务运行记录（scan/score_batch/import/export_meta，id 倒序分页）
+
+        T1 收口（R7）：backend/app/api/v1/skills.py 此前模块级 import SkillJob
+        ORM 模型直查；查询与投影收口至本方法。
+        """
+        from sqlalchemy import func
+
+        logger.info(f"查询技能任务记录 | page={page} page_size={page_size}")
+        total = (await self.session.execute(
+            select(func.count()).select_from(SkillJob))).scalar_one()
+        rows = (
+            await self.session.execute(
+                select(SkillJob).order_by(SkillJob.id.desc())
+                .offset((page - 1) * page_size).limit(page_size)
+            )
+        ).scalars().all()
+        items = [
+            {
+                "id": r.id, "job_type": r.job_type, "status": r.status,
+                "total": r.total or 0, "succeeded": r.succeeded or 0, "failed": r.failed or 0,
+                "detail": r.detail, "started_at": r.started_at, "finished_at": r.finished_at,
+            }
+            for r in rows
+        ]
+        return {"total": int(total), "items": items}
+
     async def list_candidates(self, page: int = 1, page_size: int = 20) -> dict:
         """待审候选：spider_results(source=marketplace) 且未处理（extra.review 缺省 pending）"""
         from platform_core.models.spider_result import SpiderResult

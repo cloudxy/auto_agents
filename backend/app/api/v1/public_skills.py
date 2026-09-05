@@ -18,7 +18,6 @@ from backend.repositories.skill_repository import SkillRepository
 from platform_core.db import get_async_db
 from platform_core.exceptions import NotFoundException, RateLimitException
 from platform_core.logger import get_logger
-from platform_core.models.skill import Skill
 from platform_core.queues import SKILL_PUBLIC_RATE_PREFIX
 from platform_core.redis_async import get_async_redis
 from platform_core.schemas.skill import SkillQuery
@@ -89,7 +88,8 @@ async def _enforce_rate_limit(request: Request) -> None:
         logger.warning(f"公开 API 限流检查失败（放行）: {exc}")
 
 
-def _read_skill_md(row: Skill) -> str:
+def _read_skill_md(row) -> str:
+    """读技能 SKILL.md 正文（row 为 repo 返回的技能资产行，duck-typed 只读 file_path）"""
     from pathlib import Path
 
     from config import settings
@@ -101,7 +101,9 @@ def _read_skill_md(row: Skill) -> str:
         return ""
 
 
-def _to_public(row: Skill, include_body: bool = False) -> PublicSkillResponse:
+def _to_public(row, include_body: bool = False) -> PublicSkillResponse:
+    # T1 收口（R7）：API 层不再 import ORM 类型做注解——行对象经 repo 返回，
+    # 字段白名单投影由 PublicSkillResponse（from_attributes）在运行时校验。
     item = PublicSkillResponse.model_validate(row)
     if include_body:
         item.skill_md = _read_skill_md(row)
