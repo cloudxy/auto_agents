@@ -159,7 +159,7 @@ class TestDualTrackAuth:
         _set_api_keys([])
         _set_legacy_api_key(VALID_KEY)
         with patch(
-            "backend.app.external_api.v1.public.SpiderResultRepository.query_by_spider",
+            "backend.app.external_api.v1.public.SpiderQueryService.query_public_results",
             new=AsyncMock(return_value=([], 0)),
         ):
             resp = client.get(
@@ -189,7 +189,7 @@ class TestDualTrackAuth:
         _set_legacy_api_key(VALID_KEY)
         task = _task()
         with patch(
-            "backend.app.external_api.v1.public.SpiderTaskRepository.get_by_id",
+            "backend.app.external_api.v1.public.SpiderQueryService.get_task",
             new=AsyncMock(return_value=task),
         ):
             resp = client.get(
@@ -227,7 +227,7 @@ class TestSpiderStatusEndpoint:
     def test_real_task_data(self, client, api_keys):
         task = _task()
         with patch(
-            "backend.app.external_api.v1.public.SpiderTaskRepository.get_by_id",
+            "backend.app.external_api.v1.public.SpiderQueryService.get_task",
             new=AsyncMock(return_value=task),
         ):
             resp = client.get(
@@ -242,9 +242,10 @@ class TestSpiderStatusEndpoint:
         assert body["result_count"] == 5
 
     def test_not_found_404(self, client, api_keys):
+        """任务缺失 404 语义归 Service（get_task 内抛，路由只映射）"""
         with patch(
-            "backend.app.external_api.v1.public.SpiderTaskRepository.get_by_id",
-            new=AsyncMock(return_value=None),
+            "backend.app.external_api.v1.public.SpiderQueryService.get_task",
+            new=AsyncMock(side_effect=NotFoundException("爬虫任务")),
         ):
             resp = client.get(
                 f"{PUBLIC_BASE}/spider/status/999",
@@ -270,7 +271,7 @@ class TestSpiderResultsEndpoint:
             ],
         )
         with patch(
-            "backend.app.external_api.v1.public.SpiderService.list_results",
+            "backend.app.external_api.v1.public.SpiderQueryService.list_results",
             new=AsyncMock(return_value=resp_model),
         ):
             resp = client.get(
@@ -285,7 +286,7 @@ class TestSpiderResultsEndpoint:
 
     def test_not_found_404(self, client, api_keys):
         with patch(
-            "backend.app.external_api.v1.public.SpiderService.list_results",
+            "backend.app.external_api.v1.public.SpiderQueryService.list_results",
             new=AsyncMock(side_effect=NotFoundException("爬虫任务")),
         ):
             resp = client.get(
@@ -308,7 +309,7 @@ class TestPublicStatsEndpoint:
             success_rate=0.8571,
         )
         with patch(
-            "backend.app.external_api.v1.public.SpiderService.stats",
+            "backend.app.external_api.v1.public.SpiderQueryService.stats",
             new=AsyncMock(return_value=stats),
         ):
             resp = client.get(

@@ -80,6 +80,39 @@ class SpiderQueryService:
             items=[SpiderResultResponse.model_validate(r) for r in items],
         )
 
+    async def get_task(self, task_id: int):
+        """按主键取任务行（miss 抛 404）——T7 跳层收口：external_api 状态查询改道本层"""
+        logger.info(f"查询任务 | task_id={task_id}")
+        task = await self.repo.get_by_id(task_id)
+        if task is None:
+            raise NotFoundException("爬虫任务")
+        return task
+
+    async def query_public_results(
+        self,
+        spider_name: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> Tuple[list, int]:
+        """按爬虫名称分页查询结果（返回 dict 行列表，非 ORM）——外部公开查询通道
+
+        T7 跳层收口：external_api /data/{spider_name} 的 repository 直连改道本层；
+        字段裁剪（fields 参数）属协议层职责，归调用方。
+        """
+        logger.info(
+            f"公开结果查询: spider={spider_name}, page={page}, "
+            f"start={start_time}, end={end_time}"
+        )
+        return await self.result_repo.query_by_spider(
+            spider_name=spider_name,
+            page=page,
+            page_size=page_size,
+            start_time=start_time,
+            end_time=end_time,
+        )
+
     # 导出列定义
     _EXPORT_COLUMNS = (
         "id", "task_id", "spider_name", "url", "title", "content",

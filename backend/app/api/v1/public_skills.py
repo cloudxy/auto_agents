@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict
 
 from backend.app.responses import ok
-from backend.repositories.skill_repository import SkillRepository
+from backend.services.skill_service import SkillService
 from platform_core.db import get_async_db
 from platform_core.exceptions import NotFoundException, RateLimitException
 from platform_core.logger import get_logger
@@ -55,8 +55,9 @@ class PublicSkillListResponse(BaseModel):
     items: list[PublicSkillResponse]
 
 
-def _repo(session: AsyncSession = Depends(get_async_db)) -> SkillRepository:
-    return SkillRepository(session)
+def _service(session: AsyncSession = Depends(get_async_db)) -> SkillService:
+    """T7 跳层收口：公开面数据访问改道 SkillService（不再直连 repository）"""
+    return SkillService(session)
 
 
 def _client_ip(request: Request) -> str:
@@ -114,11 +115,11 @@ def _to_public(row, include_body: bool = False) -> PublicSkillResponse:
 async def public_list_skills(
     request: Request,
     q: SkillQuery = Depends(),
-    repo: SkillRepository = Depends(_repo),
+    service: SkillService = Depends(_service),
 ):
     """公开列表：仅发布态 + 白名单投影 + 按 IP 限流"""
     await _enforce_rate_limit(request)
-    rows, total = await repo.list_skills(
+    rows, total = await service.list_skills(
         q=q.q, category=q.category, industry=q.industry, sort=q.sort,
         offset=(q.page - 1) * q.page_size, limit=q.page_size,
         status=None,
@@ -135,11 +136,11 @@ async def public_list_skills(
 async def public_get_skill(
     name: str,
     request: Request,
-    repo: SkillRepository = Depends(_repo),
+    service: SkillService = Depends(_service),
 ):
     """公开详情：未发布一律 404（不泄露存在性差异）"""
     await _enforce_rate_limit(request)
-    row = await repo.get_by_name(name)
+    row = await service.get_by_name(name)
     if row is None or row.status not in PUBLISHED_STATUSES:
         raise NotFoundException(resource="技能")
     return ok(data=_to_public(row, include_body=True).model_dump())

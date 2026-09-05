@@ -77,8 +77,15 @@ class SkillImportService:
         category: Optional[str] = None,
         industries: Optional[list[str]] = None,
         client: Optional[httpx.AsyncClient] = None,
+        *,
+        commit: bool = True,
     ) -> dict:
-        """按来源形态导入；name 取 frontmatter.name（缺省用 zip 根目录名/文件名）"""
+        """按来源形态导入；name 取 frontmatter.name（缺省用 zip 根目录名/文件名）
+
+        ADR-0007 D3：默认自持事务（API 直调即完整业务操作）；被候选转正组合
+        （SkillService.approve_candidate）时传 commit=False，导入 + 候选标记
+        由外层一个事务统一提交。
+        """
         logger.info(f"URL 导入 | url={url}")
         own_client = client is None
         client = client or _make_client()
@@ -89,12 +96,15 @@ class SkillImportService:
             similar = await self._similar_candidates(name, category or "uncategorized")
             skill_dir = self._write_to_library(name, files, url, category, industries)
             await self._ingest_and_enqueue(name, skill_dir)
-            return {
+            result = {
                 "name": name,
                 "imported": True,
                 "file_count": len(files),
                 "similar_candidates": similar,
             }
+            if commit:
+                await self.session.commit()
+            return result
         finally:
             if own_client:
                 await client.aclose()
@@ -285,8 +295,12 @@ class SkillImportService:
         return skill_dir
 
     async def _ingest_and_enqueue(self, name: str, skill_dir: Path) -> None:
-        """落库（扫描该目录）+ 入评分队列（T6：模块级单向依赖，无函数内延迟 import）"""
-        await SkillService(self.session).scan_library(root=skill_dir.parent)
+        """落库（扫描该目录）+ 入评分队列（T6：模块级单向依赖，无函数内延迟 import）
+
+        ADR-0007 D3：scan_library 以 commit=False 交出事务权——导入是
+        落盘 + 扫描入库 + 任务记录的不可分割整体，由 import_url 边界统一提交。
+        """
+        await SkillService(self.session).scan_library(root=skill_dir.parent, commit=False)
         self.session.add(
             SkillJob(
                 job_type="import", status="done", total=1, succeeded=1, failed=0,

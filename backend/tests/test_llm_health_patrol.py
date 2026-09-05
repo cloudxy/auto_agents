@@ -39,7 +39,8 @@ async def test_patrol_once_covers_enabled_providers_enabled_models(db_session, m
     on_id, off_id = await _seed(db_session)
     calls: list[tuple[int, str]] = []
 
-    async def _fake_test_model(self, provider_id, model_id):
+    async def _fake_test_model(self, provider_id, model_id, *, commit=True):
+        # ADR-0007 D3：巡检组合调用以 commit=False 交出事务权（整轮一个事务）
         calls.append((provider_id, model_id))
         return {"ok": True, "latency_ms": 5, "model": model_id, "error": "", "health_status": "healthy"}
 
@@ -60,7 +61,7 @@ async def test_patrol_skips_models_without_provider_key(monkeypatch):
 
     calls = []
 
-    async def _fake_test_model(self, provider_id, model_id):
+    async def _fake_test_model(self, provider_id, model_id, *, commit=True):
         calls.append((provider_id, model_id))
         return {"ok": True, "latency_ms": 1, "model": model_id, "error": "", "health_status": "healthy"}
 

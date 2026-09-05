@@ -55,7 +55,12 @@ def test_approve_walks_import_pipeline_and_marks(db_client, db_engine, db_sessio
     def _init(self, session):
         self.session = session
 
-    async def _fake_import(self, url, category=None, industries=None, client=None):
+    received: dict = {}
+
+    async def _fake_import(self, url, category=None, industries=None, client=None, *, commit=True):
+        # ADR-0007 D3：组合调用必须以 commit=False 交出事务权——
+        # 导入 + 候选标记由 approve_candidate 尾部一个事务统一提交
+        received["commit"] = commit
         return {"name": "pdf-briefing", "imported": True, "file_count": 3, "similar_candidates": []}
 
     monkeypatch.setattr(
@@ -74,6 +79,7 @@ def test_approve_walks_import_pipeline_and_marks(db_client, db_engine, db_sessio
             return json.loads(row.extra or "{}")
 
     assert asyncio.run(_check()).get("review") == "approved"
+    assert received.get("commit") is False  # ADR-0007 D3：组合调用不吞事务权
     # 已处理候选默认不再出现在待审列表
     again = db_client.get("/api/v1/skills/candidates").json()["data"]["items"]
     assert all(i["id"] != result_id for i in again)

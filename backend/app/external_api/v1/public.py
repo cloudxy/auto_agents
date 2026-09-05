@@ -12,11 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.external_api.v1.webhooks import validate_api_key
-from backend.repositories.spider_result_repository import SpiderResultRepository
-from backend.repositories.spider_task_repository import SpiderTaskRepository
-from backend.services.spider_service import SpiderService
+from backend.services.spider_query_service import SpiderQueryService
 from platform_core.db import get_async_db
-from platform_core.exceptions import NotFoundException
 from platform_core.schemas.spider import SpiderTaskResponse
 
 router = APIRouter()
@@ -68,9 +65,8 @@ async def get_spider_data(
     if page_size > 100:
         page_size = 100
 
-    # 3. 查询结果
-    repo = SpiderResultRepository(session)
-    items, total = await repo.query_by_spider(
+    # 3. 查询结果（T7 跳层收口：经 SpiderQueryService，不再直连 repository）
+    items, total = await SpiderQueryService(session).query_public_results(
         spider_name=spider_name,
         page=page,
         page_size=page_size,
@@ -104,9 +100,7 @@ async def get_spider_status(
 ):
     """查询爬虫任务状态（公开接口，API Key 认证；任务不存在返回 404）"""
     _require_api_key(request)
-    task = await SpiderTaskRepository(session).get_by_id(task_id)
-    if task is None:
-        raise NotFoundException("爬虫任务")
+    task = await SpiderQueryService(session).get_task(task_id)
     return SpiderTaskResponse.model_validate(task)
 
 
@@ -127,7 +121,7 @@ async def get_spider_results(
     if page_size > 100:
         page_size = 100
 
-    resp = await SpiderService(session).list_results(
+    resp = await SpiderQueryService(session).list_results(
         task_id=task_id, skip=(page - 1) * page_size, limit=page_size
     )
     return {
@@ -146,4 +140,4 @@ async def get_public_stats(
 ):
     """系统公开统计（真实聚合数据：任务状态分布/成功率/近 7 日趋势；API Key 认证）"""
     _require_api_key(request)
-    return (await SpiderService(session).stats()).model_dump(mode="json")
+    return (await SpiderQueryService(session).stats()).model_dump(mode="json")

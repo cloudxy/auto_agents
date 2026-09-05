@@ -58,7 +58,7 @@ class ConfigService:
         return dict(rows)
 
     async def upsert_configs(self, updates: dict[str, str], description: str = "") -> None:
-        """批量写入配置项（存在则改、缺省则建；不提交——commit 由调用方统一执行）"""
+        """批量写入配置项（存在则改、缺省则建；ADR-0007：service 自持事务提交）"""
         from sqlalchemy import select
 
         logger.info(f"批量写入配置 | keys={sorted(updates.keys())}")
@@ -71,3 +71,4 @@ class ConfigService:
                                               description=description))
             else:
                 row.config_value = value
+        await self.session.commit()

@@ -73,7 +73,6 @@ async def admin_create_user(
 ):
     """创建账户（平台超管；角色分配 role 单源，归属公司可选）"""
     created = await service.create_user(payload)
-    await session.commit()
     await record_audit(session, user, "user.create", f"user#{created.id}",
                        detail={"username": created.username, "role": created.role, "tenant_id": created.tenant_id})
     return ok(data=created.model_dump())
@@ -89,7 +88,6 @@ async def admin_update_user(
 ):
     """编辑账户：角色分配/启停/归属调整（防自锁：不可降级/停用/删除自己）"""
     updated = await service.update_user(user_id, payload, actor_id=int(user.id))
-    await session.commit()
     await record_audit(session, user, "user.update", f"user#{user_id}", detail=payload.model_dump(exclude_unset=True))
     return ok(data=updated.model_dump())
 
@@ -103,7 +101,6 @@ async def admin_delete_user(
 ):
     """软删除账户（防删自己；防删最后一个平台超管）"""
     await service.delete_user(user_id, actor_id=int(user.id))
-    await session.commit()
     await record_audit(session, user, "user.delete", f"user#{user_id}")
     return ok(data={"id": user_id, "deleted": True})
 
@@ -150,7 +147,11 @@ async def create_tenant_minimal(
     session: AsyncSession = Depends(get_async_db),
     service: TenantAdminService = Depends(_tenant_service),
 ):
-    """新建公司（最小语义：名称+可选 slug；配额/到期走平台运营台编辑）"""
+    """新建公司（最小语义：名称+可选 slug；配额/到期走平台运营台编辑）
+
+    ADR-0007 范围例外：本端点事务下沉需改 tenant_admin_service（tenant 域，
+    本票红线禁改），路由层 commit 暂留，由 tenant 域后续工单收口。
+    """
     result = await service.create_tenant_minimal(
         str(body.get("name") or ""), slug=str(body.get("slug") or "") or None)
     await session.commit()
@@ -167,7 +168,7 @@ async def patch_tenant(
     session: AsyncSession = Depends(get_async_db),
     service: TenantAdminService = Depends(_tenant_service),
 ):
-    """套餐/配额/到期编辑（平台超管）"""
+    """套餐/配额/到期编辑（平台超管；ADR-0007 范围例外，见 create_tenant_minimal 注）"""
     await service.patch_tenant(tenant_id, body)
     await session.commit()
     await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
@@ -259,7 +260,6 @@ async def put_notify_config(
     if not updates:
         raise ValidationException(message="无可更新字段（webhook_url/dingtalk_url/wechat_work_url）")
     await service.upsert_configs(updates, description="通知渠道 URL（运营面配置）")
-    await session.commit()
     await record_audit(session, user, "notify_config.update", "notify_config",
                        detail={k: (v[:40] + "…") if len(v) > 40 else v for k, v in updates.items()})
     return ok(data={"updated": sorted(updates.keys())})

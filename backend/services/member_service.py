@@ -84,7 +84,10 @@ class MemberService:
         # created_at/updated_at 为 server_default：flush 后未回填，_to_dict 直接读会触发
         # 异步惰性加载抛 MissingGreenlet，须显式 refresh（与 create_template 同一口径）
         await self.session.refresh(user)
-        return _to_dict(user)
+        # ADR-0007 D2：先固化快照再 commit（expire_on_commit 后属性惰性加载会抛 MissingGreenlet）
+        snapshot = _to_dict(user)
+        await self.session.commit()
+        return snapshot
 
     async def patch_member(self, tenant_id: int, member_id: int, payload: dict) -> dict:
         logger.info(f"更新成员 | tenant={tenant_id} member={member_id} fields={sorted(payload)}")
@@ -109,7 +112,9 @@ class MemberService:
                     message="不可禁用 owner（租户唯一所有者）", field="is_active")
             user.is_active = bool(payload["is_active"])
         await self.session.flush()
-        return _to_dict(user)
+        snapshot = _to_dict(user)
+        await self.session.commit()
+        return snapshot
 
     async def reset_password(self, tenant_id: int, member_id: int, new_password: str) -> dict:
         logger.info(f"重置成员密码 | tenant={tenant_id} member={member_id}")
@@ -123,6 +128,7 @@ class MemberService:
             raise NotFoundException(resource=f"成员 {member_id}")
         user.password_hash = await asyncio.to_thread(get_password_hash, new_password)
         await self.session.flush()
+        await self.session.commit()
         return {"id": member_id, "reset": True}
 
     async def delete_member(self, tenant_id: int, member_id: int, actor_id: int) -> dict:
@@ -157,6 +163,8 @@ class MemberService:
         ))
         if result.rowcount == 0:
             raise NotFoundException(resource=f"成员 {member_id}")
+        # 收件箱清理 + 软删同一事务（ADR-0007：service 方法 = 业务不可分割操作）
+        await self.session.commit()
         return {"id": member_id, "deleted": True}
 
     async def list_tenant_audit_logs(self, tenant_id: int, limit: int) -> list[dict]:

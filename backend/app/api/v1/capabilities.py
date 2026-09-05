@@ -78,7 +78,6 @@ async def scan_plugins(
     from backend.services.plugin_service import PluginService
 
     result = await PluginService(session).scan_plugins()
-    await session.commit()
     return ok(data=result)
 
 
@@ -105,7 +104,6 @@ async def verify_plugin(
     from backend.services.plugin_service import PluginService
 
     result = await PluginService(session).verify_plugin(name)
-    await session.commit()
     await record_audit(session, user, "plugin.verify", f"plugin#{name}",
                        detail={"health": result["health"]})
     return ok(data=result)
@@ -123,7 +121,6 @@ async def scan_experts(
     from backend.services.expert_service import ExpertService
 
     result = await ExpertService(session).scan_experts()
-    await session.commit()
     return ok(data=result)
 
 
@@ -156,9 +153,8 @@ async def upsert_team(
         workflow_md=str(body.get("workflow_md") or ""),
         title=str(body.get("title") or ""),
     )
-    await session.commit()
-    await record_audit(session, user, "team.upsert", f"team#{team.name}")
-    return ok(data={"name": team.name, "created": True})
+    await record_audit(session, user, "team.upsert", f"team#{team['name']}")
+    return ok(data=team)
 
 
 @router.get("/teams/{name}")

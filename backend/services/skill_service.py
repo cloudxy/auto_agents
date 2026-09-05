@@ -110,9 +110,14 @@ class SkillService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def scan_library(self, root: Optional[Path] = None) -> dict:
+    async def scan_library(self, root: Optional[Path] = None, *, commit: bool = True) -> dict:
         """扫描 skills 目录：新目录入库 / hash 变化置 hash_changed / 丢失置 missing /
-        解析失败置 parse_error；产出 skill_jobs 记录。返回摘要 dict。"""
+        解析失败置 parse_error；产出 skill_jobs 记录。返回摘要 dict。
+
+        ADR-0007 D3：默认自持事务（API 直调即完整业务操作）；被导入管线组合
+        （skill_import_service._ingest_and_enqueue）时传 commit=False，由外层
+        统一提交（导入 = 落盘 + 扫描入库 + 任务记录的不可分割整体）。
+        """
         from config import settings
 
         if root is None:
@@ -153,7 +158,8 @@ class SkillService:
         job.status = "done"
         job.detail = {"failed": failed_names, "missing": missing_names}
         await self.session.flush()
-        return {
+        # ADR-0007 D2：快照先于 commit（job 属性 expire 后读取会抛 MissingGreenlet）
+        summary = {
             "total": job.total,
             "succeeded": succeeded,
             "failed": failed,
@@ -161,6 +167,9 @@ class SkillService:
             "missing": missing_names,
             "job_id": job.id,
         }
+        if commit:
+            await self.session.commit()
+        return summary
 
     async def _upsert_from_dir(
         self, skill_dir: Path, root: Path, existing: Optional[Skill]
@@ -304,13 +313,16 @@ class SkillService:
             )
         else:
             self._record_export_failure(name, "矫正后写回失败")
-        return {
+        # ADR-0007 D2：快照先于 commit
+        result = {
             "name": name,
             "written_back": written_back,
             "tier": row.tier,
             "category": row.category,
             "status": row.status,
         }
+        await self.session.commit()
+        return result
 
     async def export_meta(self, name: str) -> bool:
         """手动补导出：按 DB 当前治理状态重写 meta.yaml + CHANGELOG"""
@@ -326,6 +338,7 @@ class SkillService:
         else:
             self._append_changelog(row, "system | 补导出 meta.yaml")
             await self.session.flush()
+        await self.session.commit()
         return ok
 
     # ---------- similar AI 辅助候选（A-P5-3） ----------
@@ -373,6 +386,7 @@ class SkillService:
             detail={"clusters": clusters},
         ))
         await self.session.flush()
+        await self.session.commit()
         return {"clusters": clusters}
 
     async def similar_confirm(self, groups: list[list[str]]) -> dict:
@@ -388,6 +402,7 @@ class SkillService:
                 merged = list(dict.fromkeys((row.similar_to or []) + others))
                 row.similar_to = merged
         await self.session.flush()
+        await self.session.commit()
         return {"confirmed": len(groups)}
 
     # ---------- 市场候选审核（A-P5-2） ----------
@@ -439,6 +454,31 @@ class SkillService:
         start = (page - 1) * page_size
         return {"total": len(items), "items": items[start:start + page_size]}
 
+    # ---------- 查询（T7 跳层收口：API 层 repository 直连改道本层） ----------
+
+    async def list_skills(self, **filters) -> tuple[list, int]:
+        """技能库列表（筛选/排序/分页）；参数与 SkillRepository.list_skills 对齐，
+        返回 (行列表, 总数)——投影与响应组装归 API 协议层。"""
+        from backend.repositories.skill_repository import SkillRepository
+
+        logger.info(f"查询技能列表 | filters={sorted(filters)}")
+        return await SkillRepository(self.session).list_skills(**filters)
+
+    async def get_by_name(self, name: str):
+        """按名称取技能行（miss 返回 None；404 语义由调用方决定——管理端与
+        公开端点的资源命名不同，见各路由）"""
+        from backend.repositories.skill_repository import SkillRepository
+
+        logger.info(f"查询技能 | name={name}")
+        return await SkillRepository(self.session).get_by_name(name)
+
+    async def list_reviews(self, skill_id: int, limit: int = 20) -> list:
+        """技能最近评分历史（id 倒序）"""
+        from backend.repositories.skill_repository import SkillReviewRepository
+
+        logger.info(f"查询技能评分历史 | skill={skill_id} limit={limit}")
+        return await SkillReviewRepository(self.session).list_by_skill(skill_id, limit=limit)
+
     async def approve_candidate(
         self, result_id: int, *, importer: "type[SkillImportService]"
     ) -> dict:
@@ -458,9 +498,12 @@ class SkillService:
         )).scalar_one_or_none()
         if row is None:
             raise NotFoundException(resource=f"候选 {result_id}")
-        result = await importer(self.session).import_url(row.url or "")
+        # ADR-0007 D3：import_url 以 commit=False 交出事务权——导入 + 候选标记
+        # 是一个不可分割操作，由本方法尾部统一提交
+        result = await importer(self.session).import_url(row.url or "", commit=False)
         self._mark_review(row, "approved", name=result.get("name"))
         await self.session.flush()
+        await self.session.commit()
         return result
 
     async def reject_candidate(self, result_id: int) -> dict:
@@ -482,6 +525,7 @@ class SkillService:
             existing.status = "blacklist"
             blacklisted = existing.name
         await self.session.flush()
+        await self.session.commit()
         return {"id": result_id, "review": "rejected", "blacklisted": blacklisted}
 
     @staticmethod
