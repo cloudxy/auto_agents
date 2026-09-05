@@ -12,7 +12,8 @@
 Patch 兼容约定：_spawn / _run_plan_bg / _run_test_bg / _BUSY_STATUSES /
 _fetch_html / _clean_html_sync / _parse_llm_json / _build_* / _read_task_snapshot /
 SpiderService / SpiderDefinitionRepository / settings 等被存量单测 patch 的符号
-一律经门面模块 _facade 属性查找（文件末行 import），使
+一律经 llm_common.seam() 命名空间调用期取值（T6 解环：门面初始化完成后注入
+seam，无文件末尾反向 import），使
 patch("backend.services.ai_planner_service.<name>") 在运行时生效。
 llm_chat 调用委托 llm_client.llm_chat（token 预算/重试逻辑真身所在）。
 """
@@ -26,6 +27,7 @@ from typing import TYPE_CHECKING, Optional
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.llm_common.seam import seam as _seam
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
 from platform_core.schemas.ai_plan import (
@@ -47,7 +49,7 @@ class AiPlannerService:
 
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.repo = _facade.AiPlanRepository(session)
+        self.repo = _seam().AiPlanRepository(session)
 
     # ------------------------------------------------------------------
     # CRUD（同步返回，规划/试采走后台任务）
@@ -103,18 +105,18 @@ class AiPlannerService:
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")
-        if plan.status in _facade._BUSY_STATUSES:
+        if plan.status in _seam()._BUSY_STATUSES:
             raise BusinessException(f"计划当前状态为 {plan.status}，不允许触发规划")
         # M5：check-then-act 非原子，并发触发会双跑双 LLM 调用；
         # 条件 UPDATE（status NOT IN busy）一次语句抢断，rowcount=0 即已被并发占用。
         claimed = await self.repo.claim_status(
-            plan_id, "planning", blocked_statuses=_facade._BUSY_STATUSES,
+            plan_id, "planning", blocked_statuses=_seam()._BUSY_STATUSES,
             error_message=None, test_task_id=None,
         )
         await self.session.commit()
         if not claimed:
             raise BusinessException("计划已进入规划/试采/注册流程，请勿重复触发")
-        _facade._spawn(_facade._run_plan_bg(plan_id))
+        _seam()._spawn(_seam()._run_plan_bg(plan_id))
         return await self.get_plan(plan_id)
 
     async def launch_test(self, plan_id: int) -> AiPlanResponse:
@@ -133,12 +135,12 @@ class AiPlannerService:
         # M5：原实现不拦 testing 且 spawn 前不置状态 → testing 期间重复触发即双跑；
         # spawn 前先条件 UPDATE 原子置 testing，抢断失败（并发已占）直接拒绝。
         claimed = await self.repo.claim_status(
-            plan_id, "testing", blocked_statuses=_facade._BUSY_STATUSES, error_message=None,
+            plan_id, "testing", blocked_statuses=_seam()._BUSY_STATUSES, error_message=None,
         )
         await self.session.commit()
         if not claimed:
             raise BusinessException("计划已进入规划/试采/注册流程，请勿重复触发")
-        _facade._spawn(_facade._run_test_bg(plan_id))
+        _seam()._spawn(_seam()._run_test_bg(plan_id))
         return await self.get_plan(plan_id)
 
     # ------------------------------------------------------------------
@@ -146,7 +148,7 @@ class AiPlannerService:
     # ------------------------------------------------------------------
     async def _llm_chat(self, messages: list[dict]) -> str:
         """chat completions（真身在 llm_client.llm_chat，委托保持方法签名兼容）"""
-        return await _facade.llm_chat(messages)
+        return await _seam().llm_chat(messages)
 
     # ------------------------------------------------------------------
     # 规划（后台执行：planning → 抓取/复用 HTML → LLM → FlowConfig → 落库）
@@ -168,12 +170,12 @@ class AiPlannerService:
                 html = snippet
                 logger.info(f"AI 规划使用预置 HTML 片段: plan_id={plan_id}")
             else:
-                html = await _facade._fetch_html(target_url)
-            cleaned = await asyncio.to_thread(_facade._clean_html_sync, html)
-            raw = await self._llm_chat(_facade._build_plan_messages(target_url, cleaned))
-            flow_dict = await asyncio.to_thread(_facade._parse_llm_json, raw)
+                html = await _seam()._fetch_html(target_url)
+            cleaned = await asyncio.to_thread(_seam()._clean_html_sync, html)
+            raw = await self._llm_chat(_seam()._build_plan_messages(target_url, cleaned))
+            flow_dict = await asyncio.to_thread(_seam()._parse_llm_json, raw)
             flow = await asyncio.to_thread(FlowConfig.model_validate, flow_dict)
-            generated = _facade._build_generated_params(target_url, flow)
+            generated = _seam()._build_generated_params(target_url, flow)
             new_plan_json = {"flow": flow.model_dump(), "test_history": [], "html_sample": cleaned}
             await self.repo.update(plan_id, plan_json=new_plan_json, generated_params=generated)
             # 规划成功回 draft（规划产物已落库，等待试采触发）
@@ -203,8 +205,8 @@ class AiPlannerService:
         history = [dict(h) for h in (plan_json.get("test_history") or [])]
         html_sample = str(plan_json.get("html_sample") or "")
         flow_dict = dict(plan_json.get("flow") or {})
-        max_iterations = max(0, int(_facade.settings.get("LLM.MAX_ITERATIONS", 2)))
-        spider_svc = _facade.SpiderService(self.session)
+        max_iterations = max(0, int(_seam().settings.get("LLM.MAX_ITERATIONS", 2)))
+        spider_svc = _seam().SpiderService(self.session)
 
         try:
             while True:
@@ -248,7 +250,7 @@ class AiPlannerService:
                         f"plan_id={plan_id}, reason={reason}"
                     )
                     flow = await self._repair_flow(target_url, flow_dict, reason, html_sample)
-                    params_dict = _facade._build_generated_params(target_url, flow)
+                    params_dict = _seam()._build_generated_params(target_url, flow)
                     plan_json["flow"] = flow.model_dump()
                     await self.repo.update(
                         plan_id, generated_params=params_dict, plan_json=plan_json
@@ -271,10 +273,10 @@ class AiPlannerService:
         """把失败原因 + 样本 HTML 回喂 LLM 修正 selectors（修复失败由调用方置 failed）"""
         html = html_sample
         if not html:
-            html = await _facade._fetch_html(target_url)
-        cleaned = await asyncio.to_thread(_facade._clean_html_sync, html)
-        raw = await self._llm_chat(_facade._build_repair_messages(target_url, flow_dict, reason, cleaned))
-        new_flow_dict = await asyncio.to_thread(_facade._parse_llm_json, raw)
+            html = await _seam()._fetch_html(target_url)
+        cleaned = await asyncio.to_thread(_seam()._clean_html_sync, html)
+        raw = await self._llm_chat(_seam()._build_repair_messages(target_url, flow_dict, reason, cleaned))
+        new_flow_dict = await asyncio.to_thread(_seam()._parse_llm_json, raw)
         return await asyncio.to_thread(FlowConfig.model_validate, new_flow_dict)
 
     async def _wait_task_final(self, spider_svc, task_id: int) -> _TaskSnapshot:
@@ -284,16 +286,16 @@ class AiPlannerService:
         （间隔/超时语义不变），规避长生命周期 session identity map 遮蔽；
         返回脱离 ORM session 的纯标量快照。
         """
-        deadline = time.monotonic() + _facade._WAIT_TIMEOUT_SECONDS
+        deadline = time.monotonic() + _seam()._WAIT_TIMEOUT_SECONDS
         while True:
-            snapshot = await _facade._read_task_snapshot(task_id)
+            snapshot = await _seam()._read_task_snapshot(task_id)
             if snapshot is not None and snapshot.status in ("completed", "failed"):
                 return snapshot
             if time.monotonic() >= deadline:
                 raise BusinessException(
-                    f"试采任务 {task_id} 超时未结束（>{_facade._WAIT_TIMEOUT_SECONDS:.0f}s）"
+                    f"试采任务 {task_id} 超时未结束（>{_seam()._WAIT_TIMEOUT_SECONDS:.0f}s）"
                 )
-            await asyncio.sleep(_facade._WAIT_INTERVAL_SECONDS)
+            await asyncio.sleep(_seam()._WAIT_INTERVAL_SECONDS)
 
     async def _judge_test(self, spider_svc, task: _TaskSnapshot) -> tuple[bool, str]:
         """试采判定：completed 且 result_count>0，质量分过低（<40）判失败"""
@@ -329,14 +331,14 @@ class AiPlannerService:
         if not generated_params:
             raise BusinessException("计划缺少生成的任务参数，请先执行规划")
 
-        name = _facade._derive_spider_name(target_url, plan_id)
+        name = _seam()._derive_spider_name(target_url, plan_id)
         payload = DefinitionCreateRequest(
             name=name,
-            title=f"AI 采集 - {_facade._domain_of(target_url)}",
+            title=f"AI 采集 - {_seam()._domain_of(target_url)}",
             type="flow",
             description=f"AI 生成的流程化采集（计划 #{plan_id}，目标 {target_url}）",
         )
-        spider_svc = _facade.SpiderService(self.session)
+        spider_svc = _seam().SpiderService(self.session)
         try:
             definition = await spider_svc.create_definition(payload, source="ai_generated")
         except BusinessException as e:
@@ -344,7 +346,7 @@ class AiPlannerService:
             # 同名且 source=ai_generated 的定义即本次 AI 注册产物 → 幂等续走（不重复建定义）。
             if "已存在" not in str(e):
                 raise
-            existing = await _facade.SpiderDefinitionRepository(self.session).get_by_name(name)
+            existing = await _seam().SpiderDefinitionRepository(self.session).get_by_name(name)
             if existing is None or existing.source != "ai_generated":
                 raise
             logger.warning(
@@ -374,9 +376,4 @@ class AiPlannerService:
                                       test_task_id=None)
         await self.session.commit()
 
-
-# ----------------------------------------------------------------------
-# 门面引用（循环导入兼容，必须置于文件末尾；语义见 llm_client.py 同名注释）
-# ----------------------------------------------------------------------
-import backend.services.ai_planner_service as _facade  # noqa: E402
 

@@ -1,22 +1,33 @@
-"""LLM 供应商管理 —— CRUD 薄壳（B2，工单 82 拆分后）
+"""LLM 供应商管理 —— CRUD 薄壳（B2，工单 82 拆分后；T6 解环修订）
 
 深模块剥离：
 - 加解密/SSRF 守卫 → llm_secret_vault.py（安全关注点一处收口）
 - 保存前探测/入库连通测试 → llm_probe_engine.py
+- 运行时配置形状与两段解析 → llm_common（公共下沉层；本模块 re-export 并委托）
 
-本模块保留：CRUD/激活/多模型集全量替换/模型 diff/运行时配置解析
-（激活供应商优先，兜底 yml/env；llm_client._llm_chat 消费）。
+本模块保留：CRUD/激活/多模型集全量替换/模型 diff/运行时配置解析编排
+（激活供应商优先，兜底 yml/env；llm_client.llm_chat 消费）。
+
+T6 依赖方向（与 ai_planner 域的环已消除）：
+- 本模块 → llm_common（LlmRuntimeConfig / 兜底解析 / 三段解析实现）单向；
+- 本模块 → ai_planner.llm_client（client 缓存失效）/ ai_planner._cooldown
+  （连通成功清冷却）单向——反向（llm_client → 本模块）已不存在。
 """
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.repositories.llm_provider_repository import LlmProviderRepository
+from backend.services import llm_common
+from backend.services.ai_planner import llm_client as _llm_client
+from backend.services.ai_planner._cooldown import clear as _cooldown_clear
+from backend.services.llm_common import (  # noqa: F401 — 兼容存量 import 面（re-export）
+    LlmRuntimeConfig,
+    resolve_config_from_settings,
+)
 from backend.services.llm_probe_engine import LlmProbeEngine
 from backend.services.llm_secret_vault import LlmSecretVault
-from platform_core.models.llm_provider import LlmProvider
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.exceptions import NotFoundException, ValidationException
 from platform_core.models.llm_provider_model import LlmProviderModel
@@ -34,44 +45,11 @@ from platform_core.schemas.llm_provider import (
 
 logger = get_logger("api")
 
-# 连通性测试参数（一次性轻量探测，非业务调用）
-
-# Fernet 主密钥读取顺序：环境变量（含 .env 注入）→ settings 顶层 → settings LLM 嵌套
-@dataclass(frozen=True)
-class LlmRuntimeConfig:
-    """LLM 运行时配置快照（provider 路径或 yml/env 兜底路径的统一形状）
-
-    source: "provider:<id>"（激活供应商）| "config"（yml/env 兜底）
-    provider_id: provider 路径时为激活行 id（token 计费维度 / client 缓存归属），兜底为 None
-    """
-
-    base_url: str
-    api_key: str
-    model: str
-    temperature: float
-    timeout: float
-    max_retries: int
-    enabled: bool
-    source: str
-    provider_id: Optional[int] = None
-    # B-M3：消费面经此路由到协议适配器（兜底路径恒 openai_compatible）
-    protocol: str = "openai_compatible"
-
-
-def resolve_config_from_settings() -> LlmRuntimeConfig:
-    logger.debug("解析 yml/env 兜底 LLM 配置（透传 ai_planner_service 实现）")
-    # yml/env 兜底配置（实现位于 ai_planner_service，见模块 docstring 说明）
-    from backend.services.ai_planner_service import resolve_config_from_settings as _fallback
-
-    return _fallback()
-
 
 async def _invalidate_llm_clients(provider_id: Optional[int] = None) -> None:
-    """供应商变更/热切换后失效共享 httpx client 缓存（延迟导入避免与 ai_planner 循环依赖）"""
+    """供应商变更/热切换后失效共享 httpx client 缓存（T6：模块级单向依赖，无延迟导入）"""
     try:
-        from backend.services.ai_planner_service import invalidate_client_cache
-
-        await invalidate_client_cache(provider_id)
+        await _llm_client.invalidate_client_cache(provider_id)
     except Exception as e:  # noqa: BLE001 缓存清理失败不影响主流程（连接池自然回收）
         logger.warning(f"LLM 共享 client 缓存清理失败（忽略）: {e}")
 
@@ -309,8 +287,7 @@ class LlmProviderService:
         if row is not None:
             # feat-llm-cooldown：连通成功立即清除冷却
             if ok:
-                from backend.services.ai_planner._cooldown import clear
-                await clear(provider_id, model_id)
+                await _cooldown_clear(provider_id, model_id)
             row.health_status = status
             row.last_latency_ms = latency_ms
             row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -396,8 +373,7 @@ class LlmProviderService:
         result = await LlmProbeEngine.test_connectivity(self.repo, provider_id)
         # feat-llm-cooldown（QA-7）：连通成功清除默认模型冷却
         if result.ok and result.model:
-            from backend.services.ai_planner._cooldown import clear
-            await clear(provider_id, result.model)
+            await _cooldown_clear(provider_id, result.model)
         try:
             row = (await self.session.execute(
                 select(LlmProviderModel).where(
@@ -424,51 +400,11 @@ class LlmProviderService:
     async def resolve_runtime_config(self) -> LlmRuntimeConfig:
         """三段解析（S1-4）：当前租户激活行 → 平台公共行（tenant_id NULL，兜底）→ yml/env
 
-        无租户上下文（legacy/后台）保持原语义：任一激活行优先。
+        实现下沉 llm_common.resolve_runtime_config（T6）；委托时注入自身
+        repo/decrypt——存量单测对 svc.repo / svc.decrypt_api_key 的实例级
+        patch 语义不变。无租户上下文（legacy/后台）保持原语义：任一激活行优先。
         """
-        from platform_core.tenant_context import current_tenant_id
-
-        tenant_id = current_tenant_id()
-        if tenant_id is not None:
-            active = (await self.session.execute(
-                select(LlmProvider).where(
-                    LlmProvider.is_active == True,  # noqa: E712
-                    LlmProvider.enabled == True,  # noqa: E712
-                    LlmProvider.tenant_id == tenant_id,
-                    LlmProvider.deleted_at.is_(None),  # 软删行不参与运行时解析
-                )
-            )).scalar_one_or_none()
-            if active is None:
-                # 平台公共供应商兜底（免费档语义：配额约束在 S3 检查点执行）
-                active = (await self.session.execute(
-                    select(LlmProvider).where(
-                        LlmProvider.enabled == True,  # noqa: E712
-                        LlmProvider.tenant_id.is_(None),
-                        LlmProvider.deleted_at.is_(None),
-                    ).order_by(LlmProvider.id.asc())
-                )).scalars().first()
-        else:
-            active = await self.repo.get_active()
-        if active is not None and bool(active.enabled):
-            api_key = self.decrypt_api_key(getattr(active, "api_key_encrypted", None))
-            base_url = str(active.base_url or "").rstrip("/")
-            model = str(active.model or "")
-            if api_key and base_url and model:
-                return LlmRuntimeConfig(
-                    base_url=base_url,
-                    api_key=api_key,
-                    model=model,
-                    temperature=float(active.temperature),
-                    timeout=float(active.timeout),
-                    max_retries=max(1, int(active.max_retries)),
-                    enabled=True,
-                    source=f"provider:{active.id}",
-                    provider_id=int(active.id),
-                    protocol=str(active.provider_type or "openai_compatible"),
-                )
-            logger.warning(
-                "激活的 LLM 供应商配置不完整（密钥缺失/解密失败/base_url/model 为空），"
-                f"回退 yml/env 兜底: provider_id={getattr(active, 'id', None)}"
-            )
-        return resolve_config_from_settings()
+        return await llm_common.resolve_runtime_config(
+            self.session, repo=self.repo, decrypt=self.decrypt_api_key
+        )
 

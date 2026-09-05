@@ -6,8 +6,9 @@
   （仅允许 80/443 公网 http(s) 目标，逐跳校验重定向）
 - 单页抓取：_fetch_html（UA 伪装 + 10s 超时 + 禁自动重定向逐跳 SSRF 校验）
 
-Patch 兼容约定：_resolve_host_ips / _assert_public_url 等可 patch 符号经门面
-模块 _facade 属性查找（test_ai_planner.py patch
+Patch 兼容约定：_resolve_host_ips / _assert_public_url 等可 patch 符号经
+llm_common.seam() 命名空间调用期取值（T6 解环：门面初始化完成后注入 seam，
+无文件末尾反向 import；test_ai_planner.py patch
 backend.services.ai_planner_service._resolve_host_ips 需在运行时生效）；
 httpx 为全局共享模块对象（patch httpx.AsyncClient 即全局生效），保留本地引用。
 """
@@ -19,6 +20,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from backend.services.llm_common.seam import seam as _seam
 from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
 
@@ -86,7 +88,7 @@ async def _assert_public_url(url: str) -> None:
 
     host → 解析 IP → 逐个拒绝私网/环回/链路本地/保留段；
     字面量 IP（含十进制整数编码）直接判定不发 DNS；域名目标解析后全部校验。
-    DNS 解析经门面查找（_facade._resolve_host_ips）：存量单测 patch 旧路径
+    DNS 解析经门面查找（_seam()._resolve_host_ips）：存量单测 patch 旧路径
     backend.services.ai_planner_service._resolve_host_ips 在运行时生效。
     """
     parsed = urlparse(url)
@@ -109,7 +111,7 @@ async def _assert_public_url(url: str) -> None:
             raise BusinessException(f"目标地址指向私网/保留段，已拒绝（SSRF 防护）: {url}")
         return
     try:
-        raw_ips = await asyncio.to_thread(_facade._resolve_host_ips, host)
+        raw_ips = await asyncio.to_thread(_seam()._resolve_host_ips, host)
     except (socket.gaierror, UnicodeError) as e:
         raise BusinessException(f"目标主机 DNS 解析失败: {url} ({e})")
     for raw in raw_ips:
@@ -134,7 +136,7 @@ async def _fetch_html(url: str) -> str:
     client: httpx.AsyncClient | None = None
     try:
         for _ in range(_MAX_REDIRECT_HOPS):
-            await _facade._assert_public_url(current)
+            await _seam()._assert_public_url(current)
             if client is None:
                 # trust_env=False：抓取请求不走系统代理（本机代理劫持陷阱，同上约定）
                 client_ctx = httpx.AsyncClient(
@@ -153,8 +155,3 @@ async def _fetch_html(url: str) -> str:
         if client is not None:
             await client_ctx.__aexit__(None, None, None)
 
-
-# ----------------------------------------------------------------------
-# 门面引用（循环导入兼容，必须置于文件末尾；语义见 llm_client.py 同名注释）
-# ----------------------------------------------------------------------
-import backend.services.ai_planner_service as _facade  # noqa: E402
