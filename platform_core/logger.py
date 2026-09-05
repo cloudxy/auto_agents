@@ -37,6 +37,9 @@ def _make_rotation_func(max_size_mb: int):
 def init_log():
     """初始化所有日志处理器（数据驱动）"""
     logger.remove()
+    # LOG_FORMAT 引用 {extra[request_id]}：先给全局默认（请求期由中间件 contextualize 覆盖），
+    # 否则应用装配前（db init 等）的首批日志每条触发 KeyError 转储且落盘失败
+    logger.configure(extra={"request_id": "-"})
 
     # 日志根目录：项目根 / logs
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))

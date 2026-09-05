@@ -29,8 +29,15 @@ _processes: list[subprocess.Popen] = []
 
 def _stream(process: subprocess.Popen, prefix: str):
     for line in iter(process.stdout.readline, ""):
-        if line:
+        if not line:
+            continue
+        try:
             print(f"[{prefix}] {line.rstrip()}")
+        except (BrokenPipeError, ValueError):
+            # 宿主输出管道已关（如 `... | head -80`、终端已退出）：转发失败不能致死线程。
+            # 本线程的核心职责是排水——一旦停止消费，子进程 stdout 管道写满后
+            # 其内部同步写（uvicorn access log 等）会阻塞事件循环，整进程僵死。
+            pass
 
 
 def _spawn(script: str, extra_args: list[str], prefix: str):
