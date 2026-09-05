@@ -127,3 +127,75 @@ async def test_ai_plan_core_update_injected(db_session):
             )
             await s.commit()
             assert result.rowcount == 1
+
+
+# ---------------- T8：豁免清单外移（注册机制） ----------------
+
+def test_exempt_registry_wired_from_single_source():
+    """T8：唯一事实源（backend/app/tenant_isolation.py）经组装点 create_app 注册生效
+
+    conftest 的 autouse app fixture 已跑 create_app（豁免登记随组装点完成），
+    此处断言注册路径真实落地——组装断线时豁免/共享读语义静默失效，靠此测试拦截。
+    另覆盖注册机制本身：可增量登记 + 幂等（platform_core 只提供机制，零业务表名）。
+    """
+    from backend.app.tenant_isolation import (
+        PLATFORM_SHARED_READ_TABLES,
+        TENANT_EXEMPT_TABLES,
+    )
+    from platform_core import tenant_context
+    from platform_core.tenant_context import (
+        platform_shared_read_tables,
+        register_tenant_exempt_tables,
+        tenant_exempt_tables,
+    )
+
+    assert set(TENANT_EXEMPT_TABLES) <= tenant_exempt_tables()
+    assert set(PLATFORM_SHARED_READ_TABLES) <= platform_shared_read_tables()
+
+    # 机制自测：增量登记 + 幂等（探针表名不存在于任何 metadata，登记后即清理）
+    register_tenant_exempt_tables("__t8_probe__")
+    register_tenant_exempt_tables("__t8_probe__")  # 重复登记幂等
+    try:
+        assert "__t8_probe__" in tenant_exempt_tables()
+        assert set(tenant_exempt_tables()) >= set(TENANT_EXEMPT_TABLES) | {"__t8_probe__"}
+    finally:
+        tenant_context._TENANT_EXEMPT.discard("__t8_probe__")  # noqa: SLF001 探针清理
+
+
+@pytest.mark.asyncio
+async def test_registered_exempt_update_unfiltered_vs_unregistered_filtered(db_session):
+    """T8 行为对拍：注册豁免表（skills，带 tenant_id 列）Core UPDATE 不注入过滤；
+    未注册的带 tenant_id 表（spider_tasks）同上下文内仍被注入（rowcount 收窄本租户）"""
+    from platform_core.tenant_context import tenant_exempt_tables
+
+    assert "skills" in tenant_exempt_tables()  # 注册路径生效（组装点登记）
+
+    async with db_session() as s:
+        s.add_all([
+            Skill(name="sk-1", file_path="skills/1"),
+            Skill(name="sk-2", file_path="skills/2"),  # 平台级：tenant_id 恒 NULL
+            SpiderTask(spider_name="a-task", tenant_id=1, params="{}"),
+            SpiderTask(spider_name="b-task", tenant_id=2, params="{}"),
+        ])
+        await s.commit()
+
+    with tenant_scope(1):
+        async with db_session() as s:
+            r_exempt = await s.execute(
+                update(Skill).values(sync_state="hash_changed")
+                .execution_options(synchronize_session=False)
+            )
+            r_filtered = await s.execute(
+                update(SpiderTask).values(status="running")
+                .execution_options(synchronize_session=False)
+            )
+            await s.commit()
+            assert r_exempt.rowcount == 2  # 豁免：全表生效（NULL 行不被注入条件失配）
+            assert r_filtered.rowcount == 1  # 未豁免：仅本租户行
+
+    async with db_session() as s:
+        states = set((await s.execute(select(Skill.sync_state))).scalars().all())
+        statuses = {n: st for n, st in (await s.execute(
+            select(SpiderTask.spider_name, SpiderTask.status))).all()}
+    assert states == {"hash_changed"}
+    assert statuses == {"a-task": "running", "b-task": "pending"}

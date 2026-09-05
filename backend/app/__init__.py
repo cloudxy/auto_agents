@@ -71,6 +71,10 @@ def _validate_runtime_secrets() -> None:
 
 def create_app():
     """创建 FastAPI 应用实例（不含初始化逻辑）"""
+    # T8：业务豁免表注册（唯一事实源 backend/app/tenant_isolation.py；
+    # 移除即豁免失效，R13 同步校验会拦截）
+    from backend.app.tenant_isolation import setup_tenant_isolation
+    setup_tenant_isolation()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
