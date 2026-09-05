@@ -51,6 +51,9 @@ Thumbs.db
 .pytest_cache/
 htmlcov/
 
+# LiteLLM 生成的 proxy 配置（含明文 API Key，L1 影子接入：backend/scripts/export_litellm_config.py）
+deploy/litellm/config.gen.yaml
+
 .claude/*
 !.claude/rules/
 !.claude/skills

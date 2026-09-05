@@ -98,5 +98,37 @@ services:
       redis:
         condition: service_healthy
 
+  # LiteLLM Proxy sidecar（L1 影子接入：默认 up 不启动，显式 --profile litellm 开启）
+  # - 影子模式只读对比，不改任何现有请求路径；回滚 = 移除本服务（零生产流量变更）
+  # - 无 DB 静态模式：不配 DATABASE_URL，仅挂载导出器生成的 config（含明文 key，
+  #   .gitignore 已登记 deploy/litellm/config.gen.yaml；生成命令见 deploy/litellm/README.md）
+  # - 供应链红线：镜像 pin 精确版本 tag（v1.99.1 = 官方 main-stable 同 digest，
+  #   查证记录见 deploy/litellm/README.md）；恶意版本黑名单 {1.82.7, 1.82.8} 由
+  #   backend/tests/test_litellm_version_guard.py 守卫——改本行 tag 必须先过守卫
+  # - 端口与 config/default/litellm.yml LITELLM.PROXY.PORT 对齐（改端口两处同步）；
+  #   影子阶段仅绑定 127.0.0.1（不对外暴露，L2 接治理层时再引入 master key）
+  litellm:
+    image: litellm/litellm-database:v1.99.1
+    profiles: ["litellm"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
+    logging: *default-logging
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ./deploy/litellm/config.gen.yaml:/app/config.yaml:ro
+    healthcheck:
+      # /health/liveliness = 进程存活浅探测（LiteLLM 内置端点，无需鉴权）
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
 volumes:
   mysql_data:
