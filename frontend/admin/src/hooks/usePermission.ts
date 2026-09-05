@@ -60,6 +60,16 @@ export const usePermission = () => {
 
   const hasPermission = (code: string) => cachedPermissions.includes(code)
 
+  // tenantOnly 过滤（递归到叶子层）：标记实际全在叶子（成员管理/用量看板），
+  // 只滤顶层 = 纯平台超管（tenant_id=NULL）在兜底态仍见租户菜单，点击 403（F-T10-1）
+  const filterTenantOnly = (menus: MenuItem[], tenantBound: boolean): MenuItem[] =>
+    menus
+      .filter(menu => !menu.tenantOnly || tenantBound)
+      .map(menu => (menu.children
+        ? { ...menu, children: filterTenantOnly(menu.children, tenantBound) }
+        : menu))
+      .filter(menu => !menu.children || menu.children.length > 0)
+
   const filterMenu = (menus: MenuItem[]): MenuItem[] => {
     void revision
     const tenantBound = user?.tenant_id != null
@@ -67,7 +77,7 @@ export const usePermission = () => {
     // 理由：菜单可见性是 UI 优化，真正的安全防线在 API 层（JWT → RBAC → 租户隔离）
     // 此前逻辑：缓存空 → filterMenu 全滤光 → 侧边栏消失（后端重启/网络瞬断即复发）
     if (cachedPermissions.length === 0) {
-      return menus.filter(menu => !menu.tenantOnly || tenantBound)
+      return filterTenantOnly(menus, tenantBound)
     }
     return menus
       .filter(menu => !menu.tenantOnly || tenantBound)

@@ -94,13 +94,12 @@ test('补拉失败（后端不可达）：菜单全量兜底而非全滤光（be
 })
 
 /**
- * bea13b5 边界缺陷（T10 发现，已报未修）：兜底分支只过滤顶层菜单的
- * tenantOnly，而 tenantOnly 标记实际全在叶子层（成员管理/用量看板）——
- * 后端不可达时纯平台超管（tenant_id=NULL）仍见 tenantOnly 菜单，点击 403。
- * 与 commit 自述「仅保留 tenantOnly 过滤」不符。test.failing：缺陷修复后
- * 本用例会变绿并使套件报错，届时转正为普通 test。
+ * bea13b5 边界缺陷（T10 报，T12/F-T10-1 修复转正）：兜底分支此前只过滤
+ * 顶层菜单的 tenantOnly，而 tenantOnly 标记实际全在叶子层（成员管理/用量
+ * 看板）——后端不可达时纯平台超管（tenant_id=NULL）仍见 tenantOnly 菜单，
+ * 点击 403。修复：filterTenantOnly 递归过滤（与权限分支同口径）。
  */
-test.failing('兜底分支应同样过滤叶子层 tenantOnly（bea13b5 边界缺陷，已报未修）', async () => {
+test('兜底分支同样过滤叶子层 tenantOnly（F-T10-1 修复转正）', async () => {
   clearCachedPermissions()
   useAuthStore.setState({
     token: 't', isAuthenticated: true,

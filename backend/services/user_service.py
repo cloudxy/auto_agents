@@ -2,8 +2,10 @@
 
 职责：
 - 用户列表查询（管理后台用户管理页）
-- 所有数据库操作通过 Repository，不直接写 SQL
+- 所有数据库操作通过 Repository，不直接操作 SQL
 """
+from dataclasses import dataclass
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.repositories.user_repository import UserRepository
@@ -13,14 +15,46 @@ from platform_core.schemas.auth import UserListResponse, UserResponse
 logger = get_logger("api")
 
 
-# 鉴权用主键直查（含已软删行——删除时 is_active 已同步置 False，快照口径由调用方判定）。
-# T1 收口（R7）：backend/app/api/deps.py 此前模块级 import User ORM 模型，改经本函数取实体；
-# 保持 session.get 形态（不经软删过滤，行为与收口前一致）。
-async def get_user_for_auth(session: AsyncSession, user_id: int):
+@dataclass(frozen=True)
+class AuthIdentity:
+    """鉴权身份 DB 快照（F-01 单一事实源载荷）
+
+    中间件 platform_scope 复核（middleware/tenant_context.py）与
+    deps.get_current_user 权限快照共用同一加载函数 load_auth_identity——
+    「撤销平台超管立即生效」在隔离作用域与权限守卫两层看到同一行数据（双源一致）。
+    纯数据快照：ORM 实体不出 service 层（R7 口径）。
+    """
+
+    id: int
+    username: str
+    role: str | None
+    is_admin: bool
+    tenant_id: int | None
+    tenant_role: str | None
+    is_platform_admin: bool
+    is_active: bool
+
+
+# 鉴权身份加载（单一事实源，F-01）。含已软删行——删除时 is_active 已同步置 False，
+# 停用判定由调用方做（与 T1 收口 get_user_for_auth 的 session.get 口径一致：
+# 主键直查、不经软删过滤；中间件复核发生在任何 scope 进入之前，无注入过滤）。
+async def load_auth_identity(session: AsyncSession, user_id: int) -> AuthIdentity | None:
     logger.debug(f"鉴权加载用户 | user_id={user_id}")
     from platform_core.models.user import User
 
-    return await session.get(User, user_id)
+    user = await session.get(User, user_id)
+    if user is None:
+        return None
+    return AuthIdentity(
+        id=user.id,
+        username=user.username,
+        role=user.role,
+        is_admin=bool(user.is_admin),
+        tenant_id=user.tenant_id,
+        tenant_role=user.tenant_role,
+        is_platform_admin=bool(user.is_platform_admin),
+        is_active=bool(user.is_active),
+    )
 
 
 class UserService:

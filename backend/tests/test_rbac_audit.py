@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.security import HTTPAuthorizationCredentials
+from starlette.requests import Request
 
 from backend.app.api.deps import (
     CurrentUser,
@@ -22,6 +23,7 @@ from backend.app.api.deps import (
 )
 from backend.app.api.v1.auth import _ROLE_PERMISSIONS
 from backend.services.audit_service import AuditService
+from backend.services.user_service import AuthIdentity
 from backend.utils.auth import create_access_token
 from platform_core.exceptions import AuthenticationException, AuthorizationException
 from platform_core.models.user import User
@@ -37,6 +39,17 @@ def _user(**overrides) -> User:
     for k, v in overrides.items():
         setattr(u, k, v)
     return u
+
+
+def _request(state: dict | None = None) -> Request:
+    """get_current_user 直调桩（F-01 签名新增 request：消费 request.state.auth_identity）
+
+    scope["state"] 须为 dict（starlette Request.state 包装为 State，属性访问语义）。
+    """
+    scope: dict = {"type": "http"}
+    if state is not None:
+        scope["state"] = state
+    return Request(scope=scope)
 
 
 def _credentials(token: str) -> HTTPAuthorizationCredentials:
@@ -95,13 +108,13 @@ async def test_require_role_custom_roles():
 @pytest.mark.asyncio
 async def test_current_user_missing_credentials():
     with pytest.raises(AuthenticationException):
-        await get_current_user(credentials=None, session=AsyncMock())
+        await get_current_user(request=_request(), credentials=None, session=AsyncMock())
 
 
 @pytest.mark.asyncio
 async def test_current_user_invalid_token():
     with pytest.raises(AuthenticationException):
-        await get_current_user(credentials=_credentials("not-a-jwt"), session=AsyncMock())
+        await get_current_user(request=_request(), credentials=_credentials("not-a-jwt"), session=AsyncMock())
 
 
 @pytest.mark.asyncio
@@ -110,7 +123,7 @@ async def test_current_user_not_found():
     session = AsyncMock()
     session.get.return_value = None
     with pytest.raises(AuthenticationException):
-        await get_current_user(credentials=_credentials(token), session=session)
+        await get_current_user(request=_request(), credentials=_credentials(token), session=session)
 
 
 @pytest.mark.asyncio
@@ -119,7 +132,7 @@ async def test_current_user_inactive():
     session = AsyncMock()
     session.get.return_value = _user(is_active=False)
     with pytest.raises(AuthenticationException):
-        await get_current_user(credentials=_credentials(token), session=session)
+        await get_current_user(request=_request(), credentials=_credentials(token), session=session)
 
 
 @pytest.mark.asyncio
@@ -127,7 +140,7 @@ async def test_current_user_ok():
     token = create_access_token({"sub": "tester", "user_id": 1})
     session = AsyncMock()
     session.get.return_value = _user()
-    result = await get_current_user(credentials=_credentials(token), session=session)
+    result = await get_current_user(request=_request(), credentials=_credentials(token), session=session)
     # 返回纯快照（避免 commit 后过期属性惰性加载抛 MissingGreenlet）
     assert isinstance(result, CurrentUser)
     assert result.id == 1
@@ -140,8 +153,26 @@ async def test_current_user_snapshot_is_admin_maps_admin():
     token = create_access_token({"sub": "tester", "user_id": 1})
     session = AsyncMock()
     session.get.return_value = _user(is_admin=True, role="viewer")
-    result = await get_current_user(credentials=_credentials(token), session=session)
+    result = await get_current_user(request=_request(), credentials=_credentials(token), session=session)
     assert result.role == "admin"
+
+
+@pytest.mark.asyncio
+async def test_current_user_consumes_middleware_identity_without_requery():
+    """F-01 免双查钉：中间件平台态复核已挂载 request.state.auth_identity 时，
+    deps 直接消费快照（不二次查库）——平台态请求每请求一次身份查询。"""
+    token = create_access_token({"sub": "tester", "user_id": 1})
+    session = AsyncMock()  # 若发生二次查询，session.get 会被调用（此处断言零调用）
+    identity = AuthIdentity(
+        id=1, username="tester", role="viewer", is_admin=True,
+        tenant_id=None, tenant_role=None, is_platform_admin=True, is_active=True)
+    state = {"auth_identity": identity}
+    result = await get_current_user(
+        request=_request(state=state), credentials=_credentials(token), session=session)
+    assert isinstance(result, CurrentUser)
+    assert result.is_platform_admin is True
+    assert result.role == "admin"  # effective_role 基于快照 is_admin
+    session.get.assert_not_called()
 
 
 # ---------------- AuditService ----------------
