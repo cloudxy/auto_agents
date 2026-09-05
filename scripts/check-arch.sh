@@ -137,16 +137,54 @@ report "R12" "spider_service 门面白名单外 import（应直接依赖子 Serv
 
 # --- 租户过滤收口（SaaS S1）---
 # R13: 业务查询必须经租户过滤收口（grep 补充手段；before_flush/do_orm_execute 主防线
-# 见 platform_core/tenant_context.py）。机械约束两条：
+# 见 platform_core/tenant_context.py）。机械约束三条：
 # 1) platform_core/tenant_context.py 的事件安装调用（install_tenant_isolation）不得被移除——
 #    backend/app/__init__.py 必须出现 platform_core 导入链（隔离随包导入自动安装）；
 # 2) TenantMixin 模型的裸 Core 查询必须出现在 allowlist 声明的收口文件内
-#    （tenant_context.py 自身 + 迁移），新增裸语句需在此登记并说明。
+#    （tenant_context.py 自身 + 迁移），新增裸语句需在此登记并说明；
+# 3) 豁免清单单一事实源同步（T8：租户豁免表外移）——事实源为
+#    backend/app/tenant_isolation.py，本检查从事实源读取清单做双向校验（无第二份拷贝，
+#    无双写漂移）：a. 组装点 create_app 内 setup_tenant_isolation 必须真实生效
+#    （经 create_app() 后注册表应覆盖声明清单——组装断线即拦截）；
+#    b. platform_core/tenant_context.py 不得回写清单内业务表名字面量（防硬编码回潮）。
 R13_OUTPUT=""
 if ! grep -q "from platform_core import tenant_context\|import platform_core.tenant_context\|from platform_core import.*tenant_context" backend/app/__init__.py platform_core/__init__.py 2>/dev/null; then
     R13_OUTPUT="platform_core/__init__.py 缺 tenant_context 安装导入（隔离钩子可能未安装）"
 fi
-report "R13" "租户过滤收口（隔离安装点缺失/裸语句未登记）" "$R13_OUTPUT"
+# bash 3.2 兼容：命令替换 + heredoc（不用进程替换）；python 失败本身即违规（fail-loud）
+R13_SYNC="$(uv run python - <<'PYEOF' 2>/dev/null || echo "R13 豁免同步校验执行失败（uv/python 环境）"
+from backend.app import create_app
+
+create_app()  # 显式经组装点（不依赖模块级 app 实例的存在）
+
+import backend.app.tenant_isolation as ti
+from platform_core import tenant_context as tc
+
+problems = []
+miss = set(ti.TENANT_EXEMPT_TABLES) - set(tc.tenant_exempt_tables())
+if miss:
+    problems.append(
+        f"豁免表登记未生效（组装点 setup_tenant_isolation 断线？）: {sorted(miss)}")
+miss = set(ti.PLATFORM_SHARED_READ_TABLES) - set(tc.platform_shared_read_tables())
+if miss:
+    problems.append(f"平台共享读表登记未生效: {sorted(miss)}")
+src = open("platform_core/tenant_context.py", encoding="utf-8").read()
+leak = [t for t in (*ti.TENANT_EXEMPT_TABLES, *ti.PLATFORM_SHARED_READ_TABLES)
+        if '"%s"' % t in src]
+if leak:
+    problems.append(
+        f"platform_core/tenant_context.py 回写业务表名（应走注册机制）: {leak}")
+for p in problems:
+    print(p)
+PYEOF
+)"
+if [ -n "$R13_OUTPUT" ] && [ -n "$R13_SYNC" ]; then
+    R13_OUTPUT="$R13_OUTPUT
+$R13_SYNC"
+elif [ -n "$R13_SYNC" ]; then
+    R13_OUTPUT="$R13_SYNC"
+fi
+report "R13" "租户过滤收口（安装点/裸语句/豁免清单同步）" "$R13_OUTPUT"
 
 # --- 核心代码边界（模块依赖方向） ---
 echo ""

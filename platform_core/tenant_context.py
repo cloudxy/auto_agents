@@ -1,4 +1,4 @@
-"""租户上下文与行级隔离（SaaS S1-2，审计 10.2-A 双侧收口）
+"""租户上下文与行级隔离（SaaS S1-2，审计 10.2-A 双侧收口；T8 豁免清单外移）
 
 作用域（ContextVar，请求中间件/后台组件显式声明）：
 - tenant_scope(tenant_id)：租户态——写侧断言（flush 中 TenantMixin 新行必须归属本租户）
@@ -7,10 +7,16 @@
 - 无上下文：legacy/测试路径——不过滤不断言（真实请求必经中间件，不落此分支；
   DB 层 NOT NULL（迁移 017）与 R13 越权套件兜底）。
 
-豁免白名单（平台级表）：tenants/system_configs/channel_events/channel_probe_results/
-operation_logs/skills/skill_reviews/skill_jobs。
-llm_providers 特殊：读注入保留平台公共行（tenant_id IS NULL，S4 兜底可见性），
-写断言仍要求归属本租户（平台公共行仅平台态可写）。
+业务表语义经注册机制由应用层注入（T8，B1 语义收口：基建不持有任何业务表名）：
+- register_tenant_exempt_tables(*names)：平台级豁免表——tenant_scope 下
+  Core UPDATE/DELETE 不注入 tenant_id 条件（含 tenant_id 列的平台级表必须登记，
+  否则恒 NULL 行与注入条件全部失配；无 tenant_id 列的表登记属防御性声明，
+  防未来加列后语义静默漂移）；
+- register_platform_shared_read_tables(*names)：读注入保留平台公共行
+  （tenant_id IS NULL 可见），写侧仍注入本租户条件（平台公共行仅平台态可写）。
+
+豁免/共享读清单的唯一事实源在应用组装层（backend/app/tenant_isolation.py），
+启动时显式注册；scripts/check-arch.sh R13 从该事实源做同步校验（防双写漂移）。
 """
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -27,15 +33,39 @@ logger = get_logger("tenant")
 _TENANT_ID: ContextVar[Optional[int]] = ContextVar("tenant_id", default=None)
 _MODE: ContextVar[str] = ContextVar("tenant_mode", default="none")  # none | tenant | platform
 
-# 平台级豁免表（S1 附录 §7.1-1；skills 域 D3 平台级统一库）
-TENANT_EXEMPT_TABLES = frozenset({
-    "tenants", "system_configs", "channel_events", "channel_probe_results",
-    "operation_logs", "skills", "skill_reviews", "skill_jobs",
-    "llm_provider_models",  # 随父行走（经 llm_providers 归属），不独立过滤
-})
+# ---------------- 业务表语义注册表（T8：应用组装点写入，基建零业务表名） ----------------
+
+# 平台级豁免表（tenant_scope 下 Core UPDATE/DELETE 跳过注入）
+_TENANT_EXEMPT: "set[str]" = set()
 
 # 读注入保留平台公共行（tenant_id IS NULL 可见）的表
-PLATFORM_SHARED_READ = frozenset({"llm_providers"})
+_PLATFORM_SHARED_READ: "set[str]" = set()
+
+
+def register_tenant_exempt_tables(*names: str) -> None:
+    """登记平台级豁免表（幂等；唯一事实源：backend/app/tenant_isolation.py）"""
+    new = sorted({n for n in names if n and n not in _TENANT_EXEMPT})
+    if new:
+        _TENANT_EXEMPT.update(new)
+        logger.info(f"平台级豁免表登记 | +{new}")
+
+
+def tenant_exempt_tables() -> frozenset:
+    """当前已登记的豁免表（快照；测试/R13 同步校验用）"""
+    return frozenset(_TENANT_EXEMPT)
+
+
+def register_platform_shared_read_tables(*names: str) -> None:
+    """登记平台共享读表（幂等；tenant_scope 读注入保留 tenant_id IS NULL 行）"""
+    new = sorted({n for n in names if n and n not in _PLATFORM_SHARED_READ})
+    if new:
+        _PLATFORM_SHARED_READ.update(new)
+        logger.info(f"平台共享读表登记 | +{new}")
+
+
+def platform_shared_read_tables() -> frozenset:
+    """当前已登记的平台共享读表（快照；测试/R13 同步校验用）"""
+    return frozenset(_PLATFORM_SHARED_READ)
 
 
 @contextmanager
@@ -112,7 +142,7 @@ def install_tenant_isolation() -> None:
 
         if isinstance(stmt, Update) or isinstance(stmt, Delete):
             table = stmt.table
-            if table.name in TENANT_EXEMPT_TABLES:
+            if table.name in _TENANT_EXEMPT:
                 return
             if "tenant_id" not in table.c:
                 return
@@ -123,12 +153,14 @@ def install_tenant_isolation() -> None:
         # 豁免表恒真跳过；平台共享表保留 NULL 行可见性）
         from sqlalchemy.orm import with_loader_criteria
 
-        # lambda-SQL 约束：闭包非 SQL 对象参与运算会被绑成参数（`in set` → contains 报错），
-        # 故豁免分支不存在——豁免表本就不继承 TenantMixin（with_loader_criteria 不匹配）；
-        # 平台共享表用纯字符串比较分支（cls 非闭包，运行时求值）。
+        # lambda-SQL 约束：闭包非 SQL 对象参与运算会被绑成参数（集合成员判断
+        # → contains 报错），故豁免分支不存在——豁免表本就不继承 TenantMixin
+        # （with_loader_criteria 不匹配）；平台共享表用纯字符串比较分支
+        # （cls 非闭包，运行时求值）。
         def _criteria(cls):
             col = cls.tenant_id
-            if getattr(cls, "__tablename__", "") == "llm_providers":
+            if any(getattr(cls, "__tablename__", "") == name
+                   for name in _PLATFORM_SHARED_READ):
                 return or_(col == tenant_id, col.is_(None))
             return col == tenant_id
 
