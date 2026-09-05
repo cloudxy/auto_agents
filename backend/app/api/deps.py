@@ -10,11 +10,11 @@ is_admin=True 的存量用户等价 admin 角色。
 from dataclasses import dataclass
 from typing import Callable
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.user_service import get_user_for_auth
+from backend.services.user_service import load_auth_identity
 from backend.utils.auth import decode_access_token
 from platform_core.db import get_async_db
 from platform_core.exceptions import AuthenticationException, AuthorizationException
@@ -53,8 +53,8 @@ class CurrentUser:
 def effective_role(user) -> str:
     """生效角色：历史 is_admin 标记等价 admin；未知/空角色按最小权限 viewer（B1）
 
-    T1 收口（R7）：入参为鉴权用户实体（经 services.user_service.get_user_for_auth
-    取得，duck-typed 只读 is_admin/role 两属性），API 层不再 import ORM 类型。
+    T1 收口（R7）：入参为鉴权身份快照（经 services.user_service.load_auth_identity
+    取得的 AuthIdentity，duck-typed 只读 is_admin/role 两属性），API 层不 import ORM。
     """
     if user.is_admin:
         return "admin"
@@ -62,10 +62,16 @@ def effective_role(user) -> str:
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     session: AsyncSession = Depends(get_async_db),
 ) -> CurrentUser:
-    """解析 Bearer Token 并加载当前用户，返回属性快照（缺失/无效/停用均抛 401）"""
+    """解析 Bearer Token 并加载当前用户，返回属性快照（缺失/无效/停用均抛 401）
+
+    F-01 单一事实源：身份加载统一走 services.user_service.load_auth_identity；
+    中间件平台态复核已挂载的快照（request.state.auth_identity，同请求生命周期）
+    直接消费——平台态请求每请求一次身份查询，避免中间件/deps 双份。
+    """
     logger.debug("校验请求身份")
     if credentials is None or not credentials.credentials:
         raise AuthenticationException(message="未登录或缺少 Token")
@@ -75,19 +81,20 @@ async def get_current_user(
     user_id = payload.get("user_id")
     if not user_id:
         raise AuthenticationException(message="Token 缺少用户信息")
-    tenant_id = payload.get("tenant_id")  # 身份字段（非权限）
-    user = await get_user_for_auth(session, user_id)
-    if not user or not user.is_active:
+    identity = getattr(request.state, "auth_identity", None)
+    if identity is None:
+        identity = await load_auth_identity(session, user_id)
+    if identity is None or not identity.is_active:
         raise AuthenticationException(message="用户不存在或已停用")
-    # claims 只承身份：tenant 字段取自 claims；权限字段一律从 DB 行快照重算
-    # （禁用/降级立即生效，防 token 生命周期内权限漂移——S2 短窗失效验收的前提）
+    # claims 只承身份：权限/租户字段一律从 DB 行快照取（load_auth_identity），
+    # 禁用/降级立即生效，防 token 生命周期内权限漂移（S2 短窗失效验收的前提）
     return CurrentUser(
-        id=user.id,
-        username=user.username,
-        role=effective_role(user),
-        tenant_id=tenant_id if user.tenant_id == tenant_id else user.tenant_id,
-        tenant_role=user.tenant_role,
-        is_platform_admin=bool(user.is_platform_admin),
+        id=identity.id,
+        username=identity.username,
+        role=effective_role(identity),
+        tenant_id=identity.tenant_id,
+        tenant_role=identity.tenant_role,
+        is_platform_admin=identity.is_platform_admin,
     )
 
 

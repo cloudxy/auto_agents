@@ -38,6 +38,7 @@ os.environ.setdefault("APP_ENV", "local")
 # ── get_async_db 全局兜底 mock（CI 无 .env，防意外连真库）──
 from unittest.mock import AsyncMock, MagicMock as _MM
 
+from fastapi import Request as _FastAPIRequest  # noqa: N812 模块级导入：本文件启用延迟注解（from __future__ import annotations），嵌套函数内的局部 import 无法被 FastAPI 的注解解析看到
 from platform_core.db import get_async_db as _gadb
 
 
@@ -68,26 +69,30 @@ async def _mock_async_db():
 # ---------------------------------------------------------------------------
 
 
-async def _current_user_override(credentials, session, default_role: str | None):
+async def _current_user_override(request, credentials, session, default_role: str | None):
     """无凭据按 default_role 分派（None=401）；带 Bearer 走真链路"""
     from backend.app.api.deps import CurrentUser, effective_role
+    from backend.services.user_service import load_auth_identity
     from backend.utils.auth import decode_access_token as _decode
-    from platform_core.models.user import User as _User
     from platform_core.exceptions import AuthenticationException
 
     # 带真实 Bearer 时走真链路（S1/S2 越权与成员用例依赖 JWT→中间件→快照全链）。
-    # 有 user_id 但查无此人/停用 → 401（与生产 get_current_user 同口径；
-    # T5 后 session.get 受 tenant_scope 注入过滤，伪造租户 token 落此分支）
+    # F-01 同口径：中间件平台态复核已挂载的快照（request.state.auth_identity）
+    # 优先消费；否则经 load_auth_identity 加载（单一事实源与生产 deps 一致）。
+    # 有 user_id 但查无此人/停用 → 401；T5 后 session.get 受 tenant_scope 注入
+    # 过滤，伪造租户 token 落此分支
     if credentials is not None and getattr(credentials, "credentials", ""):
         payload = _decode(credentials.credentials)
         if payload and payload.get("user_id"):
-            user = await session.get(_User, payload["user_id"])
-            if not user or not user.is_active:
+            identity = getattr(request.state, "auth_identity", None)
+            if identity is None:
+                identity = await load_auth_identity(session, payload["user_id"])
+            if identity is None or not identity.is_active:
                 raise AuthenticationException(message="用户不存在或已停用")
             return CurrentUser(
-                id=user.id, username=user.username, role=effective_role(user),
-                tenant_id=user.tenant_id, tenant_role=user.tenant_role,
-                is_platform_admin=bool(user.is_platform_admin),
+                id=identity.id, username=identity.username, role=effective_role(identity),
+                tenant_id=identity.tenant_id, tenant_role=identity.tenant_role,
+                is_platform_admin=identity.is_platform_admin,
             )
     if default_role is None:
         raise AuthenticationException(message="未登录或缺少 Token")
@@ -95,17 +100,21 @@ async def _current_user_override(credentials, session, default_role: str | None)
 
 
 def _make_auth_override(role: str | None):
-    """构造符合 FastAPI 依赖签名的鉴权 override（role=None 为匿名口径）"""
+    """构造符合 FastAPI 依赖签名的鉴权 override（role=None 为匿名口径）
+
+    request 注解须用模块级 _FastAPIRequest（延迟注解解析只查模块全局，见文件头）。
+    """
     from fastapi import Depends
 
     from backend.app.api.deps import _bearer
     from platform_core.db import get_async_db as _get_async_db
 
     async def _override(
+        request: _FastAPIRequest,
         credentials=Depends(_bearer),
         session=Depends(_get_async_db),
     ):
-        return await _current_user_override(credentials, session, default_role=role)
+        return await _current_user_override(request, credentials, session, default_role=role)
 
     return _override
 
@@ -317,14 +326,26 @@ def db_client(
     """DB 接线版 TestClient：get_async_db 覆写为本测试引擎的会话工厂（测后还原）
 
     会话构造统一走 db_session（单一构造点）；端点与测试断言共享同一引擎同一库文件。
+    F-01：中间件平台态 DB 复核的会话源（app.state.identity_session_factory）一并
+    接线到本测试引擎（生产默认走 DBManager，测试态引擎被逐测试清空、不可直连）。
     """
+    from contextlib import asynccontextmanager
+
     from platform_core.db import get_async_db
 
     async def _override_get_async_db() -> AsyncIterator["AsyncSession"]:
         async with db_session() as session:
             yield session
 
+    @asynccontextmanager
+    async def _middleware_identity_session() -> AsyncIterator["AsyncSession"]:
+        async with db_session() as session:
+            yield session
+
     app.dependency_overrides[get_async_db] = _override_get_async_db
+    app.state.identity_session_factory = _middleware_identity_session
     yield client
-    # 恢复全局兜底 mock（而非 pop——防止后续 client 测试意外连真库）
+    # 恢复全局兜底 mock（而非 pop——防止后续 client 测试意外连真库）；
+    # 复核会话源还原生产默认（删除覆写）
     app.dependency_overrides[get_async_db] = _mock_async_db
+    del app.state.identity_session_factory

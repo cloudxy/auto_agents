@@ -10,7 +10,7 @@ T5 扩容：users/members 越权（User 继承 TenantMixin 后自动过滤收口
 import asyncio
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from backend.services.auth_service import AuthService
 from platform_core.models.llm_provider import LlmProvider
@@ -199,3 +199,58 @@ def test_forged_tenant_token_cannot_impersonate(db_client, db_session):
     resp = db_client.get("/api/v1/members",
                          headers={"Authorization": f"Bearer {token.access_token}"})
     assert resp.status_code == 401
+
+
+# ---------------- T12/F-01：撤销平台超管后存量 token 立即失去 platform_scope ----------------
+
+
+def test_revoked_platform_admin_token_immediately_loses_platform_scope(
+        db_client, db_engine, db_session):
+    """F-01：撤销平台超管后，同一存量 token（不重签）立即失去平台态——双源一致钉
+
+    中间件 platform_scope 判定与 deps 平台守卫共用 load_auth_identity 的 DB 快照：
+    撤销后 (1) require_platform_admin 端点 403；(2) 隔离作用域降级为 DB 行租户的
+    tenant_scope，跨租户数据不可见。撤销前同一 token 跨租户可见（在位对照，不误伤）。
+    """
+
+    async def _seed():
+        async with db_session() as s:
+            # T5 后平台超管挂 platform 租户（users.tenant_id NOT NULL）
+            platform = Tenant(slug="platform-f01", name="平台租户")
+            s.add(platform)
+            await s.flush()
+            s.add(User(username="f01-root", email="f01-root@x.local", password_hash="x",
+                       role="admin", tenant_id=platform.id, tenant_role=None,
+                       is_platform_admin=True))
+            await s.commit()
+            root = (await s.execute(
+                select(User).where(User.username == "f01-root"))).scalar_one()
+            token = await AuthService(s).create_token({
+                "id": root.id, "username": "f01-root", "is_admin": True, "role": "admin",
+                "tenant_id": None, "tenant_role": None, "is_platform_admin": True,
+            })
+            return token, root.id
+
+    token, root_id = asyncio.run(_seed())
+    auth = {"Authorization": f"Bearer {token.access_token}"}
+
+    # 在位对照：撤销前（claim 与 DB 一致）平台态跨租户可见
+    before = db_client.get("/api/v1/spiders/registry", headers=auth)
+    assert before.status_code == 200
+    assert "b-def-" in before.text
+
+    # 撤销平台超管（DB 已降权；token 不重签——存量 TTL 内立即复验）
+    async def _revoke():
+        async with db_session() as s:
+            await s.execute(
+                update(User).where(User.id == root_id).values(is_platform_admin=False))
+            await s.commit()
+
+    asyncio.run(_revoke())
+
+    # 双源一致：守卫层 403 + 隔离层降级租户态（跨租户不可见），同一 token
+    guarded = db_client.get("/api/v1/admin/tenants", headers=auth)
+    assert guarded.status_code == 403
+    scoped = db_client.get("/api/v1/spiders/registry", headers=auth)
+    assert scoped.status_code == 200
+    assert "b-def-" not in scoped.text

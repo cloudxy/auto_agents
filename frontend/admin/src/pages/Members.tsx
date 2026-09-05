@@ -14,9 +14,26 @@ import {
   createMember, deleteMember, listMemberAudit, listMembers, patchMember, resetMemberPassword,
   type MemberAuditRow, type MemberRow,
 } from '../services/members'
-import { apiErrorMessage } from '../utils/errorMessage'
+import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
 
 const { Text } = Typography
+
+/**
+ * 创建成员 422 占用文案转可行动提示（F-02）：后端 create_member 的同名/同邮箱
+ * 唯一性检查含软删行（username/email"永久占用"口径——删除不可恢复、不可复用，
+ * 见 member_service.create_member 注释），裸文案「成员名已存在: x」不解释占用
+ * 来源与可行动作；此处按后端 message 前缀映射为带行动建议的文案，其余透传。
+ */
+const memberConflictMessage = (e: unknown, fallback: string): string => {
+  const raw = apiErrorMessage(e, '')
+  if (raw.startsWith('成员名已存在')) {
+    return '该用户名已被占用（若同名成员已删除：删除不可恢复、用户名不可复用），请更换用户名'
+  }
+  if (raw.startsWith('邮箱已注册')) {
+    return '该邮箱已被占用（若同邮箱成员已删除：删除不可恢复、邮箱不可复用），请更换邮箱'
+  }
+  return raw || fallback
+}
 
 const ROLE_COLORS: Record<string, string> = {
   owner: 'gold', admin: 'green', operator: 'blue', viewer: 'default',
@@ -46,12 +63,18 @@ const Members: React.FC = () => {
   useEffect(() => { load() }, [load])
 
   const onCreate = async () => {
-    const values = await form.validateFields()
-    const created = await createMember(values)
-    message.success(`成员「${created.username}」已创建`)
-    setCreateOpen(false)
-    form.resetFields()
-    load()
+    try {
+      const values = await form.validateFields()
+      const created = await createMember(values)
+      message.success(`成员「${created.username}」已创建`)
+      setCreateOpen(false)
+      form.resetFields()
+      load()
+    } catch (e) {
+      // F-02：422 占用（同名/同邮箱，含软删占位行）此前静默失败——提示并保留表单
+      if (isFormValidateError(e)) return // 表单校验错误已由表单自身展示
+      message.error(memberConflictMessage(e, '创建失败'))
+    }
   }
 
   const onToggleActive = async (row: MemberRow, active: boolean) => {
@@ -76,10 +99,16 @@ const Members: React.FC = () => {
 
   const onReset = async () => {
     if (!resetTarget) return
-    const values = await resetForm.validateFields()
-    await resetMemberPassword(resetTarget.id, values.new_password)
-    message.success(`${resetTarget.username} 密码已重置`)
-    setResetTarget(null)
+    try {
+      const values = await resetForm.validateFields()
+      await resetMemberPassword(resetTarget.id, values.new_password)
+      message.success(`${resetTarget.username} 密码已重置`)
+      setResetTarget(null)
+    } catch (e) {
+      // F-02 顺带：重置密码此前同型裸奔（失败无反馈）——提示并保留弹窗，可直接重试
+      if (isFormValidateError(e)) return
+      message.error(apiErrorMessage(e, '密码重置失败'))
+    }
   }
 
   const onDelete = async (row: MemberRow) => {
