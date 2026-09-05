@@ -12,7 +12,8 @@ class Tenant(SoftDeleteMixin, Base):
     __tablename__ = "tenants"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="租户ID")
-    slug = Column(String(64), nullable=False, unique=True, index=True, comment="租户标识（全局唯一）")
+    # 普通索引 ix_tenants_slug 已于 026 删除（与 unique 唯一键同列，纯重复）
+    slug = Column(String(64), nullable=False, unique=True, comment="租户标识（全局唯一）")
     name = Column(String(128), nullable=False, comment="企业名称")
     status = Column(String(16), nullable=False, default="active", server_default="active",
                     comment="active/expired/disabled")

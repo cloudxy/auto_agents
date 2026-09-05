@@ -28,7 +28,8 @@ class User(TenantMixin, SoftDeleteMixin, Base):
     password_hash = Column(String(255), nullable=False, comment="密码哈希")
     is_active = Column(Boolean, default=True, comment="是否激活")
     is_admin = Column(Boolean, default=False, comment="是否管理员（存量标记，等价 admin 角色）")
-    tenant_id = Column(Integer, nullable=False, index=True,
+    # tenant_id 单列索引已于 026 删除（被 uq_users_tenant_username 最左前缀承接）
+    tenant_id = Column(Integer, nullable=False,
                        comment="所属租户（平台超管挂 platform 租户）")
     tenant_role = Column(String(20), comment="租户角色：owner/admin/operator/viewer")
     department_id = Column(Integer, comment="所属部门（departments.id；SaaS 组织树一层）")

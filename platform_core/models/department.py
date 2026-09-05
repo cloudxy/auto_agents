@@ -22,7 +22,8 @@ class Department(SoftDeleteMixin, Base):
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="主键")
-    tenant_id = Column(Integer, nullable=False, index=True, comment="所属租户")
+    # tenant_id 单列索引已于 026 删除（被唯一键 uq_departments_tenant_name_alive 最左前缀承接）
+    tenant_id = Column(Integer, nullable=False, comment="所属租户")
     name = Column(String(64), nullable=False, comment="部门名")
     description = Column(String(255), nullable=True, comment="职责说明")
     alive_flag = Column(SmallInteger, Computed("CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END"),
