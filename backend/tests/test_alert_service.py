@@ -5,7 +5,8 @@
 
 覆盖（核心公开方法直测）：
 - create_rule：channels 列表序列化 JSON 落库 + 返回字典反序列化
-- update_rule / delete_rule：缺失行抛 ValueError
+- update_rule / delete_rule：缺失行抛 NotFoundException（B5 修复 F-B1b-01，
+  统一异常体系，对齐 schedules/templates；HTTP 层映射 404）
 - evaluate：consecutive_failures 连败触发（通知 + last_triggered_at 更新）/
   spider_name 不匹配与 queue_depth 跳过 / 仓储异常吞掉不影响主流程 /
   task_timeout 时长超阈值触发
@@ -16,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.services.alert_service import AlertService
+from platform_core.exceptions import NotFoundException
 from stubs import fake_async_session
 
 
@@ -59,24 +61,24 @@ async def test_create_rule_serializes_channels_and_returns_dict():
 
 
 @pytest.mark.asyncio
-async def test_update_rule_missing_raises_value_error():
-    """更新不存在的规则抛 ValueError"""
+async def test_update_rule_missing_raises_not_found():
+    """更新不存在的规则抛 NotFoundException（B5：统一异常体系，HTTP 层映射 404）"""
     svc = _service()
     svc.repo.update = AsyncMock(return_value=None)
 
-    with pytest.raises(ValueError, match="告警规则不存在"):
+    with pytest.raises(NotFoundException, match="告警规则 999不存在"):
         await svc.update_rule(999, {"threshold": 5})
 
 
 @pytest.mark.asyncio
 async def test_delete_rule_success_and_missing():
-    """删除存在的规则返回 deleted 标记；缺失行抛 ValueError"""
+    """删除存在的规则返回 deleted 标记；缺失行抛 NotFoundException（B5）"""
     svc = _service()
     svc.repo.delete = AsyncMock(return_value=True)
     assert await svc.delete_rule(7) == {"rule_id": 7, "deleted": True}
 
     svc.repo.delete = AsyncMock(return_value=False)
-    with pytest.raises(ValueError, match="告警规则不存在"):
+    with pytest.raises(NotFoundException, match="告警规则 999不存在"):
         await svc.delete_rule(999)
 
 

@@ -2,7 +2,7 @@
 
 响应契约：统一 ApiResponse 信封（ADR-001）。
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,10 +28,17 @@ async def get_configs(
 class ConfigUpdate(BaseModel):
     value: str
 
+# key 契约对齐 SystemConfig.config_key String(50)：长度 ≤50；
+# 格式按存量键形态（site.name / site_url / notify.webhook_url）收敛为
+# 小写字母数字 + . / _ 分隔（B5 修复 F-B1b-02：界外 key 应 422 而非落库后
+# 在 MySQL 严格模式下 DataError→500）
+_CONFIG_KEY_PATTERN = r"^[a-z0-9][a-z0-9_.]*$"
+
 @router.put("/{key}", response_model=ApiResponse)
 async def update_config(
-    key: str,
-    data: ConfigUpdate,
+    key: str = Path(..., min_length=1, max_length=50, pattern=_CONFIG_KEY_PATTERN,
+                    description="配置键：小写字母数字 + . / _ 分隔，≤50 字符"),
+    data: ConfigUpdate = ...,
     session: AsyncSession = Depends(get_async_db),
     user: CurrentUser = Depends(require_admin),
 ) -> ApiResponse:

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.repositories.alert_rule_repository import AlertRuleRepository
 from backend.services.notify_service import NotifyService
+from platform_core.exceptions import NotFoundException
 from platform_core.logger import get_logger
 from platform_core.models.alert_rule import AlertRule
 from platform_core.models.spider_task import SpiderTask
@@ -59,7 +60,7 @@ class AlertService:
                 payload["channels"] = json.dumps(channels)
         rule = await self.repo.update(rule_id, **payload)
         if rule is None:
-            raise ValueError(f"告警规则不存在: {rule_id}")
+            raise NotFoundException(f"告警规则 {rule_id}")
         await self.session.commit()
         await self.session.refresh(rule)
         return self._rule_to_dict(rule)
@@ -68,7 +69,7 @@ class AlertService:
         """删除告警规则"""
         deleted = await self.repo.delete(rule_id)
         if not deleted:
-            raise ValueError(f"告警规则不存在: {rule_id}")
+            raise NotFoundException(f"告警规则 {rule_id}")
         await self.session.commit()
         return {"rule_id": rule_id, "deleted": True}
 

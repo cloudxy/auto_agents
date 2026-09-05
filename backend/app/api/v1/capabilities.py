@@ -1,4 +1,11 @@
-"""能力资产目录 API（P6 C2）——统一读路径（四类资产共用）"""
+"""能力资产目录 API（P6 C2）——统一读路径（四类资产共用）
+
+路由注册顺序约束（同 skills.py 防线）：二段式静态前缀路由
+（/plugins/{name} /experts/{name} /teams/{name}）必须先于二段式动态路由
+/{asset_type}/{name} 注册，否则后者把复数 asset_type（plugins/experts/teams）
+当第一段吞掉，三条静态详情路由恒 404（B5 修复 B1c F-1）。
+新增二段式路由一律置于 get_capability_detail（本文件末尾）之前。
+"""
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,27 +50,6 @@ async def list_capabilities(
         for r in rows
     ]
     return ok(data={"total": total, "items": items})
-
-
-@router.get("/{asset_type}/{name}")
-async def get_capability_detail(
-    asset_type: str,
-    name: str,
-    _user: CurrentUser = Depends(require_login),
-    service: CapabilityService = Depends(_service),
-):
-    """统一详情（治理字段 + 类型化细节由各域端点补充）"""
-    asset = await service.get_asset(asset_type, name)
-    return ok(data={
-        "id": asset.id, "asset_type": asset.asset_type, "name": asset.name,
-        "title": asset.title, "description": asset.description,
-        "category": asset.category, "status": asset.status, "tier": asset.tier,
-        "source_url": asset.source_url, "source_author": asset.source_author,
-        "score": float(asset.score) if asset.score is not None else None,
-        "ai_suggested_score": float(asset.ai_suggested_score) if asset.ai_suggested_score is not None else None,
-        "similar_to": asset.similar_to, "file_path": asset.file_path,
-        "sync_state": asset.sync_state,
-    })
 
 
 # ---------- P6 C3/C4：插件域（扫描/详情/验证） ----------
@@ -179,3 +165,31 @@ async def export_team(
     from backend.services.expert_service import TeamService
 
     return ok(data={"markdown": await TeamService(session).export_team_md(name)})
+
+
+# ---------- 统一详情（动态段，必须最后注册，见文件头顺序约束） ----------
+
+
+@router.get("/{asset_type}/{name}")
+async def get_capability_detail(
+    asset_type: str,
+    name: str,
+    _user: CurrentUser = Depends(require_login),
+    service: CapabilityService = Depends(_service),
+):
+    """统一详情（治理字段 + 类型化细节由各域端点补充）
+
+    注意：本路由为二段式动态段，必须保持在文件末尾注册，否则遮蔽
+    /plugins/{name} /experts/{name} /teams/{name} 三条静态详情路由（恒 404）。
+    """
+    asset = await service.get_asset(asset_type, name)
+    return ok(data={
+        "id": asset.id, "asset_type": asset.asset_type, "name": asset.name,
+        "title": asset.title, "description": asset.description,
+        "category": asset.category, "status": asset.status, "tier": asset.tier,
+        "source_url": asset.source_url, "source_author": asset.source_author,
+        "score": float(asset.score) if asset.score is not None else None,
+        "ai_suggested_score": float(asset.ai_suggested_score) if asset.ai_suggested_score is not None else None,
+        "similar_to": asset.similar_to, "file_path": asset.file_path,
+        "sync_state": asset.sync_state,
+    })

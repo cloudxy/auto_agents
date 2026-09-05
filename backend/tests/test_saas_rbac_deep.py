@@ -104,10 +104,35 @@ def test_custom_role_crud(db_client, admin_client, _seed):
     assert db_client.delete("/api/v1/rbac/roles/auditor").status_code == 200
 
 
-def test_tenant_minimal_create(db_client, admin_client, _seed):
-    """企业最小创建：名称必填、slug 唯一容错"""
-    resp = db_client.post("/api/v1/admin/tenants", json={"name": "测试公司乙"})
+def test_tenant_minimal_create(db_client, db_session, _seed):
+    """企业最小创建：名称必填、slug 唯一容错（B5 后守卫为 require_platform_admin，
+    走平台超管 Bearer 真链路——普通 admin 路径见 test_b1a_admin_coverage 翻转用例）"""
+    from backend.services.auth_service import AuthService
+    from platform_core.models.tenant import Tenant
+    from platform_core.models.user import User
+    from sqlalchemy import select
+
+    async def _bearer():
+        async with db_session() as s:
+            platform = Tenant(slug="platform", name="平台租户")
+            s.add(platform)
+            await s.flush()
+            s.add(User(username="rbac-root", email="rbac-root@x.com", password_hash="x",
+                       role="admin", tenant_id=platform.id, tenant_role=None,
+                       is_platform_admin=True))
+            await s.commit()
+            root = (await s.execute(
+                select(User).where(User.username == "rbac-root"))).scalar_one()
+            token = await AuthService(s).create_token({
+                "id": root.id, "username": "rbac-root", "is_admin": True, "role": "admin",
+                "tenant_id": None, "tenant_role": None, "is_platform_admin": True,
+            })
+            return {"Authorization": f"Bearer {token.access_token}"}
+
+    auth = asyncio.run(_bearer())
+    resp = db_client.post("/api/v1/admin/tenants", json={"name": "测试公司乙"}, headers=auth)
     assert resp.status_code == 201
     data = resp.json()["data"]
     assert data["slug"]
-    assert db_client.post("/api/v1/admin/tenants", json={"name": "x"}).status_code in (400, 422)
+    assert db_client.post("/api/v1/admin/tenants", json={"name": "x"},
+                         headers=auth).status_code in (400, 422)
