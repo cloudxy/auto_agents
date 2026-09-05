@@ -12,7 +12,7 @@ import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import yaml
 from sqlalchemy import select
@@ -22,6 +22,9 @@ from backend.services.ai_planner.llm_client import llm_chat
 from platform_core.exceptions import AuthorizationException, ValidationException
 from platform_core.logger import get_logger
 from platform_core.models.skill import Skill, SkillJob, SkillReview
+
+if TYPE_CHECKING:  # T6 解环：仅类型注解（skill_import_service 运行时依赖本模块，方向单向）
+    from backend.services.skill_import_service import SkillImportService
 
 logger = get_logger("service.skill")
 
@@ -436,9 +439,17 @@ class SkillService:
         start = (page - 1) * page_size
         return {"total": len(items), "items": items[start:start + page_size]}
 
-    async def approve_candidate(self, result_id: int) -> dict:
-        """转正：走 import_url 正式管线（人工闸门），成功后标记候选已审"""
-        from backend.services.skill_import_service import SkillImportService
+    async def approve_candidate(
+        self, result_id: int, *, importer: "type[SkillImportService]"
+    ) -> dict:
+        """转正：走 import_url 正式管线（人工闸门），成功后标记候选已审
+
+        importer（SkillImportService 类）由 API 组装点请求期注入（T6 解环：
+        本模块不得反向 import skill_import_service——skill 域方向为
+        skill_import_service（编排）→ skill_service（能力）；组装点经
+        skill_import_service 模块属性取值，保持 monkeypatch 该模块类的
+        存量测试语义）。
+        """
         from platform_core.exceptions import NotFoundException
         from platform_core.models.spider_result import SpiderResult
 
@@ -447,7 +458,7 @@ class SkillService:
         )).scalar_one_or_none()
         if row is None:
             raise NotFoundException(resource=f"候选 {result_id}")
-        result = await SkillImportService(self.session).import_url(row.url or "")
+        result = await importer(self.session).import_url(row.url or "")
         self._mark_review(row, "approved", name=result.get("name"))
         await self.session.flush()
         return result

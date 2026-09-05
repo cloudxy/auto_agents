@@ -9,7 +9,8 @@
 - 状态守卫常量：_BUSY_STATUSES（M5 条件 UPDATE 原子抢断的占用态集合）
 
 Patch 兼容约定：get_manager / AsyncSession / AiPlanRepository / AiPlannerService
-等被存量单测 patch 的符号一律经门面模块 _facade 属性查找（文件末行 import），
+等被存量单测 patch 的符号一律经 llm_common.seam() 命名空间调用期取值（T6 解环：
+门面初始化完成后注入 seam，无文件末尾反向 import），
 使 patch("backend.services.ai_planner_service.<name>") 在运行时生效。
 """
 import asyncio
@@ -18,6 +19,7 @@ from typing import Optional
 
 from sqlalchemy import select, update
 
+from backend.services.llm_common.seam import seam as _seam
 from platform_core.logger import get_logger
 from platform_core.models.ai_plan import AiPlan
 from platform_core.models.spider_task import SpiderTask
@@ -64,8 +66,8 @@ async def _read_task_snapshot(task_id: int) -> Optional[_TaskSnapshot]:
     独立 session 每轮新建连接/事务，读到的永远是 DB 最新已提交行（与事务
     隔离级别无关）；且只取标量列，连 ORM 实体都不进 identity map（双保险）。
     """
-    manager = _facade.get_manager()
-    async with _facade.AsyncSession(manager.async_engines["DEFAULT"]) as session:
+    manager = _seam().get_manager()
+    async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
         row = await session.execute(
             select(
                 SpiderTask.id,
@@ -89,9 +91,9 @@ async def _force_fail_status(plan_id: int, message: str) -> None:
     """m3 最后防线：_fail 自身失败（如 DB 异常卡死）时用全新 session 落 failed；
     新 session 也失败则仅记日志，不再抛（避免掩盖原始异常/无限递归）。"""
     try:
-        manager = _facade.get_manager()
-        async with _facade.AsyncSession(manager.async_engines["DEFAULT"]) as session:
-            await _facade.AiPlanRepository(session).update_status(
+        manager = _seam().get_manager()
+        async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
+            await _seam().AiPlanRepository(session).update_status(
                 plan_id, "failed", error_message=message[:2000], test_task_id=None
             )
             await session.commit()
@@ -115,8 +117,8 @@ async def reconcile_interrupted_plans() -> int:
         .values(status="failed", error_message="进程中断，请重新发起", test_task_id=None)
         .execution_options(synchronize_session=False)
     )
-    manager = _facade.get_manager()
-    async with _facade.AsyncSession(manager.async_engines["DEFAULT"]) as session:
+    manager = _seam().get_manager()
+    async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
         result = await session.execute(stmt)
         await session.commit()
     affected = int(result.rowcount or 0)
@@ -128,26 +130,21 @@ async def reconcile_interrupted_plans() -> int:
 async def _run_plan_bg(plan_id: int) -> None:
     """后台规划协程：自开独立 AsyncSession（端点请求 session 已随响应关闭）"""
     try:
-        manager = _facade.get_manager()
-        async with _facade.AsyncSession(manager.async_engines["DEFAULT"]) as session:
-            await _facade.AiPlannerService(session)._execute_plan(plan_id)
+        manager = _seam().get_manager()
+        async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
+            await _seam().AiPlannerService(session)._execute_plan(plan_id)
     except Exception as e:  # noqa: BLE001 兜底：后台异常记日志 + 新 session 落失败态
         logger.error(f"AI 规划后台任务异常: plan_id={plan_id}, error={e}")
-        await _facade._force_fail_status(plan_id, f"规划后台异常: {e}")
+        await _seam()._force_fail_status(plan_id, f"规划后台异常: {e}")
 
 
 async def _run_test_bg(plan_id: int) -> None:
     """后台试采协程：自开独立 AsyncSession"""
     try:
-        manager = _facade.get_manager()
-        async with _facade.AsyncSession(manager.async_engines["DEFAULT"]) as session:
-            await _facade.AiPlannerService(session)._execute_test(plan_id)
+        manager = _seam().get_manager()
+        async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
+            await _seam().AiPlannerService(session)._execute_test(plan_id)
     except Exception as e:  # noqa: BLE001
         logger.error(f"AI 试采后台任务异常: plan_id={plan_id}, error={e}")
-        await _facade._force_fail_status(plan_id, f"试采后台异常: {e}")
+        await _seam()._force_fail_status(plan_id, f"试采后台异常: {e}")
 
-
-# ----------------------------------------------------------------------
-# 门面引用（循环导入兼容，必须置于文件末尾；语义见 llm_client.py 同名注释）
-# ----------------------------------------------------------------------
-import backend.services.ai_planner_service as _facade  # noqa: E402

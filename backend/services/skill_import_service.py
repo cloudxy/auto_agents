@@ -24,6 +24,8 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.skill_scoring_service import SkillScoringService
+from backend.services.skill_service import SkillService
 from platform_core.exceptions import ValidationException
 from platform_core.logger import get_logger
 from platform_core.models.skill import Skill, SkillJob
@@ -283,9 +285,7 @@ class SkillImportService:
         return skill_dir
 
     async def _ingest_and_enqueue(self, name: str, skill_dir: Path) -> None:
-        from backend.services.skill_scoring_service import SkillScoringService
-        from backend.services.skill_service import SkillService
-
+        """落库（扫描该目录）+ 入评分队列（T6：模块级单向依赖，无函数内延迟 import）"""
         await SkillService(self.session).scan_library(root=skill_dir.parent)
         self.session.add(
             SkillJob(

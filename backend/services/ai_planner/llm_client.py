@@ -1,28 +1,33 @@
-"""LLM 客户端层：共享 httpx client 缓存 / 运行时配置解析 / chat completions 调用
+"""LLM 客户端层：共享 httpx client 缓存 / 运行时配置解析入口 / chat completions 调用
 
 拆分自 ai_planner_service.py（期4 结构治理），职责边界：
 - 共享 AsyncClient 缓存（provider 路径专用）：get_shared_client / invalidate_client_cache，
   含连接池常量与缓存键
-- 运行时配置解析（激活供应商优先 / yml+env 兜底）：_resolve_llm_runtime_config /
-  resolve_config_from_settings
+- 运行时配置解析入口（激活供应商优先 / yml+env 兜底）：_resolve_llm_runtime_config
+  （实现下沉 backend.services.llm_common——T6 解环：本模块不再依赖
+  llm_provider_service，配置形状与两段解析均取自公共叶子层）
 - chat completions 调用（超时 / 指数退避重试 / token 预算熔断）：llm_chat
 - 进程级 token 用量累计：_TOKEN_USAGE（跨请求熔断）
 
 Patch 兼容约定：存量单测 patch backend.services.ai_planner_service.<name>（门面路径），
 本模块对可 patch 的可变依赖（settings / _TOKEN_USAGE / _resolve_llm_runtime_config /
-get_shared_client 等）一律经门面模块 _facade 属性查找（文件末行 import，保证
-shim ↔ 包双向初始化顺序均安全），使旧 patch 路径在运行时生效；httpx 为全局共享
-模块对象（patch httpx.AsyncClient 即全局生效），保留本地引用即可。
+get_shared_client 等）一律经 llm_common.seam() 命名空间调用期取值（门面初始化完成
+后注入 seam；无文件末尾反向 import，import 图无环），使旧 patch 路径在运行时生效；
+httpx 为全局共享模块对象（patch httpx.AsyncClient 即全局生效），保留本地引用即可。
 """
 import asyncio
 import hashlib
-import os
 from typing import Optional
 
 import httpx
 from sqlalchemy import select
 
-from backend.services.llm_provider_service import LlmProviderService, LlmRuntimeConfig
+from backend.services.llm_common import (
+    LlmRuntimeConfig,
+    resolve_config_from_settings,
+    resolve_runtime_config,
+)
+from backend.services.llm_common.seam import seam as _seam
 from backend.services.llm_usage_service import get_month_used, record_usage
 from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
@@ -109,28 +114,8 @@ async def invalidate_client_cache(provider_id: Optional[int] = None) -> None:
 
 
 # ----------------------------------------------------------------------
-# 运行时配置解析（provider 优先 / yml+env 兜底）
+# 运行时配置解析（provider 优先 / yml+env 兜底；实现下沉 llm_common，T6）
 # ----------------------------------------------------------------------
-def resolve_config_from_settings() -> LlmRuntimeConfig:
-    logger.debug("解析 yml/env 兜底 LLM 配置")
-    # yml/env 兜底配置：读取顺序与阶段一 _llm_chat 完全一致（零回归保证）。
-    # settings 读取必须经门面命名空间（_facade.settings）：test_ai_planner.py /
-    # test_llm_provider.py 对 backend.services.ai_planner_service.settings 的
-    # monkeypatch 只对门面命名空间的 settings 绑定生效，兜底路径行为契约
-    # 与拆分前完全一致。
-    return LlmRuntimeConfig(
-        base_url=str(_facade.settings.get("LLM.BASE_URL", "") or "").rstrip("/"),
-        api_key=os.environ.get("LLM_API_KEY") or str(_facade.settings.get("LLM.API_KEY", "") or ""),
-        model=str(_facade.settings.get("LLM.MODEL", "") or ""),
-        temperature=float(_facade.settings.get("LLM.TEMPERATURE", 0.2)),
-        timeout=float(_facade.settings.get("LLM.TIMEOUT", 120)),
-        max_retries=max(1, int(_facade.settings.get("LLM.MAX_RETRIES", 3))),
-        enabled=bool(_facade.settings.get("LLM.ENABLED", False)),
-        source="config",
-        provider_id=None,
-    )
-
-
 async def _resolve_llm_runtime_config() -> LlmRuntimeConfig:
     """独立短事务 session 解析 LLM 运行时配置（激活供应商优先）
 
@@ -138,12 +123,12 @@ async def _resolve_llm_runtime_config() -> LlmRuntimeConfig:
     （DB 不可用/表未建/单测无库）都降级为 yml/env 兜底，不阻断 LLM 调用。
     """
     try:
-        manager = _facade.get_manager()
-        async with _facade.AsyncSession(manager.async_engines["DEFAULT"]) as session:
-            return await LlmProviderService(session).resolve_runtime_config()
+        manager = _seam().get_manager()
+        async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
+            return await resolve_runtime_config(session)
     except Exception as e:  # noqa: BLE001 无库/异常场景一律回退兜底路径
         logger.warning(f"LLM 供应商配置解析失败，回退 yml/env 兜底: {e}")
-        return _facade.resolve_config_from_settings()
+        return resolve_config_from_settings()
 
 
 
@@ -179,8 +164,8 @@ async def _candidate_chain(provider_id: int, session=None):
     try:
         if session is not None:
             return await _query_chain(session, provider_id)
-        manager = _facade.get_manager()
-        async with _facade.AsyncSession(manager.async_engines["DEFAULT"]) as s:
+        manager = _seam().get_manager()
+        async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as s:
             return await _query_chain(s, provider_id)
     except Exception as exc:  # noqa: BLE001 候选链不可用不阻断主路径
         logger.warning(f"候选链查询失败（跳过故障转移）: {exc}")
@@ -284,7 +269,7 @@ async def llm_chat(
     - budget_override：该维度独立预算（如 SKILLS.SCORING.MAX_TOKENS_BUDGET），
       替代全局 LLM.MAX_TOKENS_BUDGET 的熔断阈值。
     """
-    cfg = await _facade._resolve_llm_runtime_config()
+    cfg = await _seam()._resolve_llm_runtime_config()
     if not cfg.enabled:
         raise BusinessException(
             "LLM 功能未启用（无激活供应商且 LLM.ENABLED=false）："
@@ -301,7 +286,7 @@ async def llm_chat(
 
     # token 预算：调用方独立预算优先，否则沿用全局 LLM.MAX_TOKENS_BUDGET
     budget = budget_override if budget_override is not None else int(
-        _facade.settings.get("LLM.MAX_TOKENS_BUDGET", 200000)
+        _seam().settings.get("LLM.MAX_TOKENS_BUDGET", 200000)
     )
     protocol = getattr(cfg, "protocol", "openai_compatible") or "openai_compatible"
     effective_model = model_override or cfg.model
@@ -337,11 +322,11 @@ async def llm_chat(
         _tid = _cur_tid()
         month_used = await get_month_used(usage_dim, tenant_id=_tid)
         if month_used is None:
-            if bool(_facade.settings.get("LLM.BUDGET_FAIL_CLOSED", False)):
+            if bool(_seam().settings.get("LLM.BUDGET_FAIL_CLOSED", False)):
                 raise BusinessException(
                     f"LLM token 预算读数不可用（Redis），fail-closed 拒绝调用: {usage_dim}"
                 )
-            month_used = _facade._TOKEN_USAGE.get(usage_dim, 0)
+            month_used = _seam()._TOKEN_USAGE.get(usage_dim, 0)
         used_total = month_used
         if used_total >= budget:
             raise BusinessException(
@@ -350,7 +335,7 @@ async def llm_chat(
         try:
             if cfg.provider_id is not None:
                 # provider 路径：模块级共享 client（连接池复用，变更时 invalidate 失效）
-                client = await _facade.get_shared_client(
+                client = await _seam().get_shared_client(
                     cfg.base_url, cfg.api_key, cfg.timeout, cfg.provider_id
                 )
                 resp = await client.post(url, json=payload, headers=headers)
@@ -371,10 +356,10 @@ async def llm_chat(
             norm = _normalize_usage(protocol, data)
             used = norm["total"]
             if used:
-                _facade._TOKEN_USAGE[usage_dim] = _facade._TOKEN_USAGE.get(usage_dim, 0) + used
+                _seam()._TOKEN_USAGE[usage_dim] = _seam()._TOKEN_USAGE.get(usage_dim, 0) + used
                 logger.info(
                     f"LLM token 用量: +{used}（{usage_dim} 累计 "
-                    f"{_facade._TOKEN_USAGE[usage_dim]}/{budget}）"
+                    f"{_seam()._TOKEN_USAGE[usage_dim]}/{budget}）"
                 )
                 # P0-3 用量持久化：Redis 日/月计数（内部失败不影响主路径；
                 # 测试态为 no-op，保持纯内存语义）
@@ -408,12 +393,3 @@ async def llm_chat(
                                cfg=cfg, primary_error=last_error)
     raise BusinessException(f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {last_error}")
 
-
-# ----------------------------------------------------------------------
-# 门面引用（循环导入兼容，必须置于文件末尾）
-# ----------------------------------------------------------------------
-# 薄 shim backend.services.ai_planner_service re-export 本包符号；本模块对可
-# patch 的可变依赖经 _facade 属性查找，使旧 patch 路径继续生效。import 置于
-# 末尾保证「先 shim 后包」与「先包后 shim」两个初始化入口均安全（部分初始化
-# 的门面模块经 sys.modules 绑定，Python 3.7+ 语义）。
-import backend.services.ai_planner_service as _facade  # noqa: E402

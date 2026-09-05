@@ -14,6 +14,7 @@ from backend.app.api._helpers import record_audit
 from backend.app.api.deps import CurrentUser, require_admin, require_login, require_operator
 from backend.app.responses import ok
 from backend.repositories.skill_repository import SkillRepository, SkillReviewRepository
+import backend.services.skill_import_service as _skill_import_service
 from backend.services.skill_service import SkillService
 from platform_core.db import get_async_db
 from platform_core.exceptions import NotFoundException, ValidationException
@@ -161,8 +162,15 @@ async def approve_skill_candidate(
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """候选转正：走 import-url 正式管线（人工闸门）"""
-    result = await service.approve_candidate(result_id)
+    """候选转正：走 import-url 正式管线（人工闸门）
+
+    importer 经模块属性请求期取值注入（T6 解环：skill_service 不反向依赖
+    skill_import_service；该取值点同时是存量测试 monkeypatch
+    skill_import_service.SkillImportService 的生效缝）。
+    """
+    result = await service.approve_candidate(
+        result_id, importer=_skill_import_service.SkillImportService
+    )
     await session.commit()
     await record_audit(session, user, "skill.candidate.approve", f"candidate#{result_id}")
     return ok(data=result)
