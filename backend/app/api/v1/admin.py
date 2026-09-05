@@ -143,7 +143,7 @@ async def list_tenants(
 @router.post("/tenants", status_code=201)
 async def create_tenant_minimal(
     body: dict,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin),
     session: AsyncSession = Depends(get_async_db),
     service: TenantAdminService = Depends(_tenant_service),
 ):
