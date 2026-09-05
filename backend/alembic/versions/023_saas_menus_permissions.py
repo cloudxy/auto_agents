@@ -138,5 +138,22 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # 先还原 roles 数据变更再 drop 两表（数据回填 backfill / migration data）：
+    # upgrade 的 JSON_ARRAY_APPEND 追加了 menu:rbac / menu:enterprise，down 不还原
+    # 则 admin 角色残留引用已被 drop 的 permissions 注册表——幽灵权限（体检 F-02）。
+    # 对称回滚 = JSON_REMOVE + JSON_SEARCH 定位（upgrade 侧 NOT JSON_CONTAINS 守卫
+    # 保证至多一处出现，'one' 模式取首个即精确逆操作）。
+    # 注：023 已应用于各环境的库不受本文件修改影响（alembic 只记版本号不重放），
+    # 修复在下一次 downgrade 023 时生效。
+    op.execute(sa.text(
+        "UPDATE roles SET permissions = JSON_REMOVE("
+        "permissions, JSON_UNQUOTE(JSON_SEARCH(permissions, 'one', 'menu:rbac'))) "
+        "WHERE role_key='admin' AND JSON_CONTAINS(permissions, '\"menu:rbac\"')"
+    ))
+    op.execute(sa.text(
+        "UPDATE roles SET permissions = JSON_REMOVE("
+        "permissions, JSON_UNQUOTE(JSON_SEARCH(permissions, 'one', 'menu:enterprise'))) "
+        "WHERE role_key='admin' AND JSON_CONTAINS(permissions, '\"menu:enterprise\"')"
+    ))
     op.drop_table("menus")
     op.drop_table("permissions")

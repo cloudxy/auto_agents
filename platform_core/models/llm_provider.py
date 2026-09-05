@@ -10,7 +10,7 @@ ai_planner._llm_chat 经 LlmProviderService.resolve_runtime_config 消费：
   不降级明文入库
 - api_key 明文永不出服务层，API 响应一律输出掩码（见 schemas/llm_provider.py）
 """
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Computed, DateTime, Float, Integer, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
@@ -18,15 +18,21 @@ from platform_core.models.mixins import AuditMixin, SoftDeleteMixin, TenantMixin
 
 
 class LlmProvider(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
-    """LLM 供应商表（OpenAI 兼容协议为主，provider_type 预留扩展）"""
+    """LLM 供应商表（OpenAI 兼容协议为主，provider_type 预留扩展）
+
+    唯一键含生成列 alive_flag（迁移 025）：软删行脱离唯一约束，删后可重配同名渠道
+    （配错删除重配是运维常态路径；应用层「已存在」检查本就只看存活行）。
+    """
 
     __tablename__ = "llm_providers"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="主键")
     name = Column(String(100), nullable=False, index=True, comment="供应商名称（租户内唯一）")
     __table_args__ = (
-        UniqueConstraint("tenant_id", "name", name="uq_llm_providers_tenant_name"),
+        UniqueConstraint("tenant_id", "name", "alive_flag", name="uq_llm_providers_tenant_name_alive"),
     )
+    alive_flag = Column(SmallInteger, Computed("CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END"),
+                        comment="存活标记（生成列，025）：唯一键组件，软删行 NULL 脱离唯一约束")
     provider_type = Column(String(50), nullable=False, default="openai_compatible",
                            server_default="openai_compatible",
                            comment="协议类型：openai_compatible（chat/completions）")

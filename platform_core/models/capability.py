@@ -3,7 +3,7 @@
 统一目录层（capability_assets）+ 类型化细节表（plugin/expert/team）。
 skills 三表保留为 skill 类型细节（D10），治理字段经 asset 层收口。
 """
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Column, Computed, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy.sql import func
 
@@ -14,7 +14,11 @@ ASSET_TYPES = ("skill", "plugin", "expert", "expert_team")
 
 
 class CapabilityAsset(SoftDeleteMixin, AuditMixin, Base):
-    """统一资产目录（治理真相源，四类共用；平台级公共资产 tenant_id 恒 NULL）"""
+    """统一资产目录（治理真相源，四类共用；平台级公共资产 tenant_id 恒 NULL）
+
+    唯一键含生成列 alive_flag（迁移 025）：软删行脱离唯一约束，删后 harvester
+    周期扫描可重建同名资产（content_hash 判重走内容维度，不受影响）。
+    """
 
     __tablename__ = "capability_assets"
 
@@ -44,8 +48,10 @@ class CapabilityAsset(SoftDeleteMixin, AuditMixin, Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     # 细节表外键（skill 类型关联 skills.id）
     detail_id = Column(Integer, comment="类型化细节表行 id")
+    alive_flag = Column(SmallInteger, Computed("CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END"),
+                        comment="存活标记（生成列，025）：唯一键组件，软删行 NULL 脱离唯一约束")
     __table_args__ = (
-        __import__("sqlalchemy").UniqueConstraint("asset_type", "name", name="uq_asset_type_name"),
+        UniqueConstraint("asset_type", "name", "alive_flag", name="uq_asset_type_name_alive"),
     )
 
 

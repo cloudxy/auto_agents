@@ -175,9 +175,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_workflow_transitions_step_id"), table_name="workflow_transitions")
+    # T9 修复：原版在 drop_table 前显式 drop_index 了 4 个 FK 依赖索引
+    # （workflow_transitions.step_id / workflow_steps.instance_id /
+    #  notifications.user_id / taggings.tag_id），MySQL 1553
+    # "Cannot drop index: needed in a foreign key constraint" 拒绝——down 实际跑不通。
+    # drop_table 会连带删除本表全部索引与 FK，这些 drop_index 是冗余且非法的，直接移除。
     op.drop_table("workflow_transitions")
-    op.drop_index(op.f("ix_workflow_steps_instance_id"), table_name="workflow_steps")
     op.drop_table("workflow_steps")
     op.drop_index("ix_workflow_instances_tenant_status", table_name="workflow_instances")
     op.drop_index(op.f("ix_workflow_instances_tenant_id"), table_name="workflow_instances")
@@ -188,14 +191,12 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_resource_versions_tenant_id"), table_name="resource_versions")
     op.drop_table("resource_versions")
     op.drop_index("ix_notifications_inbox", table_name="notifications")
-    op.drop_index(op.f("ix_notifications_user_id"), table_name="notifications")
     op.drop_index(op.f("ix_notifications_tenant_id"), table_name="notifications")
     op.drop_table("notifications")
     op.drop_index("ix_attachments_resource", table_name="attachments")
     op.drop_index(op.f("ix_attachments_tenant_id"), table_name="attachments")
     op.drop_table("attachments")
     op.drop_index("uq_taggings_resource_tag", table_name="taggings")
-    op.drop_index(op.f("ix_taggings_tag_id"), table_name="taggings")
     op.drop_table("taggings")
     op.drop_index(op.f("ix_tags_tenant_id"), table_name="tags")
     op.drop_table("tags")
