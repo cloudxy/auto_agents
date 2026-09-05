@@ -4,7 +4,8 @@ T1 收口（R7）：backend/app/api/v1/admin.py 此前在路由层直连 Tenant/
 ORM（含函数内延迟 import）。本服务承接平台运营台的租户数据访问与编辑规则，
 对上只暴露 dict 快照。
 
-事务约定：写操作只 add/flush 并回传快照，commit 由调用方（路由层）统一执行后写审计。
+事务约定（ADR-0007）：service 方法边界 = 业务不可分割操作，写方法尾部自持 commit
+并回传 dict 快照（snapshot-before-commit，防 expire_on_commit 惰性加载）。
 """
 import re
 import time
@@ -67,7 +68,9 @@ class TenantAdminService:
         row = Tenant(slug=slug, name=name, status="active", quota=None)
         self.session.add(row)
         await self.session.flush()
-        return {"id": int(row.id), "slug": slug}
+        snapshot = {"id": int(row.id), "slug": slug}  # 先固化再提交（ADR-0007 D2）
+        await self.session.commit()
+        return snapshot
 
     async def patch_tenant(self, tenant_id: int, body: dict) -> None:
         """套餐/配额/到期编辑（quota 深合并；清到期=续期恢复；status 白名单透传）"""
@@ -90,3 +93,4 @@ class TenantAdminService:
         # status 显式白名单透传（R7：禁用语义不再被挡——body 传 disabled/expired 即生效）
         if "status" in body and str(body["status"]) in ("active", "expired", "disabled"):
             row.status = str(body["status"])
+        await self.session.commit()

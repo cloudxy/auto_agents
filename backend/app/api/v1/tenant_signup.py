@@ -47,11 +47,11 @@ async def tenant_signup(
     body: TenantSignupRequest,
     request: Request,
     service: TenantSignupService = Depends(_service),
-    session: AsyncSession = Depends(get_async_db),
 ):
     """企业注册：公司名 + 管理员邮箱/密码 → tenant + owner（免费档默认配额）
 
     限流 fail-closed：Redis 故障时拒绝（无鉴权写面不可放行滥用流量）。
+    事务由 service 持有（ADR-0007）。
     """
     try:
         redis = await get_async_redis()
@@ -64,6 +64,5 @@ async def tenant_signup(
         admin_email=body.admin_email,
         admin_password=body.admin_password,
     )
-    await session.commit()
     logger.info(f"注册成功 | tenant={result['tenant']['slug']}")
     return created(data=result)

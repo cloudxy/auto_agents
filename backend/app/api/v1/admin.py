@@ -147,14 +147,9 @@ async def create_tenant_minimal(
     session: AsyncSession = Depends(get_async_db),
     service: TenantAdminService = Depends(_tenant_service),
 ):
-    """新建公司（最小语义：名称+可选 slug；配额/到期走平台运营台编辑）
-
-    ADR-0007 范围例外：本端点事务下沉需改 tenant_admin_service（tenant 域，
-    本票红线禁改），路由层 commit 暂留，由 tenant 域后续工单收口。
-    """
+    """新建公司（最小语义：名称+可选 slug；配额/到期走平台运营台编辑；事务由 service 持有 ADR-0007）"""
     result = await service.create_tenant_minimal(
         str(body.get("name") or ""), slug=str(body.get("slug") or "") or None)
-    await session.commit()
     await record_audit(session, user, "tenant.create", f"tenant#{result['id']}",
                        detail={"name": str(body.get("name") or "").strip(), "slug": result["slug"]})
     return created(data={"id": result["id"], "slug": result["slug"]})
@@ -168,9 +163,8 @@ async def patch_tenant(
     session: AsyncSession = Depends(get_async_db),
     service: TenantAdminService = Depends(_tenant_service),
 ):
-    """套餐/配额/到期编辑（平台超管；ADR-0007 范围例外，见 create_tenant_minimal 注）"""
+    """套餐/配额/到期编辑（平台超管；事务由 service 持有 ADR-0007）"""
     await service.patch_tenant(tenant_id, body)
-    await session.commit()
     await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
     return ok(data={"id": tenant_id, "updated": True})
 
