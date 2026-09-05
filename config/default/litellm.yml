@@ -1,0 +1,29 @@
+# LiteLLM Proxy sidecar 配置（L1 影子接入，product-review 任务二）
+#
+# 嵌套读取方式（与 config/default/newapi.yml 等既有风格一致）：
+#   settings.get("LITELLM.EXPORT.DEFAULT_OUT", ...)
+# 环境变量覆盖（Dynaconf 双下划线嵌套约定，前缀见 config/__init__.py）：
+#   AUTO_AGENTS_LITELLM__EXPORT__DEFAULT_OUT=...
+#
+# 部署形态：sidecar proxy（docker-compose.yml litellm 服务，profiles=["litellm"]
+# 默认不启动，影子阶段显式开启）；无 DB 静态 config.yaml 模式；本仓 MySQL 保持
+# 唯一业务事实源，治理层（L2+）未来只走 LiteLLM Admin API、禁直连其库。
+#
+# 安全红线：
+# - 生成的 config 含明文 api_key（LiteLLM config 原生形态），路径已 gitignore；
+# - 镜像版本守卫（黑名单 1.82.7/1.82.8 恶意版本）：backend/tests/test_litellm_version_guard.py
+#   解析 docker-compose.yml 断言精确 pin（compose 变更时红）；
+# - 影子阶段 sidecar 仅绑定 127.0.0.1，不接任何生产流量。
+LITELLM:
+  ENABLED: false                      # 影子阶段总开关（默认关：不生成配置、不做对比）
+  EXPORT:
+    DEFAULT_OUT: "deploy/litellm/config.gen.yaml"  # 生成路径（含明文 key，gitignore 已登记）
+  PROXY:
+    PORT: 4000                        # sidecar 端口；docker-compose.yml litellm 服务的
+                                      # ports 映射与此对齐（compose 静态文件无法读
+                                      # Dynaconf，改端口两处同步，同 backend 服务 9111 约定）
+    HEALTH_PATH: "/health/liveliness" # 容器 healthcheck 端点（liveliness=进程存活浅探测，
+                                      # 深度健康 /health endpoints 留给 L2 治理层）
+  SHADOW:
+    ENABLED: false                    # 影子只读对比器开关（backend/services/litellm/shadow.py；
+                                      # 只读对比，不发起任何真实 LLM 调用）
