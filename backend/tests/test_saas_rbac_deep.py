@@ -38,7 +38,7 @@ def _seed(db_session):
     yield STATE
 
 
-def test_dynamic_menus_filtered_by_role(db_client, _seed):
+def test_dynamic_menus_filtered_by_role(db_client, admin_client, _seed):
     """动态菜单：无权限项被过滤；空分组剔除；admin 全量可见"""
     resp = db_client.get("/api/v1/auth/menus")
     assert resp.status_code == 200
@@ -59,7 +59,7 @@ def test_dynamic_menus_filtered_by_role(db_client, _seed):
     assert all(k.startswith("grp-") or k.startswith("/") for k in grp_keys)
 
 
-def test_menu_crud_roundtrip(db_client, _seed):
+def test_menu_crud_roundtrip(db_client, admin_client, _seed):
     """菜单 CRUD：建（挂父）→ 改 → 级联守卫 → 删"""
     created = db_client.post("/api/v1/rbac/menus", json={
         "parent_id": _seed["group_id"], "name": "子页", "path": "/x-child", "sort_order": 5})
@@ -75,7 +75,7 @@ def test_menu_crud_roundtrip(db_client, _seed):
     assert db_client.delete(f"/api/v1/rbac/menus/{cid}").status_code == 200
 
 
-def test_permission_resource_crud_with_reference_guard(db_client, _seed):
+def test_permission_resource_crud_with_reference_guard(db_client, admin_client, _seed):
     """权限资源：注册 → 改 → 被角色引用禁删 → 解除后可删"""
     created = db_client.post("/api/v1/rbac/permissions", json={
         "code": "btn:tmp:demo", "name": "临时权限", "group_name": "测试", "ptype": "btn"})
@@ -94,7 +94,7 @@ def test_permission_resource_crud_with_reference_guard(db_client, _seed):
     assert db_client.delete(f"/api/v1/rbac/permissions/{pid}").status_code == 200
 
 
-def test_custom_role_crud(db_client, _seed):
+def test_custom_role_crud(db_client, admin_client, _seed):
     """自定义角色：建 → 内置禁删 → 无引用可删"""
     created = db_client.post("/api/v1/rbac/roles", json={
         "role_key": "auditor", "name": "审计员", "permissions": ["menu:logs"]})
@@ -104,7 +104,7 @@ def test_custom_role_crud(db_client, _seed):
     assert db_client.delete("/api/v1/rbac/roles/auditor").status_code == 200
 
 
-def test_tenant_minimal_create(db_client, _seed):
+def test_tenant_minimal_create(db_client, admin_client, _seed):
     """企业最小创建：名称必填、slug 唯一容错"""
     resp = db_client.post("/api/v1/admin/tenants", json={"name": "测试公司乙"})
     assert resp.status_code == 201

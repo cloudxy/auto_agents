@@ -14,8 +14,8 @@ from platform_core.exceptions import BusinessException, NotFoundException
 class TestSpiderRegistryEndpoint:
     """/spiders/registry 端点（配置驱动，无 DB 依赖）"""
 
-    def test_registry_returns_types_and_spiders(self, client):
-        resp = client.get("/api/v1/spiders/registry")
+    def test_registry_returns_types_and_spiders(self, admin_client):
+        resp = admin_client.get("/api/v1/spiders/registry")
         assert resp.status_code == 200
         body = resp.json()["data"]
 
@@ -27,9 +27,9 @@ class TestSpiderRegistryEndpoint:
         assert spider_map["openweather"]["type"] == "api"
         assert spider_map["zhihu_feed"]["type"] == "web"
 
-    def test_registry_fields_drive_dynamic_form(self, client):
+    def test_registry_fields_drive_dynamic_form(self, admin_client):
         """类型的 fields 必须带 name/label/kind（前端动态表单契约）"""
-        body = client.get("/api/v1/spiders/registry").json()["data"]
+        body = admin_client.get("/api/v1/spiders/registry").json()["data"]
         for t in body["types"]:
             assert t["fields"], f"类型 {t['type']} 缺少字段定义"
             for f in t["fields"]:

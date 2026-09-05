@@ -69,11 +69,22 @@ jobs:
           MYSQL_FIDELITY_PORT: "3306"
           MYSQL_FIDELITY_USER: root
           MYSQL_FIDELITY_PASSWORD: testroot
+        # T10 扩容：基建冒烟 3 文件 + saas/members（真链路 JWT + 租户快照）+
+        # auth 登录链 + admin 用户 CRUD + rbac 深链 + 方言回归（0e0aaf8）。
+        # 时长估算：39 用例 ×（每测试独立 schema 建删 + create_all）≈ +1~2min，
+        # 未超时。若某文件在真库暴露方言差异（正是本通道目的），处置见
+        # .scratch/p0-p1-2026-09/issues/T10.md 的分级方案：先单独验证修复，
+        # 期间将该文件移入观察名单（不要整通道降级）。
         run: >-
           uv run pytest -q
           backend/tests/test_mysql_fidelity.py
           backend/tests/test_db_fixtures.py
           backend/tests/test_alembic_baseline.py
+          backend/tests/test_t10_fix_regressions.py
+          backend/tests/test_saas_members.py
+          backend/tests/test_auth_login_tenant.py
+          backend/tests/test_admin_users_crud.py
+          backend/tests/test_saas_rbac_deep.py
 
   arch-check:
     name: Architecture Red Lines (12 rules + 3 boundaries)

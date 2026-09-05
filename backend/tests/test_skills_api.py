@@ -56,7 +56,7 @@ async def _seed(db_session, library_root: Path) -> None:
         await s.commit()
 
 
-def test_scan_endpoint_returns_job_summary(db_client, db_engine, db_session, skill_library):
+def test_scan_endpoint_returns_job_summary(db_client, admin_client, db_engine, db_session, skill_library):
     import asyncio
 
     asyncio.run(_seed(db_session, skill_library))
@@ -67,7 +67,7 @@ def test_scan_endpoint_returns_job_summary(db_client, db_engine, db_session, ski
     assert body["data"]["total"] >= 1
 
 
-def test_list_skills_filter_and_pagination(db_client, db_engine, db_session, skill_library):
+def test_list_skills_filter_and_pagination(db_client, admin_client, db_engine, db_session, skill_library):
     import asyncio
 
     asyncio.run(_seed(db_session, skill_library))
@@ -82,7 +82,7 @@ def test_list_skills_filter_and_pagination(db_client, db_engine, db_session, ski
     assert resp.json()["data"]["total"] == 0
 
 
-def test_get_skill_detail_includes_files_and_reviews(db_client, db_engine, db_session, skill_library):
+def test_get_skill_detail_includes_files_and_reviews(db_client, admin_client, db_engine, db_session, skill_library):
     import asyncio
 
     asyncio.run(_seed(db_session, skill_library))
@@ -95,12 +95,12 @@ def test_get_skill_detail_includes_files_and_reviews(db_client, db_engine, db_se
     assert "category: dev-tools" in data["meta_yaml"]
 
 
-def test_get_skill_detail_404(db_client, db_engine, db_session, skill_library):
+def test_get_skill_detail_404(db_client, admin_client, db_engine, db_session, skill_library):
     resp = db_client.get("/api/v1/skills/ghost-skill")
     assert resp.status_code == 404
 
 
-def test_static_jobs_route_not_shadowed_by_name(db_client, db_engine, db_session, skill_library):
+def test_static_jobs_route_not_shadowed_by_name(db_client, admin_client, db_engine, db_session, skill_library):
     """/skills/jobs 是静态段——若被 /{name} 吞掉会返回技能 404 而非任务列表信封"""
     resp = db_client.get("/api/v1/skills/jobs")
     assert resp.status_code == 200

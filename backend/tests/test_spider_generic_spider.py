@@ -330,9 +330,9 @@ async def test_registry_fallback_to_config_on_db_error():
     assert "example" in names and "generic" in names  # 配置种子兜底
 
 
-def test_registry_contains_custom_type_and_generic(client):
+def test_registry_contains_custom_type_and_generic(admin_client):
     """注册表端点含 custom 类型与 generic 爬虫（DB 种子或配置兜底均可）"""
-    body = client.get("/api/v1/spiders/registry").json()["data"]
+    body = admin_client.get("/api/v1/spiders/registry").json()["data"]
     type_map = {t["type"]: t for t in body["types"]}
     assert "custom" in type_map
     selector_field = next(

@@ -55,59 +55,119 @@ async def _mock_async_db():
     yield mock_session
 
 
-@pytest.fixture(scope="session")
-def app():
-    """FastAPI 应用实例（含异常处理器与全量路由）
+# ---------------------------------------------------------------------------
+# 鉴权 override（T10 收紧）：模块级单一实现，app fixture 与特权 fixtures 共用
+#
+# 口径：
+# - 默认（role=None，client fixture）：无凭据请求 → 401，与生产 get_current_user
+#   完全同口径；「端点忘挂 RBAC 守卫」不再被全局兜底 admin 掩盖（测试侧即红）。
+# - 特权身份经 opt-in fixture 显式声明：admin_client / operator_client /
+#   viewer_client（无凭据请求以对应角色快照通过）。
+# - 带真实 Bearer 时一律走真链路（JWT→DB 快照，S1/S2 越权与成员用例依赖）。
+# - RBAC 守卫自身的 401/403 分支由 test_rbac_audit.py 直接单测。
+# ---------------------------------------------------------------------------
 
-    测试环境全局 override 鉴权依赖：端点测试默认以 admin 身份通过，
-    RBAC 守卫自身的 401/403 分支由 test_rbac_audit.py 直接单测。
-    """
+
+async def _current_user_override(credentials, session, default_role: str | None):
+    """无凭据按 default_role 分派（None=401）；带 Bearer 走真链路"""
+    from backend.app.api.deps import CurrentUser, effective_role
+    from backend.utils.auth import decode_access_token as _decode
+    from platform_core.models.user import User as _User
+    from platform_core.exceptions import AuthenticationException
+
+    # 带真实 Bearer 时走真链路（S1/S2 越权与成员用例依赖 JWT→中间件→快照全链）。
+    # 有 user_id 但查无此人/停用 → 401（与生产 get_current_user 同口径；
+    # T5 后 session.get 受 tenant_scope 注入过滤，伪造租户 token 落此分支）
+    if credentials is not None and getattr(credentials, "credentials", ""):
+        payload = _decode(credentials.credentials)
+        if payload and payload.get("user_id"):
+            user = await session.get(_User, payload["user_id"])
+            if not user or not user.is_active:
+                raise AuthenticationException(message="用户不存在或已停用")
+            return CurrentUser(
+                id=user.id, username=user.username, role=effective_role(user),
+                tenant_id=user.tenant_id, tenant_role=user.tenant_role,
+                is_platform_admin=bool(user.is_platform_admin),
+            )
+    if default_role is None:
+        raise AuthenticationException(message="未登录或缺少 Token")
+    return CurrentUser(id=1, username=f"test-{default_role}", role=default_role)
+
+
+def _make_auth_override(role: str | None):
+    """构造符合 FastAPI 依赖签名的鉴权 override（role=None 为匿名口径）"""
     from fastapi import Depends
 
-    from backend.app import create_app
-    from backend.app.api.deps import CurrentUser, _bearer, get_current_user
-    from backend.utils.auth import decode_access_token as _decode
+    from backend.app.api.deps import _bearer
     from platform_core.db import get_async_db as _get_async_db
-    from platform_core.models.user import User as _User
 
-    application = create_app()
-
-    async def _override_current_user(
+    async def _override(
         credentials=Depends(_bearer),
         session=Depends(_get_async_db),
     ):
-        # 带真实 Bearer 时走真链路（S1/S2 越权与成员用例依赖 JWT→中间件→快照全链）；
-        # 无凭据时保持既有契约：固定 admin 快照（存量 600+ 测试零改动）。
-        # 有 user_id 但查无此人/停用 → 401（与生产 get_current_user 同口径；
-        # T5 后 session.get 受 tenant_scope 注入过滤，伪造租户 token 落此分支）
-        from backend.app.api.deps import effective_role
-        from platform_core.exceptions import AuthenticationException
+        return await _current_user_override(credentials, session, default_role=role)
 
-        if credentials is not None and getattr(credentials, "credentials", ""):
-            payload = _decode(credentials.credentials)
-            if payload and payload.get("user_id"):
-                user = await session.get(_User, payload["user_id"])
-                if not user or not user.is_active:
-                    raise AuthenticationException(message="用户不存在或已停用")
-                return CurrentUser(
-                    id=user.id, username=user.username, role=effective_role(user),
-                    tenant_id=user.tenant_id, tenant_role=user.tenant_role,
-                    is_platform_admin=bool(user.is_platform_admin),
-                )
-        return CurrentUser(id=1, username="test-admin", role="admin")
+    return _override
 
-    application.dependency_overrides[get_current_user] = _override_current_user
 
+def _set_auth_override(app, role: str | None) -> None:
+    from backend.app.api.deps import get_current_user
+
+    app.dependency_overrides[get_current_user] = _make_auth_override(role)
+
+
+@pytest.fixture(scope="session")
+def app():
+    """FastAPI 应用实例（含异常处理器与全量路由；鉴权默认匿名口径，见上）"""
+    from backend.app import create_app
+    from backend.app.api.deps import get_current_user
+
+    application = create_app()
+
+    application.dependency_overrides[get_current_user] = _make_auth_override(None)
     application.dependency_overrides[_gadb] = _mock_async_db
     return application
 
 
 @pytest.fixture(scope="session")
 def client(app):
-    """FastAPI TestClient（同步 HTTP 测试入口）"""
+    """FastAPI TestClient（同步 HTTP 测试入口，匿名口径：无凭据 401）"""
     from fastapi.testclient import TestClient
 
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _reset_auth_override(app):
+    """每个测试前后将鉴权 override 归位为匿名口径——防特权 fixture / 前序测试
+    残留（同 _reset_get_async_db 的加固模式）"""
+    _set_auth_override(app, None)
+    yield
+    _set_auth_override(app, None)
+
+
+@pytest.fixture
+def admin_client(app, client, _reset_auth_override):
+    """admin 特权 TestClient（显式 opt-in；无凭据请求以 admin 快照通过）"""
+    _set_auth_override(app, "admin")
+    yield client
+    _set_auth_override(app, None)
+
+
+@pytest.fixture
+def operator_client(app, client, _reset_auth_override):
+    """operator 特权 TestClient（require_login/require_operator 放行，admin 拒绝）"""
+    _set_auth_override(app, "operator")
+    yield client
+    _set_auth_override(app, None)
+
+
+@pytest.fixture
+def viewer_client(app, client, _reset_auth_override):
+    """viewer 特权 TestClient（仅 require_login 放行——403 越权断言用）"""
+    _set_auth_override(app, "viewer")
+    yield client
+    _set_auth_override(app, None)
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +278,37 @@ def _reset_get_async_db(app):
     yield
     # 测试后也重置（db_client teardown 之外的兜底）
     app.dependency_overrides[_gadb] = _mock_async_db
+
+
+@pytest.fixture(autouse=True)
+def _reset_db_manager():
+    """每个测试前后清空 DBManager 全局单例的已初始化引擎（T10 测试卫生修复）
+
+    根因（T7/T9 留档的 TestLlmChat 同批偶发 5 failed）：
+    backend/services/ai_planner/llm_client.py::_resolve_llm_runtime_config 经
+    get_manager().async_engines["DEFAULT"] 开独立短事务，**绕过** conftest 对
+    get_async_db 的 override 直连真实 local MySQL。单跑/全量绿是因为 pytest
+    进程内 DBManager 从未初始化 → KeyError → 降级 yml/env（LLM.ENABLED=false）。
+    一旦批内任一代码触发惰性 init_all()（db.py 的 `if not self._ready` 三处），
+    DEFAULT 引擎就绪 → 真库 llm_providers 激活行生效 → TestLlmChat 的
+    「无激活供应商」全局假设断裂，且 llm_chat 会发起真实付费调用。
+
+    修复口径：每测试结束即清空单例引擎缓存（pytest 态引擎为 NullPool，无
+    连接驻留，直接清 dict 安全），使「引擎未初始化」的降级语义在测试间稳定。
+    """
+    import platform_core.db as _db
+
+    def _purge() -> None:
+        manager = getattr(_db, "_manager", None)
+        if manager is not None:
+            manager.async_engines.clear()
+            manager.mysql.clear()
+            manager.redis.clear()
+            manager._ready = False  # noqa: SLF001 测试卫生收口，唯一写入口
+
+    _purge()
+    yield
+    _purge()
 
 @pytest.fixture
 def db_client(

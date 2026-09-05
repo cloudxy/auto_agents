@@ -150,7 +150,7 @@ async def test_invalid_then_valid_succeeds_on_retry(db_session, queue_redis, see
     assert result["status"] == "scored" and result["attempts"] == 2
 
 
-def test_rescore_endpoint_pushes_queue(db_client, db_engine, db_session, queue_redis, seeded):
+def test_rescore_endpoint_pushes_queue(db_client, admin_client, db_engine, db_session, queue_redis, seeded):
     resp = db_client.post("/api/v1/skills/rate-me/rescore")
     assert resp.status_code == 200
     assert "rate-me" in queue_redis.items

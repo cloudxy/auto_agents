@@ -35,7 +35,7 @@ async def _seed(db_session) -> None:
         await s.commit()
 
 
-def test_candidates_list_filters_marketplace(db_client, db_engine, db_session):
+def test_candidates_list_filters_marketplace(db_client, admin_client, db_engine, db_session):
     import asyncio
 
     asyncio.run(_seed(db_session))
@@ -46,7 +46,7 @@ def test_candidates_list_filters_marketplace(db_client, db_engine, db_session):
     assert items[0]["review_status"] == "pending"
 
 
-def test_approve_walks_import_pipeline_and_marks(db_client, db_engine, db_session, monkeypatch):
+def test_approve_walks_import_pipeline_and_marks(db_client, admin_client, db_engine, db_session, monkeypatch):
     import asyncio
 
     asyncio.run(_seed(db_session))
@@ -85,7 +85,7 @@ def test_approve_walks_import_pipeline_and_marks(db_client, db_engine, db_sessio
     assert all(i["id"] != result_id for i in again)
 
 
-def test_reject_marks_and_blacklists_existing(db_client, db_engine, db_session):
+def test_reject_marks_and_blacklists_existing(db_client, admin_client, db_engine, db_session):
     import asyncio
 
     asyncio.run(_seed(db_session))

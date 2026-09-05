@@ -123,7 +123,7 @@ async def test_isolation_writer_b_same_unique_key_succeeds(db_session):
         assert stored.role == "viewer"
 
 
-def test_db_client_reads_seeded_data(db_engine, db_client, db_session):
+def test_db_client_reads_seeded_data(db_engine, db_client, admin_client, db_session):
     """端点与测试断言走同一引擎同一库：种子数据经真实 API 可见（含统一信封形状）"""
     asyncio.run(_seed_one(db_session, "endpoint-probe"))
 

@@ -79,7 +79,7 @@ async def test_sync_adapters_runs_script(db_session, library_root, monkeypatch):
     assert "sync.sh" in " ".join(executed["args"])
 
 
-def test_manifests_endpoints(db_client, db_engine, db_session, library_root):
+def test_manifests_endpoints(db_client, admin_client, db_engine, db_session, library_root):
     resp = db_client.get("/api/v1/skills/manifests")
     assert resp.status_code == 200
     assert resp.json()["data"] == {"claude-code": ["example-pdf-extractor"]}

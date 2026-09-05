@@ -37,7 +37,7 @@ def _patch_execute(monkeypatch, body=None, error=None):
     monkeypatch.setattr(svc_mod, "execute_json", _fake)
 
 
-def test_fetch_diff_three_way(db_client, db_engine, db_session, monkeypatch):
+def test_fetch_diff_three_way(db_client, admin_client, db_engine, db_session, monkeypatch):
     pid = _setup(db_client)
     _patch_execute(monkeypatch, body={"data": [
         {"id": "m-b", "owned_by": "openai"}, {"id": "m-c", "owned_by": "openai"},
@@ -62,7 +62,7 @@ def test_fetch_diff_three_way(db_client, db_engine, db_session, monkeypatch):
     assert asyncio.run(_rows()) == ["m-a", "m-b"]
 
 
-def test_model_test_writes_health_states(db_client, db_engine, db_session, monkeypatch):
+def test_model_test_writes_health_states(db_client, admin_client, db_engine, db_session, monkeypatch):
     pid = _setup(db_client, name="health-me")
 
     # 200 → healthy + 延迟 + 时间
@@ -96,7 +96,7 @@ def test_model_test_writes_health_states(db_client, db_engine, db_session, monke
     assert asyncio.run(_status("m-a"))[0] == "degraded"
 
 
-def test_model_test_unsaved_model_one_shot(db_client, db_engine, monkeypatch):
+def test_model_test_unsaved_model_one_shot(db_client, admin_client, db_engine, monkeypatch):
     """导入新增的未落库模型：测试不 404，一次性结果即回（保存后才持久化）"""
     import backend.services.llm_provider_service as svc_mod
     from backend.services.llm_protocol import ProtocolError

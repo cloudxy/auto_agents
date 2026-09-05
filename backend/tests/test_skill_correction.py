@@ -124,7 +124,7 @@ async def test_writeback_failure_keeps_db_and_records_job(db_session, library_ro
     assert meta["status"] == "stable" and meta["capability"]["score"] == 7.0
 
 
-def test_put_meta_endpoint(db_client, db_engine, db_session, library_root):
+def test_put_meta_endpoint(db_client, admin_client, db_engine, db_session, library_root):
     import asyncio
 
     asyncio.run(_seed(db_session, library_root))

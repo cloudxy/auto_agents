@@ -66,3 +66,53 @@ test('未登录：不拉取，菜单保持全隐', async () => {
   expect(screen.getByTestId('ready').textContent).toBe('false')
   expect((api.get as jest.Mock).mock.calls.length).toBe(callCount)  // 无新增请求
 })
+
+/**
+ * bea13b5 回归：权限不可知（后端重启/网络瞬断 → refreshPermissions 失败 →
+ * cachedPermissions=[]）时，filterMenu 返回全量菜单（仅保留 tenantOnly 过滤），
+ * 侧边栏不再消失。修复前：缓存空 → 按空权限全滤光 → 菜单消失（复发链条）。
+ */
+test('补拉失败（后端不可达）：菜单全量兜底而非全滤光（bea13b5）', async () => {
+  clearCachedPermissions()
+  useAuthStore.setState({
+    token: 't', isAuthenticated: true,
+    user: { username: 'admin', role: 'admin', is_admin: true } as never,
+  })
+  ;(api.get as jest.Mock).mockRejectedValue(new Error('backend unreachable'))
+
+  render(<MemoryRouter><Probe /></MemoryRouter>)
+
+  // 补拉已尝试且失败（in-flight 结束，revision 已 bump）
+  await waitFor(() => expect(api.get).toHaveBeenCalled())
+
+  // 兜底断言：非 tenantOnly 组保留（全量菜单），而非全滤光
+  expect(await screen.findByText(/概览/)).toBeInTheDocument()
+  expect(screen.getByText(/数据工厂/)).toBeInTheDocument()
+  expect(screen.getByText(/系统管理/)).toBeInTheDocument()
+  // 权限仍未就绪（ready=false——兜底是显示语义，不是权限通过）
+  expect(screen.getByTestId('ready').textContent).toBe('false')
+})
+
+/**
+ * bea13b5 边界缺陷（T10 发现，已报未修）：兜底分支只过滤顶层菜单的
+ * tenantOnly，而 tenantOnly 标记实际全在叶子层（成员管理/用量看板）——
+ * 后端不可达时纯平台超管（tenant_id=NULL）仍见 tenantOnly 菜单，点击 403。
+ * 与 commit 自述「仅保留 tenantOnly 过滤」不符。test.failing：缺陷修复后
+ * 本用例会变绿并使套件报错，届时转正为普通 test。
+ */
+test.failing('兜底分支应同样过滤叶子层 tenantOnly（bea13b5 边界缺陷，已报未修）', async () => {
+  clearCachedPermissions()
+  useAuthStore.setState({
+    token: 't', isAuthenticated: true,
+    // 纯平台超管（tenant_id=NULL）
+    user: { username: 'admin', role: 'admin', is_admin: true } as never,
+  })
+  ;(api.get as jest.Mock).mockRejectedValue(new Error('backend unreachable'))
+
+  render(<MemoryRouter><Probe /></MemoryRouter>)
+  await waitFor(() => expect(api.get).toHaveBeenCalled())
+  await screen.findByText(/概览/)
+
+  expect(screen.queryByText(/成员管理/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/用量看板/)).not.toBeInTheDocument()
+})

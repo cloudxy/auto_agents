@@ -7,7 +7,7 @@ from platform_core.models.tenant import Tenant
 from platform_core.models.user import User
 
 
-def test_permissions_endpoint_has_new_codes(db_client, db_engine, db_session):
+def test_permissions_endpoint_has_new_codes(db_client, admin_client, db_engine, db_session):
     """R5：后端 /permissions 下发含新码（menu:skills/members/usage/platform-ops、btn:skill:*）"""
     resp = db_client.get("/api/v1/auth/permissions")
     assert resp.status_code == 200
