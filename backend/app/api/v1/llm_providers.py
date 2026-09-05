@@ -107,7 +107,6 @@ async def test_provider_model(
 ):
     """单模型 1-token 测试并落健康态（healthy/down/degraded + 延迟 + 时间）"""
     result = await service.test_model(provider_id, model_id)
-    await session.commit()
     await record_audit(session, user, "llm.provider.model.test",
                        f"llm_provider#{provider_id}/{model_id}", detail={"ok": result["ok"]})
     return ok(data=result)
@@ -133,7 +132,6 @@ async def put_provider_models(
 ):
     """模型集全量替换（is_default 至多一行；默认变更同事务刷新父行冗余列）"""
     result = await service.put_models(provider_id, [m.model_dump() for m in body.models])
-    await session.commit()
     await record_audit(session, user, "llm.provider.models.update", f"llm_provider#{provider_id}",
                        detail={"count": len(result)})
     return ok(data=result)

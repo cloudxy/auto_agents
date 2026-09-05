@@ -31,8 +31,10 @@ ROLE_ALL = ("admin", "operator", "viewer")
 class CurrentUser:
     """当前登录用户快照（鉴权时固化）
 
-    后续路由若发生 session.commit()，ORM 对象属性会全部过期；
-    届时再读 user.id/username 会触发同步惰性加载，异步上下文抛 MissingGreenlet。
+    历史坑（ADR-0007 已收口）：路由层 session.commit() 会使 ORM 对象属性全部
+    过期，再读 user.id/username 会触发同步惰性加载，异步上下文抛
+    MissingGreenlet——事务所有权已唯一归属 Service 层（快照先于提交），
+    API 层不再碰 session 生命周期，本快照型返回值是既定防线的组成部分。
 
     S1-3 租户身份（claims 只承身份，权限一律 DB 快照重算）：
     is_platform_admin=True → 平台超管（platform_scope；T5 后 DB 行挂 platform

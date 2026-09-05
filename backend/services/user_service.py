@@ -121,6 +121,8 @@ class UserService:
         resp.tenant_name = (await self.session.execute(
             select(Tenant.name).where(Tenant.id == target_tenant_id)
         )).scalar_one_or_none()
+        # ADR-0007 D2：快照先于 commit（resp 已是 Pydantic 固化值）
+        await self.session.commit()
         return resp
 
     async def update_user(self, user_id: int, payload, actor_id: int) -> UserResponse:
@@ -181,6 +183,7 @@ class UserService:
             resp.department_name = (await self.session.execute(
                 select(Department.name).where(Department.id == user.department_id)
             )).scalar_one_or_none()
+        await self.session.commit()
         return resp
 
     async def delete_user(self, user_id: int, actor_id: int) -> None:
@@ -211,3 +214,4 @@ class UserService:
         user.is_active = False
         await self.session.flush()
         logger.warning(f"软删除用户 | id={user_id} username={user.username}")
+        await self.session.commit()

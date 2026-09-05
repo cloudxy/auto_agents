@@ -4,8 +4,10 @@ T1 收口（R7）：backend/app/api/v1/rbac.py 与 auth.py 此前在路由层直
 （含 16 处函数内延迟 import 规避），依赖方向错误。本服务承接全部 ORM 访问，
 对上只暴露 dict 快照（不泄漏 ORM 实例，不触发 commit 后过期属性的惰性加载）。
 
-事务约定（与 MemberService/SkillService 同口径）：
-- 写操作只 add/flush 并回传快照，commit 由调用方（路由层）统一执行后写审计。
+事务约定（ADR-0007：事务所有权唯一归属 Service 层）：
+- 写方法完成业务操作时在方法尾部 commit；返回值经快照固化（snapshot-before-
+  commit，防 expire_on_commit 后属性惰性加载抛 MissingGreenlet）；
+- 路由层只读结果，不碰 session 生命周期（审计走独立短事务，P1-11）。
 """
 from typing import Optional
 
@@ -69,10 +71,12 @@ class RbacService:
                    permissions=sorted(set(payload["permissions"] or [])), is_builtin=False)
         self.session.add(row)
         await self.session.flush()
-        return {"role_key": row.role_key, "name": row.name}
+        snapshot = {"role_key": row.role_key, "name": row.name}
+        await self.session.commit()
+        return snapshot
 
     async def delete_role(self, role_key: str) -> None:
-        """删除角色（内置禁删；有用户在用禁删）；commit 由调用方执行"""
+        """删除角色（内置禁删；有用户在用禁删）"""
         logger.info(f"删除角色 | role_key={role_key}")
         row = (await self.session.execute(
             select(Role).where(Role.role_key == role_key)
@@ -88,6 +92,7 @@ class RbacService:
         if int(in_use) > 0:
             raise BusinessException(f"角色仍在使用中（{in_use} 个用户），先改派再删")
         await self.session.delete(row)
+        await self.session.commit()
 
     async def update_role(self, role_key: str, changes: dict, builtin_codes: set[str]) -> dict:
         """编辑角色（permissions 全量提交；name/description 可选）；返回保存后快照"""
@@ -107,8 +112,10 @@ class RbacService:
         if "description" in changes:
             row.description = changes["description"]
         await self.session.flush()
-        # commit 会 expire ORM 对象：先固化返回值再由调用方提交（防同步 refresh IO）
-        return {"role_key": role_key, "permissions": list(row.permissions or [])}
+        # ADR-0007 D2：先固化返回快照再 commit（expire_on_commit 后属性惰性加载会抛 MissingGreenlet）
+        snapshot = {"role_key": role_key, "permissions": list(row.permissions or [])}
+        await self.session.commit()
+        return snapshot
 
     async def get_role_permissions(self, role_key: str) -> Optional[list[str]]:
         """角色权限码（roles 表单源；miss 返回 None——内置映射回退由调用方决定）"""
@@ -154,7 +161,9 @@ class RbacService:
                           description=payload["description"])
         self.session.add(dept)
         await self.session.flush()
-        return {"id": int(dept.id), "name": str(dept.name), "tenant_id": payload["tenant_id"]}
+        snapshot = {"id": int(dept.id), "name": str(dept.name), "tenant_id": payload["tenant_id"]}
+        await self.session.commit()
+        return snapshot
 
     async def update_department(self, department_id: int, changes: dict) -> None:
         """编辑部门（改名/说明）"""
@@ -166,6 +175,7 @@ class RbacService:
             raise NotFoundException(resource=f"部门 {department_id}")
         for k, v in changes.items():
             setattr(dept, k, v)
+        await self.session.commit()
 
     async def delete_department(self, department_id: int) -> None:
         """软删除部门（成员 department_id 置空回退未分组）"""
@@ -178,6 +188,7 @@ class RbacService:
         await self.session.execute(
             sa_update(User).where(User.department_id == department_id).values(department_id=None))
         dept.deleted_at = func.now()
+        await self.session.commit()
 
     # ---------------- 菜单管理 ----------------
 
@@ -219,7 +230,9 @@ class RbacService:
                    sort_order=payload["sort_order"])
         self.session.add(row)
         await self.session.flush()
-        return int(row.id)
+        menu_id = int(row.id)
+        await self.session.commit()
+        return menu_id
 
     async def update_menu(self, menu_id: int, changes: dict) -> None:
         """编辑菜单"""
@@ -230,6 +243,7 @@ class RbacService:
             raise NotFoundException(resource=f"菜单 {menu_id}")
         for k, v in changes.items():
             setattr(row, k, v)
+        await self.session.commit()
 
     async def delete_menu(self, menu_id: int) -> None:
         """删除菜单（存在子菜单禁删；物理删——变更走操作审计）"""
@@ -243,6 +257,7 @@ class RbacService:
         if int(children) > 0:
             raise BusinessException(f"存在 {children} 个子菜单，先删子级")
         await self.session.delete(row)
+        await self.session.commit()
 
     # ---------------- 权限资源管理 ----------------
 
@@ -279,7 +294,9 @@ class RbacService:
                          description=payload["description"])
         self.session.add(row)
         await self.session.flush()
-        return {"id": int(row.id), "code": payload["code"]}
+        snapshot = {"id": int(row.id), "code": payload["code"]}
+        await self.session.commit()
+        return snapshot
 
     async def update_permission(self, permission_id: int, changes: dict) -> str:
         """编辑权限资源；返回权限码（供审计）"""
@@ -291,6 +308,7 @@ class RbacService:
         code = row.code
         for k, v in changes.items():
             setattr(row, k, v)
+        await self.session.commit()
         return code
 
     async def delete_permission(self, permission_id: int) -> str:
@@ -307,4 +325,5 @@ class RbacService:
             if code in (r.permissions or []):
                 raise BusinessException(f"权限码 {code} 仍被角色「{r.name}」引用，先解除再删")
         await self.session.delete(row)
+        await self.session.commit()
         return code

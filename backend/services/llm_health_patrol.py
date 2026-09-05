@@ -110,7 +110,9 @@ class LlmHealthPatrol:
                 )).scalars().all()
                 for model_id in models:
                     try:
-                        await svc.test_model(provider.id, model_id)
+                        # ADR-0007 D3：巡检整轮一个事务（外层统一 commit）；
+                        # 中途提交会 expire 循环内 provider 行 → MissingGreenlet
+                        await svc.test_model(provider.id, model_id, commit=False)
                         tested += 1
                     except Exception as exc:  # noqa: BLE001 单模型失败不中断整轮
                         logger.warning(f"巡检单模型失败 | provider={provider.name} model={model_id} err={exc}")

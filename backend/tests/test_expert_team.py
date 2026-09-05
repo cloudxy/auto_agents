@@ -78,7 +78,8 @@ async def test_team_crud_and_dangling_ref(db_session, expert_library):
             members=["code-reviewer"],  # 单成员自组团（测试简化）
             workflow_md="团长拆解 → 并行评审 → 汇总")
         await s.commit()
-        assert team.name == "review-team"
+        # ADR-0007 D2：返回名称快照（dict），不再回传 ORM 实例
+        assert team == {"name": "review-team", "created": True}
 
         exported = await TeamService(s).export_team_md("review-team")
     assert "团长" in exported and "code-reviewer" in exported

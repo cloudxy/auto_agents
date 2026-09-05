@@ -118,7 +118,6 @@ async def create_role(
 ):
     """新建自定义角色（role_key 唯一；权限码集合可后配）"""
     result = await service.create_role(payload.model_dump(), builtin_codes=_BUILTIN_CODES)
-    await session.commit()
     await record_audit(session, user, "role.create", f"role:{result['role_key']}")
     return created(data=result)
 
@@ -132,7 +131,6 @@ async def delete_role(
 ):
     """删除角色（内置禁删；有用户在用禁删）"""
     await service.delete_role(role_key)
-    await session.commit()
     await record_audit(session, user, "role.delete", f"role:{role_key}")
     return ok(data={"role_key": role_key, "deleted": True})
 
@@ -148,7 +146,6 @@ async def update_role(
     """编辑角色（权限分配：permissions 集合全量提交；/auth/permissions 即时生效）"""
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
     result = await service.update_role(role_key, changes, builtin_codes=_BUILTIN_CODES)
-    await session.commit()
     await record_audit(session, user, "role.update", f"role:{role_key}",
                        detail={"fields": sorted(changes.keys())})
     logger.info(f"角色更新 | role={role_key} perms={len(result['permissions'])}")
@@ -176,7 +173,6 @@ async def create_department(
 ):
     """创建部门（租户内名唯一）"""
     result = await service.create_department(payload.model_dump())
-    await session.commit()
     await record_audit(session, user, "department.create", f"department#{result['id']}",
                        detail={"tenant_id": result["tenant_id"], "name": result["name"]})
     return created(data={"id": result["id"], "name": result["name"]})
@@ -193,7 +189,6 @@ async def update_department(
     """编辑部门（改名/说明；成员挂接走用户管理）"""
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
     await service.update_department(department_id, changes)
-    await session.commit()
     await record_audit(session, user, "department.update", f"department#{department_id}", detail=changes)
     return updated(data={"id": department_id, **changes})
 
@@ -207,7 +202,6 @@ async def delete_department(
 ):
     """软删除部门（成员 department_id 置空回退未分组）"""
     await service.delete_department(department_id)
-    await session.commit()
     await record_audit(session, user, "department.delete", f"department#{department_id}")
     return ok(data={"id": department_id, "deleted": True})
 
@@ -258,7 +252,6 @@ async def create_menu(
     service: RbacService = Depends(_service),
 ):
     menu_id = await service.create_menu(payload.model_dump())
-    await session.commit()
     await record_audit(session, user, "menu.create", f"menu#{menu_id}", detail={"name": payload.name})
     return created(data={"id": menu_id})
 
@@ -273,7 +266,6 @@ async def update_menu(
 ):
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
     await service.update_menu(menu_id, changes)
-    await session.commit()
     await record_audit(session, user, "menu.update", f"menu#{menu_id}", detail=changes)
     return updated(data={"id": menu_id, **changes})
 
@@ -287,7 +279,6 @@ async def delete_menu(
 ):
     """删除菜单（级联删除子菜单；物理删——菜单无审计追溯需求，变更走操作审计）"""
     await service.delete_menu(menu_id)
-    await session.commit()
     await record_audit(session, user, "menu.delete", f"menu#{menu_id}")
     return ok(data={"id": menu_id, "deleted": True})
 
@@ -331,7 +322,6 @@ async def create_permission(
     service: RbacService = Depends(_service),
 ):
     result = await service.create_permission(payload.model_dump())
-    await session.commit()
     await record_audit(session, user, "permission.create", result["code"])
     return created(data={"id": result["id"], "code": result["code"]})
 
@@ -346,7 +336,6 @@ async def update_permission(
 ):
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
     code = await service.update_permission(permission_id, changes)
-    await session.commit()
     await record_audit(session, user, "permission.update", code, detail=changes)
     return updated(data={"id": permission_id, **changes})
 
@@ -359,6 +348,5 @@ async def delete_permission(
     service: RbacService = Depends(_service),
 ):
     code = await service.delete_permission(permission_id)
-    await session.commit()
     await record_audit(session, user, "permission.delete", code)
     return ok(data={"id": permission_id, "deleted": True})

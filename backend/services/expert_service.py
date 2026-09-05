@@ -55,8 +55,11 @@ class ExpertService:
         job.total, job.succeeded, job.failed, job.status = len(dirs), succeeded, failed, "done"
         job.detail = {"failed": failed_names}
         await self.session.flush()
-        return {"total": len(dirs), "succeeded": succeeded, "failed": failed,
-                "failed_names": failed_names, "job_id": job.id}
+        # ADR-0007 D2：快照先于 commit（job 属性 expire 后读取会抛 MissingGreenlet）
+        result = {"total": len(dirs), "succeeded": succeeded, "failed": failed,
+                  "failed_names": failed_names, "job_id": job.id}
+        await self.session.commit()
+        return result
 
     async def _upsert_from_dir(self, expert_dir: Path, root: Path) -> CapabilityAsset:
         agent_path = expert_dir / "AGENT.md"
@@ -160,8 +163,12 @@ class TeamService:
         self.session = session
 
     async def upsert_team(self, name: str, leader: str, members: list[str],
-                          workflow_md: str = "", title: str = "") -> CapabilityAsset:
-        """创建/更新专家团（成员/团长引用校验）"""
+                          workflow_md: str = "", title: str = "") -> dict:
+        """创建/更新专家团（成员/团长引用校验）
+
+        ADR-0007 D2：返回名称快照（dict）——不再回传 ORM 实例，
+        commit 后调用方读 ORM 属性会触发惰性加载抛 MissingGreenlet。
+        """
         logger.info(f"专家团 upsert | team={name} leader={leader} members={len(members)}")
         all_refs = [leader] + [m for m in members if m != leader]
         for ref in all_refs:
@@ -179,7 +186,8 @@ class TeamService:
                 CapabilityAsset.asset_type == "expert_team", CapabilityAsset.name == name
             )
         )).scalar_one_or_none()
-        if asset is None:
+        created = asset is None
+        if created:
             asset = CapabilityAsset(
                 asset_type="expert_team", name=name,
                 title=title or f"专家团 {name}", category="team",
@@ -197,7 +205,9 @@ class TeamService:
         detail.members = members
         detail.workflow_md = workflow_md
         await self.session.flush()
-        return asset
+        snapshot = {"name": str(asset.name), "created": created}
+        await self.session.commit()
+        return snapshot
 
     async def get_team_detail(self, name: str) -> dict:
         asset = (await self.session.execute(

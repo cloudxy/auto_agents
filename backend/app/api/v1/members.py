@@ -52,7 +52,6 @@ async def create_member(
 ):
     """创建子账号（tenant_role: owner/admin/operator/viewer）"""
     result = await service.create_member(user.tenant_id, body)
-    await session.commit()
     await record_audit(session, user, "member.create", f"user#{result['id']}")
     return created(data=result)
 
@@ -67,7 +66,6 @@ async def patch_member(
 ):
     """角色分配 / 禁用（owner 不可变更/禁用）"""
     result = await service.patch_member(user.tenant_id, member_id, body)
-    await session.commit()
     await record_audit(session, user, "member.update", f"user#{member_id}", detail=body)
     return ok(data=result)
 
@@ -81,7 +79,6 @@ async def delete_member(
 ):
     """删除成员（软删：owner 与当前登录账号不可删；收件箱随账号清理，审计保留）"""
     result = await service.delete_member(user.tenant_id, member_id, actor_id=user.id)
-    await session.commit()
     await record_audit(session, user, "member.delete", f"user#{member_id}")
     return ok(data=result)
 
@@ -96,7 +93,6 @@ async def reset_member_password(
 ):
     """重置成员密码"""
     result = await service.reset_password(user.tenant_id, member_id, str(body.get("new_password") or ""))
-    await session.commit()
     await record_audit(session, user, "member.reset_password", f"user#{member_id}")
     return ok(data=result)
 

@@ -252,8 +252,12 @@ class LlmProviderService:
             "vanished": sorted(local_ids - remote_ids),
         }
 
-    async def test_model(self, provider_id: int, model_id: str) -> dict:
-        """单模型 1-token 测试（落库行持久化健康态；未落库行一次性测试即回）：200→healthy / 401·403→down / 其余→degraded"""
+    async def test_model(self, provider_id: int, model_id: str, *, commit: bool = True) -> dict:
+        """单模型 1-token 测试（落库行持久化健康态；未落库行一次性测试即回）：200→healthy / 401·403→down / 其余→degraded
+
+        ADR-0007 D3：默认自持事务（API 直调）；被巡检等批量场景组合时传
+        commit=False，由外层统一提交（中途提交会 expire 循环内 ORM 行）。
+        """
         import time
 
         logger.info(f"模型连通测试 | provider={provider_id} model={model_id}")
@@ -296,6 +300,8 @@ class LlmProviderService:
             # 未落库模型（导入新增的预览测试）：一次性测试，结果即回不落库——
             # 保存（put_models）后再次测试才持久化健康态
             logger.debug(f"模型未落库，一次性测试 | provider={provider_id} model={model_id}")
+        if commit and row is not None:
+            await self.session.commit()
         return {"ok": ok, "latency_ms": latency_ms, "model": model_id, "error": error, "health_status": status}
 
     # ---------- B-M2-1 多模型（全量替换 + 默认冗余同步） ----------
@@ -353,6 +359,7 @@ class LlmProviderService:
         elif entries:
             provider.model = entries[0]["model_id"]
         await self.session.flush()
+        await self.session.commit()
         await _invalidate_llm_clients(provider_id)
         return await self.get_models(provider_id)
 

@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.api._helpers import record_audit
 from backend.app.api.deps import CurrentUser, require_admin, require_login, require_operator
 from backend.app.responses import ok
-from backend.repositories.skill_repository import SkillRepository, SkillReviewRepository
 import backend.services.skill_import_service as _skill_import_service
 from backend.services.skill_service import SkillService
 from platform_core.db import get_async_db
@@ -36,14 +35,6 @@ def _service(session: AsyncSession = Depends(get_async_db)) -> SkillService:
     return SkillService(session)
 
 
-def _repo(session: AsyncSession = Depends(get_async_db)) -> SkillRepository:
-    return SkillRepository(session)
-
-
-def _review_repo(session: AsyncSession = Depends(get_async_db)) -> SkillReviewRepository:
-    return SkillReviewRepository(session)
-
-
 # ---------- 静态段（必须先于 /{name}） ----------
 
 
@@ -53,9 +44,8 @@ async def scan_skills(
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """全量/增量扫描 capability-library（admin）"""
+    """全量/增量扫描 capability-library（admin）；事务由 service 持有（ADR-0007）"""
     summary = await service.scan_library()
-    await session.commit()
     await record_audit(session, user, "skill.scan", "skills", detail={"total": summary["total"]})
     return ok(data=summary)
 
@@ -77,7 +67,6 @@ async def import_skill_from_url(
         category=body.get("category"),
         industries=body.get("industries"),
     )
-    await session.commit()
     await record_audit(session, user, "skill.import", f"skill#{result['name']}", detail={"url": url})
     return ok(data=result)
 
@@ -124,7 +113,6 @@ async def similar_suggest(
 ):
     """AI 辅助同类候选（建议区，不动 similar_to；确认走 similar-confirm）"""
     result = await service.similar_suggest()
-    await session.commit()
     await record_audit(session, user, "skill.similar.suggest", "skills")
     return ok(data=result)
 
@@ -139,7 +127,6 @@ async def similar_confirm(
     """人工确认等价簇 → 互写 similar_to"""
     groups = [g for g in (body.get("groups") or []) if isinstance(g, list) and len(g) >= 2]
     result = await service.similar_confirm(groups)
-    await session.commit()
     await record_audit(session, user, "skill.similar.confirm", "skills", detail={"groups": len(groups)})
     return ok(data=result)
 
@@ -171,7 +158,6 @@ async def approve_skill_candidate(
     result = await service.approve_candidate(
         result_id, importer=_skill_import_service.SkillImportService
     )
-    await session.commit()
     await record_audit(session, user, "skill.candidate.approve", f"candidate#{result_id}")
     return ok(data=result)
 
@@ -185,7 +171,6 @@ async def reject_skill_candidate(
 ):
     """候选拒绝：标记已审；同名已入库技能置 blacklist"""
     result = await service.reject_candidate(result_id)
-    await session.commit()
     await record_audit(session, user, "skill.candidate.reject", f"candidate#{result_id}")
     return ok(data=result)
 
@@ -208,10 +193,10 @@ async def list_skill_jobs(
 async def list_skills(
     q: SkillQuery = Depends(),
     user: CurrentUser = Depends(require_login),
-    repo: SkillRepository = Depends(_repo),
+    service: SkillService = Depends(_service),
 ):
     """技能库列表（筛选/排序/分页）"""
-    rows, total = await repo.list_skills(
+    rows, total = await service.list_skills(
         q=q.q, category=q.category, status=q.status, tier=q.tier,
         source_type=q.source_type, industry=q.industry, sort=q.sort,
         offset=(q.page - 1) * q.page_size, limit=q.page_size,
@@ -224,15 +209,14 @@ async def list_skills(
 async def get_skill_detail(
     name: str,
     user: CurrentUser = Depends(require_login),
-    repo: SkillRepository = Depends(_repo),
-    review_repo: SkillReviewRepository = Depends(_review_repo),
+    service: SkillService = Depends(_service),
 ):
     """技能详情：治理字段 + SKILL.md 正文只读 + meta.yaml 原文 + 最近评分历史"""
-    row = await repo.get_by_name(name)
+    row = await service.get_by_name(name)
     if not row:
         raise NotFoundException(resource=f"技能 {name}")
 
-    reviews = await review_repo.list_by_skill(row.id, limit=20)
+    reviews = await service.list_reviews(row.id, limit=20)
     detail = SkillDetailResponse.model_validate(row)
     detail.skill_md, detail.meta_yaml = _read_skill_files(row.file_path)
     detail.reviews = [SkillReviewResponse.model_validate(rv) for rv in reviews]
@@ -243,13 +227,13 @@ async def get_skill_detail(
 async def rescore_skill(
     name: str,
     user: CurrentUser = Depends(require_operator),
+    service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
     """手动触发 AI 重评（入队；评分由后台 worker 消费）"""
     from backend.services.skill_scoring_service import SkillScoringService
 
-    repo = SkillRepository(session)
-    if not await repo.get_by_name(name):
+    if not await service.get_by_name(name):
         raise NotFoundException(resource=f"技能 {name}")
     queued = await SkillScoringService.enqueue_rescore(name)
     await record_audit(session, user, "skill.rescore", f"skill#{name}")
@@ -273,7 +257,6 @@ async def correct_skill_meta(
     if not payload:
         raise ValidationException(message="无可矫正字段", field="url")
     result = await service.correct_meta(name, reviewer=user.username, payload=payload)
-    await session.commit()
     await record_audit(session, user, "skill.correct", f"skill#{name}", detail=payload)
     return ok(data=result)
 
@@ -287,7 +270,6 @@ async def export_skill_meta(
 ):
     """手动补导出 meta.yaml（写回失败后的恢复路径）"""
     done = await service.export_meta(name)
-    await session.commit()
     await record_audit(session, user, "skill.export_meta", f"skill#{name}")
     return ok(data={"name": name, "written_back": done})
 

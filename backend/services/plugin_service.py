@@ -56,8 +56,11 @@ class PluginService:
         job.total, job.succeeded, job.failed, job.status = len(dirs), succeeded, failed, "done"
         job.detail = {"failed": failed_names}
         await self.session.flush()
-        return {"total": len(dirs), "succeeded": succeeded, "failed": failed,
-                "failed_names": failed_names, "job_id": job.id}
+        # ADR-0007 D2：快照先于 commit（job 属性 expire 后读取会抛 MissingGreenlet）
+        result = {"total": len(dirs), "succeeded": succeeded, "failed": failed,
+                  "failed_names": failed_names, "job_id": job.id}
+        await self.session.commit()
+        return result
 
     async def _upsert_from_dir(self, plugin_dir: Path, root: Path) -> CapabilityAsset:
         manifest_path = plugin_dir / "plugin.json"
@@ -175,7 +178,9 @@ class PluginService:
             detail.verify_detail = {"error": "插件未声明 MCP servers（无可验证工具链）"}
             detail.last_verified_at = _utcnow()
             await self.session.flush()
-            return {"health": "degraded", "detail": detail.verify_detail}
+            result = {"health": "degraded", "detail": dict(detail.verify_detail)}
+            await self.session.commit()
+            return result
 
         # 逐 server 验证；任一 healthy 即 healthy，全部 down 才 down
         results = {}
@@ -193,4 +198,5 @@ class PluginService:
         detail.verify_detail = {"servers": results, "verified_at": _utcnow().isoformat()}
         detail.last_verified_at = _utcnow()
         await self.session.flush()
+        await self.session.commit()
         return {"health": overall, "detail": results}
