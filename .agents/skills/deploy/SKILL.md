@@ -1,6 +1,13 @@
 ---
 name: deploy
-description: 生成 Docker 部署配置
+description: >-
+  生成 Docker 部署配置。当用户需要将项目部署到服务器、进行容器化打包、
+  生成或修改 Dockerfile / docker-compose.yml / .env 配置时触发。
+  适用于首次部署、环境迁移、新增服务的容器化，以及调整已有部署的端口映射、
+  环境变量、数据卷等配置的场景。
+trigger: >-
+  部署到服务器、生成 Docker 配置、容器化项目、环境迁移、
+  调整端口映射/环境变量/数据卷、首次部署或新增服务容器化
 ---
 
 # 生成 Docker 部署配置
@@ -24,110 +31,53 @@ description: 生成 Docker 部署配置
 
 ### Step 2: 生成文件
 
-#### Backend Dockerfile
+根据部署信息，从 [references/docker-templates.md](references/docker-templates.md) 中选取并定制以下模板：
 
-```dockerfile
-FROM python:3.11-slim
+| 模板 | 用途 |
+|------|------|
+| Backend Dockerfile | Python 3.11-slim + uvicorn 启动 |
+| Frontend Dockerfile | Node 多阶段构建 + nginx 静态服务 |
+| docker-compose.yml | MySQL + Redis + Backend + Frontend 编排 |
+| .env.example | 环境变量模板（DB / Redis / 端口） |
+| 部署命令 | docker-compose up -d / logs / rebuild |
 
-WORKDIR /app
-RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+## 预期产出物
 
-RUN useradd -m appuser && USER appuser
-EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"]
+完成后**必须**存在以下文件，缺少任何一个 = 未完成：
+
+```
+✅ 文件清单
+Dockerfile                                    # 后端容器（或按需求生成多个）
+docker-compose.yml                            # 服务编排
+.env.example                                  # 环境变量模板（无真实密码/密钥）
 ```
 
-#### Frontend Dockerfile
+如包含前端部署，额外产出：
 
-```dockerfile
-FROM node:18-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci && COPY . . && npm run build
-
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+```
+frontend/{admin,official}/Dockerfile          # 前端多阶段构建容器
+nginx.conf                                    # 反向代理配置
 ```
 
-#### docker-compose.yml
+## 验证步骤
 
-```yaml
-version: '3.8'
-
-services:
-  mysql:
-    image: mysql:8.0
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-    volumes:
-      - mysql_data:/var/lib/mysql
-    ports:
-      - "${DB_PORT:-3306}:3306"
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
-  backend:
-    build: ./backend
-    environment:
-      DB_HOST: mysql
-      REDIS_HOST: redis
-    depends_on:
-      - mysql
-      - redis
-    volumes:
-      - ./logs:/app/logs
-    restart: unless-stopped
-
-  frontend:
-    build: ./frontend
-    depends_on:
-      - backend
-    restart: unless-stopped
-
-volumes:
-  mysql_data:
-  redis_data:
-```
-
-#### .env.example
+生成配置后，**必须**依次执行以下验证（调用 `/verify`）：
 
 ```bash
-ENVIRONMENT=production
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_password_here
-DB_NAME=myapp
-REDIS_HOST=localhost
-REDIS_PORT=6379
-BACKEND_PORT=8000
-FRONTEND_PORT=3000
-```
+# 1. Docker 构建检查
+docker build -t _verify . && docker run --rm _verify echo ok
+# 期望：build + run 退出码 0
 
-### Step 3: 部署命令
+# 2. docker-compose 配置验证
+docker-compose config
+# 期望：输出有效 YAML，无报错
 
-```bash
-# 1. 创建 .env 文件
-cp .env.example .env
+# 3. 环境变量安全检查（禁止硬编码密钥）
+grep -nE "password|secret|key" docker-compose.yml .env.example
+# 期望：.env.example 用占位符，docker-compose.yml 用 ${} 引用
 
-# 2. 构建并启动
+# 4. 服务启动验证
 docker-compose up -d
-
-# 3. 查看日志
-docker-compose logs -f
-
-# 4. 重新构建
-docker-compose up -d --build
+sleep 5 && docker-compose ps
+# 期望：所有服务状态为 Up / running
 ```

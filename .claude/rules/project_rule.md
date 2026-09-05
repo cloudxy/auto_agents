@@ -48,6 +48,30 @@ trigger: always_on
 | 模型即契约 | ORM 模型禁止 import Pydantic schema | `grep -rE "from.*\.schemas import" platform_core/models/` |
 | 数据流向不可逆 | 禁止循环 import（A→B→A） | `python -c "import backend.app"` 能否成功加载 |
 | 日志即证据 | service 方法必须有入口 logger | code review：每个 public 方法第一行 `logger.info` |
+| 异步优先 | async 上下文禁止同步 `redis_client()` 链式直调（阻塞事件循环），统一走 `get_async_redis()` | `grep -rnE 'redis_client\([^)]*\)\.' backend/` |
+| 门面退役过渡 | 禁止白名单外 import 过渡门面 backend.services.spider_service | 白名单见 scripts/check-arch.sh |
+
+## 核心代码边界（模块依赖方向）
+
+除上述红线外，模块间的依赖方向必须严格遵守以下边界（`check-arch.sh` B1-B3 机械检查）：
+
+| 边界 | 规则 | 依赖方向 |
+|------|------|----------|
+| B1 | `platform_core/` 禁止 import `backend/` 或 `scrapy/` | platform_core → config（单向） |
+| B2 | `backend/` 禁止 import `scrapy/` | backend ⇏ scrapy（通过 Redis 队列 / API 解耦） |
+| B3 | `config/` 禁止 import `backend/`、`scrapy/`、`platform_core/` | config 是最底层，无上层依赖 |
+
+**依赖方向图**（从上到下，只允许向下依赖）：
+
+```
+scrapy/  ──┐
+             ├──► platform_core/ ──► config/
+backend/ ──┘
+```
+
+- `config/` 是地基：任何模块都可以读配置，但配置层不依赖任何业务代码
+- `platform_core/` 是共享基建：只能依赖 `config/`，禁止反向依赖业务模块
+- `backend/` 和 `scrapy/` 是平行业务模块：互相禁止直接 import，通过 Redis 队列 / HTTP API 解耦
 
 ## 设计原则
 
@@ -128,7 +152,7 @@ trigger: always_on
 | 创建服务模块 | `/new-svc` |
 | 创建爬虫 | `/new-spider` |
 | 创建数据模型 | `/new-model` |
-| 架构合规检查（10 条红线） | `/check-arch` |
+| 架构合规检查（12 条红线） | `/check-arch` |
 | 交付自检 | `/verify` |
 | 编码规范 | `/coding-style` |
 | 日志规范 | `/logging` |

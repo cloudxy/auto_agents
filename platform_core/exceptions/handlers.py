@@ -89,11 +89,12 @@ async def validation_exception_handler(request: Request, exc):
 async def general_exception_handler(request: Request, exc: Exception):
     """处理未捕获的通用异常（兜底）"""
     request_id = getattr(request.state, "request_id", str(uuid.uuid4())[:8])
-    
-    logger.error(
+
+    # 用 opt(exception=...) 记录堆栈：异常 message 可能含 SQL 参数花括号，
+    # 若走 loguru 的位置参数 format（exc_info=True）会触发 KeyError
+    logger.opt(exception=exc).error(
         f"未捕获异常 | request_id={request_id} | "
-        f"type={type(exc).__name__} | message={str(exc)}",
-        exc_info=True
+        f"type={type(exc).__name__} | message={str(exc)}"
     )
     
     return JSONResponse(

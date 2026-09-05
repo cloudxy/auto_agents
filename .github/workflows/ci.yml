@@ -1,0 +1,175 @@
+# Auto Agents CI - lint + test + arch-check + db-migration-gate + frontend build + docker validate
+#
+# 五阶段质量关卡（对齐 /cicd Skill 与 /verify Skill 的验证约定）：
+# 1. python-lint-test:  ruff lint + pytest（backend/tests）
+# 2. arch-check:        scripts/check-arch.sh 的 12 条架构红线 + 3 条核心边界
+# 3. db-migration-gate: scripts/check-db-ir.sh + check-db-migrations.sh 迁移破坏性变更门禁
+# 4. frontend-build:    admin + official 两个 React 应用构建
+# 5. docker-validate:   Dockerfile 构建 + compose 语法校验
+#
+# 触发：推送任意分支 + 向 main 发起 PR
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  python-lint-test:
+    name: Python Lint & Test
+    runs-on: ubuntu-latest
+    services:
+      # MySQL 保真通道（E0.1c）：跑迁移/方言敏感测试的子集，凭据为一次性容器口令
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: "testroot"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -ptestroot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Ruff lint
+        run: uv run ruff check backend platform_core scripts
+
+      - name: Pytest
+        env:
+          APP_ENV: local
+          AUTO_AGENTS_JWT__SECRET_KEY: ci-test-secret-key-not-for-production
+          AUTO_AGENTS_WEBHOOK__SECRET_KEY: ci-test-webhook-secret
+          MYSQL_DEFAULT_PASSWORD: testroot
+        run: uv run pytest -x -q --tb=short backend/tests
+
+      - name: Pytest (MySQL 保真通道子集)
+        env:
+          APP_ENV: local
+          AUTO_AGENTS_JWT__SECRET_KEY: ci-test-secret-key-not-for-production
+          AUTO_AGENTS_WEBHOOK__SECRET_KEY: ci-test-webhook-secret
+          MYSQL_FIDELITY: "1"
+          MYSQL_FIDELITY_HOST: 127.0.0.1
+          MYSQL_FIDELITY_PORT: "3306"
+          MYSQL_FIDELITY_USER: root
+          MYSQL_FIDELITY_PASSWORD: testroot
+        # T10 扩容：基建冒烟 3 文件 + saas/members（真链路 JWT + 租户快照）+
+        # auth 登录链 + admin 用户 CRUD + rbac 深链 + 方言回归（0e0aaf8）。
+        # 时长估算：39 用例 ×（每测试独立 schema 建删 + create_all）≈ +1~2min，
+        # 未超时。若某文件在真库暴露方言差异（正是本通道目的），处置见
+        # .scratch/p0-p1-2026-09/issues/T10.md 的分级方案：先单独验证修复，
+        # 期间将该文件移入观察名单（不要整通道降级）。
+        run: >-
+          uv run pytest -q
+          backend/tests/test_mysql_fidelity.py
+          backend/tests/test_db_fixtures.py
+          backend/tests/test_alembic_baseline.py
+          backend/tests/test_t10_fix_regressions.py
+          backend/tests/test_saas_members.py
+          backend/tests/test_auth_login_tenant.py
+          backend/tests/test_admin_users_crud.py
+          backend/tests/test_saas_rbac_deep.py
+
+  arch-check:
+    name: Architecture Red Lines (12 rules + 3 boundaries)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Run check-arch.sh
+        run: bash scripts/check-arch.sh
+
+  db-migration-gate:
+    name: DB Migration Gate (check-db-ir + check-db-migrations)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 纯静态检查（AST + grep，仅需 runner 自带的 python3 与 git），无 DB 依赖，
+      # 故不挂 MySQL service 容器。脚本退出码 = 违规数，非零即红。
+      # CI 下 git diff 无增量 → 脚本自动兜底扫描 backend/alembic/versions 全部迁移。
+      - name: Run check-db-ir.sh (DBML IR lint)
+        run: bash scripts/check-db-ir.sh
+
+      - name: Run check-db-migrations.sh (strong_migrations 语义)
+        run: bash scripts/check-db-migrations.sh
+
+  frontend-build:
+    name: Frontend Build (admin + official)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          # npm workspaces：lockfile 已收敛到根（D2，npm@10 生成）
+          cache-dependency-path: package-lock.json
+
+      # workspaces 根安装 + shared 先构建（D1/D2：app 经 dist 产物消费 shared）
+      - name: Install workspaces
+        run: npm ci
+
+      - name: Generate OpenAPI types
+        run: |
+          uv python install 3.13 >/dev/null 2>&1 || true
+          uv run python scripts/dump_openapi.py
+          npm run codegen:api -w @auto-agents/frontend-shared
+
+      - name: Build shared
+        run: npm run build -w @auto-agents/frontend-shared
+
+      - name: Frontend gate (F-5/F-6)
+        run: bash scripts/check-frontend.sh
+
+      - name: Build admin
+        run: CI= npm run build -w admin
+
+      - name: Test admin
+        run: npm test -w admin
+
+      - name: Build official
+        run: CI= npm run build -w official
+
+      - name: Test official
+        run: npm test -w official
+
+  docker-validate:
+    name: Docker Validate (build + compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml syntax
+        run: docker compose config --quiet
+
+      - name: Build Dockerfile
+        run: docker build --progress=plain --no-cache -t auto-agents-backend .

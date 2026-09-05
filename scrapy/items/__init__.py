@@ -4,6 +4,9 @@ import scrapy
 
 class BaseItem(scrapy.Item):
     """基础数据项"""
+    # 内部归属字段（阶段 4.1）：由 TaskAttribution 中间件从响应 meta 注入，
+    # StorePipeline 读取后弹出，不进入业务字段序列化
+    task_id = scrapy.Field()
     # 唯一标识
     id = scrapy.Field()
     # 标题
@@ -20,6 +23,12 @@ class BaseItem(scrapy.Item):
     updated_at = scrapy.Field()
     # 额外数据（JSON）
     extra = scrapy.Field()
+    # 数据质量评分（B1）：QualityCheckPipeline 写入（0-100），随 StorePipeline 推送队列，
+    # Backend 消费者弹出后落库 spider_results.quality_score。
+    # 必须声明于此：scrapy.Item 只允许写入已声明字段，未声明会在 __setitem__ 抛 KeyError，
+    # 导致 item 被丢弃 → item_scraped 不触发 → 爬虫永不收尾（任务卡 running）。
+    # 声明在 BaseItem 上使所有 Item 子类（含 flow_generic 经 build_item 产出的实例）可安全写入。
+    _quality_score = scrapy.Field()
 
 
 class HotSearchItem(BaseItem):

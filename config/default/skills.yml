@@ -1,0 +1,17 @@
+# 能力资产中心配置（P6）——本文件只含非敏感项（R1 红线）
+SKILLS:
+  # 能力资产库根目录（P6 泛化：下分 skills/plugins/experts/teams/）；相对仓库根或绝对路径
+  LIBRARY_ROOT: "capability-library"
+  # lifespan 启动时是否增量扫描一次（本地单机语义）
+  SCAN_ON_STARTUP: false
+  SCORING:
+    ENABLED: false
+    MODEL: ""
+    MAX_CONCURRENCY: 1
+    PROMPT_VERSION: "v1"
+    MAX_TOKENS_BUDGET: 0
+  PUBLIC_API:
+    ENABLED: true
+    RATE_LIMIT_PER_MIN: 60
+  ADAPTER_SYNC:
+    ENABLED: false

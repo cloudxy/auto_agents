@@ -25,3 +25,14 @@ ITEM_PIPELINES:
   pipelines.CleanPipeline: 200
   pipelines.ValidatePipeline: 300
   pipelines.StorePipeline: 400
+
+# === 任务收尾 ===
+# 空闲自动收尾（秒）：>0 时单次任务模式下连续空闲即以 finished 收尾；
+# 0 = 禁用（常驻分布式 Worker 场景）
+SPIDER_IDLE_CLOSE_SECONDS: 0
+
+# === 代理池（配置化，默认关闭直连） ===
+# 代理源优先级：PROXY_REDIS_KEY（Redis List 动态池）> PROXY_LIST（静态列表）
+PROXY_ENABLED: false
+PROXY_LIST: []            # 静态代理，如 ["http://user:pass@host:port"]
+PROXY_REDIS_KEY: ""       # 动态代理池 Redis 键（List），留空则仅用静态列表

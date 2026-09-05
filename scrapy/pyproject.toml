@@ -2,7 +2,6 @@
 name = "auto-agents-spider"
 version = "0.1.0"
 description = "AutoAgents 分布式爬虫模块"
-readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "scrapy>=2.15.0",
@@ -12,9 +11,14 @@ dependencies = [
     "dynaconf>=3.2.13",
     "drissionpage>=4.1.1.2",
     "selenium>=4.43.0",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
 ]
+
+[tool.setuptools]
+# 平铺多包显式声明（防 flat-layout 误判）
+packages = ["spiders", "middlewares", "pipelines", "items", "extensions", "utils"]

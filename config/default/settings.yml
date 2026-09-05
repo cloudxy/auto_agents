@@ -6,3 +6,73 @@ VERSION: "0.1.0"
 
 # === 环境标识 ===
 ENVIRONMENT: "local"  # local, dev, prod
+
+# === 后台任务消费者 ===
+# Redis 任务/结果双队列消费者（随 Backend lifespan 启动）
+# 设为 false 可禁用消费者（测试环境、纯 API 部署场景）
+# 引用方式：settings.get("TASKS.CONSUMER_ENABLED", True)
+TASKS:
+  CONSUMER_ENABLED: true
+  # 运行中任务超时回收（P0-1b）：running 超过 N 小时且 Redis 活跃集合无该任务
+  # → 置 failed（爬虫崩溃/webhook 丢失场景的兜底，防止任务永久卡 running）
+  STALE_TASK_HOURS: 6         # 阈值小时数（0 = 关闭回收）
+  STALE_RECOVER_INTERVAL: 300 # 回收扫描周期（秒）
+
+# === 定时调度器 ===
+# 扫描 spider_schedules 表中到期的计划并触发任务入队（随 Backend lifespan 启动）
+# 引用方式：settings.get("SCHEDULER.ENABLED", True)
+SCHEDULER:
+  ENABLED: true
+  TICK_SECONDS: 30        # 扫描间隔（秒）
+  LOCK_TTL_SECONDS: 25    # 多实例互斥锁的过期时间；实际生效值 = max(本值, 2×TICK_SECONDS)（schedule_service 兜底）
+  QUIET_HOURS: []           # 静默时段，如 ["02:00-06:00"]，空列表 = 不启用
+  QUEUE_DEPTH_WARN: 50      # 队列深度告警阈值（单级队列）
+  DYNAMIC_PRIORITY: true    # 是否启用动态优先级（基于历史数据）
+  SLOW_TASK_THRESHOLD: 300  # 慢任务阈值（秒），超过则提升优先级
+  LOW_SUCCESS_THRESHOLD: 0.5  # 低成功率阈值，低于则降低优先级
+
+# === 爬虫任务失败自动重试 ===
+# failed 回调落地时若未达上限，自动重新入队（引用：settings.get("SPIDER_MAX_RETRIES", 2)）
+SPIDER_MAX_RETRIES: 2
+
+# === 同爬虫并发任务上限（阶段 4.1） ===
+# 活跃任务集合（ACTIVE_TASK_KEY SET）成员数达上限时拒绝新任务入队；
+# 并发下结果归属改走请求 meta（引用：settings.get("SPIDER_MAX_CONCURRENT_PER_SPIDER", 2)）
+SPIDER_MAX_CONCURRENT_PER_SPIDER: 2
+
+# === Worker 节点心跳（2.2） ===
+# run_spider.py 进程级心跳写 Redis（spider:worker:{id}），Backend 扫描展示节点状态
+# 引用方式：settings.get("WORKER_HEARTBEAT.INTERVAL_SECONDS", 10)
+WORKER_HEARTBEAT:
+  INTERVAL_SECONDS: 10   # 续约间隔（秒）
+  TTL_SECONDS: 30        # 键过期时间（秒），到期未续约视为离线（需大于续约间隔 2 倍以上）
+
+# === 代理池健康管理（B3） ===
+# 评分驱动的智能代理管理：后台定时探测低分代理，评分加权选择代理
+# 仅当 PROXY_ENABLED=true 时才有意义；默认关闭（需要代理池才有效）
+# 引用方式：settings.get("PROXY_HEALTH.ENABLED", false)
+PROXY_HEALTH:
+  ENABLED: false
+  CHECK_INTERVAL: 300         # 探测间隔（秒）
+  LOW_SCORE_THRESHOLD: 0.5    # 低于此分值的代理触发探测
+  RECOVER_SCORE: 0.5          # 探测成功后恢复到的评分
+  PROBE_URL: "https://httpbin.org/get"  # 探测目标 URL
+  PROBE_TIMEOUT: 10           # 探测请求超时（秒）
+
+# === 数据质量监控（B1） ===
+# 采集过程中自动评估数据质量并打分（字段完整性/核心字段非空率/去重率）
+# 评分写入 item['_quality_score']，随 StorePipeline 推送到 Redis，最终落库到 spider_results.quality_score
+# 引用方式：settings.get("QUALITY_CHECK.ENABLED", true)
+QUALITY_CHECK:
+  ENABLED: true
+  REQUIRED_FIELDS: ["url"]
+  CORE_FIELDS: ["url", "title", "content"]
+
+# === Playwright 动态渲染（可选依赖，默认关闭）===
+# 需要安装 playwright：pip install playwright && playwright install chromium
+# 引用方式：settings.get("PLAYWRIGHT.ENABLED", false)
+PLAYWRIGHT:
+  ENABLED: false        # 默认关闭（需要安装 playwright）
+  MAX_PAGES: 2          # 最大并发渲染页面数
+  TIMEOUT: 30           # 渲染超时（秒）
+  BROWSER: "chromium"   # 浏览器类型（chromium/firefox/webkit）

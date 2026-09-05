@@ -1,80 +1,143 @@
 """外部 API - 公开查询接口
 
 职责：
-- 提供无需认证的公开数据查询
-- 支持第三方系统获取爬虫状态
-- 限流保护（未来实现）
+- 提供 API Key 认证的采集结果数据查询
+- 支持第三方系统按爬虫名称分页拉取结果
+- 任务状态 / 任务结果 / 聚合统计的真实数据查询（API Key 认证）
 """
-from fastapi import APIRouter, HTTPException
-from platform_core.logger import get_logger
-import time
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.app.external_api.v1.webhooks import validate_api_key
+from backend.services.spider_query_service import SpiderQueryService
+from platform_core.db import get_async_db
+from platform_core.schemas.spider import SpiderTaskResponse
 
 router = APIRouter()
 
-@router.get("/spider/status/{task_id}")
-async def get_spider_status(task_id: str):
+
+# ---------------------------------------------------------------------------
+# 公开数据查询端点（API Key 认证）
+# ---------------------------------------------------------------------------
+
+def _require_api_key(request: Request) -> None:
+    """公开查询端点统一鉴权（唯一入口，/data/{spider_name} 也走此函数）
+
+    X-API-Key 须命中 EXTERNAL_API.API_KEYS（或过渡期旧单 key EXTERNAL_API.API_KEY，
+    见 webhooks.validate_api_key）；均未配置（空）时一律 401，杜绝默认密钥。
     """
-    查询爬虫任务状态（公开接口）
-    
-    第三方系统可以通过此接口查询任务进度
+    api_key = request.headers.get("X-API-Key", "")
+    if not validate_api_key(api_key):
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+
+
+@router.get("/data/{spider_name}")
+async def get_spider_data(
+    spider_name: str,
+    request: Request,
+    page: int = 1,
+    page_size: int = 20,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+    fields: Optional[str] = None,
+    session: AsyncSession = Depends(get_async_db),
+):
+    """公开数据查询端点 — 按爬虫名称分页查询采集结果
+
+    认证：X-API-Key Header，统一走 _require_api_key（与 status/results/stats
+    同一鉴权逻辑）；未配置 API Key 或密钥不匹配时一律 401。
+    可选参数：
+      - page / page_size：分页
+      - start_time / end_time：时间范围过滤（ISO 8601）
+      - fields：逗号分隔的字段名，如 "url,title,content"（响应字段裁剪）
     """
-    logger = get_logger("api")
-    try:
-        # TODO: 从数据库查询任务状态
-        # task = await get_task_from_db(task_id)
-        
-        # 模拟返回
-        return {
-            "task_id": task_id,
-            "status": "running",  # pending, running, completed, failed
-            "progress": 65,
-            "started_at": int(time.time()) - 300,
-            "estimated_completion": int(time.time()) + 120
-        }
-        
-    except Exception as e:
-        logger.error(f"查询任务状态失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # 1. 验证 API Key（统一鉴权入口，与新列表/旧单 key 双轨配置兼容）
+    _require_api_key(request)
+
+    # 2. 参数约束
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 20
+    if page_size > 100:
+        page_size = 100
+
+    # 3. 查询结果（T7 跳层收口：经 SpiderQueryService，不再直连 repository）
+    items, total = await SpiderQueryService(session).query_public_results(
+        spider_name=spider_name,
+        page=page,
+        page_size=page_size,
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+    # 4. 字段过滤
+    if fields:
+        field_list = {f.strip() for f in fields.split(",") if f.strip()}
+        if field_list:
+            items = [{k: v for k, v in item.items() if k in field_list} for item in items]
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": items,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 任务状态 / 结果 / 统计（真实数据，API Key 认证）
+# ---------------------------------------------------------------------------
+
+@router.get("/spider/status/{task_id}", response_model=SpiderTaskResponse)
+async def get_spider_status(
+    task_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_async_db),
+):
+    """查询爬虫任务状态（公开接口，API Key 认证；任务不存在返回 404）"""
+    _require_api_key(request)
+    task = await SpiderQueryService(session).get_task(task_id)
+    return SpiderTaskResponse.model_validate(task)
+
 
 @router.get("/spider/results/{task_id}")
 async def get_spider_results(
-    task_id: str,
+    task_id: int,
+    request: Request,
     page: int = 1,
-    page_size: int = 50
+    page_size: int = 50,
+    session: AsyncSession = Depends(get_async_db),
 ):
-    """
-    获取爬虫结果（公开接口，支持分页）
-    """
-    logger = get_logger("api")
-    try:
-        # TODO: 从数据库查询结果
-        # results = await get_results_from_db(task_id, page, page_size)
-        
-        # 模拟返回
-        return {
-            "task_id": task_id,
-            "page": page,
-            "page_size": page_size,
-            "total": 1000,
-            "data": [
-                {"id": i, "title": f"Result {i}", "url": f"https://example.com/{i}"}
-                for i in range((page-1)*page_size, min(page*page_size, 1000))
-            ]
-        }
-        
-    except Exception as e:
-        logger.error(f"获取结果失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """获取任务采集结果（公开接口，API Key 认证；分页；任务不存在返回 404）"""
+    _require_api_key(request)
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 50
+    if page_size > 100:
+        page_size = 100
+
+    resp = await SpiderQueryService(session).list_results(
+        task_id=task_id, skip=(page - 1) * page_size, limit=page_size
+    )
+    return {
+        "task_id": task_id,
+        "page": page,
+        "page_size": page_size,
+        "total": resp.total,
+        "data": [item.model_dump(mode="json") for item in resp.items],
+    }
+
 
 @router.get("/stats")
-async def get_public_stats():
-    """
-    获取系统公开统计信息
-    """
-    return {
-        "total_tasks_today": 156,
-        "completed_tasks": 142,
-        "failed_tasks": 14,
-        "avg_completion_time_seconds": 45,
-        "active_spiders": 8
-    }
+async def get_public_stats(
+    request: Request,
+    session: AsyncSession = Depends(get_async_db),
+):
+    """系统公开统计（真实聚合数据：任务状态分布/成功率/近 7 日趋势；API Key 认证）"""
+    _require_api_key(request)
+    return (await SpiderQueryService(session).stats()).model_dump(mode="json")

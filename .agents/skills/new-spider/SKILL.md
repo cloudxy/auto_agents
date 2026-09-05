@@ -1,6 +1,13 @@
 ---
 name: new-spider
-description: 创建 Scrapy 爬虫模块
+description: >-
+  创建 Scrapy 爬虫模块。当用户需要从目标网站抓取数据、新建爬虫任务、
+  或为已有爬虫添加新的数据字段与管道时触发。
+  适用于从零搭建完整爬虫（Spider + Item + Pipeline + Settings），
+  以及需要配置反爬策略（延迟、UA 轮换）和数据存储方式（Redis 队列 / Service）的场景。
+trigger: >-
+  从目标网站抓取数据、新建爬虫任务、为已有爬虫添加字段与管道、
+  配置反爬策略（延迟/UA 轮换）、数据存储方式选择（Redis 队列/Service）
 ---
 
 # 创建 Scrapy 爬虫
@@ -36,100 +43,51 @@ scrapy/
 
 ### Step 3: 代码模板
 
-#### Items
+完整模板见 [references/code-templates.md](references/code-templates.md)，包含：
 
-```python
-import scrapy
-
-class {SpiderName}Item(scrapy.Item):
-    """{爬虫中文名}数据项"""
-    id = scrapy.Field()
-    title = scrapy.Field()
-    content = scrapy.Field()
-    url = scrapy.Field()
-```
-
-#### Spider
-
-```python
-import scrapy
-import random
-import time
-from scrapy.utils.logger import logger
-
-class {SpiderName}Spider(scrapy.Spider):
-    name = "{spider_name}"
-    allowed_domains = ["{domain}"]
-    start_urls = ["{target_url}"]
-    
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    ]
-    
-    def start_requests(self):
-        for url in self.start_urls:
-            yield scrapy.Request(
-                url=url,
-                callback=self.parse,
-                headers={"User-Agent": random.choice(self.user_agents)}
-            )
-    
-    def parse(self, response):
-        logger.info(f"解析页面: {response.url}")
-        items = response.css(".item-selector")
-        
-        for item in items:
-            data = {SpiderName}Item()
-            data["title"] = item.css(".title::text").get()
-            
-            if self._validate_data(data):
-                yield data
-            
-            time.sleep(random.uniform(1, 3))
-    
-    def _validate_data(self, data):
-        if not data.get("title"):
-            logger.warning(f"数据缺少标题")
-            return False
-        return True
-```
-
-#### Pipelines
-
-```python
-from scrapy.utils.logger import logger
-
-class {SpiderName}Pipeline:
-    def open_spider(self, spider):
-        logger.info(f"爬虫启动: {spider.name}")
-    
-    def process_item(self, item, spider):
-        logger.info(f"处理数据: {dict(item)}")
-        # 发送到消息队列或调用 Service
-        return item
-    
-    def close_spider(self, spider):
-        logger.info(f"爬虫关闭: {spider.name}")
-```
-
-#### Settings
-
-```python
-BOT_NAME = "{spider_name}"
-SPIDER_MODULES = ["scrapy.spiders"]
-NEWSPIDER_MODULE = "scrapy.spiders"
-
-CONCURRENT_REQUESTS = 4
-DOWNLOAD_DELAY = 2
-
-ITEM_PIPELINES = {
-    "scrapy.pipelines.{SpiderName}Pipeline": 300,
-}
-```
+| 组件 | 文件路径 | 说明 |
+|------|---------|------|
+| Items | `scrapy/items.py` | 数据字段定义 |
+| Spider | `scrapy/spiders/{name}_spider.py` | 爬虫主文件（含 UA 轮换 + 延迟） |
+| Pipelines | `scrapy/pipelines.py` | 数据管道（发送到队列/Service） |
+| Settings | `scrapy/settings.py` | 并发/延迟/管道配置 |
 
 ### Step 4: 运行命令
 
 ```bash
 scrapy crawl {spider_name}
 ```
+
+## 预期产出物
+
+完成后**必须**存在以下文件/变更，缺少任何一个 = 未完成：
+
+```
+✅ 文件清单
+scrapy/spiders/{spider_name}_spider.py   # 爬虫主文件（含 UA 轮换 + DOWNLOAD_DELAY）
+scrapy/items.py                          # 新增 {SpiderName}Item 数据字段
+scrapy/pipelines.py                      # 新增 {SpiderName}Pipeline 数据管道
+scrapy/settings.py                       # ITEM_PIPELINES 已注册新管道
+```
+
+## 验证步骤
+
+生成代码后，**必须**依次执行以下验证（调用 `/verify`）：
+
+```bash
+# 1. 爬虫可列出
+uv run python run_spider.py --list
+
+# 2. 爬虫合约检查
+uv run scrapy check {spider_name}
+
+# 3. 架构红线（爬虫不 import backend）
+grep -rnE "import backend|from backend" scrapy/spiders/{spider_name}_spider.py
+# 期望：输出为空
+
+# 4. 反爬配置检查
+grep -nE "DOWNLOAD_DELAY|USER_AGENT" scrapy/settings.py
+# 期望：两个配置项均存在
+```
+
+全部通过后调用 `/check-arch` 做完整架构扫描。

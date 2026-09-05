@@ -1,0 +1,33 @@
+feature: feat-llm-cooldown
+lane: L3
+appetite: 2h
+current_hat: done
+hats_done: [定义, 塑形, 实现, 验证, 审查]
+tickets:
+  - {id: T-01, title: "cooldown 键 + 查询链过滤", status: done, evidence: "01-define/spec.md#自测证据"}
+  - {id: T-02, title: "failover 集成 + 测试", status: done, evidence: "01-define/spec.md#自测证据"}
+gates:
+  - {name: test, kind: script, result: pass, cmd: "uv run pytest -q backend/tests", exit_code: 0, at: "2026-09-04T13:00:28"}
+  - {name: lint, kind: script, result: pass, cmd: "bash scripts/check-arch.sh", exit_code: 0, at: "2026-09-04T13:00:28"}
+  - {name: sdlc, kind: script, result: pass, cmd: "bash check-sdlc.sh .sdlc/feat-llm-cooldown", exit_code: 0, at: "2026-09-04T13:00:28"}
+  - {name: migration, kind: script, result: null, reason: 纯 Redis 层，无 schema 变更}
+  - {name: e2e, kind: script, result: null, reason: 后端内部机制，无 UI 路径}
+  - {name: build, kind: script, result: null, reason: 无前端改动}
+  - {name: fresh-context, kind: fresh-context, findings_total: 9, blocker: 2, major: 4, minor: {"fixed": 3, "waived": 0}, at: "2026-09-04T13:00:28"}
+review_findings:
+  - {id: QA-1, severity: blocker, status: fixed}
+  - {id: QA-2, severity: blocker, status: fixed}
+  - {id: QA-3, severity: major, status: fixed}
+  - {id: QA-4, severity: major, status: fixed}
+  - {id: QA-5, severity: major, status: fixed}
+  - {id: QA-6, severity: major, status: fixed}
+  - {id: QA-7, severity: minor, status: fixed}
+  - {id: QA-8, severity: minor, status: accepted}
+  - {id: QA-9, severity: minor, status: fixed}
+stale_artifacts: []
+open_questions: []
+lane_changes: []
+metrics:
+  duration_min: 95
+  review_intercepts: 9
+  rework_rounds: 1

@@ -4,8 +4,8 @@ from __future__ import annotations
 Frontend 前端服务启动入口
 
 使用方式：
-    ./run_frontend.py --app admin              # 启动后台管理 (3001)
-    ./run_frontend.py --app official           # 启动官方网站 (3002)
+    ./run_frontend.py --app admin              # 启动后台管理 (9112)
+    ./run_frontend.py --app official           # 启动官方网站 (9113)
     ./run_frontend.py --all                    # 同时启动两者
     ./run_frontend.py --all --env dev          # 透传 REACT_APP_ENV=dev
 
@@ -36,12 +36,19 @@ def _port_in_use(port: int) -> bool:
             return False
 
 
-def _ensure_deps(app_path: str, skip: bool):
-    node_modules = os.path.join(app_path, "node_modules")
-    if skip or os.path.isdir(node_modules):
+def _ensure_workspaces(skip: bool):
+    """npm workspaces 根安装 + shared 先构建（D1/D2：app 经 dist 产物消费 shared）"""
+    if skip:
         return
-    print(f"安装依赖: {os.path.basename(app_path)}")
-    subprocess.check_call(["npm", "install"], cwd=app_path)
+    root = PROJECT_ROOT
+    if not os.path.isdir(os.path.join(root, "node_modules")):
+        print("安装 workspaces 依赖（根）")
+        subprocess.check_call(["npm", "install"], cwd=root)
+    dist = os.path.join(root, "frontend", "shared", "dist")
+    if not os.path.isdir(dist):
+        print("构建 @auto-agents/frontend-shared")
+        subprocess.check_call(
+            ["npm", "run", "build", "-w", "@auto-agents/frontend-shared"], cwd=root)
 
 
 def start_app(app_relpath: str, port: int, app_name: str, env_name: str | None):
@@ -74,8 +81,8 @@ def main():
     parser = argparse.ArgumentParser(description="Auto Agents Frontend Manager")
     parser.add_argument("--app", choices=["admin", "official"], help="启动指定应用")
     parser.add_argument("--all", action="store_true", help="启动所有前端应用")
-    parser.add_argument("--admin-port", type=int, default=3001, help="管理后台端口")
-    parser.add_argument("--official-port", type=int, default=3002, help="官网端口")
+    parser.add_argument("--admin-port", type=int, default=9112, help="管理后台端口")
+    parser.add_argument("--official-port", type=int, default=9113, help="官网端口")
     parser.add_argument("--env", choices=["local", "dev", "prod"], default=None,
                         help="透传为 REACT_APP_ENV")
     parser.add_argument("--skip-install", action="store_true", help="跳过 npm install")
@@ -95,12 +102,14 @@ def main():
         parser.print_help()
         return
 
-    # 端口预检 + 依赖检查
+    # workspaces 根安装 + shared 构建（幂等，已装/已建则跳过）
+    _ensure_workspaces(args.skip_install)
+
+    # 端口预检
     for rel, port, name in targets:
         if _port_in_use(port):
             print(f"端口 {port} ({name}) 已被占用，启动终止")
             sys.exit(1)
-        _ensure_deps(os.path.join(PROJECT_ROOT, rel), args.skip_install)
 
     threads = []
     for rel, port, name in targets:

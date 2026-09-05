@@ -3,7 +3,7 @@
 
 CORS:
   ORIGINS:
-    - "http://localhost:9112"      # 管理后台
-    - "http://localhost:9113"      # 官方网站
+    - "http://localhost:9112"      # admin 前端 dev server
+    - "http://localhost:9113"      # official 前端 dev server
     - "http://127.0.0.1:9112"
     - "http://127.0.0.1:9113"

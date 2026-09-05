@@ -1,0 +1,55 @@
+# ============================================================
+# New API 中转站 - 快速起步版（SQLite，零外部数据库依赖）
+# ------------------------------------------------------------
+# 适合：个人自用 / 小团队试跑 / 先验证功能再迁移 MySQL 生产版。
+# 与生产版的差异：无 mysql / redis 服务，业务数据落在 ./data 内的 SQLite。
+#
+# 使用方式：
+#   1. cp .env.example .env（可只保留 SESSION_SECRET 等通用项）
+#   2. docker compose -f docker-compose.sqlite.yml up -d
+#   3. 浏览器打开 http://<host>:3000，初始账号 root / 123456，
+#      登录后【立即修改管理员密码】
+#
+# 注意：
+#   - ./data 必须持久化挂载，否则容器重建即丢数据；迁移生产前先备份该目录
+#   - 令牌缓存/限流能力随 Redis 一起缺席，大规模租户场景请用生产版
+#   - 版本锁定原则与生产版一致：new-api v0.10.7（勿用 :latest / v1.0.0-rc）
+# ============================================================
+
+services:
+  new-api:
+    image: calciumion/new-api:v0.10.7      # 锁定版本；勿用 :latest（漂移）与 v1.0.0-rc（非稳定）
+    container_name: newapi-app
+    restart: unless-stopped
+    ports:
+      # 默认全接口发布 3000；生产建议 .env 中改 NEWAPI_BIND=127.0.0.1，
+      # 由同机 Caddy/Nginx 反代对外提供 HTTPS（见 README §4）
+      - "${NEWAPI_BIND:-0.0.0.0}:${NEWAPI_PORT:-3000}:3000"
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      # --- 安全密钥（必填，openssl rand -hex 32 生成；缺失时 compose 直接报错拒绝启动）---
+      - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET is required}
+      # SQLite 单机试跑可留空；生产/多实例务必设置（加密上游 Key 存储）
+      - CRYPTO_SECRET=${CRYPTO_SECRET:-}
+      # --- HTTPS 反代就绪后保持 true（.env.example 默认 true）；
+      #     纯 HTTP 直连试跑必须改 false，否则浏览器不回传会话 Cookie ---
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - SESSION_COOKIE_TRUSTED_URL=${SESSION_COOKIE_TRUSTED_URL:-}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ./data:/data                      # SQLite 数据必须挂载，否则容器重建即丢数据
+    healthcheck:                          # 上游镜像为 alpine 基础，自带 busybox wget
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/status || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+networks:
+  default:
+    name: newapi-net

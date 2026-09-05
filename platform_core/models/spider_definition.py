@@ -1,0 +1,45 @@
+"""爬虫定义模型 - 注册表元数据迁库（3.3）
+
+DB 承接 config/default/spiders.yml 的 SPIDERS 元数据（yml 保留为种子）；
+代码级爬虫文件仍在 scrapy/spiders/，DB 只管元数据，不破坏 B2 边界。
+"""
+from sqlalchemy import Boolean, Column, Computed, DateTime, Integer, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy.sql import func
+
+from platform_core.models.base import Base
+from platform_core.models.mixins import AuditMixin, SoftDeleteMixin, TenantMixin
+
+
+class SpiderDefinition(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
+    """爬虫定义表（注册表元数据，可调度爬虫清单的 DB 数据源）
+
+    唯一键含生成列 alive_flag（迁移 025）：软删行脱离唯一约束，删后可重新登记
+    同名爬虫（历史 spider_results/spider_tasks 按 spider_name 字符串关联、不依赖
+    本表 id，重建不断链）。
+    """
+
+    __tablename__ = "spider_definitions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="主键")
+    name = Column(String(50), nullable=False, index=True,
+                  comment="爬虫名（租户内唯一）")
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", "alive_flag",
+                         name="uq_spider_definitions_tenant_name_alive"),
+    )
+    alive_flag = Column(SmallInteger, Computed("CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END"),
+                        comment="存活标记（生成列，025）：唯一键组件，软删行 NULL 脱离唯一约束")
+    title = Column(String(100), nullable=False, comment="展示标题")
+    type = Column(String(20), nullable=False, default="web",
+                  comment="类型：api/web/custom/flow（驱动前端参数表单）")
+    description = Column(Text, nullable=True, comment="描述")
+    source = Column(String(20), nullable=False, default="yml_seed", server_default="yml_seed",
+                    comment="来源：yml_seed（种子迁移）/ manual（手动登记）/ ai_generated（AI 生成）")
+    enabled = Column(Boolean, nullable=False, default=True, server_default="1",
+                     comment="是否启用（停用后注册表不再下发）")
+    created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(),
+                        comment="更新时间")
+
+    def __repr__(self) -> str:
+        return f"<SpiderDefinition {self.name}({self.type})>"

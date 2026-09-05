@@ -5,23 +5,218 @@ FastAPI 应用核心模块 - 应用级初始化和全局配置
 - 创建 FastAPI 实例
 - 配置全局中间件（CORS等）
 - 注册 API 路由（不关心具体业务实现）
+- lifespan 内启动 Redis 队列消费者（数据闭环引擎，可用 TASKS.CONSUMER_ENABLED 关闭）
 
 注意：
 - 不包含任何业务逻辑
 - 不直接定义路由
 - 通过 app/api/ 聚合器注册路由
 - 初始化逻辑已移至 cors/app_init.py
+- lifespan 内各后台组件启动/停止失败均仅告警不互相阻断（评审 H4/L1：
+  单一组件故障不影响应用可用性与其余组件的启停）
 """
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
+from backend.config_consts import (NEWAPI_ENABLED)
+from platform_core.logger import get_logger
+
+# Webhook 签名密钥的默认占位符（config/default/webhook.yml）——已随仓库公开，
+# 沿用即意味着外部回调可被任意伪造，启动时必须拒绝（P0-2）
+_WEBHOOK_SECRET_PLACEHOLDER = "change-me-in-production"
+
+
+def _validate_runtime_secrets() -> None:
+    """启动期密钥 fail-fast（P0-2）：Webhook 密钥为空/默认占位符时拒绝启动
+
+    与 JWT 守卫（backend/utils/auth.py 对同款占位符导入即抛错）构成对称防线；
+    Scrapy 侧 SpiderCloseWebhook 读取同一配置源（config/default/webhook.yml），
+    两侧密钥必须一致，配置入口：config/<env>/.env 的 AUTO_AGENTS_WEBHOOK__SECRET_KEY。
+    """
+    secret = str(settings.get("WEBHOOK.SECRET_KEY", "") or "").strip()
+    if not secret or secret == _WEBHOOK_SECRET_PLACEHOLDER:
+        raise RuntimeError(
+            "WEBHOOK.SECRET_KEY 未配置或仍为默认占位符，拒绝启动（外部回调可被伪造）。"
+            "请在 config/<env>/.env 配置 AUTO_AGENTS_WEBHOOK__SECRET_KEY"
+            "（Backend 与 Scrapy 两侧一致），"
+            "生成命令：python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+
+    # B1（工单 76）：LLM 主密钥占位符/格式 fail-fast——密钥已配置但为占位符或非法
+    # Fernet 格式时拒绝启动（否则保存的 api_key 密文将不可解）；
+    # 空值 = yml/env 兜底模式（不落库加密），放行
+    import os as _os
+
+    llm_key = str(
+        _os.environ.get("LLM_ENCRYPTION_KEY")
+        or settings.get("LLM_ENCRYPTION_KEY", "")
+        or ""
+    ).strip()
+    if llm_key == _WEBHOOK_SECRET_PLACEHOLDER:
+        raise RuntimeError(
+            "LLM_ENCRYPTION_KEY 仍为默认占位符，拒绝启动。"
+            "生成命令：python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\""
+        )
+    if llm_key:
+        try:
+            from cryptography.fernet import Fernet as _F
+
+            _F(llm_key.encode("utf-8"))
+        except Exception as exc:  # noqa: BLE001 任何格式错误均属启动期拒绝范围
+            raise RuntimeError(f"LLM_ENCRYPTION_KEY 非法 Fernet 密钥，拒绝启动: {exc}")
+
 
 def create_app():
     """创建 FastAPI 应用实例（不含初始化逻辑）"""
+    # T8：业务豁免表注册（唯一事实源 backend/app/tenant_isolation.py；
+    # 移除即豁免失效，R13 同步校验会拦截）
+    from backend.app.tenant_isolation import setup_tenant_isolation
+    setup_tenant_isolation()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """应用生命周期：密钥守卫 + Redis 队列消费者 + 定时调度器 + 代理健康管理 + LLM 用量聚合"""
+        _validate_runtime_secrets()
+        consumer = None
+        if settings.get("TASKS.CONSUMER_ENABLED", True):
+            from backend.tasks.consumer import SpiderTaskConsumer
+
+            consumer = SpiderTaskConsumer()
+            try:
+                await consumer.start()
+            except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
+                get_logger("global").warning(f"Redis 队列消费者启动失败（忽略）: {e}")
+        scheduler = None
+        if settings.get("SCHEDULER.ENABLED", True):
+            from backend.services.schedule_service import SpiderScheduler
+
+            scheduler = SpiderScheduler()
+            try:
+                await scheduler.start()
+            except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
+                get_logger("global").warning(f"爬虫调度器启动失败（忽略）: {e}")
+        proxy_health = None
+        if settings.get("PROXY_HEALTH.ENABLED", False):
+            from backend.services.proxy_health_service import ProxyHealthService
+
+            proxy_health = ProxyHealthService()
+            try:
+                await proxy_health.start()
+            except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
+                get_logger("global").warning(f"代理健康管理启动失败（忽略）: {e}")
+        # LLM 用量聚合落库（P0-3）：Redis 日粒度计数 → llm_token_usage 表
+        llm_usage_flush = None
+        if settings.get("LLM.USAGE_PERSIST_ENABLED", True):
+            from backend.services.llm_usage_service import LlmUsageFlushService
+
+            llm_usage_flush = LlmUsageFlushService()
+            try:
+                await llm_usage_flush.start()
+            except Exception as e:  # noqa: BLE001 失败仅告警不阻断启动
+                get_logger("global").warning(f"LLM 用量聚合任务启动失败（忽略）: {e}")
+        # 技能 AI 评分 worker（方案 A · A-P2-2）：SKILLS.SCORING.ENABLED 控制，
+        # 失败仅告警不阻断启动（评分队列积压可在恢复后继续消费）
+        skill_scoring_worker = None
+        if settings.get("SKILLS.SCORING.ENABLED", False):
+            from backend.services.skill_scoring_service import SkillScoringWorker
+
+            skill_scoring_worker = SkillScoringWorker()
+            try:
+                await skill_scoring_worker.start()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"技能评分 worker 启动失败（忽略）: {e}")
+        # LLM 周期健康巡检（方案 B · B-M4-2）：LLM.HEALTH_PATROL_ENABLED 控制
+        llm_health_patrol = None
+        if settings.get("LLM.HEALTH_PATROL_ENABLED", False):
+            from backend.services.llm_health_patrol import LlmHealthPatrol
+
+            llm_health_patrol = LlmHealthPatrol()
+            try:
+                await llm_health_patrol.start()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"LLM 健康巡检启动失败（忽略）: {e}")
+        # new-api 渠道集成（阶段三）：三层开关 ENABLED → SCHEDULER_ENABLED / PROBE_ENABLED，
+        # 失败仅告警不阻断启动（外部系统依赖故障不影响主平台可用性）
+        newapi_scheduler = None
+        newapi_probe = None
+        if settings.get("NEWAPI.ENABLED", NEWAPI_ENABLED):
+            if settings.get("NEWAPI.SCHEDULER_ENABLED", False):
+                from backend.services.channel_scheduler_service import ChannelSchedulerService
+
+                newapi_scheduler = ChannelSchedulerService()
+                try:
+                    await newapi_scheduler.start()
+                except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
+                    get_logger("global").warning(f"渠道调度器启动失败（忽略）: {e}")
+            if settings.get("NEWAPI.PROBE_ENABLED", False):
+                from backend.services.channel_probe_service import ChannelProbeService
+
+                newapi_probe = ChannelProbeService()
+                try:
+                    await newapi_probe.start()
+                except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
+                    get_logger("global").warning(f"渠道探针启动失败（忽略）: {e}")
+        # 启动对账：进程中断遗留的 planning/testing AI 计划置 failed（失败不阻断启动）
+        try:
+            from backend.services.ai_planner_service import reconcile_interrupted_plans
+
+            recovered = await reconcile_interrupted_plans()
+            if recovered:
+                get_logger("global").info(f"启动对账完成：恢复 {recovered} 个中断的 AI 计划")
+        except Exception as e:  # noqa: BLE001 对账失败仅告警，不阻断应用启动
+            get_logger("global").warning(f"AI 计划启动对账失败（忽略）: {e}")
+        yield
+        # 关闭链（评审 L1）：各 stop() 独立 try/except，单一组件关闭失败
+        # 不阻断其余组件的停止（避免残留后台任务/连接泄漏）
+        if newapi_probe is not None:
+            try:
+                await newapi_probe.stop()
+            except Exception as e:  # noqa: BLE001 关闭失败仅告警，继续关闭其余组件
+                get_logger("global").warning(f"渠道探针停止失败（忽略）: {e}")
+        if newapi_scheduler is not None:
+            try:
+                await newapi_scheduler.stop()
+            except Exception as e:  # noqa: BLE001 关闭失败仅告警，继续关闭其余组件
+                get_logger("global").warning(f"渠道调度器停止失败（忽略）: {e}")
+        if proxy_health is not None:
+            try:
+                await proxy_health.stop()
+            except Exception as e:  # noqa: BLE001 关闭失败仅告警，继续关闭其余组件
+                get_logger("global").warning(f"代理健康管理停止失败（忽略）: {e}")
+        if scheduler is not None:
+            try:
+                await scheduler.stop()
+            except Exception as e:  # noqa: BLE001 关闭失败仅告警，继续关闭其余组件
+                get_logger("global").warning(f"爬虫调度器停止失败（忽略）: {e}")
+        if consumer is not None:
+            try:
+                await consumer.stop()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"Redis 队列消费者停止失败（忽略）: {e}")
+        if llm_usage_flush is not None:
+            try:
+                await llm_usage_flush.stop()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"LLM 用量聚合任务停止失败（忽略）: {e}")
+        if llm_health_patrol is not None:
+            try:
+                await llm_health_patrol.stop()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"LLM 健康巡检停止失败（忽略）: {e}")
+        if skill_scoring_worker is not None:
+            try:
+                await skill_scoring_worker.stop()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"技能评分 worker 停止失败（忽略）: {e}")
+
     app = FastAPI(
         title="Auto Agents API",
         description="自动化代理系统 API",
-        version="1.0.0"
+        version="1.0.0",
+        lifespan=lifespan,
     )
 
     # CORS 配置（从 web.yml 配置文件读取）
@@ -36,6 +231,9 @@ def create_app():
     # 请求 ID 中间件（链路追踪）
     from backend.app.middleware import RequestIDMiddleware
     app.add_middleware(RequestIDMiddleware)
+    # S1-3：租户上下文中间件（JWT 身份 → tenant_scope/platform_scope，行级隔离据此生效）
+    from backend.app.middleware.tenant_context import TenantContextMiddleware
+    app.add_middleware(TenantContextMiddleware)
 
     # 注册统一异常处理器
     from platform_core.exceptions import register_exception_handlers

@@ -1,0 +1,37 @@
+feature: fix-checksdcc-exemptions
+lane: L1
+current_hat: done
+hats_done: [实现, 验证, 审查]
+tickets: []
+gates:
+  - name: sdlc
+    kind: script
+    result: pass
+    cmd: "bash check-sdlc.sh .sdlc"
+    exit_code: 0
+    at: 2026-09-04T11:02:43
+  - name: test
+    kind: script
+    result: null
+    reason: 纯 shell 门禁脚本改动，不触 Python/前端运行时；行为由 FR-01/02 受控夹具验证
+  - name: fresh-context
+    kind: fresh-context
+    findings_total: 6
+    blocker: 1
+    major: 2
+    minor: {"fixed": 2, "waived": 1}
+    at: 2026-09-04T11:02:43
+review_findings:
+  - {id: QA-1, severity: blocker, status: fixed}
+  - {id: QA-2, severity: major, status: fixed}
+  - {id: QA-3, severity: major, status: fixed}
+  - {id: QA-4, severity: minor, status: fixed}
+  - {id: QA-5, severity: minor, status: fixed}
+  - {id: QA-6, severity: minor, status: waived, reason: 既有 off-by-one 非本票引入，summary 部分修复}
+stale_artifacts: []
+open_questions: [QA-6 头部自述修正 → 下张 L1 票]
+lane_changes: []
+metrics:
+  duration_min: 25
+  review_intercepts: 6   # 自审未发现的问题数（QA-1 blocker 为实锤）
+  rework_rounds: 1       # 审查后返工一轮（重录证据+收紧豁免）

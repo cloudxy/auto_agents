@@ -1,11 +1,22 @@
-"""认证路由 - 使用统一参数接收器和响应格式"""
-from fastapi import APIRouter, Depends
+"""认证路由 - 登录 / 注册 / 权限查询（使用 Schema 参数接收器 + ApiResponse 统一响应）
+
+限流计数器统一走异步 Redis 门面 get_async_redis（期 3 收口：登录/注册路径
+此前直调同步 redis_client 阻塞事件循环，注释自证历史误用）。
+
+fail-open 约定（任务 #35 显式化）：限流是可用性加固而非安全闸门，Redis 故障
+（RedisError）时检查放行、计数跳过——只捕获 RedisError，其他异常照常冒泡。
+"""
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from platform_core.db import get_async_db
 from backend.services.auth_service import AuthService
+from backend.app.api.deps import CurrentUser, get_current_user
 from platform_core.logger import get_logger
-from platform_core.db import redis_client
-from platform_core.exceptions import AuthenticationException, RateLimitException
+from platform_core.redis_async import get_async_redis
+from backend.app.core.rate_limiter import (
+    LOGIN_FAIL_POLICY, REGISTER_ATTEMPT_POLICY, check_rate_limit, record_attempt,
+)
+from platform_core.exceptions import AuthenticationException
 from platform_core.schemas import LoginRequest, RegisterRequest  # 统一参数接收器
 from backend.app.responses import ApiResponse, ok
 
@@ -15,26 +26,27 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 
 
 async def check_login_rate_limit(username: str):
-    """检查登录频率限制（每用户 15 分钟内最多 5 次失败）"""
-    redis = redis_client()
-    key = f"login_fail:{username}"
-    
-    fail_count = await redis.get(key)
-    if fail_count and int(fail_count) >= 5:
-        ttl = await redis.ttl(key)
-        raise RateLimitException(
-            message=f"登录失败次数过多，请{ttl // 60}分钟后再试",
-            retry_after=ttl
-        )
+    """检查登录频率限制（每用户 15 分钟内最多 5 次失败；策略见 rate_limiter.LOGIN_FAIL_POLICY）"""
+    redis = get_async_redis()
+    await check_rate_limit(redis, LOGIN_FAIL_POLICY, username)
 
 
 async def record_login_failure(username: str):
-    """记录登录失败（Redis 计数器）"""
-    redis = redis_client()
-    key = f"login_fail:{username}"
-    
-    await redis.incr(key)
-    await redis.expire(key, 900)  # 15 分钟过期
+    """记录登录失败（pipeline 原子计数；策略见 rate_limiter.LOGIN_FAIL_POLICY）"""
+    redis = get_async_redis()
+    await record_attempt(redis, LOGIN_FAIL_POLICY, username)
+
+
+async def check_register_rate_limit(client_ip: str):
+    """检查注册频率限制（每 IP 15 分钟 5 次；策略见 rate_limiter.REGISTER_ATTEMPT_POLICY）"""
+    redis = get_async_redis()
+    await check_rate_limit(redis, REGISTER_ATTEMPT_POLICY, client_ip)
+
+
+async def record_register_attempt(client_ip: str):
+    """记录一次注册请求（pipeline 原子计数；策略见 rate_limiter.REGISTER_ATTEMPT_POLICY）"""
+    redis = get_async_redis()
+    await record_attempt(redis, REGISTER_ATTEMPT_POLICY, client_ip)
 
 
 @router.post("/login", response_model=ApiResponse)
@@ -49,6 +61,9 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
         ApiResponse: 包含 access_token 的响应
     """
     logger.info(f"登录请求 | username={request.username}")
+    # T5 决策 A：tenant_slug 为未来租户级登录入口预留（暂不消费，仅观测流量）
+    if request.tenant_slug:
+        logger.info(f"登录携带租户标识（预留字段未消费） | tenant_slug={request.tenant_slug}")
     
     # 检查频率限制
     await check_login_rate_limit(request.username)
@@ -68,37 +83,135 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
             "access_token": token_response.access_token,
             "token_type": token_response.token_type,
             "username": token_response.username,
-            "is_admin": token_response.is_admin
+            "is_admin": token_response.is_admin,
+            "role": user_data.get("role", "operator"),
+            "tenant_id": user_data.get("tenant_id"),
+            "tenant_role": user_data.get("tenant_role"),
+            "is_platform_admin": bool(user_data.get("is_platform_admin", False)),
         },
         message="登录成功"
     )
 
 
+# 角色 → 权限映射（前端按此控制菜单/按钮可见性，后端守卫为最终防线）
+# 权限单真相源（R5）：前端登录后从 /permissions 读取，不再硬编码
+_ROLE_PERMISSIONS = {
+    "viewer": [
+        'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
+        'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
+    ],
+    "operator": [
+        'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
+        'menu:data', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
+        'btn:create', 'btn:skill:edit',
+    ],
+    "admin": [
+        'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
+        'menu:users', 'menu:data', 'menu:settings', 'menu:ai', 'menu:skills',
+        'menu:members', 'menu:usage', 'menu:platform-ops', 'menu:logs',
+        'menu:llm', 'menu:newapi',
+        'btn:create', 'btn:delete', 'btn:schedule', 'btn:skill:edit', 'btn:skill:admin',
+    ],
+}
+
+
 @router.get("/permissions", response_model=ApiResponse)
-async def get_permissions(db: AsyncSession = Depends(get_async_db)):
-    """获取当前用户的权限列表"""
-    # 简化实现：根据 token 中的信息（由于没有中间件设置 request.user，这里模拟从 db 获取，或根据 token 判断）
-    # 实际项目中应有专门的依赖获取当前用户
-    # 暂时模拟返回
-    return ok(data=[
-        'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs', 
-        'menu:users', 'menu:data', 'menu:settings', 'btn:create', 'btn:delete'
-    ])
+async def get_permissions(
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """获取当前用户的权限列表（roles 表 DB 单源；角色管理页改动即时生效）
+
+    DB miss（表空/角色被删）回退内置硬编码映射——登录链路不被配置问题阻断。
+    """
+    from backend.services.rbac_service import RbacService
+
+    logger.info(f"查询权限 | user={user.username} role={user.role}")
+    try:
+        row = await RbacService(session).get_role_permissions(user.role)
+        if row:
+            return ok(data=row)
+    except Exception as e:  # noqa: BLE001 配置读失败回退内置映射（可用性优先）
+        logger.warning(f"角色权限 DB 读取失败，回退内置映射: {e}")
+    return ok(data=_ROLE_PERMISSIONS.get(user.role, _ROLE_PERMISSIONS["viewer"]))
+@router.get("/menus", response_model=ApiResponse)
+async def get_dynamic_menus(
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """动态菜单（menus 表按权限过滤下发；DB miss/异常回退空——前端用静态配置兜底）"""
+    from backend.services.rbac_service import RbacService
+
+    try:
+        rows = await RbacService(session).list_visible_menus()
+        if not rows:
+            return ok(data=[])
+        perms = set(await _permissions_of(session, user.role))
+        nodes = {}
+        tree = []
+        for m in rows:
+            if m["permission"] and m["permission"] not in perms:
+                continue
+            nodes[m["id"]] = {"key": m["path"] or f"grp-{m['id']}", "label": m["name"],
+                              "icon": m["icon"], "permission": m["permission"],
+                              "tenantOnly": m["path"] in ("/members", "/usage"), "children": []}
+        for m in rows:
+            node = nodes.get(m["id"])
+            if node is None:
+                continue
+            if m["parent_id"] and m["parent_id"] in nodes:
+                nodes[m["parent_id"]]["children"].append(node)
+            else:
+                tree.append(node)
+        # 剔除空分组
+        def prune(ns):
+            out = []
+            for n in ns:
+                if n["children"]:
+                    n["children"] = prune(n["children"])
+                if n["children"] or n["permission"] or not n["key"].startswith("grp-"):
+                    out.append(n)
+            return out
+        return ok(data=prune(tree))
+    except Exception as e:  # noqa: BLE001 菜单故障不阻断登录链路
+        logger.warning(f"动态菜单读取失败，回退前端静态配置: {e}")
+        return ok(data=[])
+
+
+async def _permissions_of(session, role: str) -> list[str]:
+    """角色权限码（roles 表 DB 单源 → 内置映射回退）"""
+    from backend.services.rbac_service import RbacService
+
+    try:
+        row = await RbacService(session).get_role_permissions(role)
+        if row:
+            return list(row)
+    except Exception:  # noqa: BLE001
+        pass
+    return list(_ROLE_PERMISSIONS.get(role, _ROLE_PERMISSIONS["viewer"]))
+
+
 @router.post("/register", response_model=ApiResponse)
 async def register(
     request: RegisterRequest,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    http_request: Request = None,
 ):
     """用户注册
     
     Args:
         request: 注册请求（自动验证 username/email/password）
         db: 数据库会话
+        http_request: 原始请求（取来源 IP 做限流维度）
     
     Returns:
         ApiResponse: 包含 user_id 的响应
     """
     logger.info(f"注册请求 | username={request.username}")
+    client_ip = (http_request.client.host if http_request and http_request.client else "unknown")
+    # 检查注册频率限制（请求到达即计数，成功失败均计入防刷）
+    await check_register_rate_limit(client_ip)
+    await record_register_attempt(client_ip)
     
     auth_service = AuthService(db)
     user = await auth_service.register_user(
