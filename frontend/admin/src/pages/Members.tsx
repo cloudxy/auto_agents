@@ -4,14 +4,14 @@
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import { Card,
-  Alert, Button, Form, Input, Modal, Select, Space, Switch,
+  Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch,
   Table, Tag, Typography, message,
 } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 
 import {
-  createMember, listMemberAudit, listMembers, patchMember, resetMemberPassword,
+  createMember, deleteMember, listMemberAudit, listMembers, patchMember, resetMemberPassword,
   type MemberAuditRow, type MemberRow,
 } from '../services/members'
 import { apiErrorMessage } from '../utils/errorMessage'
@@ -82,6 +82,16 @@ const Members: React.FC = () => {
     setResetTarget(null)
   }
 
+  const onDelete = async (row: MemberRow) => {
+    try {
+      await deleteMember(row.id)
+      message.success(`成员「${row.username}」已删除`)
+      load()
+    } catch (e) {
+      message.error(apiErrorMessage(e, '删除失败'))
+    }
+  }
+
   const columns: ColumnsType<MemberRow> = [
     { title: '用户名', dataIndex: 'username', render: (v: string) => <Text strong>{v}</Text> },
     { title: '邮箱', dataIndex: 'email', ellipsis: true },
@@ -108,11 +118,23 @@ const Members: React.FC = () => {
       ),
     },
     {
-      title: '操作', width: 120,
+      title: '操作', width: 160,
       render: (_: unknown, row: MemberRow) => (
         row.tenant_role === 'owner'
           ? <Text type="secondary">所有者</Text>
-          : <Button size="small" type="link" onClick={() => { setResetTarget(row); resetForm.resetFields() }}>重置密码</Button>
+          : (
+            <Space size={0}>
+              <Button size="small" type="link" onClick={() => { setResetTarget(row); resetForm.resetFields() }}>重置密码</Button>
+              <Popconfirm
+                title={`删除成员「${row.username}」`}
+                description="账号将被移除且不可恢复（登录即时失效），收件箱随之清空；操作审计保留。"
+                okText="删除" okButtonProps={{ danger: true }} cancelText="取消"
+                onConfirm={() => onDelete(row)}
+              >
+                <Button size="small" type="link" danger>删除</Button>
+              </Popconfirm>
+            </Space>
+          )
       ),
     },
   ]

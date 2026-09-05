@@ -91,10 +91,11 @@ const Spiders: React.FC = () => {
   })
   const tasks = tasksRes?.items || []
   const total = tasksRes?.total || 0
+  // 工单 78 后任务列表归 react-query：挂载自动首拉，筛选/翻页经 queryKey 变化自动重取，
+  // loadTasks 仅作手动刷新入口（禁止进 useEffect 依赖——非 memoized 引用每渲染必变，会引发无限刷接口）
   const loadTasks = async (_showSpin = true, _targetPage?: number) => { await refetchTasks() }
 
-  // 筛选/翻页变化：只改状态，由 useEffect([loadTasks]) 依赖驱动自动重载
-  // （避免闭包旧值；筛选变化时同时回到第 1 页）
+  // 筛选/翻页变化：只改状态（筛选变化时同时回到第 1 页）
   const changePriorityFilter = (v: string | undefined) => { setPriorityFilter(v); setPage(1) }
   const changeStatusFilter = (v: string | undefined) => { setStatusFilter(v); setPage(1) }
   const changeSpiderFilter = (v: string | undefined) => { setSpiderFilter(v); setPage(1) }
@@ -111,9 +112,8 @@ const Spiders: React.FC = () => {
 
   useEffect(() => {
     fetchRegistry().then(setRegistry).catch((e) => message.error(apiErrorMessage(e, '获取爬虫注册表失败')))
-    loadTasks()
     loadTemplates()
-  }, [loadTasks, loadTemplates])
+  }, [loadTemplates])
 
 
   // ---------------- 新增任务弹窗 ----------------

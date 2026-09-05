@@ -24,6 +24,9 @@ export const patchMember = (id: number, payload: Record<string, unknown>): Promi
 export const resetMemberPassword = (id: number, newPassword: string): Promise<void> =>
   api.post(`/members/${id}/reset-password`, { new_password: newPassword }).then(() => undefined)
 
+export const deleteMember = (id: number): Promise<void> =>
+  api.delete(`/members/${id}`).then(() => undefined)
+
 export interface MemberAuditRow {
   id: number
   actor_name: string
