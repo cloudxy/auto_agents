@@ -18,7 +18,7 @@ def _create_provider(db_client, name: str) -> int:
     return resp.json()["data"]["id"]
 
 
-def test_put_models_full_replace_and_default_sync(db_client, db_engine, db_session):
+def test_put_models_full_replace_and_default_sync(db_client, admin_client, db_engine, db_session):
     provider_id = _create_provider(db_client, "multi-model")
 
     first = db_client.put(
@@ -57,7 +57,7 @@ def test_put_models_full_replace_and_default_sync(db_client, db_engine, db_sessi
     assert {r.model_id for r in rows} == {"claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4"}  # 全量替换
 
 
-def test_multiple_defaults_returns_422(db_client, db_engine, db_session):
+def test_multiple_defaults_returns_422(db_client, admin_client, db_engine, db_session):
     provider_id = _create_provider(db_client, "two-defaults")
     resp = db_client.put(
         f"/api/v1/llm/providers/{provider_id}/models",
@@ -69,7 +69,7 @@ def test_multiple_defaults_returns_422(db_client, db_engine, db_session):
     assert resp.status_code == 422
 
 
-def test_delete_provider_cascades_models(db_client, db_engine, db_session):
+def test_delete_provider_cascades_models(db_client, admin_client, db_engine, db_session):
     """软删除语义（Phase A 矩阵）：父行 deleted_at 置位（列表排除），
     子表模型行保留跟随隐藏（审计可追溯），物理行不清空"""
     provider_id = _create_provider(db_client, "cascade-me")

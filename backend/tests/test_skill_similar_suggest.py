@@ -62,7 +62,7 @@ async def test_similar_confirm_merges_mutually(db_session):
         assert rows["web-scrape"].similar_to in (None, [])
 
 
-def test_similar_endpoints(db_client, db_engine, db_session, monkeypatch):
+def test_similar_endpoints(db_client, admin_client, db_engine, db_session, monkeypatch):
     import asyncio
 
     import backend.services.skill_service as svc_mod

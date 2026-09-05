@@ -91,7 +91,7 @@ async def test_expired_tenant_login_rejected(db_client, db_engine, db_session):
     assert await _status() == "expired"
 
 
-def test_platform_ops_tenant_list(db_client, db_engine, db_session):
+def test_platform_ops_tenant_list(db_client, admin_client, db_engine, db_session):
     """平台运营台：固定 admin（非平台超管）403；平台超管 token 可见租户列表"""
     # 默认测试身份（无 Bearer→固定 admin 快照，is_platform_admin=False）应被拒
     denied = db_client.get("/api/v1/admin/tenants")

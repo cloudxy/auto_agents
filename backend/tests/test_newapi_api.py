@@ -59,8 +59,11 @@ class _FakeClient:
 
 
 @pytest.fixture
-def api_client(client, app):
-    """client + get_async_db override（mock session，Repository 不落真库）"""
+def api_client(admin_client, app):
+    """admin 特权 client + get_async_db override（mock session，Repository 不落真库）
+
+    T10：原依赖 conftest 全局兜底 admin，兜底收紧后显式声明 admin 特权。
+    """
     from platform_core.db import get_async_db
 
     session = MagicMock()
@@ -68,7 +71,7 @@ def api_client(client, app):
     session.flush = AsyncMock()
     session.refresh = AsyncMock()
     app.dependency_overrides[get_async_db] = lambda: session
-    yield client
+    yield admin_client
     app.dependency_overrides.pop(get_async_db, None)
 
 

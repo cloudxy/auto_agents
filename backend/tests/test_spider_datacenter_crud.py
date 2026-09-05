@@ -544,9 +544,9 @@ class TestUpdateTask:
 
 # ---------------- 控制端点契约（M2 回归） ----------------
 class TestControlEndpointContract:
-    def test_control_without_body_returns_422(self, client):
+    def test_control_without_body_returns_422(self, admin_client):
         """M2 回归：control 端点缺 body → FastAPI 校验失败返回 422（修复前为 500）"""
-        resp = client.post("/api/v1/spiders/tasks/1/control")
+        resp = admin_client.post("/api/v1/spiders/tasks/1/control")
         assert resp.status_code == 422
 
 

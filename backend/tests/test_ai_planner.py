@@ -790,15 +790,19 @@ class TestApiPermissions:
 
 # ---------------- API 端点快照 ----------------
 @pytest.fixture
-def ai_client(client, app):
-    """client + get_async_db override（mock session，审计提交不落库）"""
+def ai_client(admin_client, app):
+    """admin 特权 client + get_async_db override（mock session，审计提交不落库）
+
+    T10：原依赖 conftest 全局兜底 admin，兜底收紧后显式声明 admin 特权
+    （delete/register 端点挂 require_admin，operator/viewer 需另见越权用例）。
+    """
     from platform_core.db import get_async_db
     session = MagicMock()
     session.commit = AsyncMock()
     session.flush = AsyncMock()
     session.refresh = AsyncMock()
     app.dependency_overrides[get_async_db] = lambda: session
-    yield client
+    yield admin_client
     app.dependency_overrides.pop(get_async_db, None)
 
 

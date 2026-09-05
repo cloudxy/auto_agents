@@ -35,7 +35,7 @@ def test_platform_presets_endpoint(db_client, db_engine):
     assert ollama["base_url"].startswith("http://localhost:11434") and ollama["requires_key"] is False
 
 
-def test_probe_models_parses_and_counts_chat_only(db_client, db_engine, monkeypatch, caplog):
+def test_probe_models_parses_and_counts_chat_only(db_client, admin_client, db_engine, monkeypatch, caplog):
     seen = {}
 
     async def _fake_execute(client, method, url, headers, json_payload=None):
@@ -76,7 +76,7 @@ async def test_probe_key_never_logged_nor_persisted(db_client, db_engine, db_ses
     assert count == 0  # 纯内存探测，零落库
 
 
-def test_probe_test_ok_and_error_masked(db_client, db_engine, monkeypatch):
+def test_probe_test_ok_and_error_masked(db_client, admin_client, db_engine, monkeypatch):
     import backend.services.llm_probe_engine as probe_engine_mod
     from backend.services.llm_protocol import ProtocolError
 
@@ -107,7 +107,7 @@ def test_probe_test_ok_and_error_masked(db_client, db_engine, monkeypatch):
     assert data2["ok"] is False and "401" in data2["error"]
 
 
-def test_create_provider_accepts_anthropic_type(db_client, db_engine, db_session):
+def test_create_provider_accepts_anthropic_type(db_client, admin_client, db_engine, db_session):
     """provider_type 三协议全可入库（无 api_key 路径），旧协议回归"""
     resp = db_client.post(
         "/api/v1/llm/providers",

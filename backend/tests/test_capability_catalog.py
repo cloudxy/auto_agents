@@ -44,7 +44,7 @@ async def test_scan_backfills_asset_row(db_session, library_root):
     assert asset.detail_id == skill.id  # 细节表挂钩
 
 
-def test_get_capabilities_api(db_client, db_engine, db_session, library_root):
+def test_get_capabilities_api(db_client, admin_client, db_engine, db_session, library_root):
     asyncio.run(_scan(db_session, library_root))
     resp = db_client.get("/api/v1/capabilities", params={"type": "skill"})
     assert resp.status_code == 200

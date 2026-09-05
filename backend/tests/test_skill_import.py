@@ -159,7 +159,7 @@ async def test_name_conflict_returns_422(db_session, library_root):
         await _run(db_session, "https://example.com/skill-2.zip", _client(handler))
 
 
-def test_check_update_uses_httpx_trust_env_false(db_client, db_engine, db_session, library_root, monkeypatch):
+def test_check_update_uses_httpx_trust_env_false(db_client, admin_client, db_engine, db_session, library_root, monkeypatch):
     """check-update 拉取必须走 httpx 且 trust_env=False（总方案 3.2-A-8）"""
     import asyncio
     import httpx

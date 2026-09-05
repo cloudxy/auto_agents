@@ -86,7 +86,7 @@ def test_member_audit_scoped_to_tenant(db_client):
     assert "b6-other" not in names  # 跨租户不可见
 
 
-def test_webhook_status_never_leaks_secret_value(db_client):
+def test_webhook_status_never_leaks_secret_value(db_client, admin_client):
     """webhook 状态：只回显配置态布尔，无任何密钥值（admin 快照即可达）"""
     resp = db_client.get("/api/v1/admin/webhook-status")
     assert resp.status_code == 200

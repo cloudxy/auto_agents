@@ -34,7 +34,7 @@ def _seed(db_session):
     yield STATE
 
 
-def test_list_users_includes_tenant_name(db_client, _seed):
+def test_list_users_includes_tenant_name(db_client, admin_client, _seed):
     """列表带归属公司名（JOIN tenants；T5 后平台超管挂 platform 租户）"""
     resp = db_client.get("/api/v1/admin/users?limit=50")
     assert resp.status_code == 200
@@ -44,7 +44,7 @@ def test_list_users_includes_tenant_name(db_client, _seed):
     assert rows["uc-super"]["tenant_name"] == "平台租户"  # T5：平台超管显式挂 platform 租户
 
 
-def test_create_user_with_role_and_tenant(db_client, _seed):
+def test_create_user_with_role_and_tenant(db_client, admin_client, _seed):
     """创建账户：角色 + 归属公司；密码不入响应"""
     resp = db_client.post("/api/v1/admin/users", json={
         "username": "new-op", "email": "new-op@x.co", "password": "Passw0rd!",
@@ -56,7 +56,7 @@ def test_create_user_with_role_and_tenant(db_client, _seed):
     assert "password" not in data
 
 
-def test_create_user_duplicate_username_rejected(db_client, _seed):
+def test_create_user_duplicate_username_rejected(db_client, admin_client, _seed):
     """同租户同名 → 400（T5 后查重按 (目标租户, username) 口径）"""
     resp = db_client.post("/api/v1/admin/users", json={
         "username": "uc-op", "email": "other@x.co", "password": "Passw0rd!",
@@ -64,7 +64,7 @@ def test_create_user_duplicate_username_rejected(db_client, _seed):
     assert resp.status_code == 400
 
 
-def test_create_user_same_name_in_platform_tenant_allowed(db_client, _seed):
+def test_create_user_same_name_in_platform_tenant_allowed(db_client, admin_client, _seed):
     """跨租户同名合法（T5 语义）：不带 tenant_id 落 platform 租户，与业务租户
     的 uc-op 同名不冲突（旧全局查重会误杀）"""
     resp = db_client.post("/api/v1/admin/users", json={
@@ -74,7 +74,7 @@ def test_create_user_same_name_in_platform_tenant_allowed(db_client, _seed):
     assert data["tenant_name"] == "平台租户" and data["is_platform_admin"] is False
 
 
-def test_update_user_role(db_client, _seed):
+def test_update_user_role(db_client, admin_client, _seed):
     """权限分配：role 修改联动 is_admin/tenant_role"""
     users = {u["username"]: u for u in db_client.get("/api/v1/admin/users?limit=50").json()["data"]["items"]}
     uid = users["uc-op"]["id"]
@@ -84,14 +84,14 @@ def test_update_user_role(db_client, _seed):
     assert data["role"] == "admin" and data["is_admin"] is True and data["tenant_role"] == "admin"
 
 
-def test_update_self_demotion_rejected(db_client, _seed):
+def test_update_self_demotion_rejected(db_client, admin_client, _seed):
     """防自锁：不能降级自己的 admin 角色（actor=uc-admin，id=1）"""
     resp = db_client.patch("/api/v1/admin/users/1", json={"role": "viewer"})
     assert resp.status_code == 400
     assert "自锁" in resp.json()["message"] or "降级" in resp.json()["message"]
 
 
-def test_delete_user_soft_and_guardrails(db_client, _seed):
+def test_delete_user_soft_and_guardrails(db_client, admin_client, _seed):
     """软删除：列表消失；不可删自己（actor id=1）；不可删最后一个平台超管"""
     users = {u["username"]: u for u in db_client.get("/api/v1/admin/users?limit=50").json()["data"]["items"]}
 
