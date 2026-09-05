@@ -62,13 +62,18 @@ ALL_ORM_TABLES = {
 
 
 def _new_user(username: str) -> User:
-    """最小可入库用户（工厂 builder 属工单 02，此处仅内联构造）"""
+    """最小可入库用户（工厂 builder 属工单 02，此处仅内联构造）
+
+    T5 后 users.tenant_id NOT NULL：默认归属 id=1 租户（无 FK 强制，测试库
+    无需预建租户行）。
+    """
     return User(
         username=username,
         email=f"{username}@test.local",
         password_hash="not-a-real-hash",
         role="viewer",
         is_active=True,
+        tenant_id=1,
     )
 
 

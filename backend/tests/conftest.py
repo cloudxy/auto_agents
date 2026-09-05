@@ -77,19 +77,23 @@ def app():
         session=Depends(_get_async_db),
     ):
         # 带真实 Bearer 时走真链路（S1/S2 越权与成员用例依赖 JWT→中间件→快照全链）；
-        # 无凭据时保持既有契约：固定 admin 快照（存量 600+ 测试零改动）
+        # 无凭据时保持既有契约：固定 admin 快照（存量 600+ 测试零改动）。
+        # 有 user_id 但查无此人/停用 → 401（与生产 get_current_user 同口径；
+        # T5 后 session.get 受 tenant_scope 注入过滤，伪造租户 token 落此分支）
         from backend.app.api.deps import effective_role
+        from platform_core.exceptions import AuthenticationException
 
         if credentials is not None and getattr(credentials, "credentials", ""):
             payload = _decode(credentials.credentials)
             if payload and payload.get("user_id"):
                 user = await session.get(_User, payload["user_id"])
-                if user and user.is_active:
-                    return CurrentUser(
-                        id=user.id, username=user.username, role=effective_role(user),
-                        tenant_id=user.tenant_id, tenant_role=user.tenant_role,
-                        is_platform_admin=bool(user.is_platform_admin),
-                    )
+                if not user or not user.is_active:
+                    raise AuthenticationException(message="用户不存在或已停用")
+                return CurrentUser(
+                    id=user.id, username=user.username, role=effective_role(user),
+                    tenant_id=user.tenant_id, tenant_role=user.tenant_role,
+                    is_platform_admin=bool(user.is_platform_admin),
+                )
         return CurrentUser(id=1, username="test-admin", role="admin")
 
     application.dependency_overrides[get_current_user] = _override_current_user

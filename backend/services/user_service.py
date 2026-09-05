@@ -62,7 +62,12 @@ class UserService:
     # ---------------- 平台超管 CRUD（用户管理页：增删改查 + 角色分配） ----------------
 
     async def create_user(self, payload) -> UserResponse:
-        """创建账户（用户名/邮箱唯一；密码 bcrypt；tenant 校验存在）"""
+        """创建账户（用户名/邮箱唯一；密码 bcrypt；tenant 校验存在）
+
+        T5 决策 B：users.tenant_id 已 NOT NULL（迁移 024）——tenant_id 缺省的
+        平台超管账户显式挂 platform 租户（不再产 NULL 行）；username 查重按
+        (目标租户, username) 口径（跨租户同名是产品既定能力）。
+        """
         import asyncio
 
         from sqlalchemy import select
@@ -72,18 +77,31 @@ class UserService:
         from platform_core.models.user import User
         from backend.utils.auth import get_password_hash
 
-        if await self.repo.get_by_username(payload.username):
+        tenant_role = None
+        is_platform_admin = False
+        target_tenant_id = payload.tenant_id
+        if target_tenant_id is None:
+            # 平台超管账户：挂 platform 租户（024 种子；NULL 租户语义已消灭）
+            target_tenant_id = (await self.session.execute(
+                select(Tenant.id).where(Tenant.slug == "platform")
+            )).scalar_one_or_none()
+            if target_tenant_id is None:
+                raise ValidationException(
+                    message="platform 租户缺失（迁移 024 未执行？）", field="tenant_id")
+            is_platform_admin = payload.role == "admin"
+        else:
+            tenant = (await self.session.execute(
+                select(Tenant).where(Tenant.id == target_tenant_id)
+            )).scalar_one_or_none()
+            if tenant is None:
+                raise ValidationException(message=f"租户不存在: {target_tenant_id}", field="tenant_id")
+            tenant_role = "admin" if payload.role == "admin" else payload.role
+
+        # 查重按 (目标租户, username) 口径且含软删行（与唯一约束及 T4 占位一致）
+        if await self.repo.exists_username_in_tenant(target_tenant_id, payload.username):
             raise BusinessException(f"用户名已存在: {payload.username}")
         if await self.repo.get_by_email(payload.email):
             raise BusinessException(f"邮箱已注册: {payload.email}")
-        tenant_role = None
-        if payload.tenant_id is not None:
-            tenant = (await self.session.execute(
-                select(Tenant).where(Tenant.id == payload.tenant_id)
-            )).scalar_one_or_none()
-            if tenant is None:
-                raise ValidationException(message=f"租户不存在: {payload.tenant_id}", field="tenant_id")
-            tenant_role = "admin" if payload.role == "admin" else payload.role
         user = User(
             username=payload.username,
             email=payload.email,
@@ -91,19 +109,18 @@ class UserService:
             is_active=payload.is_active,
             is_admin=payload.role == "admin",
             role=payload.role,
-            tenant_id=payload.tenant_id,
+            tenant_id=target_tenant_id,
             tenant_role=tenant_role,
-            is_platform_admin=payload.tenant_id is None and payload.role == "admin",
+            is_platform_admin=is_platform_admin,
         )
         self.session.add(user)
         await self.session.flush()
         await self.session.refresh(user)  # onupdate/默认列需回读，防 expired 属性同步 IO
-        logger.info(f"创建用户 | id={user.id} username={payload.username} tenant={payload.tenant_id}")
+        logger.info(f"创建用户 | id={user.id} username={payload.username} tenant={target_tenant_id}")
         resp = UserResponse.model_validate(user)
-        if payload.tenant_id is not None:
-            resp.tenant_name = (await self.session.execute(
-                select(Tenant.name).where(Tenant.id == payload.tenant_id)
-            )).scalar_one_or_none()
+        resp.tenant_name = (await self.session.execute(
+            select(Tenant.name).where(Tenant.id == target_tenant_id)
+        )).scalar_one_or_none()
         return resp
 
     async def update_user(self, user_id: int, payload, actor_id: int) -> UserResponse:

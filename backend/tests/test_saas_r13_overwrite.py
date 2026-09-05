@@ -3,6 +3,9 @@
 Seam（工单预确认）：db_client（真实 JWT → 中间件 → tenant_scope → 行级隔离全链路）。
 覆盖资源类：spiders/tasks / spiders/definitions / spiders/templates / ai / llm/providers
 （skills 为平台级豁免——全租户共享只读，不在越权面）。
+
+T5 扩容：users/members 越权（User 继承 TenantMixin 后自动过滤收口）+
+中间件收紧（NULL 租户非平台超管 token → 401）+ deps 链伪造租户 token → 401。
 """
 import asyncio
 
@@ -101,8 +104,12 @@ def test_platform_scope_sees_all(db_client, db_engine, db_session):
     """平台超管（platform_scope）跨租户可见（运营视角）"""
     async def _go():
         async with db_session() as s:
+            # T5 后平台超管挂 platform 租户（users.tenant_id NOT NULL）
+            platform = Tenant(slug="platform", name="平台租户")
+            s.add(platform)
+            await s.flush()
             s.add(User(username="root", email="root@x.local", password_hash="x",
-                       role="admin", tenant_id=None, tenant_role=None,
+                       role="admin", tenant_id=platform.id, tenant_role=None,
                        is_platform_admin=True))
             await s.commit()
             root = (await s.execute(select(User).where(User.username == "root"))).scalar_one()
@@ -115,3 +122,80 @@ def test_platform_scope_sees_all(db_client, db_engine, db_session):
     resp = db_client.get("/api/v1/spiders/registry", headers={"Authorization": f"Bearer {token.access_token}"})
     assert resp.status_code == 200
     assert "b-def-" in resp.text
+
+
+# ---------------- T5 扩容：users/members 越权 + 中间件收紧 ----------------
+
+
+def test_a_cannot_see_b_users_in_members(db_client):
+    """A 租户 owner 看 /members：B 租户用户不可见（MemberService 显式条件
+    + TenantMixin 自动过滤双保险，T5 后即使手写条件漏掉也被兜住）"""
+    resp = db_client.get("/api/v1/members", headers=_auth("a"))
+    assert resp.status_code == 200
+    usernames = [m["username"] for m in resp.json()["data"]]
+    assert any(u.startswith("a-owner-") for u in usernames), "A 应看到本租户成员"
+    assert all(not u.startswith("b-owner-") for u in usernames), "B 用户不得出现在 A 的成员列表"
+
+
+def test_a_cannot_see_b_users_in_admin_users(db_client):
+    """/admin/users（用户管理页，A owner role=admin 可过角色守卫）：
+    TenantMixin 自动过滤生效——A 只见本租户用户，B 用户不可见"""
+    resp = db_client.get("/api/v1/admin/users?limit=100", headers=_auth("a"))
+    assert resp.status_code == 200
+    usernames = [u["username"] for u in resp.json()["data"]["items"]]
+    assert any(u.startswith("a-owner-") for u in usernames), "A 应看到本租户用户（正向对照）"
+    assert all(not u.startswith("b-owner-") for u in usernames), "B 用户不得出现在 A 的用户列表"
+
+
+def test_null_tenant_non_platform_token_rejected(db_client, db_session):
+    """中间件收紧（T5 决策 B）：非平台超管且 tenant_id=NULL 的 token → 401。
+
+    旧条件 `is_platform_admin OR not tenant_id` 下此类 token 自动获得
+    platform_scope（公开注册 NULL 账号=任意人造平台态）；收紧后 NULL 兜底消失。
+    """
+    async def _go():
+        async with db_session() as s:
+            return await AuthService(s).create_token({
+                "id": 42, "username": "null-tenant-user", "is_admin": False,
+                "role": "viewer", "tenant_id": None, "tenant_role": "viewer",
+                "is_platform_admin": False,
+            })
+
+    token = asyncio.run(_go())
+    resp = db_client.get("/api/v1/spiders/tasks",
+                         headers={"Authorization": f"Bearer {token.access_token}"})
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "AUTH_FAILED"
+
+
+def test_forged_tenant_token_cannot_impersonate(db_client, db_session):
+    """deps 链收紧（T5 决策 C）：伪造 token（B 用户 user_id + A 租户 tenant_id）。
+
+    User 继承 TenantMixin 后，get_current_user 的 session.get(User, id) 在
+    tenant_scope(A) 下被注入过滤——B 行租户不匹配查不到 → 401（旧行为是
+    静默取 DB 行放行，语义更严属修复非回归）。
+    """
+
+    async def _ids():
+        async with db_session() as s:
+            rows = (await s.execute(
+                select(User.username, User.id).where(User.username.like("b-owner-%"))
+            )).all()
+            b_id = rows[0][1]
+            t1 = (await s.execute(select(Tenant.id).where(Tenant.slug.like("alpha-%")))).scalar_one()
+            return b_id, t1
+
+    b_user_id, a_tenant_id = asyncio.run(_ids())
+
+    async def _go():
+        async with db_session() as s:
+            return await AuthService(s).create_token({
+                "id": b_user_id, "username": "b-owner", "is_admin": False,
+                "role": "admin", "tenant_id": a_tenant_id, "tenant_role": "owner",
+                "is_platform_admin": False,
+            })
+
+    token = asyncio.run(_go())
+    resp = db_client.get("/api/v1/members",
+                         headers={"Authorization": f"Bearer {token.access_token}"})
+    assert resp.status_code == 401

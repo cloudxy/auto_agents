@@ -104,8 +104,12 @@ def test_platform_ops_tenant_list(db_client, db_engine, db_session):
 
     async def _go():
         async with db_session() as s:
+            # T5 后平台超管挂 platform 租户（users.tenant_id NOT NULL）
+            platform = Tenant(slug="platform", name="平台租户")
+            s.add(platform)
+            await s.flush()
             s.add(User(username="rootop", email="rootop@x.com", password_hash="x",
-                       role="admin", tenant_id=None, tenant_role=None,
+                       role="admin", tenant_id=platform.id, tenant_role=None,
                        is_platform_admin=True))
             await s.commit()
             root = (await s.execute(select(User).where(User.username == "rootop"))).scalar_one()

@@ -28,7 +28,11 @@ def _apply(model: M, overrides: dict[str, Any]) -> M:
 
 
 def build_user(**overrides: Any) -> User:
-    """最小可入库用户（viewer，激活）"""
+    """最小可入库用户（viewer，激活）
+
+    T5 后 users.tenant_id NOT NULL：默认归属 id=1 租户（无 FK 强制，测试库
+    无需预建租户行；需要租户语义的用例经 overrides 显式覆盖）。
+    """
     n = next(_seq)
     return _apply(
         User(
@@ -37,6 +41,7 @@ def build_user(**overrides: Any) -> User:
             password_hash="not-a-real-hash",
             role="viewer",
             is_active=True,
+            tenant_id=1,
         ),
         overrides,
     )

@@ -35,7 +35,8 @@ class CurrentUser:
     届时再读 user.id/username 会触发同步惰性加载，异步上下文抛 MissingGreenlet。
 
     S1-3 租户身份（claims 只承身份，权限一律 DB 快照重算）：
-    tenant_id=None 且 is_platform_admin=True → 平台超管（platform_scope）；
+    is_platform_admin=True → 平台超管（platform_scope；T5 后 DB 行挂 platform
+    租户，claims 的 tenant_id 可能为 None——旧 token 形态兼容）；
     否则租户用户（tenant_scope，tenant_role: owner/admin/operator/viewer）。
     """
 
