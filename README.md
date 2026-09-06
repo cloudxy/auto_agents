@@ -448,11 +448,11 @@ CI 关卡：Python lint+test → 架构红线（13+3）→ 迁移 IR → 前端�
 
 ## 相关文档
 
-- 平台方案 / ADR / 诊断档案：`docs/` 为本地私有内容不入库（历史版本见 git 历史 `@50558b9` 前）
+- 平台方案 / ADR / 部署 / 复盘：[`docs/`](docs/)（`adr/` `claims.md` `ops/` `agents/`）
 - 项目规则（13 红线 + 3 边界）：`.claude/rules/project_rule.md`；扫描器 `scripts/check-arch.sh`
 - new-api 网关部署：[deploy/newapi/README.md](deploy/newapi/README.md)
 - LiteLLM L1 影子接入：[deploy/litellm/README.md](deploy/litellm/README.md)
-- 宣称对账：`docs/claims.md`（本地私有，不入库）
+- 宣称对账：[docs/claims.md](docs/claims.md)
 - AI 协作层：`.claude/IDENTITY.md` / `SOUL.md` / `MEMORY.md`、子代理 `spider-doctor / arch-warden / memory-curator`
 - 常用 Skill：`/new-svc` `/new-spider` `/new-model` `/db-design` `/check-arch` `/verify` `/coding-style` `/logging` `/config` `/deploy` `/cicd`
 - 跨工具内容库：[capability-library/README.md](capability-library/README.md)
