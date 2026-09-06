@@ -2,16 +2,15 @@
 gates:
   test:      "uv run pytest -q backend/tests"
   lint:      "bash scripts/check-arch.sh && bash scripts/check-frontend.sh"
-  build:     "npm run build -w admin && npm run build -w official"
+  build:     "npm run build -w @auto-agents/frontend-shared && CI= npm run build -w admin && CI= npm run build -w official"
   migration: "bash scripts/check-db-ir.sh && bash scripts/check-db-migrations.sh"
-  e2e:       null
-  e2e_reason: "无 E2E 框架；L3+ 由前端构建 + jest 双 app 测试补，见 06-deliver/checklist"
+  e2e:       "CI=1 npm run e2e -w admin"
   sdlc:      "bash ~/.zcode/local-plugins/sdlc-workflow/scripts/check-sdlc.sh"
 
 constitution: ".claude/rules/project_rule.md"
 artifact_root: "."
 lane_rules:
   file_count_threshold: 20        # 实测：常规 feat 动 17-36 文件
-  subproject_dirs: [backend, frontend/admin, frontend/official, scrapy, platform_core]
+  subproject_dirs: [backend, frontend/admin, frontend/official, frontend/shared, scrapy, platform_core]
   schema_paths: [backend/alembic, platform_core/models]
-  auth_paths: [backend/app/api/v1/auth.py, backend/app/api/v1/rbac.py, backend/app/middleware/tenant_context.py, platform_core/tenant_context.py]
+  auth_paths: [backend/app/api/v1/auth.py, backend/app/api/v1/rbac.py, backend/app/api/v1/api_keys.py, backend/app/middleware/tenant_context.py, platform_core/tenant_context.py]
