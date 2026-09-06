@@ -1,7 +1,8 @@
 /**
  * 平台运营台（SaaS S5-2）：租户列表 / 套餐配额编辑 / 到期管理（平台超管专属）。
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert, Button, DatePicker, Form, InputNumber, Modal, Popconfirm, Space, Table, Tag,
   Typography, message,
@@ -12,6 +13,7 @@ import dayjs, { Dayjs } from 'dayjs'
 import { Tabs } from 'antd'
 import { listTenants, patchTenant, type TenantRow } from '../services/platformOps'
 import { clearDeadItems, discardDeadItem, listDeadItems, type DeadItem } from '../services/deadItems'
+import PendingOrdersTab from '../components/ops/PendingOrdersTab'
 import { apiErrorMessage } from '../utils/errorMessage'
 
 
@@ -22,23 +24,14 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const PlatformOps: React.FC = () => {
-  const [rows, setRows] = useState<TenantRow[]>([])
-  const [loading, setLoading] = useState(false)
+  const qc = useQueryClient()
+  const tenantsQ = useQuery({ queryKey: ['tenants'], queryFn: listTenants })
+  const rows = tenantsQ.data ?? []
+  const loading = tenantsQ.isLoading
   const [editing, setEditing] = useState<TenantRow | null>(null)
   const [form] = Form.useForm()
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      setRows(await listTenants())
-    } catch (e) {
-      message.error(apiErrorMessage(e, '租户列表加载失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { load() }, [load])
+  const load = () => { qc.invalidateQueries({ queryKey: ['tenants'] }) }
 
   const onSave = async () => {
     if (!editing) return
@@ -116,24 +109,12 @@ const PlatformOps: React.FC = () => {
 
 // ---------------- 死信队列 Tab（B6 工单 91：排障刚需） ----------------
 const DeadItemsTab: React.FC = () => {
-  const [items, setItems] = useState<DeadItem[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(false)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await listDeadItems()
-      setItems(data.items)
-      setTotal(data.total)
-    } catch (e) {
-      message.error(apiErrorMessage(e, '死信队列加载失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { load() }, [load])
+  const qc = useQueryClient()
+  const deadQ = useQuery({ queryKey: ['dead-items'], queryFn: () => listDeadItems() })
+  const items = deadQ.data?.items ?? []
+  const total = deadQ.data?.total ?? 0
+  const loading = deadQ.isLoading
+  const load = () => { qc.invalidateQueries({ queryKey: ['dead-items'] }) }
 
   const onDiscard = async (index: number) => {
     try {
@@ -162,7 +143,7 @@ const DeadItemsTab: React.FC = () => {
     <div>
       <Alert
         type="info" showIcon style={{ marginBottom: 12 }}
-        message={`共 ${total} 条死信（最新在前）`}
+        title={`共 ${total} 条死信（最新在前）`}
         description="结果消息缺少 task_id 等无法归属时转入此队列留档；确认无用后可单条丢弃或清空。"
       />
       <Space style={{ marginBottom: 12 }}>
@@ -198,8 +179,12 @@ const DeadItemsTab: React.FC = () => {
             key: 'tenants', label: '租户管理',
             children: (
               <>
+      {tenantsQ.isError ? (
+        <Alert type="error" showIcon style={{ marginBottom: 12 }}
+               title={apiErrorMessage(tenantsQ.error, '租户列表加载失败')} />
+      ) : null}
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
-             message="平台运营台为平台超管专属；到期租户会被登录拒绝（可行动文案），此处可续期/调整套餐" />
+             title="平台运营台为平台超管专属；到期租户会被登录拒绝（可行动文案），此处可续期/调整套餐" />
       <Space style={{ marginBottom: 12 }}>
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
       </Space>
@@ -208,6 +193,7 @@ const DeadItemsTab: React.FC = () => {
               </>
             ),
           },
+          { key: 'orders', label: '待确认收款', children: <PendingOrdersTab /> },
           { key: 'dead-items', label: '死信队列', children: <DeadItemsTab /> },
         ]}
       />

@@ -12,26 +12,26 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.external_api.v1.webhooks import validate_api_key
+from backend.services.api_key_service import ApiKeyService
 from backend.services.spider_query_service import SpiderQueryService
 from platform_core.db import get_async_db
+from platform_core.logger import get_logger
 from platform_core.schemas.spider import SpiderTaskResponse
 
 router = APIRouter()
+_log = get_logger("external.api")
 
 
-# ---------------------------------------------------------------------------
-# 公开数据查询端点（API Key 认证）
-# ---------------------------------------------------------------------------
-
-def _require_api_key(request: Request) -> None:
-    """公开查询端点统一鉴权（唯一入口，/data/{spider_name} 也走此函数）
-
-    X-API-Key 须命中 EXTERNAL_API.API_KEYS（或过渡期旧单 key EXTERNAL_API.API_KEY，
-    见 webhooks.validate_api_key）；均未配置（空）时一律 401，杜绝默认密钥。
-    """
+async def _resolve_tenant_key(request: Request, session: AsyncSession) -> Optional[int]:
+    """租户 Key 优先；旧平台静态 Key 仅作运维过渡（无租户过滤，记警告）。"""
     api_key = request.headers.get("X-API-Key", "")
-    if not validate_api_key(api_key):
-        raise HTTPException(status_code=401, detail="Invalid API Key")
+    tenant_id = await ApiKeyService(session).authenticate(api_key)
+    if tenant_id is not None:
+        return tenant_id
+    if validate_api_key(api_key):
+        _log.warning("外部 API 使用已退役的平台静态 Key，过渡期允许且无租户过滤")
+        return None
+    raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
 @router.get("/data/{spider_name}")
@@ -54,8 +54,7 @@ async def get_spider_data(
       - start_time / end_time：时间范围过滤（ISO 8601）
       - fields：逗号分隔的字段名，如 "url,title,content"（响应字段裁剪）
     """
-    # 1. 验证 API Key（统一鉴权入口，与新列表/旧单 key 双轨配置兼容）
-    _require_api_key(request)
+    tenant_id = await _resolve_tenant_key(request, session)
 
     # 2. 参数约束
     if page < 1:
@@ -72,6 +71,7 @@ async def get_spider_data(
         page_size=page_size,
         start_time=start_time,
         end_time=end_time,
+        tenant_id=tenant_id,
     )
 
     # 4. 字段过滤
@@ -99,8 +99,8 @@ async def get_spider_status(
     session: AsyncSession = Depends(get_async_db),
 ):
     """查询爬虫任务状态（公开接口，API Key 认证；任务不存在返回 404）"""
-    _require_api_key(request)
-    task = await SpiderQueryService(session).get_task(task_id)
+    tenant_id = await _resolve_tenant_key(request, session)
+    task = await SpiderQueryService(session).get_task(task_id, tenant_id=tenant_id)
     return SpiderTaskResponse.model_validate(task)
 
 
@@ -113,7 +113,8 @@ async def get_spider_results(
     session: AsyncSession = Depends(get_async_db),
 ):
     """获取任务采集结果（公开接口，API Key 认证；分页；任务不存在返回 404）"""
-    _require_api_key(request)
+    tenant_id = await _resolve_tenant_key(request, session)
+    await SpiderQueryService(session).get_task(task_id, tenant_id=tenant_id)
     if page < 1:
         page = 1
     if page_size < 1:
@@ -139,5 +140,10 @@ async def get_public_stats(
     session: AsyncSession = Depends(get_async_db),
 ):
     """系统公开统计（真实聚合数据：任务状态分布/成功率/近 7 日趋势；API Key 认证）"""
-    _require_api_key(request)
-    return (await SpiderQueryService(session).stats()).model_dump(mode="json")
+    tenant_id = await _resolve_tenant_key(request, session)
+    if tenant_id is None:
+        return (await SpiderQueryService(session).stats()).model_dump(mode="json")
+    items, total = await SpiderQueryService(session).query_public_results(
+        tenant_id=tenant_id, page=1, page_size=1
+    )
+    return {"tenant_id": tenant_id, "result_total": total}

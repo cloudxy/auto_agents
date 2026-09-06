@@ -1,7 +1,8 @@
 /**
  * 候选审核 Tab（方案 A · A-P5-2）：市场采集候选 → 人工闸门 → 转正(import-url 管线)/拒绝。
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Empty, message, Popconfirm, Space, Table, Tag, Typography } from 'antd'
 
 import {
@@ -13,25 +14,13 @@ import { apiErrorMessage } from '../utils/errorMessage'
 const { Text } = Typography
 
 const SkillsCandidates: React.FC<{ canAdmin?: boolean }> = ({ canAdmin = false }) => {
-  const [items, setItems] = useState<SkillCandidate[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(false)
   const [acting, setActing] = useState<number | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await listSkillCandidates()
-      setItems(data.items)
-      setTotal(data.total)
-    } catch (e) {
-      message.error(apiErrorMessage(e, '候选加载失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { load() }, [load])
+  const qc = useQueryClient()
+  const candQ = useQuery({ queryKey: ['skill-candidates'], queryFn: listSkillCandidates })
+  const items = candQ.data?.items ?? []
+  const total = candQ.data?.total ?? 0
+  const loading = candQ.isLoading
+  const load = () => { qc.invalidateQueries({ queryKey: ['skill-candidates'] }) }
 
   const approve = async (id: number) => {
     try {
@@ -61,7 +50,7 @@ const SkillsCandidates: React.FC<{ canAdmin?: boolean }> = ({ canAdmin = false }
 
   return (
     <div>
-      {!canAdmin && <Alert type="info" showIcon style={{ marginBottom: 12 }} message="转正/拒绝需 admin 权限" />}
+      {!canAdmin && <Alert type="info" showIcon style={{ marginBottom: 12 }} title="转正/拒绝需 admin 权限" />}
       <Space style={{ marginBottom: 12 }}>
         <Button onClick={load}>刷新候选</Button>
         <Text type="secondary">共 {total} 条待审（来源：skill_harvester 采集，source=marketplace）</Text>

@@ -7,8 +7,9 @@
  * - 排行图：各爬虫采集结果量 Top5（条形）
  * - 质量概览：最近任务的质量评分分布（B1）
  */
-import React, { useEffect, useState } from 'react'
-import { Alert, Typography, Card, Row, Col, Statistic, Button, Empty, Spin, message, Space } from 'antd'
+import React from 'react'
+import { Alert, Typography, Card, Row, Col, Statistic, Button, Empty, Space } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import {
   CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, ThunderboltOutlined,
   SafetyCertificateOutlined, PlusOutlined, RobotOutlined,
@@ -22,6 +23,7 @@ import { useAuthStore } from '../store/useAuthStore'
 import { fetchAdminStats, fetchQualityReport, fetchRecentCompletedTasks } from '../services/admin'
 import { apiErrorMessage } from '../utils/errorMessage'
 import { BRAND_TOKENS } from '@auto-agents/frontend-shared'
+import { QueryStateView } from '../components/QueryStateView'
 
 const { Title } = Typography
 
@@ -56,41 +58,37 @@ interface QualityReport {
 const Dashboard: React.FC = () => {
   const { user } = useAuthStore()
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(true)
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [qualityData, setQualityData] = useState<QualityReport | null>(null)
-  const [recentTaskIds, setRecentTaskIds] = useState<number[]>([])
-
-  useEffect(() => {
-    Promise.all([
-      fetchAdminStats<Stats>().then((res) => setStats(res)),
-      // 获取最近完成的任务列表，取第一个查质量报告
-      fetchRecentCompletedTasks(5)
-        .then((ids) => setRecentTaskIds(ids))
-        .catch(() => {}),
-    ])
-      .catch((e) => message.error(apiErrorMessage(e, '获取运行统计失败')))
-      .finally(() => setLoading(false))
-  }, [])
-
-  // 获取最近任务的质量报告
-  useEffect(() => {
-    if (recentTaskIds.length === 0) return
-    const taskId = recentTaskIds[0]
-    fetchQualityReport<QualityReport>(taskId)
-      .then((res) => setQualityData(res))
-      .catch(() => {})
-  }, [recentTaskIds])
+  const statsQ = useQuery({
+    queryKey: ['admin-stats'],
+    queryFn: () => fetchAdminStats<Stats>(),
+  })
+  const recentQ = useQuery({
+    queryKey: ['recent-completed-tasks'],
+    queryFn: () => fetchRecentCompletedTasks(5),
+  })
+  const qualityQ = useQuery({
+    queryKey: ['quality-report', recentQ.data?.[0]],
+    queryFn: () => fetchQualityReport<QualityReport>(recentQ.data![0]),
+    enabled: !!recentQ.data?.[0],
+  })
+  const stats = statsQ.data ?? null
+  const loading = statsQ.isLoading
+  const error = statsQ.isError ? apiErrorMessage(statsQ.error, '获取运行统计失败') : null
+  const qualityData = qualityQ.data ?? null
 
   // 近 7 日趋势：把任务数/结果数按日期合并成一行（双折线共用 X 轴）
   const trendData = (() => {
     if (!stats) return []
     const map: Record<string, { date: string; tasks: number; results: number }> = {}
-    for (const p of stats.daily_tasks || []) map[p.date] = { date: p.date.slice(5), tasks: p.count, results: 0 }
+    const dayKey = (d: string) => d.slice(0, 10)
+    for (const p of stats.daily_tasks || []) {
+      const k = dayKey(p.date)
+      map[k] = { date: k.slice(5), tasks: p.count, results: 0 }
+    }
     for (const p of stats.daily_results || []) {
-      const key = p.date.slice(5)
-      if (map[p.date]) map[p.date].results = p.count
-      else map[p.date] = { date: key, tasks: 0, results: p.count }
+      const k = dayKey(p.date)
+      if (map[k]) map[k].results = p.count
+      else map[k] = { date: k.slice(5), tasks: 0, results: p.count }
     }
     return Object.values(map).sort((a, b) => a.date.localeCompare(b.date))
   })()
@@ -103,7 +101,7 @@ const Dashboard: React.FC = () => {
       {/* UX2（工单 90）：新用户 onboarding——零任务时三步快速开始引导 */}
       {!loading && stats && (stats.total_tasks ?? 0) === 0 && (
         <Alert type="info" showIcon style={{ marginBottom: 16 }}
-               message="从这里开始你的第一次智能采集（三步）"
+               title="从这里开始你的第一次智能采集（三步）"
                description={
                  <ol style={{ margin: '8px 0 0', paddingLeft: 20, lineHeight: 2 }}>
                    <li>
@@ -143,7 +141,9 @@ const Dashboard: React.FC = () => {
         </Col>
       </Row>
 
-      <Spin spinning={loading}>
+      <QueryStateView loading={loading} error={error} data={stats}>
+        {(_stats) => (
+          <>
           {/* 统计卡片 */}
           <Row gutter={[16, 16]}>
             <Col xs={12} md={6}>
@@ -301,7 +301,9 @@ const Dashboard: React.FC = () => {
               </Card>
             </Col>
           </Row>
-      </Spin>
+          </>
+        )}
+      </QueryStateView>
     </div>
   )
 }

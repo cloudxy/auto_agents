@@ -80,11 +80,13 @@ class SpiderQueryService:
             items=[SpiderResultResponse.model_validate(r) for r in items],
         )
 
-    async def get_task(self, task_id: int):
+    async def get_task(self, task_id: int, tenant_id: Optional[int] = None):
         """按主键取任务行（miss 抛 404）——T7 跳层收口：external_api 状态查询改道本层"""
         logger.info(f"查询任务 | task_id={task_id}")
         task = await self.repo.get_by_id(task_id)
         if task is None:
+            raise NotFoundException("爬虫任务")
+        if tenant_id is not None and getattr(task, "tenant_id", None) != tenant_id:
             raise NotFoundException("爬虫任务")
         return task
 
@@ -95,6 +97,7 @@ class SpiderQueryService:
         page_size: int = 20,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        tenant_id: Optional[int] = None,
     ) -> Tuple[list, int]:
         """按爬虫名称分页查询结果（返回 dict 行列表，非 ORM）——外部公开查询通道
 
@@ -111,6 +114,7 @@ class SpiderQueryService:
             page_size=page_size,
             start_time=start_time,
             end_time=end_time,
+            tenant_id=tenant_id,
         )
 
     # 导出列定义
@@ -222,7 +226,15 @@ class SpiderQueryService:
         result = await self.result_repo.get_by_id(result_id)
         if result is None:
             raise NotFoundException("采集结果")
+        task_id = result.task_id
         await self.result_repo.delete(result_id)
+        if task_id is not None:
+            try:
+                n = await self.result_repo.count_by_task(task_id)
+                if isinstance(n, int):
+                    await self.repo.update(task_id, result_count=n)
+            except Exception:  # noqa: BLE001 测试桩/计数失败不阻断删除
+                pass
         await self.session.commit()
         return {"id": result_id, "deleted": True}
 

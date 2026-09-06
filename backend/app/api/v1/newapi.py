@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_admin
+from backend.app.api.deps import CurrentUser, require_platform_admin
 from backend.app.responses import ApiResponse, PaginatedResponse, ok, paginated
 from backend.services.channel_config_service import ChannelConfigService
 from backend.services.newapi_overview_service import NewapiOverviewService
@@ -43,7 +43,7 @@ def _config_service() -> ChannelConfigService:
 @router.get("/overview", response_model=ApiResponse[NewapiOverviewResponse])
 async def get_overview(
     service: NewapiOverviewService = Depends(_service),
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin),
 ) -> ApiResponse[NewapiOverviewResponse]:
     """中转站总览：远程渠道列表（异常降级 available=false）+ 本地事件/探针统计"""
     return ok(await service.get_overview())
@@ -55,7 +55,7 @@ async def list_events(
     page: int = Query(1, ge=1, description="页码（1 起）"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     service: NewapiOverviewService = Depends(_service),
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin),
 ) -> PaginatedResponse[ChannelEventResponse]:
     """渠道启停事件分页（时间倒序；本地表，始终可用）"""
     resp = await service.list_events(channel_id=channel_id, page=page, page_size=page_size)
@@ -70,7 +70,7 @@ async def list_probe_results(
     page: int = Query(1, ge=1, description="页码（1 起）"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     service: NewapiOverviewService = Depends(_service),
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin),
 ) -> PaginatedResponse[ChannelProbeResultResponse]:
     """渠道真伪探针结果分页（时间倒序；本地表，始终可用）"""
     resp = await service.list_probe_results(
@@ -87,7 +87,7 @@ async def list_probe_results(
 @router.get("/channels", response_model=ApiResponse[list[ChannelWithConfigResponse]])
 async def list_channels_with_config(
     service: ChannelConfigService = Depends(_config_service),
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin),
 ) -> ApiResponse[list[ChannelWithConfigResponse]]:
     """渠道列表 + 调度配置合并视图（渠道级 > 全局默认；远程不可达返回业务码 502）"""
     return ok(await service.list_channels())
@@ -99,7 +99,7 @@ async def set_channel_config(
     payload: ChannelConfigInfo,
     session: AsyncSession = Depends(get_async_db),
     service: ChannelConfigService = Depends(_config_service),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin),
 ) -> ApiResponse[ChannelConfigUpdateResult]:
     """写入渠道级额度配置（limit_quota=0 表示显式关闭该渠道调度）"""
     info = await service.set_config(channel_id, payload)
@@ -116,7 +116,7 @@ async def clear_channel_config(
     channel_id: int,
     session: AsyncSession = Depends(get_async_db),
     service: ChannelConfigService = Depends(_config_service),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin),
 ) -> ApiResponse[ChannelConfigUpdateResult]:
     """清除渠道级配置（该渠道回退全局默认额度；无全局默认则退出纳管）"""
     previous = await service.clear_config(channel_id)

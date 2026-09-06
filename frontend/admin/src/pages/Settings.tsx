@@ -1,8 +1,9 @@
 /**
  * 系统设置页面 - 管理网站基础信息
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Tag, Form, Input, Button, Card, message, Divider, Spin } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import { fetchSiteConfigs, fetchWebhookStatus, updateSiteConfig, type WebhookStatus } from '../services/settings'
 import { fetchNotifyConfig, updateNotifyConfig, type NotifyChannelConfig } from '../services/users'
 import { apiErrorMessage } from '../utils/errorMessage'
@@ -16,32 +17,21 @@ interface SiteConfigValues {
 const Settings: React.FC = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
-  const [fetching, setFetching] = useState(true)
-  const [webhook, setWebhook] = useState<WebhookStatus | null>(null)
-  const [notifyCfg, setNotifyCfg] = useState<NotifyChannelConfig | null>(null)
   const [notifySaving, setNotifySaving] = useState(false)
   const [notifyForm] = Form.useForm()
+  const siteQ = useQuery({ queryKey: ['site-configs'], queryFn: fetchSiteConfigs })
+  const webhookQ = useQuery({ queryKey: ['webhook-status'], queryFn: fetchWebhookStatus })
+  const notifyQ = useQuery({ queryKey: ['notify-config'], queryFn: fetchNotifyConfig })
+  const fetching = siteQ.isLoading
+  const webhook: WebhookStatus | null = webhookQ.data ?? null
+  const notifyCfg: NotifyChannelConfig | null = notifyQ.data ?? null
 
   useEffect(() => {
-    fetchWebhookStatus().then(setWebhook).catch(() => setWebhook(null))
-    fetchNotifyConfig().then((cfg) => { setNotifyCfg(cfg); notifyForm.setFieldsValue(cfg) })
-      .catch(() => setNotifyCfg(null))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const fetchConfigs = useCallback(async () => {
-    try {
-      form.setFieldsValue(await fetchSiteConfigs())
-    } catch (error) {
-      message.error('获取配置失败')
-    } finally {
-      setFetching(false)
-    }
-  }, [form])
-
+    if (siteQ.data) form.setFieldsValue(siteQ.data)
+  }, [siteQ.data, form])
   useEffect(() => {
-    fetchConfigs()
-  }, [fetchConfigs])
+    if (notifyQ.data) notifyForm.setFieldsValue(notifyQ.data)
+  }, [notifyQ.data, notifyForm])
 
   const onSaveNotify = async () => {
     try {

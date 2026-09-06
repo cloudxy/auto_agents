@@ -3,13 +3,15 @@
  */
 import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Alert, Button, Card, Form, Input, Typography, message } from 'antd'
+import { Alert, Button, Card, Checkbox, Form, Input, Typography, message } from 'antd'
 import { CheckCircleOutlined } from '@ant-design/icons'
 import { tenantSignup } from '../services/signup'
 import { apiErrorMessage } from '../utils/errorMessage'
 
 
 const { Title, Text } = Typography
+
+const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
 
 interface SignupResult {
   tenant: { slug: string; name: string }
@@ -26,7 +28,6 @@ const Register: React.FC = () => {
     try {
       setSubmitting(true)
       const result = await tenantSignup(values)
-        .then((r) => (r as unknown as { data: SignupResult }).data)
       setDone(result)
       message.success('注册成功，即可登录开始第一次采集')
     } catch (e) {
@@ -51,7 +52,8 @@ const Register: React.FC = () => {
                  description={(
                    <div>
                      <p>管理员账号：<Text code>{done.owner.username}</Text></p>
-                     <Button type="primary" href="/register" onClick={() => window.location.reload()}>再注册一家</Button>
+                     <p>首次登录后请尽快修改密码。</p>
+                     <Button type="primary" href={`${ADMIN_URL}/login`}>进入管理后台登录</Button>
                      {' '}<Button href="/">返回官网</Button>
                    </div>
                  )} />
@@ -65,6 +67,17 @@ const Register: React.FC = () => {
             </Form.Item>
             <Form.Item name="admin_password" label="初始密码" rules={[{ required: true, min: 8 }]}>
               <Input.Password placeholder="至少 8 位" autoComplete="new-password" />
+            </Form.Item>
+            <Form.Item
+              name="agree"
+              valuePropName="checked"
+              rules={[{ validator: (_, v) => (v ? Promise.resolve() : Promise.reject(new Error('请先阅读并同意服务条款与隐私政策'))) }]}
+            >
+              <Checkbox>
+                我已阅读并同意 <a href="/terms" target="_blank" rel="noreferrer">服务条款</a>
+                {' '}与{' '}
+                <a href="/privacy" target="_blank" rel="noreferrer">隐私政策</a>
+              </Checkbox>
             </Form.Item>
             <Button type="primary" htmlType="submit" block loading={submitting}>创建企业租户</Button>
           </Form>

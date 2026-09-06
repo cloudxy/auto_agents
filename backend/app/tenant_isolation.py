@@ -50,6 +50,8 @@ TENANT_EXEMPT_TABLES: "tuple[str, ...]" = (
     # 供应商模型子表：无独立归属，随父表 llm_providers 行走（访问经父行收口）；
     # 无 tenant_id 列（防御性声明）
     "llm_provider_models",
+    # 套餐价目：平台级目录，无 tenant_id 列（防御性声明）
+    "plans",
 )
 
 # 平台共享读表：tenant_scope 读注入保留平台公共行（tenant_id IS NULL 可见，

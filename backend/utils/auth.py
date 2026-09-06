@@ -1,6 +1,7 @@
 """JWT 认证工具 - 强制验证 SECRET_KEY"""
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import os
 import jwt
 import bcrypt
 from platform_core.logger import get_logger
@@ -28,9 +29,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     )
 
 
+def _bcrypt_rounds() -> int:
+    raw = os.environ.get("BCRYPT_ROUNDS") or str(settings.get("AUTH.BCRYPT_ROUNDS", 12))
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        n = 12
+    return max(4, min(n, 14))
+
+
 def get_password_hash(password: str) -> str:
     """生成密码哈希"""
-    salt = bcrypt.gensalt()
+    salt = bcrypt.gensalt(rounds=_bcrypt_rounds())
     hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
     return hashed.decode('utf-8')
 

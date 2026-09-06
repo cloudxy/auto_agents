@@ -80,8 +80,10 @@ def create_app():
     async def lifespan(app: FastAPI):
         """应用生命周期：密钥守卫 + Redis 队列消费者 + 定时调度器 + 代理健康管理 + LLM 用量聚合"""
         _validate_runtime_secrets()
+        import os as _os
+        _run_bg = (_os.environ.get("APP_ROLE") or "all").strip().lower() in ("all", "worker")
         consumer = None
-        if settings.get("TASKS.CONSUMER_ENABLED", True):
+        if _run_bg and settings.get("TASKS.CONSUMER_ENABLED", True):
             from backend.tasks.consumer import SpiderTaskConsumer
 
             consumer = SpiderTaskConsumer()
@@ -90,7 +92,7 @@ def create_app():
             except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
                 get_logger("global").warning(f"Redis 队列消费者启动失败（忽略）: {e}")
         scheduler = None
-        if settings.get("SCHEDULER.ENABLED", True):
+        if _run_bg and settings.get("SCHEDULER.ENABLED", True):
             from backend.services.schedule_service import SpiderScheduler
 
             scheduler = SpiderScheduler()
@@ -99,7 +101,7 @@ def create_app():
             except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
                 get_logger("global").warning(f"爬虫调度器启动失败（忽略）: {e}")
         proxy_health = None
-        if settings.get("PROXY_HEALTH.ENABLED", False):
+        if _run_bg and settings.get("PROXY_HEALTH.ENABLED", False):
             from backend.services.proxy_health_service import ProxyHealthService
 
             proxy_health = ProxyHealthService()
@@ -109,7 +111,7 @@ def create_app():
                 get_logger("global").warning(f"代理健康管理启动失败（忽略）: {e}")
         # LLM 用量聚合落库（P0-3）：Redis 日粒度计数 → llm_token_usage 表
         llm_usage_flush = None
-        if settings.get("LLM.USAGE_PERSIST_ENABLED", True):
+        if _run_bg and settings.get("LLM.USAGE_PERSIST_ENABLED", True):
             from backend.services.llm_usage_service import LlmUsageFlushService
 
             llm_usage_flush = LlmUsageFlushService()
@@ -120,7 +122,7 @@ def create_app():
         # 技能 AI 评分 worker（方案 A · A-P2-2）：SKILLS.SCORING.ENABLED 控制，
         # 失败仅告警不阻断启动（评分队列积压可在恢复后继续消费）
         skill_scoring_worker = None
-        if settings.get("SKILLS.SCORING.ENABLED", False):
+        if _run_bg and settings.get("SKILLS.SCORING.ENABLED", False):
             from backend.services.skill_scoring_service import SkillScoringWorker
 
             skill_scoring_worker = SkillScoringWorker()
@@ -130,7 +132,7 @@ def create_app():
                 get_logger("global").warning(f"技能评分 worker 启动失败（忽略）: {e}")
         # LLM 周期健康巡检（方案 B · B-M4-2）：LLM.HEALTH_PATROL_ENABLED 控制
         llm_health_patrol = None
-        if settings.get("LLM.HEALTH_PATROL_ENABLED", False):
+        if _run_bg and settings.get("LLM.HEALTH_PATROL_ENABLED", False):
             from backend.services.llm_health_patrol import LlmHealthPatrol
 
             llm_health_patrol = LlmHealthPatrol()
@@ -142,7 +144,7 @@ def create_app():
         # 失败仅告警不阻断启动（外部系统依赖故障不影响主平台可用性）
         newapi_scheduler = None
         newapi_probe = None
-        if settings.get("NEWAPI.ENABLED", NEWAPI_ENABLED):
+        if _run_bg and settings.get("NEWAPI.ENABLED", NEWAPI_ENABLED):
             if settings.get("NEWAPI.SCHEDULER_ENABLED", False):
                 from backend.services.channel_scheduler_service import ChannelSchedulerService
 
@@ -159,6 +161,15 @@ def create_app():
                     await newapi_probe.start()
                 except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
                     get_logger("global").warning(f"渠道探针启动失败（忽略）: {e}")
+        retention = None
+        if _run_bg and settings.get("RETENTION.ENABLED", True):
+            from backend.services.retention_service import RetentionService
+
+            retention = RetentionService()
+            try:
+                await retention.start()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"retention 启动失败（忽略）: {e}")
         # 启动对账：进程中断遗留的 planning/testing AI 计划置 failed（失败不阻断启动）
         try:
             from backend.services.ai_planner_service import reconcile_interrupted_plans
@@ -211,6 +222,11 @@ def create_app():
                 await skill_scoring_worker.stop()
             except Exception as e:  # noqa: BLE001
                 get_logger("global").warning(f"技能评分 worker 停止失败（忽略）: {e}")
+        if retention is not None:
+            try:
+                await retention.stop()
+            except Exception as e:  # noqa: BLE001
+                get_logger("global").warning(f"retention 停止失败（忽略）: {e}")
 
     app = FastAPI(
         title="Auto Agents API",

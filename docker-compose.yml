@@ -47,7 +47,9 @@ services:
           memory: 256m
           cpus: "0.5"
     logging: *default-logging
-    command: redis-server --requirepass 123456
+    command: redis-server --requirepass 123456 --appendonly yes --appendfsync everysec --maxmemory 200mb --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "123456", "ping"]
       interval: 5s
@@ -98,6 +100,50 @@ services:
       redis:
         condition: service_healthy
 
+  # 后台循环独立进程（APP_ROLE=worker）。默认不启动以免与 backend(all) 双消费者。
+  # 启用：APP_ROLE=api 给 backend 后 `docker compose --profile worker up`
+  worker:
+    profiles: ["worker"]
+    build: .
+    restart: unless-stopped
+    command: ["uv", "run", "python", "run_backend.py", "--no-reload", "--env", "local"]
+    environment:
+      APP_ENV: "local"
+      APP_ROLE: "worker"
+      AUTO_AGENTS_API__HOST: "0.0.0.0"
+      AUTO_AGENTS_MYSQL__DEFAULT__HOST: "mysql"
+      AUTO_AGENTS_REDIS__DEFAULT__HOST: "redis"
+      AUTO_AGENTS_MYSQL_DEFAULT_PASSWORD: "123456"
+      AUTO_AGENTS_REDIS_DEFAULT_PASSWORD: "123456"
+      AUTO_AGENTS_JWT__SECRET_KEY: "auto-agents-dev-secret-key-2026"
+      AUTO_AGENTS_WEBHOOK__SECRET_KEY: "auto-agents-dev-webhook-secret-2026"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Scrapy worker（G2）：写 Redis 心跳，节点页可见。默认不随 up 启动。
+  # 启用：docker compose --profile spider up
+  spider:
+    profiles: ["spider"]
+    build: .
+    restart: unless-stopped
+    command: ["uv", "run", "python", "run_spider.py", "--env", "local"]
+    environment:
+      APP_ENV: "local"
+      SPIDER_WORKER_ID: "compose-1"
+      AUTO_AGENTS_MYSQL__DEFAULT__HOST: "mysql"
+      AUTO_AGENTS_REDIS__DEFAULT__HOST: "redis"
+      AUTO_AGENTS_MYSQL_DEFAULT_PASSWORD: "123456"
+      AUTO_AGENTS_REDIS_DEFAULT_PASSWORD: "123456"
+      AUTO_AGENTS_WEBHOOK__SECRET_KEY: "auto-agents-dev-webhook-secret-2026"
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
   # LiteLLM Proxy sidecar（L1 影子接入：默认 up 不启动，显式 --profile litellm 开启）
   # - 影子模式只读对比，不改任何现有请求路径；回滚 = 移除本服务（零生产流量变更）
   # - 无 DB 静态模式：不配 DATABASE_URL，仅挂载导出器生成的 config（含明文 key，
@@ -132,3 +178,4 @@ services:
 
 volumes:
   mysql_data:
+  redis_data:

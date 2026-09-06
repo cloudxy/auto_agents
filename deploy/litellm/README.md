@@ -1,7 +1,7 @@
 # LiteLLM Proxy Sidecar（L1 影子接入）
 
-> 状态：**影子模式（L1）**——只读对比，不接任何生产流量；回滚 = 移除 compose 服务。
-> 决策出处：`.scratch/p0-p1-2026-09/product-review.md` 任务二（new-api → LiteLLM 五票路线）。
+> 状态：**L1 影子 + L2 Admin API（默认关）**——生产流量仍走自研直连；治理层只走 HTTP Admin API。
+> 决策：L1 影子 + L2 Admin API 均已接线；生产流量默认仍走自研直连。打开治理层需 `LITELLM.ADMIN.ENABLED`。
 
 ## 1. L1 范围
 
@@ -71,8 +71,8 @@ docker compose --profile litellm down litellm   # 停 sidecar
 
 | 票 | 衔接点 |
 |---|---|
-| L2 渠道配置面切换 | 导出器扩展为 Admin API 下发（治理层只走 Admin API，禁直连 LiteLLM 库）；`backend/services/litellm/` 子包是配置生成的事实源 |
-| L3 虚拟键+计费对账 | sidecar 加 LiteLLM 专用 Postgres + virtual keys/budgets；本仓 MySQL 保持唯一业务事实源，spend → `llm_token_usage` 对账 |
+| L2 渠道配置面切换 | `backend/services/litellm/admin_client.py` + `/api/v1/litellm/*`（平台超管）；禁直连 LiteLLM 库 |
+| L3 虚拟键+计费对账 | 注册 `attach_free_plan` → `ensure_tenant_key`（Admin 未启用则跳过）；部门/个人三级分发仍待 sidecar Postgres |
 | L4 内部调用切流 | `llm_common.runtime` 加 PROXY 路由开关（feature flag）；shadow.py 的对照表是 A/B 质量对比的基线工具 |
 | L5 退役清理 | new-api 全残留删除（本票零 new-api 改动） |
 

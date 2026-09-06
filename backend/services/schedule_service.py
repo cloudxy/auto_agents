@@ -272,7 +272,12 @@ class SpiderScheduler:
         triggered = False
         try:
             service = SpiderService(session)
-            await service.enqueue(spider_name=spider_name, params=schedule.params, priority=priority)
+            await service.enqueue(
+                spider_name=spider_name,
+                params=schedule.params,
+                priority=priority,
+                tenant_id=getattr(schedule, "tenant_id", None),
+            )
             triggered = True
             logger.info(
                 f"调度触发任务入队: schedule_id={schedule.id}, spider={spider_name}, "

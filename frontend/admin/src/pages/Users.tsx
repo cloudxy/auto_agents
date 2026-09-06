@@ -4,9 +4,10 @@
  * 权限语义：role 单源（admin/operator/viewer → 后端 _ROLE_PERMISSIONS 下发）；
  * 归属公司 Select 数据源 /admin/tenants；防自锁（不可降级/停用/删除自己）由后端守卫。
  */
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Avatar, Button, Card, Form, Input, message, Modal, Popconfirm, Select,
+  Alert, Avatar, Button, Card, Form, Input, message, Modal, Popconfirm, Select,
   Space, Switch, Table, Tag,
 } from 'antd'
 import { PlusOutlined, UserOutlined } from '@ant-design/icons'
@@ -26,13 +27,18 @@ const ROLE_OPTIONS = [
 ]
 
 const Users: React.FC = () => {
-  const [loading, setLoading] = useState(false)
-  const [users, setUsers] = useState<UserItem[]>([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const pageSize = 20
-  const [tenants, setTenants] = useState<TenantRow[]>([])
-  const [departments, setDepartments] = useState<DepartmentRow[]>([])
+  const qc = useQueryClient()
+  const usersQ = useQuery({
+    queryKey: ['admin-users', page],
+    queryFn: () => fetchUsersPage<UserItem>({ skip: (page - 1) * pageSize, limit: pageSize }),
+  })
+  const tenantsQ = useQuery({ queryKey: ['tenants'], queryFn: listTenants })
+  const users = usersQ.data?.items || []
+  const total = usersQ.data?.total || 0
+  const loading = usersQ.isLoading
+  const tenants = tenantsQ.data ?? []
   // 列表筛选（本地过滤：搜索/角色/公司/状态/部门）
   const [filterText, setFilterText] = useState('')
   const [filterRole, setFilterRole] = useState('all')
@@ -46,32 +52,25 @@ const Users: React.FC = () => {
   const [createForm] = Form.useForm()
   const [editForm] = Form.useForm()
 
-  const loadUsers = async (p: number) => {
-    setLoading(true)
-    try {
-      const res = await fetchUsersPage<UserItem>({ skip: (p - 1) * pageSize, limit: pageSize })
-      setUsers(res.items || [])
-      setTotal(res.total || 0)
-    } catch (e) {
-      message.error(apiErrorMessage(e, '获取用户列表失败'))
-    } finally {
-      setLoading(false)
-    }
+  const loadUsers = (p: number) => {
+    setPage(p)
+    qc.invalidateQueries({ queryKey: ['admin-users'] })
   }
 
-  useEffect(() => {
-    loadUsers(page)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
-
-  useEffect(() => {
-    listTenants().then(setTenants).catch(() => setTenants([]))
-  }, [])
-  // 部门跟随公司筛选联动（全部公司时聚合不重复部门意义不大，清空部门筛）
-  useEffect(() => {
-    if (filterTenant === 'all') { setFilterDept('all'); setDepartments([]); return }
-    listDepartments(filterTenant as number).then(setDepartments).catch(() => setDepartments([]))
-  }, [filterTenant])
+  const deptsQ = useQuery({
+    queryKey: ['departments', filterTenant],
+    queryFn: () => listDepartments(filterTenant as number),
+    enabled: filterTenant !== 'all',
+  })
+  const departments: DepartmentRow[] = filterTenant === 'all' ? [] : (deptsQ.data ?? [])
+  const editTenantWatch = Form.useWatch('tenant_id', editForm) as number | undefined
+  const editDeptsId = editTenantWatch && editTenantWatch !== 0 ? editTenantWatch : null
+  const editDeptsQ = useQuery({
+    queryKey: ['departments', editDeptsId],
+    queryFn: () => listDepartments(editDeptsId as number),
+    enabled: editDeptsId != null,
+  })
+  const editDepartments: DepartmentRow[] = editDeptsQ.data ?? []
 
   const tenantOptions = [
     { value: 0, label: '（平台账户，不挂公司）' },
@@ -111,9 +110,6 @@ const Users: React.FC = () => {
       tenant_id: u.tenant_id ?? 0,
       department_id: u.department_id ?? 0,
     })
-    if (u.tenant_id) {
-      listDepartments(u.tenant_id).then(setDepartments).catch(() => setDepartments([]))
-    }
   }
 
   const onEdit = async () => {
@@ -242,6 +238,10 @@ const Users: React.FC = () => {
         </Space>
       }
     >
+      {usersQ.isError ? (
+        <Alert type="error" showIcon style={{ marginBottom: 12 }}
+               title={apiErrorMessage(usersQ.error, '用户列表加载失败')} />
+      ) : null}
       <Table
         columns={columns}
         dataSource={users.filter((u) => {
@@ -301,7 +301,7 @@ const Users: React.FC = () => {
           <Form.Item name="department_id" label="所属部门" tooltip="部门须属于该公司；0=未分组">
             <Select options={[
               { value: 0, label: '（未分组）' },
-              ...departments.map((d) => ({ value: d.id, label: `${d.name}（${d.member_count}人）` })),
+              ...editDepartments.map((d) => ({ value: d.id, label: `${d.name}（${d.member_count}人）` })),
             ]} />
           </Form.Item>
           <Form.Item name="is_active" label="启用" valuePropName="checked">

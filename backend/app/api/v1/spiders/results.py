@@ -83,10 +83,12 @@ async def export_results(
     task_id: int = Path(..., ge=1),
     format: str = Query("csv", pattern="^(csv|json)$", description="导出格式：csv/json"),
     service: SpiderQueryService = Depends(_query_service),
-    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+    user: CurrentUser = Depends(require_login),
 ) -> StreamingResponse:
     """导出指定任务的全部采集结果（下载附件，流式传输避免大任务内存峰值）"""
     stream, filename, media_type = await service.export_results(task_id, format)
+    await record_audit(session, user, "result.export", f"task#{task_id}")
     return StreamingResponse(
         stream,
         media_type=media_type,

@@ -43,6 +43,7 @@ class PublicSkillResponse(BaseModel):
     industries: Optional[list[str]] = None
     tier: Optional[str] = None
     score: Optional[float] = None
+    download_count: int = 0
     status: str
     source_url: str = ""
     source_author: str = ""
@@ -122,12 +123,11 @@ async def public_list_skills(
     rows, total = await service.list_skills(
         q=q.q, category=q.category, industry=q.industry, sort=q.sort,
         offset=(q.page - 1) * q.page_size, limit=q.page_size,
-        status=None,
+        status=list(PUBLISHED_STATUSES),
     )
-    published = [r for r in rows if r.status in PUBLISHED_STATUSES]
     return ok(
         data=PublicSkillListResponse(
-            total=len(published), items=[_to_public(r) for r in published]
+            total=total, items=[_to_public(r) for r in rows]
         ).model_dump(mode="json")
     )
 
@@ -143,6 +143,8 @@ async def public_get_skill(
     row = await service.get_by_name(name)
     if row is None or row.status not in PUBLISHED_STATUSES:
         raise NotFoundException(resource="技能")
+    await service.record_public_view(name)
+    row = await service.get_by_name(name) or row
     return ok(data=_to_public(row, include_body=True).model_dump())
 
 

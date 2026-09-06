@@ -50,15 +50,15 @@ def test_get_configs_anonymous_401(client):
 # PUT /configs/{key}（require_admin）
 # ---------------------------------------------------------------------------
 
-def test_put_config_create_and_readback(db_client, admin_client, db_engine, db_session):
+def test_put_config_create_and_readback(db_client, platform_admin_client, db_engine, db_session):
     """新建配置 → UPDATED + GET 回读一致 + DB 一行（持久化与读取回显一致）"""
-    resp = admin_client.put(f"{BASE}/site.name", json={"value": "AutoAgents 平台"})
+    resp = platform_admin_client.put(f"{BASE}/site.name", json={"value": "AutoAgents 平台"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["code"] == "UPDATED"
     assert "site.name" in body["message"]
 
-    got = admin_client.get(f"{BASE}/").json()["data"]
+    got = platform_admin_client.get(f"{BASE}/").json()["data"]
     assert got["site.name"] == "AutoAgents 平台"  # 回显一致
 
     async def _check():
@@ -71,12 +71,12 @@ def test_put_config_create_and_readback(db_client, admin_client, db_engine, db_s
     asyncio.run(_check())
 
 
-def test_put_config_overwrite_no_duplicate(db_client, admin_client, db_engine, db_session):
+def test_put_config_overwrite_no_duplicate(db_client, platform_admin_client, db_engine, db_session):
     """同 key 二次 PUT → 覆盖旧值（更新分支），DB 不新增行"""
-    admin_client.put(f"{BASE}/site.name", json={"value": "v1"})
-    resp = admin_client.put(f"{BASE}/site.name", json={"value": "v2"})
+    platform_admin_client.put(f"{BASE}/site.name", json={"value": "v1"})
+    resp = platform_admin_client.put(f"{BASE}/site.name", json={"value": "v2"})
     assert resp.status_code == 200, resp.text
-    assert admin_client.get(f"{BASE}/").json()["data"]["site.name"] == "v2"
+    assert platform_admin_client.get(f"{BASE}/").json()["data"]["site.name"] == "v2"
 
     async def _check():
         async with db_session() as s:
@@ -88,17 +88,17 @@ def test_put_config_overwrite_no_duplicate(db_client, admin_client, db_engine, d
     asyncio.run(_check())
 
 
-def test_put_config_validation_422(db_client, admin_client):
+def test_put_config_validation_422(db_client, platform_admin_client):
     """缺 value 字段 → 422（ConfigUpdate 契约必填）"""
-    resp = admin_client.put(f"{BASE}/site.name", json={})
+    resp = platform_admin_client.put(f"{BASE}/site.name", json={})
     assert resp.status_code == 422, resp.text
     assert resp.json()["code"] == "VALIDATION_ERROR"
     assert "value" in resp.text
 
 
-def test_put_config_overlength_key_422(db_client, admin_client):
+def test_put_config_overlength_key_422(db_client, platform_admin_client):
     """51 字符 key（模型 String(50) 界外）→ 422（B5 修复 F-B1b-02：路由层 Path 校验）"""
-    resp = admin_client.put(f"{BASE}/{'k' * 51}", json={"value": "v"})
+    resp = platform_admin_client.put(f"{BASE}/{'k' * 51}", json={"value": "v"})
     assert resp.status_code == 422, resp.text
     assert resp.json()["code"] == "VALIDATION_ERROR"
 

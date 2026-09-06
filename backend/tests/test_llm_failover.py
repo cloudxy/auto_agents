@@ -45,6 +45,11 @@ def _patch(monkeypatch, cfg, chain, http_behavior, notifications):
     monkeypatch.setattr(lc, "record_usage", _record)
     monkeypatch.setattr(lc, "get_month_used", _month)
 
+    async def _rf(*_a, **_k):
+        return None
+
+    monkeypatch.setattr("backend.services.ai_planner._cooldown.record_failure", _rf)
+
     class _Client:
         is_closed = False  # get_shared_client 缓存健康检查依赖
 
@@ -170,6 +175,15 @@ async def test_candidate_chain_filters_disabled_and_down(db_session):
         s.add_all(rows)
         await s.commit()
 
-    async with db_session() as s:
-        chain = await lc._candidate_chain(pid, session=s)
+    async def _no_cool(provider_id, model_ids):
+        return model_ids
+
+    import backend.services.ai_planner._cooldown as cd
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(cd, "filter_cooled", _no_cool)
+    try:
+        async with db_session() as s:
+            chain = await lc._candidate_chain(pid, session=s)
+    finally:
+        monkeypatch.undo()
     assert [m for m, _ in chain] == ["m-default", "m-high", "m-low"]

@@ -1,9 +1,13 @@
 /**
  * 用量看板页（SaaS S3-2）：三指标 vs 配额进度条 + LLM 按供应商分摊。
  */
-import React, { useCallback, useEffect, useState } from 'react'
-import { Alert, Card, Col, Progress, Row, Spin, Table, Typography, message } from 'antd'
+import React from 'react'
+import { Alert, Card, Col, Progress, Row, Table, Typography } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 
+import { QueryStateView } from '../components/QueryStateView'
+import DeliveryWebhookCard from '../components/usage/DeliveryWebhookCard'
+import BillingPanel from '../components/usage/BillingPanel'
 import { fetchUsageByMember, fetchUsageOverview, type MemberUsageRow, type UsageOverview } from '../services/usage'
 import { apiErrorMessage } from '../utils/errorMessage'
 
@@ -16,33 +20,25 @@ const METRICS: Array<{ key: keyof UsageOverview['usage']; label: string; unit: s
 ]
 
 const Usage: React.FC = () => {
-  const [data, setData] = useState<UsageOverview | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  const [byMember, setByMember] = useState<MemberUsageRow[]>([])
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      setData(await fetchUsageOverview())
-    } catch (e) {
-      message.error(apiErrorMessage(e, '用量加载失败'))
-    } finally {
-      setLoading(false)
-    }
-    try {
-      setByMember(await fetchUsageByMember())
-    } catch { /* 成员分摊非关键路径 */ }
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  if (loading && !data) return <Spin />
-  if (!data) return <Alert type="warning" message="暂无用量数据" />
+  const overviewQ = useQuery({
+    queryKey: ['tenant-usage'],
+    queryFn: fetchUsageOverview,
+  })
+  const memberQ = useQuery({
+    queryKey: ['tenant-usage-members'],
+    queryFn: fetchUsageByMember,
+  })
+  const data = overviewQ.data ?? null
+  const loading = overviewQ.isLoading
+  const error = overviewQ.isError ? apiErrorMessage(overviewQ.error, '用量加载失败') : null
+  const byMember: MemberUsageRow[] = memberQ.data ?? []
 
   return (
+    <QueryStateView loading={loading} error={error} data={data}>
+      {(data) => (
     <div>
       <Alert type="info" showIcon style={{ marginBottom: 16 }}
-             message="用量看板是租户维度；超配额的操作会被拒绝（429 QUOTA_EXCEEDED），文案含可行动建议" />
+             title="用量看板是租户维度；超配额的操作会被拒绝（429 QUOTA_EXCEEDED），文案含可行动建议" />
       <Row gutter={16}>
         {METRICS.map(({ key, label, unit }) => {
           const used = data.usage[key]
@@ -62,14 +58,19 @@ const Usage: React.FC = () => {
           )
         })}
       </Row>
-      <Card title="LLM 用量分摊（本月，按供应商）" style={{ marginTop: 16 }}>
+      <Card title={`LLM 成本（本月 ${(data.cost_cents_total / 100).toFixed(2)} 元）`} style={{ marginTop: 16 }}>
         <Table
           rowKey="provider"
           size="small" pagination={false}
-          dataSource={Object.entries(data.llm_by_provider).map(([provider, tokens]) => ({ provider, tokens }))}
+          dataSource={Object.entries(data.llm_by_provider).map(([provider, tokens]) => ({
+            provider,
+            tokens,
+            cost: (data.cost_by_provider?.[provider] || 0) / 100,
+          }))}
           columns={[
             { title: '供应商', dataIndex: 'provider', render: (v: string) => <Text code>{v}</Text> },
             { title: 'Tokens', dataIndex: 'tokens', render: (v: number) => v.toLocaleString() },
+            { title: '金额（元）', dataIndex: 'cost', render: (v: number) => v.toFixed(2) },
           ]}
           locale={{ emptyText: '本月暂无 LLM 用量' }}
         />
@@ -88,7 +89,11 @@ const Usage: React.FC = () => {
           ]}
         />
       </Card>
+      <DeliveryWebhookCard />
+      <BillingPanel />
     </div>
+      )}
+    </QueryStateView>
   )
 }
 

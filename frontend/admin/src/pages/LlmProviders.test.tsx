@@ -3,6 +3,7 @@
  */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import { withQuery } from '../testUtils';
 
 jest.mock('../services/llm', () => ({
   fetchLlmProviders: jest.fn().mockResolvedValue([
@@ -35,7 +36,7 @@ jest.mock('../services/llm', () => ({
 import LlmProviders from './LlmProviders';
 
 test('renders provider list with protocol display name and readonly guard', async () => {
-  render(<LlmProviders />);
+  render(withQuery(<LlmProviders />));
   expect(await screen.findByText('主用')).toBeInTheDocument();
   expect(screen.getByText('Anthropic 原生')).toBeInTheDocument(); // 协议显示名（不再是裸枚举值）
   expect(screen.getByText(/仅管理员可管理供应商/)).toBeInTheDocument(); // 默认 viewer 只读

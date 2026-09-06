@@ -7,8 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.api.deps import CurrentUser
 from backend.app.api.v1.members import require_tenant_manager
 from backend.app.responses import ok
+from platform_core.exceptions import BusinessException
 from backend.services.quota_service import QuotaService
+from backend.services.tenant_settings_service import TenantSettingsService
 from platform_core.db import get_async_db
+from pydantic import BaseModel, Field
 
 router = APIRouter()
 
@@ -34,3 +37,30 @@ async def tenant_usage_by_member(
 ):
     """成员维度用量分摊（B6：任务创建数按成员聚合，租户管理者视角）"""
     return ok(data=await service.usage_by_member(user.tenant_id))
+
+
+class DeliveryWebhookIn(BaseModel):
+    url: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/delivery-webhook")
+async def get_delivery_webhook(
+    user: CurrentUser = Depends(require_tenant_manager),
+    session: AsyncSession = Depends(get_async_db),
+):
+    if user.tenant_id is None:
+        raise BusinessException("需要租户上下文")
+    url = await TenantSettingsService(session).get_delivery_webhook(user.tenant_id)
+    return ok(data={"delivery_webhook_url": url})
+
+
+@router.put("/delivery-webhook")
+async def put_delivery_webhook(
+    payload: DeliveryWebhookIn,
+    user: CurrentUser = Depends(require_tenant_manager),
+    session: AsyncSession = Depends(get_async_db),
+):
+    if user.tenant_id is None:
+        raise BusinessException("需要租户上下文")
+    data = await TenantSettingsService(session).set_delivery_webhook(user.tenant_id, payload.url)
+    return ok(data=data)

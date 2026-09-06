@@ -40,7 +40,7 @@ from config import settings
 from platform_core.db import get_manager
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
-from platform_core.queues import ACTIVE_TASK_KEY, TASK_CONTROL_KEY, task_queue
+from platform_core.queues import ACTIVE_TASK_KEY, TASK_CONTROL_KEY, task_queue, tenant_active_key
 from platform_core.redis_async import get_async_redis
 from platform_core.schemas.spider import (
     SpiderTaskListResponse,
@@ -172,18 +172,21 @@ class SpiderTaskService:
 
             await QuotaService(self.session).check_task_concurrency(tenant_id)
 
-        # 并发槽位守卫
-        active_key = ACTIVE_TASK_KEY.format(spider_name=spider_name)
+        # 并发槽位：有租户时按 {tenant}:{spider} 计数，两租户互不挤占
         max_concurrent = self._max_concurrent()
+        if tenant_id is not None:
+            slot_key = tenant_active_key(tenant_id, spider_name)
+        else:
+            slot_key = ACTIVE_TASK_KEY.format(spider_name=spider_name)
         try:
-            active_count = await get_async_redis().scard(active_key)
+            active_count = await get_async_redis().scard(slot_key)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"并发槽位检查失败（放行）: spider={spider_name}, error={e}")
             active_count = 0
         if active_count >= max_concurrent:
             logger.warning(
                 f"同爬虫并发任务已达上限，拒绝入队: spider={spider_name}, "
-                f"active={active_count}, max={max_concurrent}"
+                f"tenant={tenant_id}, active={active_count}, max={max_concurrent}"
             )
             raise BusinessException(
                 f"爬虫 {spider_name} 已有 {active_count} 个进行中的任务（上限 {max_concurrent}），请稍后再提交"
@@ -200,8 +203,13 @@ class SpiderTaskService:
 
         # 投递任务消息到对应优先级队列
         message = json.dumps(
-            {"task_id": task.id, "spider_name": spider_name, "params": params,
-             "tenant_id": tenant_id},
+            {
+                "task_id": task.id,
+                "spider_name": spider_name,
+                "params": params,
+                "tenant_id": tenant_id,
+                "priority": priority,
+            },
             ensure_ascii=False,
         )
         try:
@@ -257,18 +265,28 @@ class SpiderTaskService:
             logger.info(f"任务无字段变更: task_id={task_id}")
             return SpiderTaskResponse.model_validate(task)
 
-        # B1：repo.update 前固化旧消息快照（字段/格式与 enqueue 投递、consumer 消费的
-        # 消息完全一致）。update + commit + refresh 后 ORM 实体 params 已是新值，
-        # 届时再用其构造 old_message 会与 Redis 中旧消息永不匹配 → LREM 恒未命中。
+        target_priority = update_kwargs.get("priority", old_priority)
+        # repo.update 前固化旧消息快照（字段须与 enqueue 投递完全一致，含 tenant_id）。
         old_message = json.dumps(
-            {"task_id": task.id, "spider_name": task.spider_name, "params": task.params},
+            {
+                "task_id": task.id,
+                "spider_name": task.spider_name,
+                "params": task.params,
+                "tenant_id": getattr(task, "tenant_id", None),
+                "priority": old_priority,
+            },
             ensure_ascii=False,
         )
         new_message = json.dumps(
-            {"task_id": task.id, "spider_name": task.spider_name, "params": new_params},
+            {
+                "task_id": task.id,
+                "spider_name": task.spider_name,
+                "params": new_params,
+                "tenant_id": getattr(task, "tenant_id", None),
+                "priority": target_priority,
+            },
             ensure_ascii=False,
         )
-        target_priority = update_kwargs.get("priority", old_priority)
 
         updated = await self.repo.update(task_id, **update_kwargs)
         await self.session.commit()
@@ -425,17 +443,25 @@ class SpiderTaskService:
             next_retry = (task.retry_count or 0) + 1
             task = await self.repo.update(
                 task_id,
+                only_if_status=("pending", "running"),
                 status="pending",
                 retry_count=next_retry,
                 completed_at=None,
                 error_message=error_message,
             )
+            if task is None:
+                current = await self.repo.get_by_id(task_id)
+                if current is None:
+                    raise NotFoundException("爬虫任务")
+                return SpiderTaskResponse.model_validate(current)
             await self.session.commit()
             await self.session.refresh(task)
             try:
-                await get_async_redis().srem(
-                    ACTIVE_TASK_KEY.format(spider_name=task.spider_name), task_id
-                )
+                redis = get_async_redis()
+                await redis.srem(ACTIVE_TASK_KEY.format(spider_name=task.spider_name), task_id)
+                tid = getattr(task, "tenant_id", None)
+                if isinstance(tid, int):
+                    await redis.srem(tenant_active_key(tid, task.spider_name), task_id)
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"重试前清理活跃键失败: task_id={task_id}, error={e}")
             delay = await self._reenqueue(task)
@@ -450,17 +476,34 @@ class SpiderTaskService:
             error_message=error_message,
             completed_at=func.now(),
         )
-        if item_count is not None:
+        counted = None
+        try:
+            raw = await self.result_repo.count_by_task(task_id)
+            if isinstance(raw, int):
+                counted = raw
+        except Exception:  # noqa: BLE001 计数失败回退 webhook 上报值
+            counted = None
+        if counted is not None and (counted > 0 or item_count is None):
+            update_kwargs["result_count"] = counted
+        elif item_count is not None:
             update_kwargs["result_count"] = item_count
-        task = await self.repo.update(task_id, **update_kwargs)
+        task = await self.repo.update(
+            task_id, only_if_status=("pending", "running"), **update_kwargs
+        )
+        if task is None:
+            current = await self.repo.get_by_id(task_id)
+            if current is None:
+                raise NotFoundException("爬虫任务")
+            return SpiderTaskResponse.model_validate(current)
         await self.session.commit()
         await self.session.refresh(task)
 
-        # 从活跃任务集合移除
         try:
-            await get_async_redis().srem(
-                ACTIVE_TASK_KEY.format(spider_name=task.spider_name), task_id
-            )
+            redis = get_async_redis()
+            await redis.srem(ACTIVE_TASK_KEY.format(spider_name=task.spider_name), task_id)
+            tid = getattr(task, "tenant_id", None)
+            if isinstance(tid, int):
+                await redis.srem(tenant_active_key(tid, task.spider_name), task_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"清理活跃任务关联失败: task_id={task_id}, error={e}")
 
@@ -481,6 +524,7 @@ class SpiderTaskService:
             "params": task.params,
             "started_at": task.started_at,
             "completed_at": task.completed_at,
+            "tenant_id": getattr(task, "tenant_id", None),
         }
         _spawn_side_effect(self._run_finish_side_effects(snapshot))
 
@@ -513,6 +557,26 @@ class SpiderTaskService:
             retry_count=snapshot["retry_count"],
             error_message=snapshot["error_message"],
         )
+        tid = snapshot.get("tenant_id")
+        if isinstance(tid, int):
+            try:
+                from backend.services.delivery_webhook_service import DeliveryWebhookService
+                from backend.services.tenant_settings_service import TenantSettingsService
+
+                manager = get_manager()
+                async with AsyncSession(manager.async_engines["DEFAULT"]) as sess:
+                    url = await TenantSettingsService(sess).get_delivery_webhook(tid)
+                if url:
+                    await DeliveryWebhookService().deliver(url, {
+                        "event": "task.finished",
+                        "task_id": task_id,
+                        "spider_name": snapshot["spider_name"],
+                        "status": snapshot["status"],
+                        "result_count": snapshot["result_count"],
+                        "tenant_id": tid,
+                    })
+            except Exception as e:  # noqa: BLE001 租户交付失败不影响终态
+                logger.warning(f"租户交付 webhook 失败（忽略）: task={task_id} err={e}")
 
         # 告警规则评估：自开独立短事务 session（期 4 收口，Oscar 登记）
         # 本协程由 _spawn_side_effect 后台执行，生命周期长于 webhook 请求；
@@ -554,6 +618,7 @@ class SpiderTaskService:
                 "spider_name": task.spider_name,
                 "params": task.params,
                 "priority": task.priority or "normal",
+                "tenant_id": getattr(task, "tenant_id", None),
             },
             ensure_ascii=False,
         )
@@ -583,7 +648,11 @@ class SpiderTaskService:
         await self.session.commit()
 
         try:
-            await get_async_redis().srem(ACTIVE_TASK_KEY.format(spider_name=spider_name), task_id)
+            redis = get_async_redis()
+            await redis.srem(ACTIVE_TASK_KEY.format(spider_name=spider_name), task_id)
+            tid = getattr(task, "tenant_id", None)
+            if isinstance(tid, int):
+                await redis.srem(tenant_active_key(tid, spider_name), task_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"删除任务后清理活跃键失败: task_id={task_id}, error={e}")
 

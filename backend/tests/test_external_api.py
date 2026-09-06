@@ -273,6 +273,9 @@ class TestSpiderResultsEndpoint:
         with patch(
             "backend.app.external_api.v1.public.SpiderQueryService.list_results",
             new=AsyncMock(return_value=resp_model),
+        ), patch(
+            "backend.app.external_api.v1.public.SpiderQueryService.get_task",
+            new=AsyncMock(return_value=MagicMock(id=1, tenant_id=None)),
         ):
             resp = client.get(
                 f"{PUBLIC_BASE}/spider/results/1",
