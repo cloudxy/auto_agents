@@ -16,6 +16,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.mysql_fidelity
+
 from backend.app.api.v1.members import require_tenant_manager
 from backend.app.api.deps import CurrentUser
 from backend.repositories.skill_repository import SkillRepository

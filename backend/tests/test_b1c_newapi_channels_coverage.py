@@ -66,7 +66,7 @@ def _wire(monkeypatch, redis: FakeRedis, stub: _StubClient):
 # GET /api/v1/newapi/channels
 # ---------------------------------------------------------------------------
 
-def test_channels_admin_ok_merged_view(admin_client, monkeypatch, fake_redis):
+def test_channels_admin_ok_merged_view(platform_admin_client, monkeypatch, fake_redis):
     """admin 合并视图：渠道级配置的渠道 effective_source=channel 且 config 回显；
     无配置渠道（全局默认 0）未纳管（config=null / effective_source=none）"""
     fake_redis.hashes[CFG_KEY] = {
@@ -78,7 +78,7 @@ def test_channels_admin_ok_merged_view(admin_client, monkeypatch, fake_redis):
     )
     _wire(monkeypatch, fake_redis, stub)
 
-    resp = admin_client.get(CHANNELS_URL)
+    resp = platform_admin_client.get(CHANNELS_URL)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["code"] == "SUCCESS"
@@ -105,10 +105,10 @@ def test_channels_non_admin_403(role_client, request, monkeypatch, fake_redis):
     assert resp.json()["code"] == "FORBIDDEN"
 
 
-def test_channels_remote_unreachable_502(admin_client, monkeypatch, fake_redis):
+def test_channels_remote_unreachable_502(platform_admin_client, monkeypatch, fake_redis):
     """远端 new-api 不可达 → 502 业务码 NEWAPI_UNREACHABLE（不 500）"""
     _wire(monkeypatch, fake_redis, _StubClient(list_error=RuntimeError("conn refused")))
-    resp = admin_client.get(CHANNELS_URL)
+    resp = platform_admin_client.get(CHANNELS_URL)
     assert resp.status_code == 502, resp.text
     assert resp.json()["code"] == "NEWAPI_UNREACHABLE"
 
@@ -117,7 +117,7 @@ def test_channels_remote_unreachable_502(admin_client, monkeypatch, fake_redis):
 # PUT /api/v1/newapi/channels/{channel_id}/config
 # ---------------------------------------------------------------------------
 
-def test_set_config_admin_writes_hash_and_audits(admin_client, monkeypatch, fake_redis):
+def test_set_config_admin_writes_hash_and_audits(platform_admin_client, monkeypatch, fake_redis):
     """写配置：200 回执 + Redis hash 字段与调度器读取契约一致 + 审计动作落点"""
     stub = _StubClient(get_channel={"id": 3, "name": "prov-a"})
     _wire(monkeypatch, fake_redis, stub)
@@ -125,7 +125,7 @@ def test_set_config_admin_writes_hash_and_audits(admin_client, monkeypatch, fake
     import backend.app.api.v1.newapi as api_mod
     monkeypatch.setattr(api_mod, "record_audit", audit_mock)
 
-    resp = admin_client.put(f"{CHANNELS_URL}/3/config", json={
+    resp = platform_admin_client.put(f"{CHANNELS_URL}/3/config", json={
         "limit_quota": 800, "window_hours": 6, "cooldown_seconds": 900,
     })
     assert resp.status_code == 200, resp.text
@@ -146,10 +146,10 @@ def test_set_config_admin_writes_hash_and_audits(admin_client, monkeypatch, fake
     assert call_args[3] == "channel:3"
 
 
-def test_set_config_unknown_channel_404(admin_client, monkeypatch, fake_redis):
+def test_set_config_unknown_channel_404(platform_admin_client, monkeypatch, fake_redis):
     """渠道不存在 → 404（防把配置写到不存在的 ID 上静默空转），hash 零写入"""
     _wire(monkeypatch, fake_redis, _StubClient(get_channel=None))
-    resp = admin_client.put(f"{CHANNELS_URL}/99/config", json={
+    resp = platform_admin_client.put(f"{CHANNELS_URL}/99/config", json={
         "limit_quota": 100, "window_hours": 24, "cooldown_seconds": 3600,
     })
     assert resp.status_code == 404
@@ -163,10 +163,10 @@ def test_set_config_unknown_channel_404(admin_client, monkeypatch, fake_redis):
     {"limit_quota": 10, "window_hours": 24, "cooldown_seconds": 59},   # 冷却界外（ge=60）
     {"limit_quota": -1, "window_hours": 24, "cooldown_seconds": 60},   # 额度界外（ge=0）
 ])
-def test_set_config_validation_422(admin_client, monkeypatch, fake_redis, payload):
+def test_set_config_validation_422(platform_admin_client, monkeypatch, fake_redis, payload):
     """参数界外 → 422，且 hash 零写入（副作用断言）"""
     _wire(monkeypatch, fake_redis, _StubClient(get_channel={"id": 3}))
-    resp = admin_client.put(f"{CHANNELS_URL}/3/config", json=payload)
+    resp = platform_admin_client.put(f"{CHANNELS_URL}/3/config", json=payload)
     assert resp.status_code == 422, resp.text
     assert fake_redis.hashes == {}
 
@@ -189,14 +189,14 @@ def test_set_config_viewer_403(viewer_client, monkeypatch, fake_redis):
 # DELETE /api/v1/newapi/channels/{channel_id}/config
 # ---------------------------------------------------------------------------
 
-def test_clear_config_admin_returns_previous_and_deletes(admin_client, monkeypatch, fake_redis):
+def test_clear_config_admin_returns_previous_and_deletes(platform_admin_client, monkeypatch, fake_redis):
     """清除：回执携带清除前配置（cleared=True），hash 键被删除"""
     fake_redis.hashes[CFG_KEY] = {
         "limit_quota": "500", "window_hours": "12", "cooldown_seconds": "1800",
     }
     _wire(monkeypatch, fake_redis, _StubClient())
 
-    resp = admin_client.delete(f"{CHANNELS_URL}/3/config")
+    resp = platform_admin_client.delete(f"{CHANNELS_URL}/3/config")
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     assert data["cleared"] is True
@@ -204,10 +204,10 @@ def test_clear_config_admin_returns_previous_and_deletes(admin_client, monkeypat
     assert CFG_KEY not in fake_redis.hashes      # 副作用：键已删除
 
 
-def test_clear_config_without_previous(admin_client, monkeypatch, fake_redis):
+def test_clear_config_without_previous(platform_admin_client, monkeypatch, fake_redis):
     """无渠道级配置时清除：仍 200（幂等），回执 config=null"""
     _wire(monkeypatch, fake_redis, _StubClient())
-    resp = admin_client.delete(f"{CHANNELS_URL}/3/config")
+    resp = platform_admin_client.delete(f"{CHANNELS_URL}/3/config")
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["cleared"] is True

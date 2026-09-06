@@ -50,6 +50,7 @@ class LlmProvider(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
                        comment="是否为当前激活供应商（全表至多一行，热切换用）")
     enabled = Column(Boolean, nullable=False, default=True, server_default="1",
                      comment="是否启用（禁用后即使激活也走 yml/env 兜底）")
+    unit_price_per_1k_cents = Column(Integer, nullable=True, comment="每千 token 单价（分）")
     remark = Column(String(255), nullable=True, comment="备注")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(),

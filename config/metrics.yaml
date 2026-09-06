@@ -1,0 +1,32 @@
+# 指标口径注册表（H2）：id / name / formula / window / unit / source
+metrics:
+  - id: task_success_rate
+    name: 任务成功率
+    formula: completed / (completed + failed)
+    window: 7d
+    unit: ratio
+    source: spider_tasks.status
+  - id: result_volume
+    name: 采集结果量
+    formula: COUNT(spider_results)
+    window: 7d
+    unit: count
+    source: spider_results.created_at
+  - id: llm_tokens_month
+    name: 租户月度 LLM token
+    formula: SUM(llm_token_usage.total_tokens)
+    window: calendar_month
+    unit: tokens
+    source: llm_token_usage
+  - id: llm_cost_cents_month
+    name: 租户月度 LLM 成本
+    formula: SUM(llm_token_usage.cost_cents)
+    window: calendar_month
+    unit: cents
+    source: llm_token_usage.cost_cents
+  - id: quota_task_concurrency
+    name: 任务并发占用
+    formula: COUNT(pending+running) / quota.task_concurrency
+    window: point_in_time
+    unit: ratio
+    source: spider_tasks + tenants.quota

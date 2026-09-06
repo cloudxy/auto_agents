@@ -11,7 +11,7 @@ backend.services.ai_planner_service.settings 只对门面命名空间的绑定�
 LlmProviderService 委托调用时注入（svc.repo.get_active 等实例级 patch 语义不变）。
 """
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Optional
 
 from sqlalchemy import select
@@ -49,6 +49,20 @@ class LlmRuntimeConfig:
     protocol: str = "openai_compatible"
 
 
+def apply_proxy_route(cfg: LlmRuntimeConfig) -> LlmRuntimeConfig:
+    """L4：内部调用切到 LiteLLM Proxy（默认关，不改生产直连）。"""
+    logger.info("检查 LiteLLM 内部切流")
+    if not _seam().settings.get("LITELLM.PROXY.ROUTE_INTERNAL", False):
+        return cfg
+    base = str(_seam().settings.get("LITELLM.ADMIN.BASE_URL", "") or "").rstrip("/")
+    if not base:
+        port = int(_seam().settings.get("LITELLM.PROXY.PORT", 4000) or 4000)
+        base = f"http://127.0.0.1:{port}"
+    key = str(_seam().settings.get("LITELLM.ADMIN.MASTER_KEY", "") or cfg.api_key)
+    logger.info(f"LLM 内部切流至 LiteLLM Proxy | base={base}")
+    return replace(cfg, base_url=base, api_key=key, source="proxy")
+
+
 def resolve_config_from_settings() -> LlmRuntimeConfig:
     """yml/env 兜底配置：读取顺序与阶段一 _llm_chat 完全一致（零回归保证）。
 
@@ -57,7 +71,7 @@ def resolve_config_from_settings() -> LlmRuntimeConfig:
     命名空间的 settings 绑定生效。
     """
     logger.debug("解析 yml/env 兜底 LLM 配置")
-    return LlmRuntimeConfig(
+    return apply_proxy_route(LlmRuntimeConfig(
         base_url=str(_seam().settings.get("LLM.BASE_URL", "") or "").rstrip("/"),
         api_key=os.environ.get("LLM_API_KEY") or str(_seam().settings.get("LLM.API_KEY", "") or ""),
         model=str(_seam().settings.get("LLM.MODEL", "") or ""),
@@ -67,7 +81,7 @@ def resolve_config_from_settings() -> LlmRuntimeConfig:
         enabled=bool(_seam().settings.get("LLM.ENABLED", False)),
         source="config",
         provider_id=None,
-    )
+    ))
 
 
 async def resolve_runtime_config(
@@ -114,7 +128,7 @@ async def resolve_runtime_config(
         base_url = str(active.base_url or "").rstrip("/")
         model = str(active.model or "")
         if api_key and base_url and model:
-            return LlmRuntimeConfig(
+            return apply_proxy_route(LlmRuntimeConfig(
                 base_url=base_url,
                 api_key=api_key,
                 model=model,
@@ -125,7 +139,7 @@ async def resolve_runtime_config(
                 source=f"provider:{active.id}",
                 provider_id=int(active.id),
                 protocol=str(active.provider_type or "openai_compatible"),
-            )
+            ))
         logger.warning(
             "激活的 LLM 供应商配置不完整（密钥缺失/解密失败/base_url/model 为空），"
             f"回退 yml/env 兜底: provider_id={getattr(active, 'id', None)}"

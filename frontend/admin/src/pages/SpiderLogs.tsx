@@ -2,10 +2,10 @@
  * 爬虫运行日志页面 - 选择任务查看 Worker 实时日志
  * 支持全文关键词搜索和日志级别过滤
  */
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { Card, Select, Space, Tag, Empty, Button, Typography, Input } from 'antd'
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
-import { fetchTaskLogs, Task, TaskLogResponse } from '../services/spiders'
+import { fetchTaskLogs, fetchTasks, Task } from '../services/spiders'
 import { useQuery } from '@tanstack/react-query'
 
 const { Text } = Typography
@@ -27,29 +27,21 @@ const LOG_LEVELS = [
 ]
 
 const SpiderLogs: React.FC = () => {
-  const [tasks, setTasks] = useState<Task[]>([])
   const [taskId, setTaskId] = useState<number | null>(null)
   const [keyword, setKeyword] = useState<string>('')
   const [level, setLevel] = useState<string>('')
-  useEffect(() => {
-    import('../services/spiders').then(({ fetchTasks }) =>
-      fetchTasks(0, 50)
-        .then((res) => {
-          setTasks(res.items || [])
-          if (res.items?.length && taskId === null) {
-            setTaskId(res.items[0].id)
-          }
-        })
-        .catch(() => setTasks([]))
-    )
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const tasksQ = useQuery({
+    queryKey: ['spider-tasks', 'logs-picker'],
+    queryFn: () => fetchTasks(0, 50),
+  })
+  const tasks: Task[] = tasksQ.data?.items ?? []
+  const effectiveTaskId = taskId ?? tasks[0]?.id ?? null
 
   // 工单 78：日志轮询交 react-query（2s 一次，终态自动停——refetchInterval 按数据判定）
   const { data: logData, refetch: refetchLogs } = useQuery({
-    queryKey: ['task-logs', taskId, keyword, level],
-    queryFn: () => fetchTaskLogs(taskId!, 200, keyword || undefined, level || undefined),
-    enabled: !!taskId,
+    queryKey: ['task-logs', effectiveTaskId, keyword, level],
+    queryFn: () => fetchTaskLogs(effectiveTaskId!, 200, keyword || undefined, level || undefined),
+    enabled: !!effectiveTaskId,
     refetchInterval: (query) => {
       const s = query.state.data?.status
       return s === 'completed' || s === 'failed' ? false : 2000
@@ -75,7 +67,7 @@ const SpiderLogs: React.FC = () => {
           <Select
             style={{ width: 240 }}
             placeholder="选择任务"
-            value={taskId}
+            value={effectiveTaskId}
             onChange={setTaskId}
             options={tasks.map((t) => ({
               label: `#${t.id} ${t.spider_name}（${STATUS_META[t.status]?.label || t.status}）`,

@@ -33,6 +33,8 @@ if str(TESTS_DIR) not in sys.path:
 
 # 固定测试环境为 local（必须在导入 config 之前设置）
 os.environ.setdefault("APP_ENV", "local")
+# T1：测试态 bcrypt 因子降到 4，避免登录链被 12 轮拖进分钟级
+os.environ.setdefault("BCRYPT_ROUNDS", "4")
 
 
 # ── get_async_db 全局兜底 mock（CI 无 .env，防意外连真库）──
@@ -96,7 +98,15 @@ async def _current_user_override(request, credentials, session, default_role: st
             )
     if default_role is None:
         raise AuthenticationException(message="未登录或缺少 Token")
-    return CurrentUser(id=1, username=f"test-{default_role}", role=default_role)
+    is_plat = default_role == "platform_admin"
+    return CurrentUser(
+        id=1,
+        username=f"test-{default_role}",
+        role="admin" if is_plat else default_role,
+        is_platform_admin=is_plat,
+        tenant_id=None if is_plat else (1 if default_role == "admin" else None),
+        tenant_role=None if is_plat else ("owner" if default_role == "admin" else None),
+    )
 
 
 def _make_auth_override(role: str | None):
@@ -157,8 +167,16 @@ def _reset_auth_override(app):
 
 @pytest.fixture
 def admin_client(app, client, _reset_auth_override):
-    """admin 特权 TestClient（显式 opt-in；无凭据请求以 admin 快照通过）"""
+    """admin 特权 TestClient（租户 admin，非平台超管）"""
     _set_auth_override(app, "admin")
+    yield client
+    _set_auth_override(app, None)
+
+
+@pytest.fixture
+def platform_admin_client(app, client, _reset_auth_override):
+    """平台超管 TestClient（require_platform_admin 放行）"""
+    _set_auth_override(app, "platform_admin")
     yield client
     _set_auth_override(app, None)
 

@@ -200,10 +200,24 @@ act() {
     fi
 
     if [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; then
-        if kill -9 "$pid" 2> /dev/null; then
-            log INFO "已 kill -9 pid=${pid}（拉起由 WATCHDOG_RESTART_CMD / 编排器负责）"
+        DRAIN="${WATCHDOG_DRAIN_SECONDS:-8}"
+        if kill -TERM "$pid" 2> /dev/null; then
+            log INFO "已 SIGTERM pid=${pid}，等待 ${DRAIN}s 排空"
+            waited=0
+            while [ "${waited}" -lt "${DRAIN}" ]; do
+                kill -0 "$pid" 2> /dev/null || break
+                sleep 1
+                waited=$((waited + 1))
+            done
+        fi
+        if kill -0 "$pid" 2> /dev/null; then
+            if kill -9 "$pid" 2> /dev/null; then
+                log INFO "排空超时，已 kill -9 pid=${pid}（拉起由 WATCHDOG_RESTART_CMD / 编排器负责）"
+            else
+                log WARN "kill -9 pid=${pid} 失败（权限不足或进程刚消失）"
+            fi
         else
-            log WARN "kill -9 pid=${pid} 失败（权限不足或进程刚消失）"
+            log INFO "进程已在 SIGTERM 后退出 pid=${pid}"
         fi
     else
         log WARN "目标 PID 未解析（WATCHDOG_PID / WATCHDOG_PID_FILE / pgrep 均未命中），跳过 kill 仅拉起"

@@ -10,6 +10,7 @@ const SkillsSquare = React.lazy(() => import('./pages/SkillsSquare'))
 const Capabilities = React.lazy(() => import('./pages/Capabilities'))
 const Register = React.lazy(() => import('./pages/Register'))
 const Pricing = React.lazy(() => import('./pages/Pricing'))
+const Legal = React.lazy(() => import('./pages/Legal'))
 const NotFound = React.lazy(() => import('./pages/NotFound'))
 
 const PageLoading = (
@@ -30,6 +31,8 @@ function App() {
               <Route path="/capabilities" element={<Capabilities />} />
               <Route path="/register" element={<Register />} />
               <Route path="/pricing" element={<Pricing />} />
+              <Route path="/terms" element={<Legal />} />
+              <Route path="/privacy" element={<Legal />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

@@ -7,6 +7,7 @@
  */
 import React from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
+import { track } from '../../utils/track'
 import { Button } from 'antd'
 import { RocketOutlined, ArrowRightOutlined } from '@ant-design/icons'
 
@@ -30,8 +31,21 @@ const linkStyle: React.CSSProperties = {
 }
 const linkActiveStyle: React.CSSProperties = { ...linkStyle, color: '#fff', fontWeight: 600 }
 
+const TITLES: Record<string, string> = {
+  '/': 'AutoAgents · 智能数据采集',
+  '/skills': '技能广场 · AutoAgents',
+  '/pricing': '定价 · AutoAgents',
+  '/register': '注册 · AutoAgents',
+  '/terms': '服务条款 · AutoAgents',
+  '/privacy': '隐私政策 · AutoAgents',
+}
+
 const SiteLayout: React.FC = () => {
   const { pathname } = useLocation()
+  React.useEffect(() => {
+    document.title = TITLES[pathname] || SITE_NAME
+    track('view', { path: pathname })
+  }, [pathname])
   return (
     <div style={{ minHeight: '100vh', background: '#f7f9fc', display: 'flex', flexDirection: 'column' }}>
       <header
@@ -103,6 +117,8 @@ const SiteLayout: React.FC = () => {
             {NAV_LINKS.map((l) => (
               <Link key={l.to} to={l.to} style={linkStyle}>{l.label}</Link>
             ))}
+            <Link to="/terms" style={linkStyle}>服务条款</Link>
+            <Link to="/privacy" style={linkStyle}>隐私政策</Link>
           </nav>
         </div>
         <div

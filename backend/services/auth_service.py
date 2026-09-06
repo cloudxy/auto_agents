@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories.user_repository import UserRepository
 from backend.utils.auth import verify_password, get_password_hash, create_access_token
 from platform_core.logger import get_logger
-from platform_core.exceptions import BusinessException
+from platform_core.exceptions import AuthenticationException, BusinessException
 from pydantic import BaseModel
 
 logger = get_logger("api")
@@ -80,20 +80,37 @@ class AuthService:
             logger.warning(f"密码消歧失败: {username}")
             return None
         user = matched[0]
+        from datetime import datetime, timezone
 
-        logger.info(f"用户认证成功: {username}")
         role = getattr(user, "role", None)
-        return {
+        snapshot = {
             "id": user.id,
             "username": user.username,
             "email": user.email,
             "is_admin": user.is_admin,
             "role": role or ("admin" if user.is_admin else "operator"),
-            # 租户/平台维度（与 JWT payload 同源）：中间件平台态判定 + 前端菜单可见性
             "tenant_id": getattr(user, "tenant_id", None),
             "tenant_role": getattr(user, "tenant_role", None),
             "is_platform_admin": bool(getattr(user, "is_platform_admin", False)),
         }
+        user.last_login_at = datetime.now(timezone.utc)
+        await self.session.commit()
+        logger.info(f"用户认证成功: {username}")
+        return snapshot
+
+    async def assert_tenant_login_allowed(self, user_data: dict) -> None:
+        """到期租户拒绝登录（平台超管豁免）。"""
+        logger.info(f"校验租户登录资格 | tenant={user_data.get('tenant_id')}")
+        tenant_id = user_data.get("tenant_id")
+        if not tenant_id or user_data.get("is_platform_admin"):
+            return
+        from sqlalchemy import select
+
+        from platform_core.models.tenant import Tenant
+
+        tenant = (await self.session.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
+        if tenant is not None and getattr(tenant, "status", None) == "expired":
+            raise AuthenticationException(message="租户已到期，请续费后再登录")
 
     async def create_token(self, user_data: dict) -> TokenResponse:
         """创建访问令牌"""

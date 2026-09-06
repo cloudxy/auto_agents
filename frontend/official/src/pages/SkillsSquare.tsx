@@ -7,7 +7,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { TIER_COLORS } from '@auto-agents/frontend-shared'
-import { Card, Empty, Input, Layout, Menu, Modal, Spin, Tag, Typography } from 'antd'
+import { Alert, Card, Empty, Input, Layout, Menu, Modal, Spin, Tag, Typography } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 
@@ -21,7 +21,9 @@ const SkillsSquare: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const initialQuery = searchParams.get('q') ?? ''
   const [items, setItems] = useState<PublicSkill[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [keyword, setKeyword] = useState(initialQuery)
   const [category, setCategory] = useState<string>('')
   const [detail, setDetail] = useState<PublicSkill | null>(null)
@@ -29,11 +31,15 @@ const SkillsSquare: React.FC = () => {
 
   const load = useCallback(async (q: string, cat: string) => {
     setLoading(true)
+    setLoadError(null)
     try {
       const data = await listPublicSkills({ q: q || undefined, category: cat || undefined, page: 1, page_size: PAGE_SIZE })
       setItems(data.items)
+      setTotal(data.total)
     } catch {
       setItems([])
+      setTotal(0)
+      setLoadError('技能列表加载失败')
     } finally {
       setLoading(false)
     }
@@ -83,10 +89,19 @@ const SkillsSquare: React.FC = () => {
         placeholder="搜索技能名称 / 描述"
         value={keyword}
         onPressEnter={(e) => applyKeyword((e.target as HTMLInputElement).value)}
-        onChange={(e) => !e.target.value && applyKeyword('')}
+        onChange={(e) => {
+          const v = e.target.value
+          setKeyword(v)
+          if (!v) applyKeyword('')
+        }}
         style={{ marginBottom: 20 }}
         allowClear
       />
+      {loadError ? <Alert type="error" showIcon title={loadError} style={{ marginBottom: 16 }} /> : null}
+      {total > PAGE_SIZE ? (
+        <Alert type="info" showIcon style={{ marginBottom: 16 }}
+          title={`仅展示前 ${PAGE_SIZE} 条（共 ${total}）。请用搜索或分类缩小范围。`} />
+      ) : null}
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         <Layout.Sider
           width={200} theme="light" breakpoint="lg" collapsedWidth={0}

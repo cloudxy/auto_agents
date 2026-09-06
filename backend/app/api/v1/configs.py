@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_admin, require_login
+from backend.app.api.deps import CurrentUser, require_login, require_platform_admin
 from backend.app.responses import ApiResponse, ok, updated
 from backend.services.config_service import ConfigService
 from platform_core.db import get_async_db
@@ -40,7 +40,7 @@ async def update_config(
                     description="配置键：小写字母数字 + . / _ 分隔，≤50 字符"),
     data: ConfigUpdate = ...,
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin),
 ) -> ApiResponse:
     """更新单个配置项（仅管理员，写入审计；set_config 内部已提交业务事务，
     审计记录由 record_audit 单独提交）"""

@@ -202,7 +202,13 @@ export const exportResults = async (taskId: number, format: 'csv' | 'json'): Pro
     params: { format },
     responseType: 'blob',
   })
-  return res as unknown as Blob
+  const blob = res as unknown as Blob
+  const ctype = (blob as Blob & { type?: string }).type || ''
+  if (ctype.includes('application/json')) {
+    const text = await blob.text()
+    throw new Error(text.slice(0, 200) || '导出失败')
+  }
+  return blob
 }
 
 // ---------------- 待执行任务编辑（阶段一）----------------

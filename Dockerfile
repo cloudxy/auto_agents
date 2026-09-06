@@ -30,10 +30,10 @@ COPY pyproject.toml uv.lock README.md ./
 COPY backend/ backend/
 COPY scrapy/ scrapy/
 COPY platform_core/ platform_core/
-RUN uv sync --package auto-agents-backend --no-dev && echo 'UV_SYNC_OK'
+RUN uv sync --package auto-agents-backend --package auto-agents-spider --no-dev && echo 'UV_SYNC_OK'
 
 COPY config/ config/
-COPY run_backend.py ./
+COPY run_backend.py run_spider.py ./
 
 # 前端构建产物（静态资源，供后续 nginx/静态服务接入）
 COPY --from=frontend-builder /build/admin/build /app/frontend-dist/admin

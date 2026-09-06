@@ -4,9 +4,10 @@
  * 与平台运营台的分工：运营台管套餐/配额/到期；本页管组织结构（公司与部门），
  * 部门用于资源分配粒度（中转站渠道/虚拟 Key 的公司→部门→个人链路）。
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Button, Card, Form, Input, message, Modal, Popconfirm, Select, Space,
+  Alert, Button, Card, Form, Input, message, Modal, Popconfirm, Space,
   Table, Tabs, Tag, Typography,
 } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
@@ -21,30 +22,26 @@ const { Text } = Typography
 
 // ---------------- 部门管理 ----------------
 const DepartmentsTab: React.FC = () => {
-  const [tenants, setTenants] = useState<TenantRow[]>([])
   const [tenantId, setTenantId] = useState<number | null>(null)
-  const [rows, setRows] = useState<DepartmentRow[]>([])
-  const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [form] = Form.useForm()
+  const qc = useQueryClient()
+  const tenantsQ = useQuery({ queryKey: ['enterprise-tenants'], queryFn: listTenants })
+  const tenants = tenantsQ.data ?? []
+  const deptsQ = useQuery({
+    queryKey: ['enterprise-depts', tenantId],
+    queryFn: () => listDepartments(tenantId as number),
+    enabled: tenantId != null,
+  })
+  const rows = deptsQ.data ?? []
+  const loading = deptsQ.isLoading || tenantsQ.isLoading
+  const refreshDepts = () => {
+    void qc.invalidateQueries({ queryKey: ['enterprise-depts', tenantId] })
+  }
 
-  const load = useCallback(async (tid: number) => {
-    setLoading(true)
-    try {
-      setRows(await listDepartments(tid))
-    } catch (e) {
-      message.error(apiErrorMessage(e, '部门列表加载失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    listTenants().then((ts) => {
-      setTenants(ts)
-      if (ts.length) { setTenantId(ts[0].id); load(ts[0].id) }
-    }).catch(() => setTenants([]))
-  }, [load])
+  React.useEffect(() => {
+    if (tenantId == null && tenants.length) setTenantId(tenants[0].id)
+  }, [tenants, tenantId])
 
   const onCreate = async () => {
     if (!tenantId) return
@@ -54,7 +51,7 @@ const DepartmentsTab: React.FC = () => {
       message.success(`部门「${values.name}」已创建`)
       setCreateOpen(false)
       form.resetFields()
-      load(tenantId)
+      refreshDepts()
     } catch (e) {
       if ((e as { errorFields?: unknown })?.errorFields) return
       message.error(apiErrorMessage(e, '创建部门失败'))
@@ -66,7 +63,7 @@ const DepartmentsTab: React.FC = () => {
     try {
       await deleteDepartment(d.id)
       message.success(`部门「${d.name}」已删除（成员回退未分组）`)
-      load(tenantId)
+      refreshDepts()
     } catch (e) {
       message.error(apiErrorMessage(e, '删除部门失败'))
     }
@@ -74,16 +71,20 @@ const DepartmentsTab: React.FC = () => {
 
   return (
     <div>
+      {tenantsQ.isError || deptsQ.isError ? (
+        <Alert type="error" showIcon style={{ marginBottom: 12 }}
+               title={apiErrorMessage(tenantsQ.error ?? deptsQ.error, '部门数据加载失败')} />
+      ) : null}
       <Space style={{ marginBottom: 16 }} wrap>
         <Text type="secondary">公司：</Text>
         <select
           value={tenantId ?? undefined}
-          onChange={(e) => { const v = Number(e.target.value); setTenantId(v); load(v) }}
+          onChange={(e) => setTenantId(Number(e.target.value))}
           style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d9d9d9' }}
         >
           {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}（{t.slug}）</option>)}
         </select>
-        <Button icon={<ReloadOutlined />} onClick={() => tenantId && load(tenantId)}>刷新</Button>
+        <Button icon={<ReloadOutlined />} onClick={refreshDepts}>刷新</Button>
         <Button type="primary" icon={<PlusOutlined />} disabled={!tenantId} onClick={() => setCreateOpen(true)}>新建部门</Button>
       </Space>
       <Table
@@ -119,22 +120,13 @@ const DepartmentsTab: React.FC = () => {
 
 // ---------------- 公司（租户）管理 ----------------
 const TenantsTab: React.FC = () => {
-  const [rows, setRows] = useState<TenantRow[]>([])
-  const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [form] = Form.useForm()
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      setRows(await listTenants())
-    } catch (e) {
-      message.error(apiErrorMessage(e, '公司列表加载失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-  useEffect(() => { load() }, [load])
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['enterprise-tenants'], queryFn: listTenants })
+  const rows = q.data ?? []
+  const loading = q.isLoading
+  const load = () => { qc.invalidateQueries({ queryKey: ['enterprise-tenants'] }) }
 
   const onCreate = async () => {
     try {

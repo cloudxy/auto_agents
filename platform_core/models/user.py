@@ -37,6 +37,7 @@ class User(TenantMixin, SoftDeleteMixin, Base):
                                comment="平台超级管理员（跨租户，挂 platform 租户）")
     role = Column(String(20), nullable=False, default="operator", server_default="operator",
                   comment="角色：admin(全权)/operator(操作)/viewer(只读)")
+    last_login_at = Column(DateTime(timezone=True), nullable=True, comment="最近登录时间")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
 

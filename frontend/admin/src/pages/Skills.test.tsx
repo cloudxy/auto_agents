@@ -3,6 +3,7 @@
  */
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
+import { withQuery } from '../testUtils';
 import Skills from './Skills';
 
 jest.mock('../services/skills', () => ({
@@ -31,7 +32,7 @@ jest.mock('../hooks/usePermission', () => ({
 
 
 test('renders skill list with dual score columns', async () => {
-  render(<Skills />);
+  render(withQuery(<Skills />));
   expect(await screen.findByText('阿尔法')).toBeInTheDocument();
   await waitFor(() => expect(screen.getByText('8.6')).toBeInTheDocument());
   expect(screen.getByText('贝塔')).toBeInTheDocument();
@@ -40,7 +41,7 @@ test('renders skill list with dual score columns', async () => {
 });
 
 test('readonly mode hides correction column and shows hint', () => {
-  render(<Skills />);
+  render(withQuery(<Skills />));
   expect(screen.getByText(/当前角色只读/)).toBeInTheDocument();
   expect(screen.queryByText('矫正')).toBeNull();
 });

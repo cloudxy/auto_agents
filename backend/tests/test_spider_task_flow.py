@@ -48,6 +48,7 @@ def _task(**overrides) -> MagicMock:
         retry_count=0,
         error_message=None,
         params='{"urls": ["https://example.com"]}',
+        tenant_id=None,
         created_at=None,
         updated_at=None,
         started_at=None,

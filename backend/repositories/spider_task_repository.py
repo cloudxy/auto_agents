@@ -15,6 +15,18 @@ class SpiderTaskRepository(BaseRepository[SpiderTask]):
     def __init__(self, session: AsyncSession):
         super().__init__(model=SpiderTask, session=session)
 
+    async def update(
+        self, id: int, only_if_status: Optional[Tuple[str, ...]] = None, **kwargs
+    ) -> Optional[SpiderTask]:
+        """更新任务；only_if_status 用于终态条件 UPDATE（B5 防 webhook 双写）。"""
+        stmt = update(SpiderTask).where(SpiderTask.id == id)
+        if only_if_status:
+            stmt = stmt.where(SpiderTask.status.in_(only_if_status))
+        result = await self.session.execute(stmt.values(**kwargs))
+        if only_if_status and int(result.rowcount or 0) == 0:
+            return None
+        return await self.get_by_id(id)
+
     async def get_by_ids(self, ids: List[int]) -> List[SpiderTask]:
         """按 ID 列表批查任务（WHERE id IN），消除逐条 get_by_id 的 N+1"""
         if not ids:

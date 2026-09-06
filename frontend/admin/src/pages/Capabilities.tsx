@@ -2,7 +2,8 @@
  * 能力中心页（P6 C9）：四类资产统一管理——技能/插件/专家/专家团
  * 技能 Tab 复用 Skills 组件（按钮级权限由 Skills 内部 usePermission 决定）；插件含验证按钮；专家/专家团为定义管理。
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button, Empty, Form, Input, message, Modal, Select, Space,
   Table, Tabs, Tag, Typography,
@@ -39,15 +40,15 @@ const Capabilities: React.FC = () => {
 }
 
 const PluginTab: React.FC = () => {
-  const [rows, setRows] = useState<AssetRow[]>([])
-  const [loading, setLoading] = useState(false)
   const [verifying, setVerifying] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try { setRows((await listAssets('plugin')).items) } finally { setLoading(false) }
-  }, [])
-  useEffect(() => { load() }, [load])
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: ['assets', 'plugin'],
+    queryFn: () => listAssets('plugin'),
+  })
+  const rows = q.data?.items ?? []
+  const loading = q.isLoading
+  const load = () => { qc.invalidateQueries({ queryKey: ['assets', 'plugin'] }) }
 
   const scan = async () => {
     try {
@@ -94,14 +95,14 @@ const PluginTab: React.FC = () => {
 }
 
 const ExpertTab: React.FC = () => {
-  const [rows, setRows] = useState<AssetRow[]>([])
-  const [loading, setLoading] = useState(false)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try { setRows((await listAssets('expert')).items) } finally { setLoading(false) }
-  }, [])
-  useEffect(() => { load() }, [load])
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: ['assets', 'expert'],
+    queryFn: () => listAssets('expert'),
+  })
+  const rows = q.data?.items ?? []
+  const loading = q.isLoading
+  const load = () => { qc.invalidateQueries({ queryKey: ['assets', 'expert'] }) }
 
   const scan = async () => {
     try {
@@ -129,20 +130,21 @@ const ExpertTab: React.FC = () => {
 }
 
 const TeamTab: React.FC = () => {
-  const [rows, setRows] = useState<AssetRow[]>([])
-  const [loading, setLoading] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [form] = Form.useForm()
-  const [experts, setExperts] = useState<string[]>([])
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try { setRows((await listAssets('expert_team')).items) } finally { setLoading(false) }
-  }, [])
-  useEffect(() => {
-    load()
-    listAssets('expert').then((d) => setExperts(d.items.map((i) => i.name))).catch(() => {})
-  }, [load])
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: ['assets', 'expert_team'],
+    queryFn: () => listAssets('expert_team'),
+  })
+  const expertsQ = useQuery({
+    queryKey: ['assets', 'expert'],
+    queryFn: () => listAssets('expert'),
+  })
+  const rows = q.data?.items ?? []
+  const loading = q.isLoading
+  const experts = (expertsQ.data?.items ?? []).map((i) => i.name)
+  const load = () => { qc.invalidateQueries({ queryKey: ['assets'] }) }
 
   const onCreate = async () => {
     const values = await form.validateFields()

@@ -48,6 +48,8 @@ class Skill(SoftDeleteMixin, AuditMixin, Base):
     sync_state = Column(String(16), nullable=False, default="ok",
                         comment="ok/hash_changed/missing/parse_error")
     tenant_id = Column(Integer, comment="D3 预留：平台级恒 NULL")
+    download_count = Column(Integer, nullable=False, default=0, server_default="0",
+                            comment="公开详情/下载次数")
     raw_meta = Column(JSON, comment="meta.yaml 原文快照（导出对账用）")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")

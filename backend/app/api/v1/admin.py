@@ -17,12 +17,16 @@ from backend.services.config_service import ConfigService
 from backend.services.spider_service import SpiderService
 from backend.services.tenant_admin_service import TenantAdminService
 from backend.services.user_service import UserService
-from platform_core.db import get_async_db
+from platform_core.db import get_async_db, get_async_readonly_db
 
 router = APIRouter()
 
 
 def _service(session: AsyncSession = Depends(get_async_db)) -> SpiderService:
+    return SpiderService(session)
+
+
+def _stats_service(session: AsyncSession = Depends(get_async_readonly_db)) -> SpiderService:
     return SpiderService(session)
 
 
@@ -44,7 +48,7 @@ def _config_service(session: AsyncSession = Depends(get_async_db)) -> ConfigServ
 
 @router.get("/stats")
 async def get_stats(
-    service: SpiderService = Depends(_service),
+    service: SpiderService = Depends(_stats_service),
     _user: CurrentUser = Depends(require_login),
 ):
     """获取系统统计数据（含运行时长/成功率/近 7 日趋势/爬虫 Top5）"""

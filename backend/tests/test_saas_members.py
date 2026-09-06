@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import Delete, func, select, update as sa_update
 
+pytestmark = pytest.mark.mysql_fidelity
+
 from backend.services.auth_service import AuthService
 from platform_core.exceptions import NotFoundException
 from platform_core.models.notification import Notification

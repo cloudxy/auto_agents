@@ -7,9 +7,10 @@
  * - 行内操作：查看详情（复用 ResultDrawer，按结果所属任务打开）、删除（仅管理员，二次确认）
  * - 导出：按当前筛选条件拉取最多 100 条生成 CSV 下载
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Card, Col, Row, Statistic, Table, Button, Space, Select, Input, DatePicker,
+  Alert, Card, Col, Row, Statistic, Table, Button, Space, Select, Input, DatePicker,
   Tooltip, Typography, message, Popconfirm,
 } from 'antd'
 import {
@@ -66,12 +67,12 @@ const Data: React.FC = () => {
   const { hasPermission } = usePermission()
   const canDelete = hasPermission('btn:delete') // 删除结果仅 admin
 
-  // 统计卡片
-  const [stats, setStats] = useState<StatsData | null>(null)
-  const [statsLoading, setStatsLoading] = useState(true)
-
-  // 爬虫下拉（注册表）
-  const [spiders, setSpiders] = useState<SpiderInfo[]>([])
+  const qc = useQueryClient()
+  const statsQ = useQuery({ queryKey: ['admin-stats'], queryFn: () => fetchAdminStats<StatsData>() })
+  const stats = statsQ.data ?? null
+  const statsLoading = statsQ.isLoading
+  const registryQ = useQuery({ queryKey: ['spider-registry'], queryFn: fetchRegistry })
+  const spiders: SpiderInfo[] = registryQ.data?.spiders || []
   const spiderMap = useMemo<SpiderMap>(() => {
     const m: SpiderMap = {}
     spiders.forEach((s) => { m[s.name] = { title: s.title, type: s.type } })
@@ -84,58 +85,39 @@ const Data: React.FC = () => {
   const [keyword, setKeyword] = useState('')
 
   // 结果表格
-  const [rows, setRows] = useState<SpiderResult[]>([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(false)
+  const [applied, setApplied] = useState<Record<string, unknown>>({})
 
   // 详情抽屉（复用 ResultDrawer）
   const [detailTask, setDetailTask] = useState<Task | null>(null)
 
-  const loadStats = useCallback(async () => {
-    try {
-      setStats(await fetchAdminStats<StatsData>())
-    } catch (error) {
-      message.error('获取统计数据失败')
-    } finally {
-      setStatsLoading(false)
-    }
-  }, [])
-
-  const buildQuery = useCallback(() => ({
+  const buildQuery = () => ({
     spider_name: spiderName,
     keyword: keyword.trim() || undefined,
     start_time: range?.[0] ? range[0].format('YYYY-MM-DDTHH:mm:ss') : undefined,
     end_time: range?.[1] ? range[1].format('YYYY-MM-DDTHH:mm:ss') : undefined,
-  }), [spiderName, keyword, range])
+  })
 
-  const loadResults = useCallback(async (p: number, showSpin = true) => {
-    if (showSpin) setLoading(true)
-    try {
-      const res = await searchResults({ ...buildQuery(), page: p, page_size: 20 })
-      setRows(res.items || [])
-      setTotal(res.total || 0)
-    } catch (error) {
-      message.error('获取采集结果失败')
-    } finally {
-      if (showSpin) setLoading(false)
-    }
-  }, [buildQuery])
+  const resultsQ = useQuery({
+    queryKey: ['data-results', page, applied],
+    queryFn: () => searchResults({ ...applied, page, page_size: 20 }),
+  })
+  const rows = resultsQ.data?.items || []
+  const total = resultsQ.data?.total || 0
+  const loading = resultsQ.isLoading
 
-  useEffect(() => {
-    loadStats()
-    fetchRegistry()
-      .then((reg) => setSpiders(reg.spiders || []))
-      .catch(() => { /* 下拉为空不阻塞 */ })
-    // 挂载时加载第一页结果（筛选变化仍由「查询」按钮触发，避免自动刷新）
-    loadResults(1)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadStats])
+  const loadResults = (p: number) => {
+    setPage(p)
+    void qc.invalidateQueries({ queryKey: ['data-results'] })
+  }
 
-  // 查询条件变化回到第一页
+  const loadStats = () => {
+    void qc.invalidateQueries({ queryKey: ['admin-stats'] })
+  }
+
   const onSearch = () => {
     setPage(1)
-    loadResults(1)
+    setApplied(buildQuery())
   }
 
   const onReset = () => {
@@ -143,19 +125,14 @@ const Data: React.FC = () => {
     setRange(null)
     setKeyword('')
     setPage(1)
-    // 依赖闭包旧值，直接按空条件拉取（带 loading 态，避免重置期间闪现空态）
-    setLoading(true)
-    searchResults({ page: 1, page_size: 20 })
-      .then((res) => { setRows(res.items || []); setTotal(res.total || 0) })
-      .catch((e) => message.error(apiErrorMessage(e, '获取采集结果失败')))
-      .finally(() => setLoading(false))
+    setApplied({})
   }
 
   const onDelete = async (row: SpiderResult) => {
     try {
       await deleteResult(row.id)
       message.success(`结果 #${row.id} 已删除`)
-      loadResults(page, false)
+      loadResults(page)
     } catch (error) {
       message.error(apiErrorMessage(error, '删除失败'))
     }
@@ -261,6 +238,14 @@ const Data: React.FC = () => {
       </Row>
 
       <Card title="采集结果检索" style={{ marginTop: 16 }}>
+        {(statsQ.isError || resultsQ.isError) ? (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 12 }}
+            title={apiErrorMessage(statsQ.error ?? resultsQ.error, '数据中心加载失败')}
+          />
+        ) : null}
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
             allowClear
@@ -306,7 +291,7 @@ const Data: React.FC = () => {
             current: page,
             pageSize: 20,
             total,
-            onChange: (p) => { setPage(p); loadResults(p, false) },
+            onChange: (p) => setPage(p),
             showTotal: (t) => `共 ${t} 条结果`,
           }}
         />

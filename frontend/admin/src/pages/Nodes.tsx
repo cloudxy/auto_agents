@@ -9,6 +9,8 @@ import { Card, Table, Tag, Button, Space, message, Badge, Typography, Empty } fr
 import { ClusterOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { fetchNodesPage } from '../services/admin'
+import { QueryStateView } from '../components/QueryStateView'
+import { apiErrorMessage } from '../utils/errorMessage'
 
 const { Text } = Typography
 
@@ -30,13 +32,14 @@ interface WorkerNode {
 
 const Nodes: React.FC = () => {
   // 工单 78：react-query 托管（心跳 10s 续约，15s 轮询跟上离线判定；失焦自动暂停）
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['spider-nodes'],
     queryFn: () => fetchNodesPage<WorkerNode>(),
     refetchInterval: 15000,
   })
   const nodes = data?.items || []
   const total = data?.total || 0
+  const loadError = isError ? apiErrorMessage(error, '节点列表加载失败') : null
 
   const columns = [
     {
@@ -84,6 +87,8 @@ const Nodes: React.FC = () => {
   ]
 
   return (
+    <QueryStateView loading={isLoading} error={loadError} data={data ?? { items: [], total: 0 }} isEmpty={() => false}>
+      {() => (
     <Card
       title={<span><ClusterOutlined style={{ marginRight: 8 }} />Worker 节点（共 {total} 个）</span>}
       extra={<Button icon={<ReloadOutlined />} onClick={() => refetch()}>刷新</Button>}
@@ -92,11 +97,12 @@ const Nodes: React.FC = () => {
         columns={columns}
         dataSource={nodes}
         rowKey="worker_id"
-        loading={isLoading}
         pagination={false}
-        locale={{ emptyText: <Empty description="暂无在线节点（Worker 进程心跳 10s 上报一次）" /> }}
+        locale={{ emptyText: <Empty description="暂无在线节点。启动：docker compose --profile spider up" /> }}
       />
     </Card>
+      )}
+    </QueryStateView>
   )
 }
 

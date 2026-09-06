@@ -181,6 +181,7 @@ def run(spider_name: str | None, **kwargs):
                 "pid": str(os.getpid()),
                 "spiders": ",".join(sorted(names)),
                 "started_at": worker_started_at,
+                "seen_at": datetime.now().isoformat(timespec="seconds"),
                 "respawn_count": str(sum(RESPAWN_COUNTS.values())),
             })
             client.expire(key, hb_ttl)

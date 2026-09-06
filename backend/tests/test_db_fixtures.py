@@ -11,6 +11,8 @@ import asyncio
 import pytest
 from sqlalchemy import func, inspect as sa_inspect, select
 
+pytestmark = pytest.mark.mysql_fidelity
+
 from platform_core.models.user import User
 
 # 独立事实源：platform_core/models/ 下模型文件的表名清单
@@ -58,6 +60,11 @@ ALL_ORM_TABLES = {
     "departments",
     "menus",
     "permissions",
+    "api_keys",
+    # 订阅计费（迁移 029）
+    "plans",
+    "tenant_subscriptions",
+    "orders",
 }
 
 

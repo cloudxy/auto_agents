@@ -19,7 +19,7 @@ import redis
 from scrapy import signals
 
 from platform_core.logger import get_logger
-from platform_core.queues import ACTIVE_TASK_KEY
+from platform_core.queues import ACTIVE_TASK_KEY, ACTIVE_TASK_TTL, worker_active_key
 
 logger = get_logger("spider")
 
@@ -35,6 +35,8 @@ class SpiderCloseWebhook:
         self.webhook_url = webhook_url
         self.secret = secret
         self.redis_url = redis_url
+        self._local_tasks: dict[int, set[int]] = {}
+        self._redis = None
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -46,18 +48,50 @@ class SpiderCloseWebhook:
             redis_url=crawler.settings.get("REDIS_URL"),
         )
         crawler.signals.connect(ext.spider_closed, signal=signals.spider_closed)
+        crawler.signals.connect(ext.request_scheduled, signal=signals.request_scheduled)
         return ext
 
-    def spider_closed(self, spider, reason):
-        try:
-            client = redis.Redis.from_url(self.redis_url, decode_responses=True)
-            try:
-                members = client.smembers(ACTIVE_TASK_KEY.format(spider_name=spider.name))
-            finally:
-                client.close()  # 异常路径也必须关，否则泄漏 from_url 自建的连接池
-        except Exception as e:  # noqa: BLE001 Redis 不可用：无法关联任务，跳过回调
-            logger.warning(f"读取活跃任务集合失败，跳过回调: {spider.name}, error={e}")
+    def _client(self):
+        if self._redis is None:
+            self._redis = redis.Redis.from_url(self.redis_url, decode_responses=True)
+        return self._redis
+
+    def request_scheduled(self, request, spider):
+        """本实例见过的 task_id：关闭时只回调这些，避免多 worker 互杀。"""
+        tid = (request.meta or {}).get("task_id")
+        if tid is None:
             return
+        bucket = self._local_tasks.setdefault(id(spider), set())
+        try:
+            task_id = int(tid)
+        except (TypeError, ValueError):
+            return
+        bucket.add(task_id)
+        try:
+            key = worker_active_key(spider.name)
+            client = self._client()
+            client.sadd(key, task_id)
+            client.expire(key, ACTIVE_TASK_TTL)
+        except Exception as e:  # noqa: BLE001 worker 键失败不阻断采集
+            logger.debug(f"写入 worker 活跃键失败（忽略）: {spider.name}, error={e}")
+
+    def spider_closed(self, spider, reason):
+        local = self._local_tasks.pop(id(spider), set())
+        members = {str(t) for t in local}
+        if not members:
+            try:
+                client = self._client()
+                members = client.smembers(worker_active_key(spider.name)) or set()
+                if not members:
+                    members = client.smembers(ACTIVE_TASK_KEY.format(spider_name=spider.name))
+                    if len(members) > 1:
+                        logger.info(
+                            f"本实例未见 task_id 且全局多成员，跳过回调: {spider.name}"
+                        )
+                        return
+            except Exception as e:  # noqa: BLE001 Redis 不可用：无法关联任务，跳过回调
+                logger.warning(f"读取活跃任务集合失败，跳过回调: {spider.name}, error={e}")
+                return
         if not members:
             logger.info(f"无活跃任务关联，跳过回调: {spider.name}")
             return

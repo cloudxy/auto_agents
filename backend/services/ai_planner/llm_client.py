@@ -230,6 +230,9 @@ async def _failover(messages, *, usage_dim, budget_override, cfg, primary_error)
             return content
         except Exception as exc:  # noqa: BLE001 单候选失败继续下一候选
             failures.append(f"{model_id}: {type(exc).__name__}")
+            from backend.services.ai_planner._cooldown import record_failure as _rec_fail
+
+            await _rec_fail(cfg.provider_id, model_id)
     raise _BizErr(
         f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {primary_error}；"
         f"候选链 {len(failures)} 个模型均失败: " + "; ".join(failures)
@@ -332,6 +335,26 @@ async def llm_chat(
             raise BusinessException(
                 f"LLM token 预算已耗尽（{usage_dim} 本月累计 {used_total} >= {budget}），已熔断"
             )
+        if isinstance(_tid, int):
+            try:
+                from datetime import date as _date
+
+                from sqlalchemy.ext.asyncio import AsyncSession as _AS
+
+                from backend.services.quota_service import QuotaExceededException, QuotaService
+                from platform_core.db import get_manager as _gm
+
+                _engines = getattr(_gm(), "async_engines", {}) or {}
+                _engine = next(iter(_engines.values()), None)
+                if _engine is not None:
+                    async with _AS(_engine) as _qs:
+                        await QuotaService(_qs).check_llm_tokens_month(
+                            _tid, _date.today().strftime("%Y-%m")
+                        )
+            except QuotaExceededException:
+                raise
+            except Exception as _qe:  # noqa: BLE001 配额检查基础设施失败不阻断（测试/无引擎）
+                logger.debug(f"租户 LLM 配额检查跳过: {_qe}")
         try:
             if cfg.provider_id is not None:
                 # provider 路径：模块级共享 client（连接池复用，变更时 invalidate 失效）
@@ -381,6 +404,10 @@ async def llm_chat(
             last_error = e
         except Exception as e:  # noqa: BLE001 超时/网络/解析失败均进入重试
             last_error = e
+            if cfg.provider_id and effective_model:
+                from backend.services.ai_planner._cooldown import record_failure as _rec_fail
+
+                await _rec_fail(cfg.provider_id, effective_model)
         delay = _RETRY_BASE_DELAY * (2 ** attempt)
         logger.warning(
             f"LLM 调用失败（第 {attempt + 1}/{cfg.max_retries} 次），"

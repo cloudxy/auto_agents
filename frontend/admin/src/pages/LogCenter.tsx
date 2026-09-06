@@ -5,7 +5,8 @@
  * - 审计日志：对接 GET /admin/audit-logs（ApiResponse 信封需解包 data），
  *   操作人/操作类型/时间范围筛选，仅管理员可见（后端为最终防线）
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Card, Tabs, Table, Tag, Space, Input, Button, DatePicker, Typography, message, Alert,
 } from 'antd'
@@ -34,43 +35,29 @@ interface AuditLogItem {
 /** 审计日志页签（仅管理员可见数据） */
 const AuditLogsTab: React.FC = () => {
   const { isAdmin } = usePermission()
-  const [rows, setRows] = useState<AuditLogItem[]>([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(false)
   const [userFilter, setUserFilter] = useState('')
   const [actionFilter, setActionFilter] = useState('')
   const [range, setRange] = useState<RangeValue>(null)
+  const [applied, setApplied] = useState<Record<string, unknown>>({})
 
-  const buildQuery = useCallback(() => ({
-    user: userFilter.trim() || undefined,
-    action: actionFilter.trim() || undefined,
-    start_time: range?.[0] ? range[0].format('YYYY-MM-DDTHH:mm:ss') : undefined,
-    end_time: range?.[1] ? range[1].format('YYYY-MM-DDTHH:mm:ss') : undefined,
-  }), [userFilter, actionFilter, range])
-
-  const loadLogs = useCallback(async (p: number, showSpin = true) => {
-    if (!isAdmin) return
-    if (showSpin) setLoading(true)
-    try {
-      const res = await fetchAuditLogs<AuditLogItem>({ skip: (p - 1) * 20, limit: 20, ...buildQuery() })
-      setRows(res.items || [])
-      setTotal(res.total || 0)
-    } catch (error) {
-      message.error('获取审计日志失败')
-    } finally {
-      if (showSpin) setLoading(false)
-    }
-  }, [isAdmin, buildQuery])
-
-  useEffect(() => {
-    loadLogs(page)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, isAdmin])
+  const auditQ = useQuery({
+    queryKey: ['audit-logs', page, applied, isAdmin],
+    queryFn: () => fetchAuditLogs<AuditLogItem>({ skip: (page - 1) * 20, limit: 20, ...applied }),
+    enabled: isAdmin,
+  })
+  const rows = auditQ.data?.items || []
+  const total = auditQ.data?.total || 0
+  const loading = auditQ.isLoading
 
   const onSearch = () => {
     setPage(1)
-    loadLogs(1)
+    setApplied({
+      user: userFilter.trim() || undefined,
+      action: actionFilter.trim() || undefined,
+      start_time: range?.[0] ? range[0].format('YYYY-MM-DDTHH:mm:ss') : undefined,
+      end_time: range?.[1] ? range[1].format('YYYY-MM-DDTHH:mm:ss') : undefined,
+    })
   }
 
   const columns: ColumnsType<AuditLogItem> = [
@@ -120,11 +107,11 @@ const AuditLogsTab: React.FC = () => {
         />
         <Button type="primary" onClick={onSearch}>查询</Button>
         <Button
-          onClick={() => { setUserFilter(''); setActionFilter(''); setRange(null); setPage(1); loadLogs(1) }}
+          onClick={() => { setUserFilter(''); setActionFilter(''); setRange(null); setPage(1); setApplied({}) }}
         >
           重置
         </Button>
-        <Button icon={<ReloadOutlined />} onClick={() => loadLogs(page)}>刷新</Button>
+        <Button icon={<ReloadOutlined />} onClick={() => auditQ.refetch()}>刷新</Button>
       </Space>
       <Table
         columns={columns}

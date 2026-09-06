@@ -1,0 +1,5 @@
+# spider_results 归档后物理删除（S4）
+# 天数取租户套餐 quota.result_retention_days，缺省 90
+RETENTION:
+  ENABLED: true
+  INTERVAL_SECONDS: 3600

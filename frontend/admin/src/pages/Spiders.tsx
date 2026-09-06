@@ -9,8 +9,8 @@
  * - 删除任务：二次确认 + 级联删除采集结果（运行中禁止删除）
  * - 定时任务：Cron 调度计划管理（创建/启停/删除）
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Card, Tabs, message } from 'antd'
+import React, { useMemo, useState } from 'react'
+import { Alert, Card, Tabs, message } from 'antd'
 import { ClockCircleOutlined, AlertOutlined, BookOutlined } from '@ant-design/icons'
 import {
   fetchRegistry, fetchTasks, deleteTask, controlTask,
@@ -47,7 +47,8 @@ const Spiders: React.FC = () => {
   const [priorityFilter, setPriorityFilter] = useState<string | undefined>(undefined)
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
   const [spiderFilter, setSpiderFilter] = useState<string | undefined>(undefined)
-  const [registry, setRegistry] = useState<SpiderRegistry>({ types: [], spiders: [] })
+  const { data: registryData } = useQuery({ queryKey: ['spider-registry'], queryFn: fetchRegistry })
+  const registry: SpiderRegistry = registryData ?? { types: [], spiders: [] }
 
   // 新增任务弹窗（preset 携带待回填参数）
   const [modalOpen, setModalOpen] = useState(false)
@@ -66,8 +67,11 @@ const Spiders: React.FC = () => {
   // 编辑待执行任务弹窗
   const [editTask, setEditTask] = useState<Task | null>(null)
 
-  // 模板列表（供 TaskModal 的"从模板创建"使用）
-  const [templates, setTemplates] = useState<TaskTemplate[]>([])
+  const { data: templatesData, refetch: refetchTemplates } = useQuery({
+    queryKey: ['spider-templates'],
+    queryFn: fetchTemplates,
+  })
+  const templates: TaskTemplate[] = templatesData ?? []
 
   const spiderMap = useMemo<SpiderMap>(() => {
     const m: SpiderMap = {}
@@ -76,7 +80,7 @@ const Spiders: React.FC = () => {
   }, [registry])
 
   // 工单 78：任务列表交 react-query（U1-1 服务端真分页；存在未终态任务时 3s 轮询）
-  const { data: tasksRes, isLoading: loading, refetch: refetchTasks } = useQuery({
+  const { data: tasksRes, isLoading: loading, isError: tasksError, error: tasksErr, refetch: refetchTasks } = useQuery({
     queryKey: ['spider-tasks', page, priorityFilter, statusFilter, spiderFilter],
     queryFn: () => fetchTasks((page - 1) * PAGE_SIZE, PAGE_SIZE, {
       priority: priorityFilter,
@@ -101,19 +105,7 @@ const Spiders: React.FC = () => {
   const changeSpiderFilter = (v: string | undefined) => { setSpiderFilter(v); setPage(1) }
   const changePagination = (p: number) => { setPage(p) }
 
-  const loadTemplates = useCallback(async () => {
-    try {
-      const res = await fetchTemplates()
-      setTemplates(res || [])
-    } catch (error) {
-      message.error('获取任务模板失败')
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchRegistry().then(setRegistry).catch((e) => message.error(apiErrorMessage(e, '获取爬虫注册表失败')))
-    loadTemplates()
-  }, [loadTemplates])
+  const loadTemplates = () => { void refetchTemplates() }
 
 
   // ---------------- 新增任务弹窗 ----------------
@@ -176,6 +168,11 @@ const Spiders: React.FC = () => {
             key: 'tasks',
             label: '任务列表',
             children: (
+              <>
+              {tasksError ? (
+                <Alert type="error" showIcon style={{ marginBottom: 12 }}
+                       title={apiErrorMessage(tasksErr, '任务列表加载失败')} />
+              ) : null}
               <TaskList
                 tasks={tasks}
                 loading={loading}
@@ -209,6 +206,7 @@ const Spiders: React.FC = () => {
                 onEdit={(task: Task) => setEditTask(task)}
                 onRefresh={() => loadTasks()}
               />
+              </>
             ),
           },
           {

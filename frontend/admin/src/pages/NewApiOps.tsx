@@ -9,7 +9,8 @@
  *
  * 约定：全只读无写操作；状态 Tag 颜色对齐 new-api 语义（1 绿 / 2 橙 / 3 红 / 未知灰）。
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import ProbeResults from '../components/newapi/ProbeResults'
 import EventsList from '../components/newapi/EventsList'
 import {
@@ -74,38 +75,24 @@ const DEFAULT_PAGE_SIZE = 10
 
 const NewApiOps: React.FC = () => {
   // ---------------- 总览 ----------------
-  const [overview, setOverview] = useState<NewapiOverview | null>(null)
-  const [overviewLoading, setOverviewLoading] = useState(false)
-
-  const loadOverview = useCallback(async (showSpin = true) => {
-    if (showSpin) setOverviewLoading(true)
-    try {
-      setOverview(await fetchNewapiOverview())
-    } catch (error) {
-      message.error('获取中转站总览失败')
-    } finally {
-      if (showSpin) setOverviewLoading(false)
-    }
-  }, [])
+  const qc = useQueryClient()
+  const overviewQ = useQuery({ queryKey: ['newapi-overview'], queryFn: fetchNewapiOverview })
+  const overview = overviewQ.data ?? null
+  const overviewLoading = overviewQ.isLoading
+  const loadOverview = (_showSpin = true) => { qc.invalidateQueries({ queryKey: ['newapi-overview'] }) }
 
   // ---------------- 渠道额度配置（4.2 接线） ----------------
-  const [channelsCfg, setChannelsCfg] = useState<ChannelWithConfig[]>([])
-  const [channelsCfgLoading, setChannelsCfgLoading] = useState(false)
+  const channelsQ = useQuery({ queryKey: ['newapi-channels'], queryFn: fetchChannelsWithConfig })
+  const channelsCfg = channelsQ.data ?? []
+  const channelsCfgLoading = channelsQ.isLoading
   const [cfgTarget, setCfgTarget] = useState<ChannelWithConfig | null>(null)
   const [cfgSaving, setCfgSaving] = useState(false)
   const [cfgForm] = Form.useForm()
+  // 工单 80：子组件经 refreshSignal 联动刷新（events/probes 状态已下沉组件）
+  const [refreshSignal, setRefreshSignal] = useState(0)
+  const [configSaved, setConfigSaved] = useState(0)
 
-  const loadChannelsCfg = useCallback(async (showSpin = true) => {
-    if (showSpin) setChannelsCfgLoading(true)
-    try {
-      setChannelsCfg(await fetchChannelsWithConfig())
-    } catch (error) {
-      // 管理面不可达：保持列表为空（顶部已有降级 Alert 说明）
-      setChannelsCfg([])
-    } finally {
-      if (showSpin) setChannelsCfgLoading(false)
-    }
-  }, [])
+  const loadChannelsCfg = (_showSpin = true) => { qc.invalidateQueries({ queryKey: ['newapi-channels'] }) }
 
   const openCfg = (record: ChannelWithConfig) => {
     setCfgTarget(record)
@@ -150,14 +137,6 @@ const NewApiOps: React.FC = () => {
     }
   }
 
-  useEffect(() => {
-    loadOverview()
-    loadChannelsCfg()
-  }, [loadOverview, loadChannelsCfg])
-
-  // 工单 80：子组件经 refreshSignal 联动刷新（events/probes 状态已下沉组件）
-  const [refreshSignal, setRefreshSignal] = useState(0)
-  const [configSaved, setConfigSaved] = useState(0)
   const refreshAll = () => {
     loadOverview(false)
     loadChannelsCfg(false)

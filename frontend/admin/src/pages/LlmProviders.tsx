@@ -4,7 +4,8 @@
  * 职责：列表加载/激活/供应商级测试/删除 + 平台预设；新建向导与模型集管理在
  * components/llm/{ProviderWizardModal,ModelSetDrawer}。
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Switch, Select,
   Alert, Button, Card, message, Popconfirm, Space, Table, Tag, Tooltip, Typography,
 } from 'antd'
@@ -31,17 +32,30 @@ const LlmProviders: React.FC = () => {
   const canOperate = hasPermission('btn:create')
   const canDelete = hasPermission('btn:delete')
 
-  const [rows, setRows] = useState<LlmProvider[]>([])
-  const [loading, setLoading] = useState(false)
-  const [activeProvider, setActiveProvider] = useState<LlmProvider | null>(null)
-  const [activeLoaded, setActiveLoaded] = useState(false)
-  const [presets, setPresets] = useState<PlatformPreset[]>([])
-  const [rowTesting, setRowTesting] = useState<string | null>(null)
+  const qc = useQueryClient()
+  const listQ = useQuery({ queryKey: ['llm-providers'], queryFn: fetchLlmProviders })
+  const activeQ = useQuery({ queryKey: ['llm-active'], queryFn: fetchActiveLlmProvider })
+  const presetsQ = useQuery({ queryKey: ['llm-presets'], queryFn: getPlatformPresets })
+  const rows = listQ.data ?? []
+  const loading = listQ.isLoading
+  const activeProvider = activeQ.data ?? null
+  const activeLoaded = !activeQ.isLoading
+  const presets: PlatformPreset[] = presetsQ.data ?? []
   const [activatingId, setActivatingId] = useState<number | null>(null)
   const [testingId, setTestingId] = useState<number | null>(null)
   const [testResults, setTestResults] = useState<Record<number, LlmTestResult>>({})
-  // 列表模型计数（模型列多 Tag：默认金色 +N）
-  const [modelsMap, setModelsMap] = useState<Record<number, ProviderModelRow[]>>({})
+  const providerIds = rows.map((row) => row.id)
+  const modelsQ = useQuery({
+    queryKey: ['llm-provider-models', providerIds],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        providerIds.map(async (id) => [id, await getLlmProviderModels(id)] as const),
+      )
+      return Object.fromEntries(entries) as Record<number, ProviderModelRow[]>
+    },
+    enabled: canOperate && providerIds.length > 0,
+  })
+  const modelsMap: Record<number, ProviderModelRow[]> = modelsQ.data ?? {}
   // 向导 / Drawer 由子组件托管，页面只持有开关态
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<LlmProvider | null>(null)
@@ -51,46 +65,18 @@ const LlmProviders: React.FC = () => {
   const [filterEnabled, setFilterEnabled] = useState<string>('all')
   const [filterActive, setFilterActive] = useState<string>('all')
 
-  const loadList = useCallback(async (showSpin = true) => {
-    if (showSpin) setLoading(true)
-    try {
-      setRows(await fetchLlmProviders())
-    } catch {
-      /* 列表加载失败由壳层兜底 */
-    } finally {
-      if (showSpin) setLoading(false)
-    }
-  }, [])
+  const loadList = async (_showSpin = true) => {
+    await qc.invalidateQueries({ queryKey: ['llm-providers'] })
+  }
 
-  const loadActive = useCallback(async () => {
-    try {
-      setActiveProvider(await fetchActiveLlmProvider())
-    } catch {
-      setActiveProvider(null)
-    } finally {
-      setActiveLoaded(true)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadList()
-    loadActive()
-    getPlatformPresets().then(setPresets).catch(() => setPresets([]))
-  }, [loadList, loadActive])
-
-  // 列表加载后补各供应商模型集（仅 admin 需要展示模型列计数）
-  useEffect(() => {
-    rows.forEach(async (row) => {
-      try {
-        const models = await getLlmProviderModels(row.id)
-        setModelsMap((prev) => ({ ...prev, [row.id]: models }))
-      } catch { /* 忽略单行失败 */ }
-    })
-  }, [rows])
+  const loadActive = async () => {
+    await qc.invalidateQueries({ queryKey: ['llm-active'] })
+  }
 
   const refreshAll = () => {
     loadList(false)
     loadActive()
+    void qc.invalidateQueries({ queryKey: ['llm-provider-models'] })
   }
 
   // ---------------- 行操作 ----------------
@@ -201,15 +187,19 @@ const LlmProviders: React.FC = () => {
   return (
     <>
       {!canOperate && (
-        <Alert type="info" showIcon style={{ marginBottom: 16 }} message="仅管理员可管理供应商"
+        <Alert type="info" showIcon style={{ marginBottom: 16 }} title="仅管理员可管理供应商"
                description="当前账号为只读视图；新建/激活/测试/编辑/删除操作仅管理员可用。" />
       )}
+      {listQ.isError ? (
+        <Alert type="error" showIcon style={{ marginBottom: 16 }}
+               title={apiErrorMessage(listQ.error, '供应商列表加载失败')} />
+      ) : null}
 
       {activeLoaded && (activeProvider ? (
         <Alert type="success" showIcon style={{ marginBottom: 16 }}
-               message={`当前激活供应商：${activeProvider.name}（${activeProvider.model || '-'}）`} />
+               title={`当前激活供应商：${activeProvider.name}（${activeProvider.model || '-'}）`} />
       ) : (
-        <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="尚未激活任何 LLM 供应商"
+        <Alert type="warning" showIcon style={{ marginBottom: 16 }} title="尚未激活任何 LLM 供应商"
                description="AI 采集等功能依赖已激活的 LLM 供应商，请在列表中选择一个并点击「激活」。" />
       ))}
 
@@ -252,11 +242,15 @@ const LlmProviders: React.FC = () => {
                locale={{ emptyText: canOperate ? '暂无 LLM 供应商，点击右上角「新建供应商」添加' : '暂无 LLM 供应商' }} />
       </Card>
 
-      <ProviderWizardModal
-        open={modalOpen} editing={editing} presets={presets}
-        onClose={() => setModalOpen(false)} onSaved={refreshAll} />
-      <ModelSetDrawer
-        provider={drawerProvider} onClose={() => setDrawerProvider(null)} onSaved={refreshAll} />
+      {modalOpen ? (
+        <ProviderWizardModal
+          open={modalOpen} editing={editing} presets={presets}
+          onClose={() => setModalOpen(false)} onSaved={refreshAll} />
+      ) : null}
+      {drawerProvider ? (
+        <ModelSetDrawer
+          provider={drawerProvider} onClose={() => setDrawerProvider(null)} onSaved={refreshAll} />
+      ) : null}
     </>
   )
 }

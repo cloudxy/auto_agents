@@ -88,10 +88,22 @@ async def health_deep(session: AsyncSession = Depends(get_async_db)):
     logger = get_logger("api")
     mysql_res = await health_db(session)
     redis_res = await health_redis()
+    queues = {}
+    try:
+        from platform_core.queues import DEAD_ITEM_QUEUE, ITEM_QUEUE, ITEM_REDO_QUEUE
+
+        r = get_async_redis()
+        queues = {
+            "item": int(await r.llen(ITEM_QUEUE) or 0),
+            "redo": int(await r.llen(ITEM_REDO_QUEUE) or 0),
+            "dead": int(await r.llen(DEAD_ITEM_QUEUE) or 0),
+        }
+    except Exception as e:  # noqa: BLE001
+        queues = {"error": type(e).__name__}
     checks = {"mysql": mysql_res["status"], "redis": redis_res["status"]}
     if all(status == "healthy" for status in checks.values()):
         logger.debug("Deep health check passed")
-        return {"status": "healthy", "checks": checks}
+        return {"status": "healthy", "checks": checks, "queues": queues}
     payload = {
         "status": "unhealthy",
         "checks": checks,
