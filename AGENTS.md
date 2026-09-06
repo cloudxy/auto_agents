@@ -9,8 +9,9 @@
 |------|------|------|
 | 后端 | `backend/` | FastAPI API（`app/api/v1+v2`）+ 外部 API（`app/external_api`）+ services + repositories |
 | 爬虫 | `scrapy/` | spiders / middlewares / pipelines / items（禁止 import backend） |
-| 共享基建 | `platform_core/` | logger / db / storage / exceptions / repository / models / schemas |
-| 前端 | `frontend/{admin,official}/` | React 19 + TypeScript（独立 npm 包） |
+| 共享基建 | `platform_core/` | logger / db / storage / exceptions / repository / models / schemas / tenant_context |
+| 前端 | `frontend/{admin,official,shared}/` | React 19 + TypeScript（npm workspaces；`shared` 为 `@auto-agents/frontend-shared` 编译产物） |
+| 能力资产库 | `capability-library/` | 跨工具内容（SKILL.md / adapters）；治理走主 API `v1/skills` |
 | 配置 | `config/` | Dynaconf 多层合并（default → `<env>` → `.env` → 环境变量） |
 | 编排 | `run.py` / `run_*.py` | 全栈启停入口 |
 
@@ -21,7 +22,7 @@
 - `uv.lock` 必须提交（可复现性保证），禁止加入 `.gitignore`
 - `platform_core/` 是源码包，经 `sys.path` 引入，不打包、不进 workspace
 
-## 架构红线 + 核心边界（12 红线（R1-R12） + 3 边界，机械可检查）
+## 架构红线 + 核心边界（13 红线（R1-R13） + 3 边界，机械可检查）
 
 详见 `.claude/rules/project_rule.md`；提交前会自动执行 `scripts/check-arch.sh`
 （pre-commit hook + CI）。核心约束：
@@ -31,6 +32,7 @@
 - 爬虫必须配反爬（DOWNLOAD_DELAY + USER_AGENT 轮换）
 - API 层禁止直接 import ORM 模型；ORM 禁止 import Pydantic schema（模型即契约）
 - async 上下文禁止同步 `redis_client()` 链式直调，统一走 `get_async_redis()`（R11 异步优先）
+- 业务查询必须经租户过滤收口；豁免清单单一事实源 `backend/app/tenant_isolation.py`（R13）
 - 核心边界：`platform_core/` 只依赖 `config/`（B1）；`backend/` 禁止 import `scrapy/`（B2）；`config/` 不依赖任何业务模块（B3）
 
 ## 关键文件索引
@@ -62,17 +64,18 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push  # 安装�
 - 任何"已完成"陈述必须伴随可验证输出（测试输出 / curl 结果 / 构建日志）
 - 后端改动：`uv run pytest -x -q backend/tests` 必须退出码 0
 - 数据契约改动（models/schemas）：额外跑 `bash scripts/check-arch.sh`
-- CI 三阶段关卡：Python lint+test / 架构红线 / 前端构建
+- CI 关卡：Python lint+test（ruff + pytest `fail_under=70`）/ 架构红线（13+3）/ `check-frontend.sh` + 双前端构建（含 shared）/ Playwright e2e / 迁移 IR
 
 ## Skill 路由（.agents/skills/）
 
-项目协作 skill 在 `.agents/skills/`。跨工具共享的 skill 目录库在 `skills-library/`（**技能治理已并入主 API `v1/skills`**，本地 8765 后台已退役；用法见该目录 README）。
+项目协作 skill 在 `.agents/skills/`。跨工具共享的内容库在 `capability-library/`（**技能治理走主 API `v1/skills`**；用法见该目录 README）。
 
 | 场景 | Skill |
 |------|-------|
 | 创建服务模块 | `/new-svc` |
 | 创建爬虫 | `/new-spider` |
 | 创建数据模型（ORM + Schema 配对） | `/new-model` |
+| 数据库设计（S0→S5 / DBML / 迁移） | `/db-design` |
 | 架构合规检查 | `/check-arch` |
 | 交付自检 | `/verify` |
 | 编码规范 / 日志规范 / 配置规范 | `/coding-style` / `/logging` / `/config` |
@@ -93,5 +96,6 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push  # 安装�
 
 single-context：根级 `CONTEXT.md` + `docs/adr/`（按需惰性创建；docs/ 为本地私有不入库）。
 
-其他 provider 的完整项目指令见 `CLAUDE.md`（Claude）与 `GEMINI.md`（Gemini），
-本文件与其保持同一架构事实，如有冲突以 `project_rule.md` 为准。
+其他 provider 的完整项目指令见 `CLAUDE.md`。本文件与其保持同一架构事实，
+如有冲突以 `project_rule.md` 与 `scripts/check-arch.sh` 为准。
+对外宣称对账见 `docs/claims.md`（本地私有）。

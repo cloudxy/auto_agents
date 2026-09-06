@@ -17,13 +17,15 @@ auto_agents/
 │
 ├── backend/              # FastAPI 后端（workspace member）
 ├── scrapy/               # Scrapy 爬虫（workspace member）
-├── platform_core/        # 共享基础设施（logger/db/storage/exceptions/repository/models/schemas）
+├── platform_core/        # 共享基础设施（logger/db/storage/exceptions/repository/models/schemas/tenant_context）
 ├── frontend/
 │   ├── admin/            # 后台管理（React 19 + Ant Design + Zustand）
-│   └── official/         # 官方网站（React 19 + Ant Design + Framer Motion）
+│   ├── official/         # 官方网站（React 19 + Ant Design + Framer Motion）
+│   └── shared/           # @auto-agents/frontend-shared（编译产物，禁源码直引）
 ├── config/               # Dynaconf 配置（default + local/dev/prod + scrapy 子层）
-├── scripts/              # 运维脚本（init-db / migrate / start / run-spider）
-├── skills-library/       # 多工具共享 skill 库（内容文件/adapters；治理并入主 API v1/skills）
+├── scripts/              # 运维脚本（bootstrap-db / migrate / check-arch / watchdog）
+├── capability-library/   # 跨工具内容库（SKILL.md/adapters；治理并入主 API v1/skills）
+├── deploy/               # new-api 管控面编排 + LiteLLM L1 sidecar（profiles 隔离）
 ├── .agents/skills/       # 本仓库开发协作 skill（/new-svc /check-arch 等）
 └── .claude/              # 规则和技能库
 ```
@@ -42,7 +44,7 @@ auto_agents/
 |------|------|
 | 后端 | FastAPI 0.136 + SQLAlchemy 2 + PyMySQL/aiomysql + redis-py + Pydantic 2 + PyJWT + Loguru |
 | 爬虫 | Scrapy 2.15 + scrapy-redis + Selenium + DrissionPage |
-| 前端 | React 19 + TypeScript + Ant Design 6 + React Router v7 + Axios + React Query + Zustand |
+| 前端 | React 19 + TypeScript + Ant Design 6 + React Router v7 + Axios + React Query + Zustand；npm workspaces + `frontend/shared` |
 | 配置 | Dynaconf 3.2 |
 | 数据库 | MySQL 8 / Redis 6+ |
 | 包管理 | uv workspace（Python）/ npm（前端） |
@@ -65,8 +67,7 @@ uv add --package auto-agents-spider <pkg>
 ### 前端
 
 ```bash
-cd frontend/admin && npm install && cd ../..
-cd frontend/official && npm install && cd ../..
+npm install    # 根 workspaces：admin + official + @auto-agents/frontend-shared
 ```
 
 ### 启动
@@ -99,21 +100,24 @@ uv run python run_frontend.py --all                # admin:9112 / official:9113
 | `/new-svc` | 创建 FastAPI 服务模块 |
 | `/new-spider` | 创建 Scrapy 爬虫 |
 | `/new-model` | 创建 ORM + Pydantic 数据模型 |
-| `/check-arch` | 架构合规检查（12 条红线） |
+| `/db-design` | 数据库设计流水线（S0→S5） |
+| `/check-arch` | 架构合规检查（13 条红线 + 3 边界） |
 | `/verify` | 交付自检 |
 | `/coding-style` | 编码规范 |
 | `/logging` | 日志规范 |
 | `/config` | 配置规范 |
 | `/deploy` | Docker 部署配置 |
 | `/cicd` | GitHub Actions CI/CD |
+| `/pua` | 穷尽式问题解决（重复失败 / 质量投诉） |
 
 ## 项目状态
 
-当前分支：`feature/project-structure`
+结构重构已落地：异常 / CORS / 日志收敛到 `platform_core`，uv workspace 单一 `.venv`，
+ORM 与 Schema 在 `platform_core`，前端 npm workspaces + `frontend/shared`，
+内容库目录为 `capability-library/`，租户隔离为 R13。
 
-正在进行的结构重构：
-- 异常处理、CORS、日志初始化等已统一收敛到 `platform_core`
-- Python 环境已收敛为 uv workspace 单一 `.venv`
+LiteLLM sidecar（`profiles: ["litellm"]`）已接线，默认关（`LITELLM.ENABLED` /
+`PROXY.ROUTE_INTERNAL` / `ADMIN.ENABLED`）。宣称对账见 `docs/claims.md`。
 
 ## 关键文件
 

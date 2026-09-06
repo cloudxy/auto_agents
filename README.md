@@ -97,10 +97,10 @@ auto_agents/
 ├── run.py / run_backend.py / run_spider.py / run_frontend.py
 │                                 # 全栈编排入口（all / backend / spider / frontend）
 ├── backend/                      # FastAPI 后端（workspace member）
-│   ├── app/api/v1/               # 9 个业务域（见「API 设计」）
+│   ├── app/api/v1/               # 内部 API 域（见「API 设计」）
 │   ├── app/api/v2/               # 增强版健康检查
 │   ├── app/external_api/v1/      # 外部 API：API Key 数据查询 + Webhook 回调
-│   ├── services/                 # 20+ 服务（spider 三域拆分 / ai_planner / llm_provider /
+│   ├── services/                 # 业务服务（spider 三域拆分 / ai_planner / llm_provider /
 │   │                             #   channel_scheduler / channel_probe / auth / notify ...）
 │   ├── repositories/             # 数据访问（继承 BaseRepository）
 │   ├── tasks/consumer.py         # Redis 三循环消费者（分发/回流/重试）
@@ -113,13 +113,16 @@ auto_agents/
 │   ├── pipelines/                # Clean → Validate → QualityCheck → Store（Redis 队列）
 │   └── extensions/               # 关闭 Webhook（HMAC 签名）/ 空闲自动收尾
 ├── platform_core/                # 共享基建：db / redis_async / queues(分布式锁) /
-│                                 #   logger / storage / repository / models / schemas / exceptions
+│                                 #   logger / storage / repository / models / schemas /
+│                                 #   exceptions / tenant_context
 ├── config/                       # Dynaconf 多层合并（backend & scrapy 共用）
 ├── frontend/admin/               # 管理后台（React 19 + antd 6 + Zustand + axios）
 ├── frontend/official/            # 官网（React 19 + antd + Framer Motion）
+├── frontend/shared/              # @auto-agents/frontend-shared（tsc 编译产物，禁源码直引）
 ├── deploy/newapi/                # new-api 网关独立部署编排
+├── deploy/litellm/               # LiteLLM L1 影子 sidecar（profiles 隔离，默认不启动）
 ├── scripts/                      # bootstrap-db / check-arch / migrate / start ...
-├── skills-library/               # 多工具共享 skill 库（内容文件/adapters；治理并入主 API v1/skills）
+├── capability-library/           # 跨工具内容库（SKILL.md/adapters；治理并入主 API v1/skills）
 ├── .agents/skills/               # 工具中立 AI 资产（/new-svc /new-spider /check-arch ...）
 └── .claude/                      # Claude Code 协作层（IDENTITY/SOUL/MEMORY/agents/hooks）
 ```
@@ -142,8 +145,7 @@ auto_agents/
 
 ```bash
 uv sync                                            # Python 一把梭（backend + scrapy 全部装入根 .venv）
-cd frontend/admin    && npm install && cd ../..     # 后台
-cd frontend/official && npm install && cd ../..     # 官网
+npm install                                        # 根 workspaces：admin + official + shared
 ```
 
 ### 2. 配置敏感信息
@@ -272,7 +274,7 @@ uv run python run.py spider         # 另开终端：启动爬虫 Worker（不�
 
 ### 大模型管理（LLM 配置）
 
-多供应商注册（openai_compatible 协议）；API Key Fernet 加密落库、接口出参掩码；行内「测试连通性」回显延迟与模型；「激活」热切换（全表至多一个激活；未激活时回退 `config/default/llm.yml` + 环境变量兜底）。
+多供应商注册，协议走自研适配器（`openai_compatible` / `anthropic` / `google_gemini`），不引入 openai/anthropic/langchain Python SDK。API Key Fernet 加密落库、接口出参掩码；行内「测试连通性」回显延迟与模型；未配置时回退 `config/default/llm.yml` + 环境变量兜底。LiteLLM L1 影子 sidecar 见 [deploy/litellm/README.md](deploy/litellm/README.md)（默认不启动，不接生产流量）。
 
 ### new-api 中转站管控
 
@@ -299,7 +301,13 @@ uv run python run.py spider         # 另开终端：启动爬虫 Worker（不�
 | `/ai` | ai | AI 采集计划（创建/规划/试采/上线注册） |
 | `/llm` | llm_providers | LLM 供应商 CRUD / 激活 / 连通性测试 |
 | `/newapi` | newapi | 中转站总览 / 渠道事件 / 探针结果 |
-| `/admin` | admin | 统计、用户列表、审计日志 |
+| `/admin` | admin | 统计、用户列表、审计日志、租户运营 |
+| `/rbac` | rbac | 角色 / 权限 / 菜单 |
+| `/members` | members | 租户成员 |
+| `/tenants/me` | tenant_usage | 当前租户用量 |
+| `/skills` | skills | 技能治理（扫描/评分/候选/适配器） |
+| `/capabilities` | capabilities | 能力资产目录（技能/插件/专家/专家团） |
+| `/public` | public_skills / tenant_signup | 公开技能与企业自助注册 |
 | `/configs` | configs | 系统配置读写 |
 | `/health` | health | 存活 / db / storage / redis 探针 |
 | `/` | root | 版本信息 |
@@ -373,13 +381,13 @@ API Routes → Services → Repositories → Models(ORM)
  请求校验     业务编排      数据访问      数据契约（与 Schemas 互不 import）
 ```
 
-### 架构红线（12 条 + 3 边界，机械可检查）
+### 架构红线（13 条 + 3 边界，机械可检查）
 
 ```bash
 bash scripts/check-arch.sh      # 退出码 = 违规数（pre-commit 与 CI 自动执行）
 ```
 
-核心：禁止硬编码连接串/密钥；爬虫禁止 import backend、禁止直写主库；爬虫必须配反爬（DOWNLOAD_DELAY + UA 轮换）；API 层禁止 import ORM；async 上下文禁止同步 Redis 链式直调（统一 `get_async_redis()`）；完整清单见 `.claude/rules/project_rule.md`。
+核心：禁止硬编码连接串/密钥；爬虫禁止 import backend、禁止直写主库；爬虫必须配反爬（DOWNLOAD_DELAY + UA 轮换）；API 层禁止 import ORM；async 上下文禁止同步 Redis 链式直调（统一 `get_async_redis()`）；业务查询经租户过滤收口（R13）；完整清单见 `.claude/rules/project_rule.md`。
 
 ### 质量门禁
 
@@ -389,7 +397,7 @@ bash scripts/check-arch.sh          # 数据契约改动必跑
 uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
-CI 三阶段：Python lint+test → 架构红线 → 前端构建。
+CI 关卡：Python lint+test → 架构红线（13+3）→ 迁移 IR → 前端构建（含 shared）→ Docker 校验。
 
 ---
 
@@ -428,21 +436,23 @@ CI 三阶段：Python lint+test → 架构红线 → 前端构建。
 |------|------|
 | 后端 | FastAPI / SQLAlchemy 2 / PyMySQL + aiomysql / redis-py(async) / Pydantic 2 / PyJWT / Loguru / Alembic |
 | 爬虫 | Scrapy ≥2.15 / scrapy-redis / DrissionPage / Selenium / httpx |
-| 前端 | React 19 / TypeScript / Ant Design 6 / React Router v7 / Zustand / axios / Framer Motion(official) |
+| 前端 | React 19 / TypeScript / Ant Design 6 / React Router v7 / Zustand / axios / React Query / Framer Motion(official)；npm workspaces + `frontend/shared` |
 | 配置 | Dynaconf ≥3.2 |
 | 数据 | MySQL 8 / Redis 6+ |
 | 包管理 | uv（Python workspace）/ npm |
 | AI 协作 | Claude Code（`.claude/` 协作层：IDENTITY / SOUL / MEMORY / agents / hooks / skills） |
 
-> AI 协作层不是运行时依赖；项目名 `auto_agents` 中的 "agents" 指自动化爬虫工人。项目协作 skills 位于 `.agents/skills/`（工具中立），`.claude/skills` 为 symlink。跨工具共享的 skill 目录库在 [`skills-library/`](skills-library/README.md)（内容文件与适配器载体；**治理/评分/矫正并入主 API `v1/skills`**，本地 8765 后台已退役 deprecated）。
+> AI 协作层不是运行时依赖；项目名 `auto_agents` 中的 "agents" 指自动化爬虫工人。项目协作 skills 位于 `.agents/skills/`（工具中立），`.claude/skills` 为 symlink。跨工具共享的内容库在 [`capability-library/`](capability-library/README.md)（内容文件与适配器；**治理走主 API `v1/skills`**）。
 
 ---
 
 ## 相关文档
 
 - 平台方案 / ADR / 诊断档案：`docs/` 为本地私有内容不入库（历史版本见 git 历史 `@50558b9` 前）
-- 项目规则（12 红线 + 3 边界）：`.claude/rules/project_rule.md`
+- 项目规则（13 红线 + 3 边界）：`.claude/rules/project_rule.md`；扫描器 `scripts/check-arch.sh`
 - new-api 网关部署：[deploy/newapi/README.md](deploy/newapi/README.md)
+- LiteLLM L1 影子接入：[deploy/litellm/README.md](deploy/litellm/README.md)
+- 宣称对账：`docs/claims.md`（本地私有，不入库）
 - AI 协作层：`.claude/IDENTITY.md` / `SOUL.md` / `MEMORY.md`、子代理 `spider-doctor / arch-warden / memory-curator`
-- 常用 Skill：`/new-svc` `/new-spider` `/new-model` `/check-arch` `/verify` `/coding-style` `/logging` `/config` `/deploy` `/cicd`
-- 跨工具 skill 库：[skills-library/README.md](skills-library/README.md)
+- 常用 Skill：`/new-svc` `/new-spider` `/new-model` `/db-design` `/check-arch` `/verify` `/coding-style` `/logging` `/config` `/deploy` `/cicd`
+- 跨工具内容库：[capability-library/README.md](capability-library/README.md)
