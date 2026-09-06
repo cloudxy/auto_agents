@@ -1,39 +1,34 @@
 # 数据模型代码模板
 
-## ORM 模型模板
+对照 `platform_core/models/api_key.py`。
 
-路径：`platform_core/models/{module}.py`
+## ORM（`platform_core/models/{module}.py`）
+
+租户业务表：
 
 ```python
 from sqlalchemy import Column, Integer, String, DateTime
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
+from platform_core.models.mixins import AuditMixin, SoftDeleteMixin, TenantMixin
 
 
-class {Module}(Base):
+class {Module}(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
     __tablename__ = "{module}"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    # <业务字段>
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
-    )
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="ID")
+    # 每个业务字段必须有 comment
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="创建时间")
 ```
 
-**红线自检**：生成前 grep 当前文件有无 Pydantic 引用：
+- mixin 顺序与现有模型一致：`TenantMixin, SoftDeleteMixin, AuditMixin, Base`
+- **禁止**在本文件 `import pydantic` / `from platform_core.schemas ...`（R8）
+- 平台豁免表不要在 `platform_core/tenant_context.py` 写表名，只改 `backend/app/tenant_isolation.py`（R13）
 
-```bash
-grep -nE "from.*\.schemas import|from pydantic" platform_core/models/{module}.py
-# 期望输出：空
-```
+注册到 `platform_core/models/__init__.py` 的 `__all__`。
 
-记得把新模型注册到 `platform_core/models/__init__.py` 的 `__all__`。
-
-## Pydantic Schema 模板
-
-路径：`platform_core/schemas/{module}.py`
+## Pydantic Schema（`platform_core/schemas/{module}.py`）
 
 ```python
 from datetime import datetime
@@ -43,18 +38,15 @@ from pydantic import BaseModel, ConfigDict
 
 
 class {Module}Base(BaseModel):
-    # <公共字段>
     pass
 
 
 class {Module}Create({Module}Base):
-    # <创建必填字段>
     pass
 
 
 class {Module}Update(BaseModel):
-    # <更新可选字段>
-    pass
+    pass  # 字段全部 Optional
 
 
 class {Module}Out({Module}Base):
@@ -62,19 +54,11 @@ class {Module}Out({Module}Base):
 
     id: int
     created_at: datetime
-    updated_at: datetime
 ```
 
-**红线自检**：生成前 grep 有无 ORM 引用：
+**禁止** `from sqlalchemy` / `from platform_core.models ...`。
 
-```bash
-grep -nE "from.*\.models import|from sqlalchemy" platform_core/schemas/{module}.py
-# 期望输出：空
-```
-
-## 转换函数模板（契约桥梁）
-
-路径：`backend/services/{module}_converter.py`（或在 service 内部内联）
+## 转换（可选，`backend/services/` 内）
 
 ```python
 from platform_core.schemas.{module} import {Module}Create, {Module}Out
@@ -89,11 +73,10 @@ def create_to_orm(data: {Module}Create) -> {Module}:
     return {Module}(**data.model_dump())
 ```
 
-**关键约束**：`backend/services/` 是**唯一允许**同时 import ORM 和 Schema 的目录。它是两个契约之间的翻译官（爬虫绝不允许这样做——`scrapy/` 禁止 import platform_core.models 配合 Session 写入）。
+## 反模式
 
-## 常见反模式（避免）
-
-- ❌ 一个文件里同时定义 ORM 和 Pydantic（"反正都是 model"）
-- ❌ API router 里直接 `return db_obj`（FastAPI 会把 ORM 序列化，绕过 Schema 契约）
-- ❌ Service 层用 Pydantic 当 DTO 传到仓储层，仓储层再当 ORM 用
-- ❌ Update schema 复用 Create schema（Update 字段应全部 Optional）
+- ❌ 一个文件同时定义 ORM 和 Pydantic
+- ❌ API router `return db_obj`（绕过 Schema）
+- ❌ Update 复用 Create
+- ❌ 租户表漏 `TenantMixin`，然后在查询里手搓 `tenant_id=` 当"隔离"
+- ❌ 手写 Alembic SQL（走 `/db-design` autogenerate）

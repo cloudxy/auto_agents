@@ -15,7 +15,7 @@ trigger: >-
 - 即将在对话中说"已完成"、"搞定了"、"修好了"、"应该没问题"
 - 准备 commit 或提交 PR
 - 用户明确说"验证一下"、"跑下测试"
-- PUA L1+ 触发时（见 `pua.md` 的压力升级）
+- PUA L1+ 触发时（见 `/pua` 的压力升级）
 
 ## 执行流程
 
@@ -32,18 +32,19 @@ git diff --stat HEAD
 |---------|------|
 | `backend/services/**`、`backend/utils/**`、`backend/repositories/**` | 后端代码 |
 | `backend/app/api/**`、`backend/app/external_api/**` | API 层 |
-| `platform_core/models/**`、`platform_core/schemas/**` | 数据契约 |
-| `platform_core/{logger,db,storage,exceptions,repository}.py` | 基建层 |
+| `platform_core/models/**`、`platform_core/schemas/**`、`backend/alembic/**` | 数据契约 / 迁移 |
+| `platform_core/{logger,db,storage,exceptions,repository,tenant_context}.py` | 基建层 |
 | `scrapy/**` | 爬虫 |
 | `config/**`、`.env*`、`scrapy/settings.py` | 配置 |
 | `**Dockerfile`、`**docker-compose**` | 容器 |
 | `.github/workflows/**` | CI |
-| `frontend/{admin,official}/**` | 前端 |
+| `frontend/{admin,official,shared}/**` | 前端 |
 | `pyproject.toml`、`uv.lock` | 依赖 / workspace |
+| `scripts/check-arch.sh`、`scripts/check-frontend.sh` | 门禁脚本 |
 
 ### Step 2: 按类型跑验证（并行）
 
-详细命令矩阵见 [references/verify-commands.md](references/verify-commands.md)（含 10 种改动路径的必跑命令与通过标准）。
+详细命令矩阵见 [references/verify-commands.md](references/verify-commands.md)。
 
 **并行原则**：独立命令在一次 Bash 里 `&` 并行或者一条消息里多个 Bash tool call，禁止串行等待。
 
@@ -66,6 +67,6 @@ git diff --stat HEAD
 | 依赖 | 用途 |
 |------|------|
 | `answer_rule.md` “空口完成”红线 | 本 skill 的根本依据 |
-| `pua.md` 能动性等级“交付验证”行 | 被动 vs 主动的分水岭 |
+| `/pua` 能动性等级“交付验证”行 | 被动 vs 主动的分水岭 |
 | `/check-arch` | Step 4 的联动 |
-| `/new-svc` `/new-spider` `/new-model` `/deploy` | Step 2b 产出物验证的场景来源 |
+| `/new-svc` `/new-spider` `/new-model` `/db-design` `/deploy` | Step 2b 产出物验证的场景来源 |

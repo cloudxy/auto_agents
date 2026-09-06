@@ -13,7 +13,7 @@ trigger: >-
 
 # 创建 FastAPI 服务模块
 
-当用户需要创建新的业务模块时，使用此 Skill 生成完整代码。
+对照实现：`backend/app/api/v1/api_keys.py` + `backend/services/api_key_service.py`。
 
 ## 触发场景
 
@@ -26,77 +26,66 @@ trigger: >-
 ### Step 1: 确认模块信息
 
 1. 模块名称（英文，小写+下划线）
-2. 主要功能描述
-3. 是否需要数据库表/Redis 缓存
+2. 租户表还是平台表（租户表 → `TenantMixin`；平台豁免表只改 `backend/app/tenant_isolation.py`）
+3. 鉴权：租户接口 `require_operator` / `require_admin` / `get_current_user`；平台接口 `require_platform_admin`（不要混用）
+4. 是否需要表 / Redis
+
+底层数据契约交给 `/new-model`（含 mixin 与 converter）。schema 变更走 `/db-design`。
 
 ### Step 2: 生成代码
 
 ```
-backend/
-├── app/api/v1/{module}.py              # 路由层（注册到 v1/__init__.py）
-├── services/{module}_service.py         # 业务层
-├── repositories/{module}_repository.py  # 数据访问（继承 platform_core.repository.BaseRepository）
+backend/app/api/v1/{module}.py
+backend/services/{module}_service.py
+backend/repositories/{module}_repository.py   # 可先用 BaseRepository，复杂查询再拆
 
-platform_core/
-├── models/{module}.py                   # ORM 模型（共享数据契约）
-└── schemas/{module}.py                  # Pydantic 模型（共享接口契约）
+platform_core/models/{module}.py
+platform_core/schemas/{module}.py
 ```
 
-### Step 3: 代码模板
+模板：[references/code-templates.md](references/code-templates.md)。
 
-完整模板见 [references/code-templates.md](references/code-templates.md)，包含：
+硬约束：
 
-| 组件 | 文件路径 | 说明 |
-|------|---------|------|
-| ORM 模型 | `platform_core/models/{module}.py` | 数据库契约（Base 继承） |
-| Pydantic 模型 | `platform_core/schemas/{module}.py` | 接口契约（Create/Update/Out） |
-| Service | `backend/services/{module}_service.py` | 业务层（logger + 异步） |
-| Router | `backend/app/api/v1/{module}.py` | 路由层（APIRouter） |
+- Router **禁止** import ORM（R7）。入参/出参只用 Schema；响应走 `ApiResponse` + `ok`/`created`
+- Service public 方法第一行 `logger.info`（R10）
+- HTTP 请求已由中间件进入 `tenant_scope` / `platform_scope`。后台任务 / 消费者必须显式 `with tenant_scope(tid):` 或 `platform_scope()`（R13）
+- 异步 Redis 用 `get_async_redis()`，禁止 `redis_client().x`（R11）
+- 不要新增 `from backend.services.spider_service import ...`（R12）
 
-### Step 4: 注册路由
+### Step 3: 注册路由
 
-在 `backend/app/api/v1/__init__.py` 中添加：
+在 `backend/app/api/v1/__init__.py`：
 
 ```python
 from . import {module}
 router.include_router({module}.router, prefix="/{module}", tags=["{模块中文名}"])
 ```
 
-最终路径会是 `/api/v1/{module}/...`（前缀 `/api` 由 `backend/app/__init__.py` 注入，`/v1` 由 `backend/app/api/__init__.py` 注入）。
+最终路径 `/api/v1/{module}/...`。
+
+然后更新 `backend/tests/openapi_routes_golden.txt`（`METHOD /api/v1/{module}` 每条一行，与 `test_openapi_routes_golden.py` 一致）。
 
 ## 预期产出物
 
-完成后**必须**存在以下文件，缺少任何一个 = 未完成：
+```
+platform_core/models/{module}.py
+platform_core/schemas/{module}.py
+backend/services/{module}_service.py
+backend/repositories/{module}_repository.py   # 或 Service 内直接 BaseRepository
+backend/app/api/v1/{module}.py
+backend/app/api/v1/__init__.py                # include_router
+backend/tests/openapi_routes_golden.txt       # 新路由已登记
+```
 
-```
-✅ 文件清单
-platform_core/models/{module}.py              # ORM 模型（已注册到 __init__.py __all__）
-platform_core/schemas/{module}.py             # Pydantic Schema（Create / Update / Out）
-backend/services/{module}_service.py          # Service 业务层
-backend/repositories/{module}_repository.py   # Repository 数据访问层
-backend/app/api/v1/{module}.py                # Router 路由层
-backend/app/api/v1/__init__.py                # 已 include_router 注册
-```
+表结构变更另走 `/db-design` 产出迁移。
 
 ## 验证步骤
 
-生成代码后，**必须**依次执行以下验证（调用 `/verify`）：
-
 ```bash
-# 1. 后端测试
+uv run pytest -x -q backend/tests/test_openapi_routes_golden.py
 uv run pytest -x -q backend/tests
-
-# 2. 架构红线 R7/R8（API 不 import ORM，ORM 不 import Schema）
-grep -rnE "from.*\.models import" backend/app/api/
-grep -rnE "from.*\.schemas import" platform_core/models/
-# 期望：两条输出均为空
-
-# 3. 模块可导入
-uv run python -c "from platform_core.models.{module} import {Module}; from platform_core.schemas.{module} import {Module}Out; print('OK')"
-
-# 4. 服务启动 + 健康检查
-uv run python run_backend.py --no-reload &
-sleep 3 && curl -sS localhost:9111/api/v1/health | jq
+bash scripts/check-arch.sh
 ```
 
-全部通过后调用 `/check-arch` 做完整架构扫描。
+不要跑不存在的 `platform_core/tests`。不要在 Router 里手搓 `from.*models import` 自检当唯一关卡——R7 正则以 `check-arch.sh` 为准。

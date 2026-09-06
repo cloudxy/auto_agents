@@ -1,99 +1,58 @@
 # 爬虫代码模板
 
-## Items
+对齐 `scrapy/spiders/example.py`。启动入口是 `uv run python run_spider.py`，不是 `scrapy crawl`。
+
+## Item（仅新字段时）
+
+加在 `scrapy/items/__init__.py`，继承 `BaseItem`（已含 url/title/content/source/task_id）：
 
 ```python
-import scrapy
-
-class {SpiderName}Item(scrapy.Item):
-    """{爬虫中文名}数据项"""
-    id = scrapy.Field()
-    title = scrapy.Field()
-    content = scrapy.Field()
-    url = scrapy.Field()
+class {SpiderName}Item(BaseItem):
+    """{爬虫中文名}"""
+    extra_field = scrapy.Field()
 ```
 
-## Spider
+## Spider（`scrapy/spiders/{spider_name}.py`）
 
 ```python
-import scrapy
-import random
-import time
-from scrapy.utils.logger import logger
+from spiders.base import TaskAwareRedisSpider
+from items import BaseItem
+from platform_core.logger import get_logger
 
-class {SpiderName}Spider(scrapy.Spider):
+logger = get_logger("spider")
+
+
+class {SpiderName}Spider(TaskAwareRedisSpider):
     name = "{spider_name}"
+    redis_key = "{spider_name}:start_urls"
     allowed_domains = ["{domain}"]
-    start_urls = ["{target_url}"]
-    
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    ]
-    
-    def start_requests(self):
-        for url in self.start_urls:
-            yield scrapy.Request(
-                url=url,
-                callback=self.parse,
-                headers={"User-Agent": random.choice(self.user_agents)}
-            )
-    
+
     def parse(self, response):
-        logger.info(f"解析页面: {response.url}")
-        items = response.css(".item-selector")
-        
-        for item in items:
-            data = {SpiderName}Item()
-            data["title"] = item.css(".title::text").get()
-            
-            if self._validate_data(data):
-                yield data
-            
-            time.sleep(random.uniform(1, 3))
-    
-    def _validate_data(self, data):
-        if not data.get("title"):
-            logger.warning(f"数据缺少标题")
-            return False
-        return True
+        logger.info(f"解析页面: {response.url} | Status: {response.status}")
+        item = BaseItem()
+        item["url"] = response.url
+        item["title"] = response.css("title::text").get()
+        item["content"] = "".join(response.css("p::text").getall())
+        item["source"] = "web"
+        yield item
 ```
 
-## Pipelines
+- 队列条目由 Backend 投递，基类解析 JSON `{url, task_id}`。不要覆盖 `start_requests` 把 Redis 消费循环吃掉（见 `openweather.py` 注释）。
+- 需要站点密钥时从 `sites.yml` 读，禁止把 API Key 写入 item / 日志。
 
-```python
-from scrapy.utils.logger import logger
+## Pipeline / Settings
 
-class {SpiderName}Pipeline:
-    def open_spider(self, spider):
-        logger.info(f"爬虫启动: {spider.name}")
-    
-    def process_item(self, item, spider):
-        logger.info(f"处理数据: {dict(item)}")
-        # 发送到消息队列或调用 Service
-        return item
-    
-    def close_spider(self, spider):
-        logger.info(f"爬虫关闭: {spider.name}")
-```
+不要新建。全局管道已在 `scrapy/settings.py`：
 
-## Settings
+`CleanPipeline` → `ValidatePipeline` → `QualityCheckPipeline` → `StorePipeline`
 
-```python
-BOT_NAME = "{spider_name}"
-SPIDER_MODULES = ["scrapy.spiders"]
-NEWSPIDER_MODULE = "scrapy.spiders"
+`StorePipeline` 只推 Redis。禁止在爬虫里 `import sqlalchemy` / `get_async_db` / `import backend`。
 
-CONCURRENT_REQUESTS = 4
-DOWNLOAD_DELAY = 2
+反爬（R5/R6）在 `scrapy/settings.py`，由 config 的 `DOWNLOAD_DELAY` 与 UA 中间件提供，不要在 spider 里 `time.sleep`。
 
-ITEM_PIPELINES = {
-    "scrapy.pipelines.{SpiderName}Pipeline": 300,
-}
-```
-
-## 运行命令
+## 运行
 
 ```bash
-scrapy crawl {spider_name}
+uv run python run_spider.py --list
+uv run python run_spider.py --spider {spider_name}
 ```

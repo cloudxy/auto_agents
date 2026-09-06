@@ -1,3 +1,12 @@
+---
+name: db-design
+description: >-
+  数据库设计流水线 S0→S5：产出 db-spec.md / DBML IR，再经 /new-model 配对 ORM+Schema，
+  Alembic autogenerate 与行为验证。当用户新建表、加列、加索引、改唯一键、写迁移或评审 schema 时触发。
+trigger: >-
+  数据库设计、schema、迁移、alembic、索引、DBML、新建表、加列、加索引、改唯一键
+---
+
 # 数据库设计流水线（S0→S5）
 
 > 强制流程：任何涉及数据库 schema 变更的工作必须走此流水线。

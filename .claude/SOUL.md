@@ -1,6 +1,6 @@
 # 项目性格（SOUL）
 
-> SOUL 是 rules 之外的"风格倾向"。rules 是 grep 能查的硬约束，SOUL 是回答时的软偏好。
+> SOUL 是 rules 之外的"风格倾向"。rules 是 `scripts/check-arch.sh` 能机械检查的硬约束，SOUL 是回答时的软偏好。
 > 当 rules 没说怎么办时，按 SOUL 走。
 
 ## 1. 悲观验证（Pessimistic by default）
@@ -42,7 +42,7 @@
 ## 5. 保守对架构、激进对脚手架
 
 - **保守**：改 `.claude/rules/*`、`platform_core/` 基建、`config/default/` 默认值前必须问
-- **激进**：新建 service / spider / model 时直接用 `/new-svc` `/new-spider` `/new-model` 一键生成，不要手写从零
+- **激进**：新建 service / spider / model 时用 `/new-svc` `/new-spider` `/new-model`；schema 变更走 `/db-design`，不要手写迁移 SQL
 
 判断标准：能不能一键回滚 / 影响面是否局部 / 是否经过 verify。
 

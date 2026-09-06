@@ -1,109 +1,27 @@
-# Docker 部署模板
+# 部署约束（不要复制一份第二 Dockerfile）
 
-## Backend Dockerfile
+权威文件：
 
-```dockerfile
-FROM python:3.11-slim
+- 根 `Dockerfile`
+- 根 `docker-compose.yml`
 
-WORKDIR /app
-RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+改它们时必须保持：
 
-RUN useradd -m appuser && USER appuser
-EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"]
-```
+| 项 | 现行值 |
+|----|--------|
+| Python | 3.13-slim + `uv`（`uv sync --package auto-agents-backend --package auto-agents-spider --no-dev`） |
+| Node 构建 | `node:20`，admin/official `CI= npm run build`，产物进 `/app/frontend-dist/` |
+| 启动 | `uv run python run_backend.py --no-reload` |
+| 端口 | `EXPOSE 9111`；`AUTO_AGENTS_API__HOST=0.0.0.0`（容器内禁止绑 127.0.0.1） |
+| 健康检查 | `GET /api/v1/health/deep` |
+| Compose 服务 | `mysql`（mysql:8）+ `redis`（redis:7-alpine）+ `backend`（`9111:9111`） |
+| 配置注入 | `APP_ENV` + `AUTO_AGENTS_MYSQL__DEFAULT__HOST=mysql` 这类双下划线 |
+| LiteLLM | 仅 `profiles: ["litellm"]`，`LITELLM.ENABLED` / `ROUTE_INTERNAL` / `ADMIN.ENABLED` 默认 false |
 
-## Frontend Dockerfile
+禁止出现在新改动里：
 
-```dockerfile
-FROM node:18-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci && COPY . . && npm run build
-
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-## docker-compose.yml
-
-```yaml
-version: '3.8'
-
-services:
-  mysql:
-    image: mysql:8.0
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-    volumes:
-      - mysql_data:/var/lib/mysql
-    ports:
-      - "${DB_PORT:-3306}:3306"
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
-  backend:
-    build: ./backend
-    environment:
-      DB_HOST: mysql
-      REDIS_HOST: redis
-    depends_on:
-      - mysql
-      - redis
-    volumes:
-      - ./logs:/app/logs
-    restart: unless-stopped
-
-  frontend:
-    build: ./frontend
-    depends_on:
-      - backend
-    restart: unless-stopped
-
-volumes:
-  mysql_data:
-  redis_data:
-```
-
-## .env.example
-
-```bash
-ENVIRONMENT=production
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_password_here
-DB_NAME=myapp
-REDIS_HOST=localhost
-REDIS_PORT=6379
-BACKEND_PORT=8000
-FRONTEND_PORT=3000
-```
-
-## 部署命令
-
-```bash
-# 1. 创建 .env 文件
-cp .env.example .env
-
-# 2. 构建并启动
-docker-compose up -d
-
-# 3. 查看日志
-docker-compose logs -f
-
-# 4. 重新构建
-docker-compose up -d --build
-```
+- `FROM python:3.11`
+- `COPY requirements.txt` / `pip install -r requirements.txt`
+- `uvicorn main:app --port 8000`
+- 前端 `COPY --from=builder /app/dist`（CRA 产物目录是 `build/`）
+- 把 LiteLLM / delivery webhook 改成默认开

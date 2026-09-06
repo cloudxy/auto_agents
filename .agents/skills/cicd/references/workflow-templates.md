@@ -1,141 +1,22 @@
-# CI/CD 工作流模板
+# CI 现行结构（权威：`.github/workflows/ci.yml`）
 
-## 后端测试工作流
+不要把下面复制成新文件。加步骤时对号入座。
 
-```yaml
-name: Backend Tests
+| job | 做什么 |
+|-----|--------|
+| `python-lint-test` | `uv python install 3.13`；`uv run ruff check backend platform_core scripts`；`uv run pytest -x -q --cov=backend --cov=platform_core --cov-fail-under=70 backend/tests`；`MYSQL_FIDELITY=1 pytest -m mysql_fidelity` |
+| `arch-check` | `bash scripts/check-arch.sh`（13 红线 + 3 边界） |
+| `db-migration-gate` | `scripts/check-db-ir.sh` + `scripts/check-db-migrations.sh` |
+| `frontend-build` | 根 `npm ci`；shared codegen/build；`bash scripts/check-frontend.sh`；`CI= npm run build -w admin` / `official`；`npm test -w admin` / `official`；`npm run e2e -w admin`（`CI=true`，`NO_PROXY=127.0.0.1,localhost,::1`） |
+| `docker-validate` | `docker compose config --quiet` + `docker build -t auto-agents-backend .` |
+| `ghcr-publish` | 仅 push `main` 或 tag：`ghcr.io/<repo>:git-$SHA` |
 
-on:
-  push:
-    branches: [main, test]
-    paths:
-      - 'backend/**'
-      - 'scrapy/**'
-      - 'platform_core/**'
-      - 'config/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
+本地门禁（`.pre-commit-config.yaml`）：提交跑 ruff + `check-arch` + db 脚本；`pre-push` 跑 `pytest backend/tests`。
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
+加新检查时：
 
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: test_password
-          MYSQL_DATABASE: test_db
-        options: >-
-          --health-cmd="mysqladmin ping"
-          --health-interval=10s
-          --health-retries=3
-        ports:
-          - 3306:3306
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd="redis-cli ping"
-          --health-interval=10s
-          --health-retries=3
-        ports:
-          - 6379:6379
+1. 能进现有 job 的不要新 job
+2. 架构类进 `scripts/check-arch.sh` 或 `check-frontend.sh`，不要在 YAML 里再写一套 grep
+3. `pip-audit` / `npm audit` 目前 `continue-on-error: true`，改强制红之前先确认噪声
 
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          enable-cache: true
-
-      - name: Setup Python
-        run: uv python install 3.13
-
-      - name: Install dependencies (uv workspace)
-        run: uv sync --frozen
-
-      - name: Run tests
-        env:
-          APP_ENV: dev
-        run: uv run pytest backend/tests platform_core/tests -v --cov=backend --cov=platform_core --cov-report=xml
-```
-
-## 前端测试工作流
-
-```yaml
-name: Frontend Tests
-
-on:
-  push:
-    branches: [main, test]
-    paths: ['frontend/**']
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        app: [admin, official]
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/${{ matrix.app }}/package-lock.json
-
-      - name: Install & test
-        working-directory: frontend/${{ matrix.app }}
-        run: npm ci && npm test -- --watchAll=false && npm run build
-```
-
-## 部署工作流
-
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    environment: production
-    
-    steps:
-      - name: Wait for approval
-        if: github.ref == 'refs/heads/main'
-        uses: trstringer/manual-approval@v1
-      
-      - name: Deploy
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.PROD_SERVER_HOST }}
-          username: ${{ secrets.PROD_SERVER_USER }}
-          key: ${{ secrets.PROD_SERVER_SSH_KEY }}
-          script: |
-            cd /opt/myapp
-            docker-compose pull && docker-compose up -d
-```
-
-## Secrets 配置
-
-在 GitHub → Settings → Secrets and variables → Actions 中添加：
-
-```
-DOCKER_USERNAME
-DOCKER_PASSWORD
-PROD_SERVER_HOST
-PROD_SERVER_USER
-PROD_SERVER_SSH_KEY
-```
-
-## Environment Protection
-
-在 GitHub → Settings → Environments 中：
-
-- **production**：Required reviewers（至少 1 人审核）
-- **test**：无保护规则
+禁止再引入：`uv python install 3.11`、`pytest platform_core/tests`、`setup-uv@v3` 当新标准、按 `frontend/${{ matrix.app }}` 各自 `npm ci`（lock 已在仓库根）。

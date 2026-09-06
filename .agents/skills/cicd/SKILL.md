@@ -7,7 +7,9 @@ trigger: >-
 
 # 配置 CI/CD 流程
 
-当用户需要自动化部署时，使用此 Skill 生成 GitHub Actions 工作流。
+权威文件：`.github/workflows/ci.yml`。本 skill 是往这份工作流加 job / 改步骤，不是再生成 `Backend Tests.yml` + `Frontend Tests.yml` + SSH Deploy。
+
+现有 job 与改法见 [references/workflow-templates.md](references/workflow-templates.md)。
 
 ## 触发场景
 
@@ -17,21 +19,18 @@ trigger: >-
 
 ## 执行流程
 
-### Step 1: 确认 CI/CD 需求
+### Step 1: 确认缺口
 
-1. 目标分支（main/test）
-2. 是否需要测试环境
-3. 部署方式（SSH/Docker/K8s）
-4. 是否需要人工审核
+现有流水线已经覆盖：ruff + pytest（`fail_under=70`）+ MySQL 保真子集、`check-arch.sh`、`check-db-ir` / `check-db-migrations`、`check-frontend.sh` + admin/official build/test + Playwright e2e、`docker compose config` + `docker build`、main/tag 推 GHCR。
 
-### Step 2: 生成工作流
+先问要补的是哪一段，而不是脚手架一套并行 workflow。
 
-根据需求确认结果，从 [references/workflow-templates.md](references/workflow-templates.md) 中选取并定制以下工作流：
+### Step 2: 改 `ci.yml`
 
-| 工作流 | 用途 |
-|--------|------|
-| 后端测试工作流 | pytest + MySQL/Redis services + uv workspace |
-| 前端测试工作流 | npm test + build，matrix 覆盖 admin/official |
-| 部署工作流 | SSH 部署 + 人工审核（Environment Protection） |
-| Secrets 配置 | DOCKER_USERNAME / PROD_SERVER_* 等 |
-| Environment Protection | production 需审核，test 无保护 |
+Python **3.13** + `astral-sh/setup-uv` + `uv sync`。前端根 `npm ci`（workspaces lock 在仓库根 `package-lock.json`）。密钥用 `AUTO_AGENTS_JWT__SECRET_KEY` 这类，不要 `OPENAI_API_KEY`。
+
+镜像发布已在 `ghcr-publish` job（push main / tag）。不要再加 appleboy/ssh-action 除非用户明确要 SSH 部署。
+
+## 验证
+
+推当前分支，看 GitHub Actions 五段 + 可选 GHCR。本地对应命令见 `/verify`。

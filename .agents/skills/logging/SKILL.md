@@ -12,71 +12,54 @@ trigger: >-
 
 # 日志规范
 
-本规范定义项目的日志记录准则。
+事实源：`config/default/log.yml` + `platform_core/logger.py`。sink 由 `init_log()` 按 `LOGGERS` 挂载。
 
-## 分级语义
+```python
+from platform_core.logger import get_logger
+logger = get_logger("api")          # 或 service.{module} / spider / tenant
+```
 
-| 级别 | 用途 | 示例 |
-|------|------|------|
-| DEBUG | 开发调试，生产不输出 | 变量值、请求详情 |
-| INFO | 业务关键节点 | 请求进入、数据写入、用户操作 |
-| WARNING | 可恢复异常 | 数据缺失、降级处理、重试 |
-| ERROR | 需人工介入的故障 | 连接失败、数据不一致 |
+## 分级
 
-## 记录原则
+| 级别 | 用途 |
+|------|------|
+| DEBUG | 开发调试，生产不输出 |
+| INFO | 业务关键节点（请求进入、写入、用户操作） |
+| WARNING | 可恢复异常（缺失、降级、重试） |
+| ERROR | 需人工介入 |
 
-### 必须记录
+## 必须 / 禁止
 
-- 请求进入和响应返回
-- 业务逻辑关键节点
-- 数据写入（成功/失败）
-- 异常发生（包含堆栈）
-- 爬虫每次请求（URL + 状态码）
+必须：请求进出、业务关键节点、写入成败、异常带堆栈、爬虫每次请求的 URL+状态码。
 
-### 禁止记录
+禁止：生产 DEBUG、密码/密钥/Token、完整身份证/银行卡。
 
-- DEBUG 级别的生产日志
-- 密码、密钥、Token
-- 完整身份证号、银行卡号
+R10：`backend/services/*.py` 的 public 方法第一行必须是 `logger.info` / `logger.debug` 等（`scripts/check-arch.sh` 启发式：def 下一行匹配 `logger.`）。
 
-## 脱敏规则
-
-日志中的敏感信息必须脱敏：
+## 脱敏
 
 ```
 手机号：13812345678 → 138****5678
 身份证：310101199001011234 → 310**************1234
-密码：任何情况都不记录
+密码 / API Key：不记录；URL 要剥 query 里的 key（见 openweather.strip_appid）
 ```
 
-## 存储规范
-
-按模块分类存储日志：
+## 存储（与 log.yml 一致）
 
 ```
 logs/
-├── api/           # API 服务
-├── admin/          # 管理后台
-├── official/       # 官网
-├── spider/         # 爬虫
-├── error/          # 错误日志
-└── global/        # 全局应用
+├── global/app.log
+├── api/api.log
+├── admin/admin.log
+├── official/official.log
+├── error/error.log      # level ERROR，retention 90
+└── spider/spider.log    # 与 run_spider.py / 后端任务日志偏移同一文件
 ```
 
-**禁止**：所有模块共用一个日志文件
+轮转、大小、保留天数只改 `config/default/log.yml`（及 env 覆盖）的 `max_size` / `retention` / `rotate_hour`，不要在业务代码里另挂 sink。
 
-## 轮转规则
+格式：`LOG_FORMAT`（含 `{extra[request_id]}`，中间件 `contextualize`）。
 
-- **切割**：按天切割
-- **保留**：普通日志 30 天，错误日志 90 天
-- **格式**：`error.2026-04-15_18-41-44_718153.log`
+## 爬虫
 
-## 爬虫日志额外要求
-
-每次请求记录：
-- URL
-- HTTP 状态码
-- 响应时间
-
-爬虫结束输出统计：
-- 成功/失败/跳过数量
+每次请求：URL、HTTP 状态码。结束统计走现有 extension / 任务回调，不要新建第二套日志根目录。

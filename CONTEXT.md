@@ -28,6 +28,21 @@
 | **expand-contract** | 破坏性变更（drop/rename/类型收窄）的安全迁移法：先扩展（新旧并存）→ 迁数据 → 后收缩；lint 强制拆分。 |
 | **目标态 / 路径**（target state / path） | ADR-0002 分工：AI 产出目标态（Spec/DBML/ORM），确定性工具产出路径（autogenerate 迁移）与判决（EXPLAIN/约束注入）。 |
 
+## 计费 / LLM 接入
+
+| 术语 | 含义 |
+|---|---|
+| **计费**（billing） | 套餐下单 + 平台超管人工确认收款；无支付宝/微信网关。渠道 `offline` / `alipay` / `wechat` 只是下单标记。 |
+| **LiteLLM sidecar** | compose profile `litellm`，不进主 venv。`LITELLM.ENABLED` / `PROXY.ROUTE_INTERNAL` / `ADMIN.ENABLED` **默认关**。 |
+| **交付 webhook** | 任务终态回调租户 URL；租户 opt-in（`PUT /tenants/me/delivery-webhook`），默认关。 |
+
+## 前端 / 契约门禁
+
+| 术语 | 含义 |
+|---|---|
+| **OpenAPI golden** | `backend/tests/openapi_routes_golden.txt`。增删 HTTP 路由必须改此文件，否则 `test_openapi_routes_golden.py` 红。 |
+| **admin Playwright 冒烟** | 登录 → 仪表盘 → 用量 → 成员。先 `CI= npm run build -w admin`，再 `CI=1 npm run e2e -w admin`。端口 / `NO_PROXY` / 记住我见 `.claude/memory/playwright-admin-e2e.md`。 |
+
 ## 既有域（速览）
 
 | 术语 | 含义 |
