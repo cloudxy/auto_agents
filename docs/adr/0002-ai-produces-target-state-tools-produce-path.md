@@ -2,7 +2,7 @@
 
 - 状态：已接受（2026-09-02）
 - 决策人：项目所有者（D 线数据库设计流水线定案）
-- 关联：ADR-0001（验证原则同源——平台不信未经亲验的能力）；`docs/plan/db-design-pipeline.md`
+- 关联：ADR-0001（验证原则同源——平台不信未经亲验的能力）；流程引导 `.agents/skills/db-design/SKILL.md`；执法 `scripts/check-db-ir.sh` / `scripts/check-db-migrations.sh`
 
 ## 背景
 
