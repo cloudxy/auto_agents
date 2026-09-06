@@ -86,7 +86,7 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push  # 安装�
 
 ### Issue tracker
 
-工单以本地 markdown 存放于 `.scratch/<feature>/`（spec + `issues/` 每票一文件）。约定文件 `docs/agents/issue-tracker.md` 为本地私有配置（不入库）。
+工单以本地 markdown 存放于 `.scratch/<feature>/`（spec + `issues/` 每票一文件，`.scratch/` 不入库）。约定见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
@@ -94,8 +94,8 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push  # 安装�
 
 ### Domain docs
 
-single-context：根级 `CONTEXT.md` + `docs/adr/`（按需惰性创建；docs/ 为本地私有不入库）。
+single-context：根级 `CONTEXT.md` + `docs/adr/` + `docs/claims.md` + `docs/ops/`。
 
 其他 provider 的完整项目指令见 `CLAUDE.md`。本文件与其保持同一架构事实，
 如有冲突以 `project_rule.md` 与 `scripts/check-arch.sh` 为准。
-对外宣称对账见 `docs/claims.md`（本地私有）。
+对外宣称对账见 `docs/claims.md`。
