@@ -60,12 +60,16 @@ def upgrade() -> None:
     op.add_column("llm_token_usage", sa.Column(
         "cost_cents", sa.BigInteger(), nullable=False, server_default="0"
     ))
+    # quota_json 含 `:5` 这类片段会被 SQLAlchemy 当成 bind；走 bindparams 避免吃 JSON
     op.execute(
-        "INSERT INTO plans (slug, name, price_cents, period, quota_json, is_public) VALUES "
-        "('free', '免费档', 0, 'month', "
-        "'{\"task_concurrency\":5,\"result_storage\":10000,\"llm_tokens_month\":200000}', 1),"
-        "('pro', '专业档', 29900, 'month', "
-        "'{\"task_concurrency\":20,\"result_storage\":500000,\"llm_tokens_month\":5000000}', 1)"
+        sa.text(
+            "INSERT INTO plans (slug, name, price_cents, period, quota_json, is_public) "
+            "VALUES ('free', '免费档', 0, 'month', :q_free, 1), "
+            "('pro', '专业档', 29900, 'month', :q_pro, 1)"
+        ).bindparams(
+            q_free='{"task_concurrency":5,"result_storage":10000,"llm_tokens_month":200000}',
+            q_pro='{"task_concurrency":20,"result_storage":500000,"llm_tokens_month":5000000}',
+        )
     )
 
 
