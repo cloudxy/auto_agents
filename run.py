@@ -111,6 +111,12 @@ def main():
     args = parser.parse_args()
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
+    for key in ("NO_PROXY", "no_proxy"):
+        parts = [p.strip() for p in os.environ.get(key, "").split(",") if p.strip()]
+        for host in ("127.0.0.1", "localhost", "::1"):
+            if host not in parts:
+                parts.append(host)
+        os.environ[key] = ",".join(parts)
 
     if args.command == "backend":
         extra = []

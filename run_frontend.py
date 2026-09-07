@@ -60,6 +60,13 @@ def start_app(app_relpath: str, port: int, app_name: str, env_name: str | None):
     env["BROWSER"] = "none"  # 禁止自动打开浏览器
     if env_name:
         env["REACT_APP_ENV"] = env_name
+    # 本机 HTTP 代理（如 7897）会把 webpack → 9111 打成 502；浏览器系统代理同理
+    for key in ("NO_PROXY", "no_proxy"):
+        parts = [p.strip() for p in env.get(key, "").split(",") if p.strip()]
+        for host in ("127.0.0.1", "localhost", "::1"):
+            if host not in parts:
+                parts.append(host)
+        env[key] = ",".join(parts)
 
     try:
         process = subprocess.Popen(
