@@ -31,3 +31,4 @@
 - 根因：早期 exit=4 夹具为非规范格式（空括号 FR-01（）：、缺 $ 前缀命令行），触发 EVID 子检查
 - 规范夹具验证：多 FR 配对/重锚/EVIDMISMATCH 全部正确（全绿 exit 0），无需修代码
 - 教训：夹具格式本身要过 check-sdlc.sh 才能作为测试输入（自洽性）
+- 2026-09-07 账本清理：`feat-checksdlc-stats` / `fix-checksdcc-exemptions` 残留 open_questions 已关；不另开 L1 票

@@ -16,6 +16,21 @@ from platform_core.models.skill import SkillJob
 logger = get_logger("service.plugin")
 
 _DESCRIPTION_MAX = 1024
+# 根级 plugin.json 优先；否则认各 host 的嵌套清单（zcode / Claude Code / Grok）。
+_MANIFEST_CANDIDATES = (
+    "plugin.json",
+    ".zcode-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+    ".grok-plugin/plugin.json",
+)
+
+
+def _plugin_manifest_path(plugin_dir: Path) -> Optional[Path]:
+    for rel in _MANIFEST_CANDIDATES:
+        path = plugin_dir / rel
+        if path.is_file():
+            return path
+    return None
 
 
 def _utcnow() -> datetime:
@@ -63,8 +78,8 @@ class PluginService:
         return result
 
     async def _upsert_from_dir(self, plugin_dir: Path, root: Path) -> CapabilityAsset:
-        manifest_path = plugin_dir / "plugin.json"
-        if not manifest_path.exists():
+        manifest_path = _plugin_manifest_path(plugin_dir)
+        if manifest_path is None:
             raise ValidationException(message=f"plugin.json 缺失: {plugin_dir.name}", field="url")
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

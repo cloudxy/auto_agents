@@ -19,7 +19,8 @@ review_findings:
   - {id: QA-9, severity: minor, status: fixed}
   - {id: QA-10, severity: minor, status: waived, reason: 既有 off-by-one 沿上票豁免}
 stale_artifacts: []
-open_questions: [多 FR 夹具 exit=4 根因（夹具非规范形态，下票核对）]
+open_questions: []
+# 原「多 FR 夹具 exit=4」已由 _lessons.md ESC-9 结案（夹具非规范，不是脚本缺陷）
 lane_changes: []
 metrics:
   duration_min: 55

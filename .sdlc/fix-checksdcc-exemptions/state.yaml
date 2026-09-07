@@ -29,7 +29,8 @@ review_findings:
   - {id: QA-5, severity: minor, status: fixed}
   - {id: QA-6, severity: minor, status: waived, reason: 既有 off-by-one 非本票引入，summary 部分修复}
 stale_artifacts: []
-open_questions: [QA-6 头部自述修正 → 下张 L1 票]
+open_questions: []
+# QA-6 头部自述 / off-by-one 豁免已由 feat-checksdlc-stats 吸收；不再单开下票
 lane_changes: []
 metrics:
   duration_min: 25
