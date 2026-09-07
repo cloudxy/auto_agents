@@ -29,6 +29,7 @@ skills/<name>/
   meta.yaml     库治理元数据：category / industries / capability 评分 / status / similar_to / source
   SOURCE.md     来源链接、作者、引入日期
   CHANGELOG.md  每次手动更新的记录（日期 | 操作人 | 摘要）
+plugins/<name>/         插件入口：指向唯一维护源的符号链接（禁止复制内容，见 plugins/README.md）
 manifests/<tool>.yaml   每个工具启用哪些 skill（每行 "- <name>"）
 adapters/<tool>.sh      每个工具的分发脚本（symlink 型 或 拼接生成型）
 taxonomy/
@@ -88,4 +89,5 @@ cd capability-library
 |---|---|---|
 | Claude Code | `~/.claude/skills/<name>/`，原生支持独立目录 | symlink（`adapters/claude-code.sh`） |
 | Codex | 机制未最终确认，暂按"只吃单一规则文件"处理 | 拼接生成 `~/.codex/capability-library.md`（`adapters/codex.sh`），若后续确认有独立目录机制会切换为 symlink |
-| Kimi / Grok / workbuddy / zcode / traework / Qoder | 未知，需要官方文档或实际配置路径确认 | 待补，届时退化为 symlink 型或拼接型两种 fallback 之一 |
+| Grok | `.grok/plugins/<name>/`（项目级，需 enabled） | 符号链接到唯一维护源（`sdlc-workflow` → `~/.zcode/local-plugins/sdlc-workflow`） |
+| Kimi / workbuddy / zcode / traework / Qoder | 未知，需要官方文档或实际配置路径确认 | 待补，届时退化为 symlink 型或拼接型两种 fallback 之一 |
