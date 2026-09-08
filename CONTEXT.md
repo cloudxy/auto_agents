@@ -2,7 +2,7 @@
 
 > 工程技能（grilling / domain-modeling）的共享语言。输出命名域概念时用此表词汇；新概念随决策落定入此。
 > 创建：2026-09-02（能力资产中心两轮拷问定案时首次建立）。
-> 词汇修订：2026-09-07b（Power Market D22–D29：五类平级、展示≠停用）。权威产品设计：`/Users/xuyun/Documents/grok-files/power-market-design.md`。
+> 词汇修订：2026-09-08（中转站 = 平台 LLM 网关 LiteLLM Proxy；new-api 退役运行时）。2026-09-07b：Power Market D22–D29。权威产品设计：`/Users/xuyun/Documents/grok-files/power-market-design.md`。
 
 ## 能力资产域（capability hub / Power Market）
 
@@ -37,7 +37,9 @@
 
 | 术语 | 含义 |
 |---|---|
-| 中转站（relay） | 外部 new-api 实例的外挂管控面（渠道额度调度/真伪探针），平台级基础设施。 |
+| 中转站（relay） | 平台 LLM 网关（**LiteLLM Proxy**）+ 本平台值班编排（渠道额度窗口 / 真伪探针）。new-api 为 **已退役运行时**，不与 LiteLLM 长期双通道并存。租户渠道组 / 虚拟令牌仍待产品拍板，不发给租户。 |
+| 渠道 | 用户文案可仍叫「渠道」；值班列表来自网关侧模型/部署，不是 new-api channel。 |
+| 令牌（平台路径） | 网关虚拟钥匙，**不发给租户**，直至租户中转 SKU 另开需求。 |
 | 租户（tenant） | SaaS 隔离单元；行级隔离经 tenant_context 事件钩子（tenant_scope / platform_scope）。 |
 | 配额（quota） | tenants.quota 三类：任务并发 / 结果存储 / LLM token 月度；超限 429 QUOTA_EXCEEDED。 |
 | 资产评分（asset scoring） | 四维 rubric（completeness/doc_quality/maintenance/real_world_effect）AI 建议 + 人工终评（人工权威）；tier S/A/B/C 派生。按资产类型可配维度集。 |
