@@ -4,13 +4,19 @@ lane: L4
 appetite: "program; Wave0 3.5pw; Wave1 11pw (architect); Wave2-4 blocked on operator Qs"
 current_hat: 定义
 hats_done: []
+status: superseded
+superseded_by: feat-four-pillars-v2
+superseded_at: "2026-09-08"
 resume_note: >
+  2026-09-08 操作者 /sdlc 要求全角色复审 + 结合既有方案生成全新方案。
+  本 feature 定义帽 G-fresh 未过（hats_done 空），不再 resume。
+  现行程序：.sdlc/feat-four-pillars-v2/ 。本目录工件只作输入。
+  ---
   2026-09-07 内核清理：删早期合成稿 diagnosis/four-pillars-diagnosis-and-plan.md；
   state.yaml tickets 与 02-shape/tickets 票号对齐（此前编排器票名与文件不一致）。
   方案书：02-shape/contract.md v2.1（上游 spec v1.4 / D22–D29）。
   PRD v1.4 已同步五类平级；G-fresh 仍须对 v1.4 再跑（producer 自批不算过闸）。
   current_hat 保持定义（G-fresh 未过不得推塑形；check-sdlc HATADVANCE）。
-  下一帽：G-fresh v1.4 通过后并行 /dba + /designer。Wave 0 票以 02-shape/tickets 为准。
 
 tickets:
   - {id: T-01, title: "平台目录豁免登记（capability_*）", status: todo, evidence: "02-shape/tickets/T-01.md"}

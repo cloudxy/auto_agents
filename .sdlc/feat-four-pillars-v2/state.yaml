@@ -1,0 +1,214 @@
+# state.yaml — feat-four-pillars-v2 进度唯一事实源
+feature: feat-four-pillars-v2
+lane: L4
+appetite: "program; Wave0 5-7pw; Wave L 4-6pw (LiteLLM replaces new-api); Wave1 11-14pw; Wave2 4-8pw (Q-BILL); Wave3 2-6pw (Q-RELAY)"
+current_hat: 定义
+hats_done: []
+rework_rounds: 4
+systemic_stop: false
+systemic_stop_reason: ""
+operator_override:
+  at: "2026-09-08"
+  action: "round-4 PM rework then fresh G-fresh"
+  scope: "QA-28, QA-29, QA-30 only"
+  result: "done; G-fresh r4 fail on QA-31"
+  reason: >
+    操作者明示：再开一轮 PM 返工（第 4 轮，只关 QA-28/29/30，然后新的独立审查）。
+    三次失败停止被该明示覆盖；第 4 轮完成后恢复停止。
+operator_decisions:
+  - id: Q-LLM
+    at: "2026-09-08"
+    decision: "LiteLLM 替换 new-api；必须重构；先出方案再并入未执行的四柱计划"
+    source: "/sdlc operator turn"
+    note: >
+      关闭 Q-LLM。定义帽仍停在 G-fresh fail（QA-31 open）。本轮：architect 先写
+      替换方案（定义帽输入，不写 02-shape/contract.md），PM 再并入 spec 并关 QA-31，
+      然后独立 G-fresh。current_hat 保持定义。
+
+supersedes: feat-four-pillars
+supersede_reason: >
+  操作者 2026-09-08 /sdlc：用插件角色从头到尾再审一遍，结合既有计划方案
+  与 grok-files 生成全新方案。旧 feature 定义帽 G-fresh 未过（hats_done 空），
+  塑形稿已存在但不得当作过闸。旧工件只作输入，不复制为现行合同。
+
+tickets: []
+
+gates:
+  - name: sdlc
+    kind: script
+    result: pass
+    cmd: "bash /Users/xuyun/.zcode/local-plugins/sdlc-workflow/scripts/check-sdlc.sh --require .sdlc/feat-four-pillars-v2"
+    exit_code: 0
+    at: "2026-09-08T06:50:00"
+  - name: test
+    kind: script
+    result: null
+    reason: 定义帽无运行时代码；pytest 留到实现帽
+  - name: lint
+    kind: script
+    result: null
+    reason: 定义帽未改运行时代码；check-arch 留到实现帽
+  - name: build
+    kind: script
+    result: null
+    reason: 定义帽无前端实现
+  - name: migration
+    kind: script
+    result: null
+    reason: 定义帽不写表；Alembic 留到 /dba 与实现帽
+  - name: e2e
+    kind: script
+    result: null
+    reason: 仓库无独立 E2E 套件；verify 帽补 curl/浏览器路径
+  - name: fresh-context
+    kind: fresh-context
+    result: fail
+    findings_total: 20
+    blocker: 0
+    major: 14
+    minor: 6
+    at: "2026-09-08T07:05:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07e0f-fa71-7cd2-a468-ea76d60018f3
+    note: "round 1 on PM spec v1; hats_done stays empty; current_hat stays 定义"
+  - name: fresh-context-r2
+    kind: fresh-context
+    result: fail
+    findings_total: 7
+    blocker: 0
+    major: 5
+    minor: 2
+    at: "2026-09-08T07:25:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07e66-206c-7cb0-a64e-5f95fa509b28
+    note: "round 2 on PM v1.1; QA-01..20 independently closed; new QA-21..27; hats_done stays empty"
+  - name: fresh-context-r3
+    kind: fresh-context
+    result: fail
+    findings_total: 3
+    blocker: 0
+    major: 2
+    minor: 1
+    at: "2026-09-08T07:45:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07e7b-4069-7bc1-b25c-25701ad852fb
+    note: "round 3 on PM v1.2; QA-21..27 independently closed; new QA-28..30; systemic stop"
+  - name: fresh-context-r4
+    kind: fresh-context
+    result: fail
+    findings_total: 1
+    blocker: 0
+    major: 1
+    minor: 0
+    at: "2026-09-08T08:05:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07e8b-e2bd-7991-894e-bc663e9f6227
+    note: "round 4 on PM v1.3 (operator-authorized); QA-28..30 independently closed; new QA-31; hats_done stays empty"
+review_findings:
+  - {id: QA-01, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-02, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-03, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-04, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-05, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-06, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-07, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-08, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-09, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-10, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-11, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-12, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-13, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-14, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-15, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-16, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-17, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-18, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-19, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-20, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-21, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-22, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-23, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-24, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-25, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-26, severity: minor, status: fixed, note: "r3 independent"}
+  - {id: QA-27, severity: minor, status: fixed, note: "r3 independent"}
+  - {id: QA-28, severity: major, status: fixed, note: "r4 independent"}
+  - {id: QA-29, severity: major, status: fixed, note: "r4 independent"}
+  - {id: QA-30, severity: minor, status: fixed, note: "r4 independent"}
+  - {id: QA-31, severity: major, status: open}
+stale_artifacts: []
+open_questions:
+  - Q-VOICE
+  - Q-PRICE
+  - Q-RELAY
+  - Q-MARKET-USER
+  - Q-BILL
+  - Q-AGPL
+  - Q-OPS-DUTY
+  - Q-OPS-COLLECT
+closed_questions:
+  - {id: Q-LLM, status: decided, decision: "LiteLLM 替换 new-api，必须重构"}
+lane_changes: []
+
+lane_judge:
+  Q1_schema: true
+  Q2_auth_tenant: true
+  Q3_external_contract: true
+  Q4_irreversible: true
+  Q5_new_dependency: true
+  Q6_files_or_subprojects: true
+  reason: >
+    智能采集 + SaaS 多租户 + 中转站外部契约 + Power Market schema；
+    listing/租户安装/源注册表不可逆；backend/scrapy/双前端/capability-library
+    多子项目。操作者点名全角色复审后出结合旧方案的全新方案。
+
+roles_invited_beyond_default:
+  - ops
+  - designer
+  - architect
+  - dba
+  - frontend
+  - backend
+  - sre
+  - data-collector
+  - data-warehouse-engineer
+  - miner
+  - analyst
+  - qa
+  - algo
+  - pm
+  - qc
+
+roles_skipped: []
+roles_skipped_note: >
+  诊断 fan-out 全请。实现帽再按票裁剪；miner/ops/algo/warehouse 若无实现面
+  再写入 roles_skipped。qc 在定义帽只做覆盖缺口诊断，不写 release-opinion.md。
+
+host_spawn:
+  requested: "sdlc-workflow:<role>"
+  available: [arch-warden, explore, general-purpose, memory-curator, plan, spider-doctor]
+  fallback: general-purpose
+  probed_at: "2026-09-08"
+  probe_type: "sdlc-workflow:ops"
+  probe_error: "Unknown subagent type"
+  reason: >
+    本宿主未注册插件 agents/ 的 sdlc-workflow:<role> 类型（ZCode 才会把
+    pluginName:bareName 挂进 spawn 表）。回退为每角色一个独立 general-purpose
+    子代理，强制先读 agents/<role>.md + skills/<role>/SKILL.md，编排器本窗口
+    不写诊断正文。这不是双派发（原生类型不存在，只派一次）。
+
+signals:
+  - /Users/xuyun/Documents/grok-files/power-market-design.md
+  - /Users/xuyun/Documents/grok-files/power-market-design-review.md
+  - /Users/xuyun/Documents/grok-files/four-pillars-plan.md
+  - /Users/xuyun/Documents/grok-files/four-pillars-diagnosis-and-plan.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-spec.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-user-story.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-metrics.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-algo-diagnosis.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-qa-diagnosis.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-sre-diagnosis.md
+  - .sdlc/feat-four-pillars/01-define/spec.md
+  - .sdlc/feat-four-pillars/02-shape/contract.md
+  - CONTEXT.md
+  - README.md
