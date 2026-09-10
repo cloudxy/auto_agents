@@ -1,53 +1,33 @@
-"""
-数据库表初始化脚本（同步版本）
-用于在开发环境中快速同步所有模型到数据库
-"""
+"""开发环境 create_all 基线表（已存在则跳过）。"""
+from __future__ import annotations
+
+import os
 import sys
-import os
+from pathlib import Path
 
-# 添加项目根目录到 Python 路径
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, project_root)
-
-import os
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 os.environ.setdefault("APP_ENV", "local")
 
-from sqlalchemy import create_engine
-from config import settings
-from platform_core.models.base import Base
+from sqlalchemy import create_engine  # noqa: E402
 
-def init_tables():
-    """初始化所有数据库表"""
-    try:
-        # 构造 MySQL URL（密码取法与 platform_core.db.DBManager._get_password 对齐）
-        mysql_conf = settings.MYSQL.DEFAULT
-        password = os.getenv('MYSQL_DEFAULT_PASSWORD') or str(settings.get('MYSQL_DEFAULT_PASSWORD', ''))
-        db_url = f"mysql+aiomysql://{mysql_conf.USER}:{password}@{mysql_conf.HOST}:{mysql_conf.PORT}/{mysql_conf.DB_NAME}?charset=utf8mb4"
-        
-        # 使用同步引擎进行建表（避开异步上下文管理器问题）
-        sync_url = db_url.replace("mysql+aiomysql", "mysql+pymysql")
-        engine = create_engine(sync_url, echo=True)
-        
-        print(f"正在连接数据库: {mysql_conf.HOST}:{mysql_conf.PORT}/{mysql_conf.DB_NAME}")
-        print("开始同步表结构...")
-        
-        # 导入所有模型以确保它们被注册到 Base.metadata
-        from platform_core.models.user import User  # noqa: F401  副作用导入：注册到 Base.metadata
-        from platform_core.models.spider_task import SpiderTask  # noqa: F401
-        from platform_core.models.spider_result import SpiderResult  # noqa: F401
-        from platform_core.models.system_config import SystemConfig  # noqa: F401
-        
-        # 创建所有表
-        Base.metadata.create_all(bind=engine)
-        
-        print("✅ 数据库表结构同步成功！")
-        print("已创建的表:", list(Base.metadata.tables.keys()))
-        
-    except Exception as e:
-        print(f"❌ 数据库表结构同步失败: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+from config import settings  # noqa: E402
+import platform_core.models  # noqa: F401,E402  注册全部模型到 Base.metadata
+from platform_core.models.base import Base  # noqa: E402
+
+
+def main() -> None:
+    conf = settings.MYSQL.DEFAULT
+    password = os.getenv("MYSQL_DEFAULT_PASSWORD") or str(settings.get("MYSQL_DEFAULT_PASSWORD", ""))
+    url = (
+        f"mysql+pymysql://{conf.USER}:{password}@{conf.HOST}:{conf.PORT}/{conf.DB_NAME}"
+        "?charset=utf8mb4"
+    )
+    engine = create_engine(url)
+    print(f"同步表结构 {conf.HOST}:{conf.PORT}/{conf.DB_NAME}")
+    Base.metadata.create_all(bind=engine)
+    print("已创建/已存在:", ", ".join(Base.metadata.tables))
+
 
 if __name__ == "__main__":
-    init_tables()
+    main()

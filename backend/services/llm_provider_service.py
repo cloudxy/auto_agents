@@ -28,8 +28,12 @@ from backend.services.llm_common import (  # noqa: F401 — 兼容存量 import 
 )
 from backend.services.llm_probe_engine import LlmProbeEngine
 from backend.services.llm_secret_vault import LlmSecretVault
-from platform_core.exceptions import BusinessException, NotFoundException
-from platform_core.exceptions import NotFoundException, ValidationException
+from platform_core.exceptions import (
+    AuthorizationException,
+    BusinessException,
+    NotFoundException,
+    ValidationException,
+)
 from platform_core.models.llm_provider_model import LlmProviderModel
 from sqlalchemy import delete, select
 
@@ -61,6 +65,40 @@ class LlmProviderService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repo = LlmProviderRepository(session)
+
+    async def _guard_platform_provider_write(
+        self,
+        item,
+        *,
+        actor_is_platform_admin: bool | None,
+        actor_id: int | None = None,
+        actor_name: str = "",
+    ) -> None:
+        """GWT-06.6：租户态写平台级（tenant_id IS NULL）行 → 拒绝且行不变
+
+        actor_is_platform_admin is None：服务直调/单测不传 actor，保持既有行为。
+        无租户上下文（测试 override 无 Bearer）：不在此拦截，避免误伤存量 HTTP 夹具。
+        """
+        if actor_is_platform_admin is None or actor_is_platform_admin:
+            return
+        if getattr(item, "tenant_id", None) is not None:
+            return
+        from platform_core.tenant_context import current_tenant_id
+
+        if current_tenant_id() is None:
+            return
+        provider_id = getattr(item, "id", None)
+        logger.warning(
+            f"平台级供应商写拒绝 | actor={actor_name} provider_id={provider_id}"
+        )
+        from backend.services.audit_service import record_authz_denied
+
+        await record_authz_denied(
+            self.session, actor_id, actor_name or "unknown",
+            f"llm_provider#{provider_id}",
+            {"reason": "platform_row"},
+        )
+        raise AuthorizationException(message="需要平台管理员权限")
 
     # ------------------------------------------------------------------
     # 加解密/SSRF 守卫 → llm_secret_vault（B2）；保留同名薄委托兼容存量调用面
@@ -160,12 +198,18 @@ class LlmProviderService:
         return await self.get_provider(new_id)
 
     async def update_provider(
-        self, provider_id: int, payload: LlmProviderUpdate
+        self, provider_id: int, payload: LlmProviderUpdate,
+        *, actor_is_platform_admin: bool | None = None,
+        actor_id: int | None = None, actor_name: str = "",
     ) -> LlmProviderResponse:
         """更新供应商（PATCH 语义；api_key：未提交/空串均不修改，非空重新加密落库）"""
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
+        await self._guard_platform_provider_write(
+            item, actor_is_platform_admin=actor_is_platform_admin,
+            actor_id=actor_id, actor_name=actor_name,
+        )
         changes = payload.model_dump(exclude_unset=True, exclude_none=True)
 
         if "name" in changes and changes["name"] != item.name:
@@ -189,11 +233,19 @@ class LlmProviderService:
         logger.info(f"更新 LLM 供应商: id={provider_id}, fields={sorted(changes.keys())}")
         return await self.get_provider(provider_id)
 
-    async def delete_provider(self, provider_id: int) -> dict:
+    async def delete_provider(
+        self, provider_id: int,
+        *, actor_is_platform_admin: bool | None = None,
+        actor_id: int | None = None, actor_name: str = "",
+    ) -> dict:
         """删除供应商（激活位随行删除；无激活行时 resolve_runtime_config 自动走兜底）"""
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
+        await self._guard_platform_provider_write(
+            item, actor_is_platform_admin=actor_is_platform_admin,
+            actor_id=actor_id, actor_name=actor_name,
+        )
         deleted_name = str(getattr(item, "name", "") or "")
         # Phase A 矩阵：软删除（deleted_at 置位，列表/激活/解析全链自动排除；
         # 子表行保留跟随父行隐藏，审计可追溯）
@@ -203,22 +255,38 @@ class LlmProviderService:
         logger.info(f"LLM 供应商已删除: id={provider_id}, name={deleted_name}")
         return {"id": provider_id, "deleted": deleted}
 
-    async def activate_provider(self, provider_id: int) -> LlmProviderResponse:
+    async def activate_provider(
+        self, provider_id: int,
+        *, actor_is_platform_admin: bool | None = None,
+        actor_id: int | None = None, actor_name: str = "",
+    ) -> LlmProviderResponse:
         """单激活热切换（activate_exclusive 单语句互斥；旧激活行的共享连接全清失效）"""
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
+        await self._guard_platform_provider_write(
+            item, actor_is_platform_admin=actor_is_platform_admin,
+            actor_id=actor_id, actor_name=actor_name,
+        )
         await self.repo.activate_exclusive(provider_id)
         await self.session.commit()
         await _invalidate_llm_clients()  # 全清：旧激活行连接不再权威，重建成本低
         logger.info(f"LLM 供应商热切换完成: active_id={provider_id}")
         return await self.get_provider(provider_id)
 
-    async def deactivate_provider(self, provider_id: int) -> LlmProviderResponse:
+    async def deactivate_provider(
+        self, provider_id: int,
+        *, actor_is_platform_admin: bool | None = None,
+        actor_id: int | None = None, actor_name: str = "",
+    ) -> LlmProviderResponse:
         """取消激活（全部下线：运行时解析回退 yml/env 兜底；行保留可再激活）"""
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
+        await self._guard_platform_provider_write(
+            item, actor_is_platform_admin=actor_is_platform_admin,
+            actor_id=actor_id, actor_name=actor_name,
+        )
         if not item.is_active:
             return await self.get_provider(provider_id)  # 幂等
         item.is_active = False
@@ -326,12 +394,20 @@ class LlmProviderService:
             for r in rows
         ]
 
-    async def put_models(self, provider_id: int, entries: list[dict]) -> list[dict]:
+    async def put_models(
+        self, provider_id: int, entries: list[dict],
+        *, actor_is_platform_admin: bool | None = None,
+        actor_id: int | None = None, actor_name: str = "",
+    ) -> list[dict]:
         """全量替换模型集；is_default 至多一行（多行 422）；默认变更同事务刷新父行 model 列"""
         logger.info(f"模型集全量替换 | provider={provider_id} count={len(entries)}")
         provider = await self.repo.get_by_id(provider_id)
         if provider is None:
             raise NotFoundException(resource=f"LLM 供应商 {provider_id}")
+        await self._guard_platform_provider_write(
+            provider, actor_is_platform_admin=actor_is_platform_admin,
+            actor_id=actor_id, actor_name=actor_name,
+        )
 
         defaults = [e for e in entries if e.get("is_default")]
         if len(defaults) > 1:
@@ -375,8 +451,20 @@ class LlmProviderService:
         return await LlmProbeEngine.probe_test(provider_type, base_url, api_key, model)
 
 
-    async def test_connectivity(self, provider_id: int) -> LlmProviderTestResponse:
-        """入库连通测试（结果同步默认模型行健康态——管理模型抽屉即时可见）"""
+    async def test_connectivity(
+        self, provider_id: int,
+        *, actor_is_platform_admin: bool | None = None,
+        actor_id: int | None = None, actor_name: str = "",
+    ) -> LlmProviderTestResponse:
+        """入库连通测试（测该行地址；平台行对非超管拒绝）"""
+        logger.info(f"测试 LLM 供应商连通 | id={provider_id}")
+        item = await self.repo.get_by_id(provider_id)
+        if item is None:
+            raise NotFoundException("LLM 供应商")
+        await self._guard_platform_provider_write(
+            item, actor_is_platform_admin=actor_is_platform_admin,
+            actor_id=actor_id, actor_name=actor_name,
+        )
         result = await LlmProbeEngine.test_connectivity(self.repo, provider_id)
         # feat-llm-cooldown（QA-7）：连通成功清除默认模型冷却
         if result.ok and result.model:

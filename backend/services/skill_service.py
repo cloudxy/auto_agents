@@ -28,6 +28,21 @@ if TYPE_CHECKING:  # T6 解环：仅类型注解（skill_import_service 运行�
 
 logger = get_logger("service.skill")
 
+
+async def _skill_is_third_party(session: AsyncSession, name: str) -> bool:
+    from backend.services.power_market.identity import _is_third_party
+    from platform_core.models.capability import CapabilityAsset
+
+    row = (await session.execute(
+        select(CapabilityAsset).where(
+            CapabilityAsset.asset_type == "skill",
+            CapabilityAsset.name == name,
+            CapabilityAsset.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    return bool(row is not None and _is_third_party(row))
+
+
 # tier 派生（总方案 §5.1）：人工综合分优先（缺省用 AI 建议分）映射
 # S≥8.5 / A≥7.0 / B≥5.0 / C<5.0；两者皆无 → None（展示"未评"）
 def derive_tier(human_score: Optional[float], ai_score: Optional[float]) -> Optional[str]:
@@ -167,6 +182,9 @@ class SkillService:
             "missing": missing_names,
             "job_id": job.id,
         }
+        if summary["total"] == 0:
+            summary["empty"] = True
+            summary["message"] = "没有可同步的包"
         if commit:
             await self.session.commit()
         return summary
@@ -304,7 +322,10 @@ class SkillService:
         )
         await self.session.flush()
 
-        written_back = self._write_back_meta(row)
+        if await _skill_is_third_party(self.session, name):
+            written_back = False
+        else:
+            written_back = self._write_back_meta(row)
         if written_back:
             self._append_changelog(
                 row,
@@ -332,6 +353,8 @@ class SkillService:
             from platform_core.exceptions import NotFoundException
 
             raise NotFoundException(resource=f"技能 {name}")
+        if await _skill_is_third_party(self.session, name):
+            return False
         ok = self._write_back_meta(row)
         if not ok:
             self._record_export_failure(name, "手动补导出失败")
@@ -371,14 +394,18 @@ class SkillService:
             ]
             try:
                 text = await llm_chat(prompt, usage_dim="skill_scoring")
+            except Exception as exc:  # noqa: BLE001 llm_chat 失败不得吞成 Job done
+                await self._fail_similar_suggest(exc)
+                raise
+            try:
                 data = _json.loads(text.strip().removeprefix("```json").removesuffix("```"))
                 valid_names = {m.name for m in members}
                 for group in data.get("clusters") or []:
                     cleaned = [n for n in group if n in valid_names]
                     if len(cleaned) >= 2:
                         clusters.append(cleaned)
-            except Exception as exc:  # noqa: BLE001 单分类失败继续
-                logger.warning(f"similar 建议生成失败 | category={category} err={exc}")
+            except Exception as exc:  # noqa: BLE001 单分类 JSON 失败继续
+                logger.warning(f"similar 建议解析失败 | category={category} err={exc}")
 
         self.session.add(SkillJob(
             job_type="similar_suggest", status="done",
@@ -388,6 +415,17 @@ class SkillService:
         await self.session.flush()
         await self.session.commit()
         return {"clusters": clusters}
+
+    async def _fail_similar_suggest(self, exc: Exception) -> None:
+        logger.warning(f"similar 建议失败（不吞成 done）| err={exc}")
+        sentence = getattr(exc, "message", None) or str(exc)
+        self.session.add(SkillJob(
+            job_type="similar_suggest", status="failed",
+            total=1, succeeded=0, failed=1,
+            detail={"reason": sentence, "error": sentence},
+        ))
+        await self.session.flush()
+        await self.session.commit()
 
     async def similar_confirm(self, groups: list[list[str]]) -> dict:
         """人工确认等价簇 → 互写 similar_to（合并去重）"""
@@ -436,11 +474,12 @@ class SkillService:
 
     async def list_candidates(self, page: int = 1, page_size: int = 20) -> dict:
         """待审候选：spider_results(source=marketplace) 且未处理（extra.review 缺省 pending）"""
-        from platform_core.models.spider_result import SpiderResult
+        logger.info(f"查询待审候选 | page={page} page_size={page_size}")
+        from backend.repositories.spider_result_repository import SpiderResultRepository
 
-        stmt = select(SpiderResult).where(SpiderResult.source == "marketplace")
-        rows = (await self.session.execute(stmt.order_by(SpiderResult.id.desc()))).scalars().all()
-        pending = [r for r in rows if self._review_of(r) in ("pending", None)]
+        rows, total = await SpiderResultRepository(
+            self.session
+        ).list_pending_marketplace_candidates(page=page, page_size=page_size)
         items = [
             {
                 "id": r.id, "title": r.title or "", "url": r.url or "",
@@ -449,10 +488,9 @@ class SkillService:
                 "review_status": self._review_of(r) or "pending",
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
-            for r in pending
+            for r in rows
         ]
-        start = (page - 1) * page_size
-        return {"total": len(items), "items": items[start:start + page_size]}
+        return {"total": int(total), "items": items}
 
     # ---------- 查询（T7 跳层收口：API 层 repository 直连改道本层） ----------
 

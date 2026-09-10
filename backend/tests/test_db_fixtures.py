@@ -39,6 +39,12 @@ ALL_ORM_TABLES = {
     "capability_plugins",
     "capability_experts",
     "capability_teams",
+    "capability_commands",
+    "capability_components",
+    "capability_installs",
+    "capability_sources",
+    "capability_aliases",
+    "product_events",
     # DB 升级 2026-09 Phase B/C 横切功能表（13 张）
     "tags",
     "taggings",

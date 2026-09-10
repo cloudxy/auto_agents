@@ -24,8 +24,8 @@
 #       MySQL / Redis 不发布任何宿主端口。
 # 网络：独立 bridge 网络 newapi-net。未来调度器若容器化，加入本网络即可
 #       通过服务名（new-api / mysql / redis）互通，禁止写死 127.0.0.1。
-# 调度与探针：渠道调度器、渠道真伪探针不由本目录承载，由本项目 backend
-#       内置服务实现（config/default/newapi.yml，默认关闭），详见 README §5。
+# T-20 墓碑：本文件不是运行时。不要 up。见 TOMBSTONE.md。
+# 调度与探针：backend 读 RELAY.*（config/default/relay.yml），不读 NEWAPI.*。
 # ============================================================
 
 services:

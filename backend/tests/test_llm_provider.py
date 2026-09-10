@@ -13,7 +13,7 @@
 - _llm_chat provider 路径共享 client + 按 provider 维度 token 计数
 - invalidate_client_cache 定向 / 全清
 - test_connectivity：成功 / HTTP 错误 / 网络异常 / 不存在的供应商
-- API：GET 直出数组且 api_key_masked 掩码 / 写操作 operator 403
+- API：GET 直出数组且 api_key_masked 掩码 / 本企业写 operator 200、viewer 403
 """
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -23,7 +23,7 @@ import pytest
 from cryptography.fernet import Fernet
 from pydantic import ValidationError
 
-from backend.app.api.deps import CurrentUser, require_admin
+from backend.app.api.deps import CurrentUser, require_admin, require_operator
 from backend.repositories.llm_provider_repository import LlmProviderRepository
 from backend.services.ai_planner_service import (
     _HTTP_CLIENTS,
@@ -653,9 +653,16 @@ class TestPrivateUrlSwitch:
 # ---------------- 权限 ----------------
 class TestPermissions:
     @pytest.mark.asyncio
-    async def test_write_requires_admin(self):
+    async def test_write_allows_operator(self):
+        user = await require_operator(
+            user=CurrentUser(id=2, username="op", role="operator"),
+        )
+        assert user.role == "operator"
+
+    @pytest.mark.asyncio
+    async def test_write_rejects_viewer(self):
         with pytest.raises(AuthorizationException):
-            await require_admin(user=CurrentUser(id=2, username="op", role="operator"))
+            await require_operator(user=CurrentUser(id=3, username="v", role="viewer"))
 
     @pytest.mark.asyncio
     async def test_admin_passes(self):
@@ -728,10 +735,19 @@ class TestApiEndpoints:
         assert body["success"] is True and body["code"] == "CREATED"
         assert body["data"]["name"] == "p"
 
-    def test_create_endpoint_rejects_operator(self, llm_client, app):
-        """写操作仅 admin：operator 403（恢复必须还原 conftest 原 override——本地重造旧签名
-        会丢失 Bearer 直通链路，污染后续 SaaS 用例的租户身份解析）"""
+    def test_create_endpoint_operator_ok(self, llm_client, app, monkeypatch):
+        """本企业写：operator 200（作废 rejects_operator 金标；SH-09）"""
         from backend.app.api.deps import CurrentUser as _CU, get_current_user
+
+        async def fake_create(self, payload):
+            return LlmProviderResponse(
+                id=1, name=payload.name, provider_type="openai_compatible",
+                base_url=payload.base_url, model=payload.model, temperature=0.2,
+                timeout=120, max_retries=3,
+            )
+
+        monkeypatch.setattr(LlmProviderService, "create_provider", fake_create)
+        monkeypatch.setattr("backend.app.api.v1.llm_providers.record_audit", AsyncMock())
 
         async def _operator_user():
             return _CU(id=2, username="op", role="operator")
@@ -743,13 +759,53 @@ class TestApiEndpoints:
                                    json={"name": "p", "base_url": "https://x/v1", "model": "m"})
         finally:
             app.dependency_overrides[get_current_user] = original
+        assert resp.status_code == 200
+        assert resp.json()["data"]["name"] == "p"
+
+    def test_create_endpoint_rejects_viewer(self, llm_client, app):
+        """只读写仍拒（SH-09）"""
+        from backend.app.api.deps import CurrentUser as _CU, get_current_user
+
+        async def _viewer_user():
+            return _CU(id=3, username="v", role="viewer")
+
+        original = app.dependency_overrides[get_current_user]
+        app.dependency_overrides[get_current_user] = _viewer_user
+        try:
+            resp = llm_client.post("/api/v1/llm/providers",
+                                   json={"name": "p", "base_url": "https://x/v1", "model": "m"})
+        finally:
+            app.dependency_overrides[get_current_user] = original
         assert resp.status_code == 403
+
+    def test_test_endpoint_operator_ok(self, llm_client, app, monkeypatch):
+        """经办测本企业行 HTTP 200（73.4 身份；点测在 LlmProviders.test）"""
+        from backend.app.api.deps import CurrentUser as _CU, get_current_user
+        from platform_core.schemas.llm_provider import LlmProviderTestResponse
+
+        async def fake_test(self, provider_id, **_kw):
+            return LlmProviderTestResponse(ok=True, latency_ms=9, model="m", error="")
+
+        monkeypatch.setattr(LlmProviderService, "test_connectivity", fake_test)
+        monkeypatch.setattr("backend.app.api.v1.llm_providers.record_audit", AsyncMock())
+
+        async def _operator_user():
+            return _CU(id=2, username="op", role="operator")
+
+        original = app.dependency_overrides[get_current_user]
+        app.dependency_overrides[get_current_user] = _operator_user
+        try:
+            resp = llm_client.post("/api/v1/llm/providers/1/test")
+        finally:
+            app.dependency_overrides[get_current_user] = original
+        assert resp.status_code == 200
+        assert resp.json()["data"]["ok"] is True
 
     def test_test_endpoint_shape(self, llm_client, monkeypatch):
         """POST /llm/providers/{id}/test 信封 data={ok, latency_ms, model, error}（ADR-001）"""
         from platform_core.schemas.llm_provider import LlmProviderTestResponse
 
-        async def fake_test(self, provider_id):
+        async def fake_test(self, provider_id, **_kw):
             return LlmProviderTestResponse(ok=False, latency_ms=12, model="m", error="HTTP 401")
 
         monkeypatch.setattr(LlmProviderService, "test_connectivity", fake_test)
@@ -762,7 +818,7 @@ class TestApiEndpoints:
         assert body["data"]["model"] == "m" and body["data"]["error"] == "HTTP 401"
 
     def test_activate_endpoint_admin_ok(self, llm_client, monkeypatch):
-        async def fake_activate(self, provider_id):
+        async def fake_activate(self, provider_id, **_kwargs):
             return LlmProviderResponse(
                 id=provider_id, name="a", provider_type="openai_compatible",
                 base_url="https://x/v1", model="m", temperature=0.2, timeout=120,

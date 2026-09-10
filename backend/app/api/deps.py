@@ -10,10 +10,12 @@ is_admin=True 的存量用户等价 admin 角色。
 from dataclasses import dataclass
 from typing import Callable
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.audit_service import record_authz_denied
+from backend.services.tenant_expiry_service import assert_tenant_active
 from backend.services.user_service import load_auth_identity
 from backend.utils.auth import decode_access_token
 from platform_core.db import get_async_db
@@ -86,6 +88,12 @@ async def get_current_user(
         identity = await load_auth_identity(session, user_id)
     if identity is None or not identity.is_active:
         raise AuthenticationException(message="用户不存在或已停用")
+    # FR-08：已颁发会话在后续请求拒绝到期/停用企业（禁止只挡登录）
+    await assert_tenant_active(
+        session,
+        identity.tenant_id,
+        is_platform_admin=identity.is_platform_admin,
+    )
     # claims 只承身份：权限/租户字段一律从 DB 行快照取（load_auth_identity），
     # 禁用/降级立即生效，防 token 生命周期内权限漂移（S2 短窗失效验收的前提）
     return CurrentUser(
@@ -116,10 +124,46 @@ require_operator = require_role("admin", "operator")
 require_admin = require_role("admin")
 
 
+def task_actor_tenant_id(user: CurrentUser) -> int | None:
+    """租户任务路径的入队企业：超管无企业空间 → None（enqueue 拒绝，GWT-09.4）。"""
+    if user.is_platform_admin:
+        return None
+    return user.tenant_id
+
+
 async def require_platform_admin(
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_db),
 ) -> CurrentUser:
-    """平台级守卫：仅 is_platform_admin（tenant_id 恒 NULL 的平台超管）"""
-    if not user.is_platform_admin:
-        raise AuthorizationException(message="需要平台管理员权限")
-    return user
+    """平台级守卫：仅 is_platform_admin；非超管拒绝并留下越权记录（GWT-06.3）"""
+    if user.is_platform_admin:
+        return user
+    target = f"{request.method} {request.url.path}"
+    logger.warning(
+        f"平台写面越权拒绝 | user={user.username} role={user.role} target={target}"
+    )
+    await record_authz_denied(
+        session, user.id, user.username, target,
+        {"need": "platform_admin", "role": user.role},
+    )
+    raise AuthorizationException(message="需要平台管理员权限")
+
+
+async def require_platform_admin_or_404(
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_db),
+) -> CurrentUser:
+    """中转/运营台存在性隐藏：非超管 404 同形（GWT-07.3），不走 403 信封。"""
+    if user.is_platform_admin:
+        return user
+    target = f"{request.method} {request.url.path}"
+    logger.warning(
+        f"平台写面越权拒绝(404) | user={user.username} role={user.role} target={target}"
+    )
+    await record_authz_denied(
+        session, user.id, user.username, target,
+        {"need": "platform_admin", "role": user.role},
+    )
+    raise HTTPException(status_code=404, detail="Not Found")

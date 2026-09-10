@@ -1,11 +1,17 @@
-"""R 线接线验证（工单 45/46/47）：任务链/用量链/配额/复合去重"""
+"""R 线接线验证（工单 45/46/47）：任务链/用量链/配额/复合去重 + T-07 入队归属"""
+import asyncio
 from datetime import date
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy import select
 
+from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.models.spider_result import SpiderResult
 from platform_core.models.spider_task import SpiderTask
+from platform_core.models.task_template import TaskTemplate
 from platform_core.models.tenant import Tenant
+from platform_core.tenant_context import tenant_scope
 
 
 async def _tenant(db_session, slug="wire", **quota) -> int:
@@ -44,9 +50,14 @@ async def test_enqueue_carries_tenant_and_quota_rejects(db_session, monkeypatch)
             def model_validate(x, t):
                 return t
 
-        with pytest.raises(sts.BusinessException, match="QUOTA_EXCEEDED|任务并发") as ei:
+        from backend.services.quota_service import PLAN_FULL_CTA, PLAN_FULL_USER, QuotaExceededException
+
+        with pytest.raises(QuotaExceededException) as ei:
             await svc.enqueue("w-spid", params="{}", tenant_id=tid)
-        assert "QUOTA" in str(ei.value.code) or "并发" in str(ei.value.message) or True
+        assert ei.value.code == "QUOTA_EXCEEDED"
+        assert "任务并发" in ei.value.message
+        assert PLAN_FULL_USER in ei.value.message
+        assert PLAN_FULL_CTA in ei.value.message
 
 
 @pytest.mark.asyncio
@@ -149,3 +160,185 @@ async def test_flush_resolves_default_tenant(db_session, monkeypatch):
         tid = await default_tenant_id(s)
         await s.commit()
     assert tid >= 1
+
+
+@pytest.mark.asyncio
+async def test_enqueue_without_tenant_does_not_create(db_session, monkeypatch):
+    """GWT-09.4 服务层：无企业不入队，不产生无主任务（禁止 NULL 当平台入站成功）"""
+    from backend.services.spider_task_service import SpiderTaskService
+
+    svc = SpiderTaskService.__new__(SpiderTaskService)
+    svc.session = MagicMock()
+    svc.session.commit = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.create = AsyncMock()
+    svc._ensure_spider_available = AsyncMock()
+    svc._check_enqueue_quota = AsyncMock()
+    with pytest.raises(BusinessException, match="没有企业身份"):
+        await svc.enqueue("w-spid", params="{}", tenant_id=None)
+    svc.repo.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_lists_in_own_tenant_not_other(db_session, monkeypatch):
+    """GWT-09.1：有效企业入队 → 本企业列表可见；他企业不可见"""
+    from stubs import FakeRedis, seed_worker_heartbeat
+
+    from backend.services.spider_task_service import SpiderTaskService
+
+    ta, tb = await _tenant(db_session, "g91a"), await _tenant(db_session, "g91b")
+    fake = FakeRedis()
+    seed_worker_heartbeat(fake)
+    monkeypatch.setattr("backend.services.spider_task_service.get_async_redis", lambda: fake)
+    monkeypatch.setattr("backend.services.quota_service.get_async_redis", lambda: fake)
+
+    async with db_session() as s:
+        svc = SpiderTaskService(s)
+        svc._ensure_spider_available = AsyncMock()
+        task = await svc.enqueue("w-spid", params="{}", tenant_id=ta)
+        task_id = int(task.id)
+
+    with tenant_scope(ta):
+        async with db_session() as s:
+            listing = await SpiderTaskService(s).list_tasks()
+            assert any(i.id == task_id for i in listing.items)
+    with tenant_scope(tb):
+        async with db_session() as s:
+            listing = await SpiderTaskService(s).list_tasks()
+            assert all(i.id != task_id for i in listing.items)
+
+
+@pytest.mark.asyncio
+async def test_template_other_tenant_rejected_no_task_for_owner(db_session):
+    """GWT-09.3：企业 A 用企业 B 的模板 → 拒绝；B 不出现新任务"""
+    from backend.services.spider_registry_service import SpiderRegistryService
+
+    ta, tb = await _tenant(db_session, "g93a"), await _tenant(db_session, "g93b")
+    async with db_session() as s:
+        s.add(TaskTemplate(name="b-tpl", spider_name="example", tenant_id=tb, params="{}"))
+        await s.commit()
+        tmpl_id = int((await s.execute(
+            select(TaskTemplate.id).where(TaskTemplate.tenant_id == tb)
+        )).scalar_one())
+
+    async with db_session() as s:
+        svc = SpiderRegistryService(s)
+        with pytest.raises(NotFoundException, match="任务模板"):
+            await svc.create_task_from_template(tmpl_id, tenant_id=ta)
+        await s.rollback()
+
+    async with db_session() as s:
+        tasks_b = (await s.execute(
+            select(SpiderTask).where(SpiderTask.tenant_id == tb)
+        )).scalars().all()
+        assert tasks_b == []
+
+
+@pytest.mark.asyncio
+async def test_results_visible_to_owner_hidden_from_other(db_session):
+    """GWT-10.1 / 10.3：A 看得到本企业条；B 猜任务编号与没有这个任务同形"""
+    from backend.services.spider_query_service import SpiderQueryService
+
+    ta, tb = await _tenant(db_session, "g101a"), await _tenant(db_session, "g101b")
+    async with db_session() as s:
+        task = SpiderTask(spider_name="x", tenant_id=ta, status="completed", params="{}")
+        s.add(task)
+        await s.flush()
+        s.add(SpiderResult(
+            task_id=task.id, spider_name="x", url="https://a.example",
+            title="a-item", tenant_id=ta,
+        ))
+        await s.commit()
+        task_id = int(task.id)
+
+    with tenant_scope(ta):
+        async with db_session() as s:
+            resp = await SpiderQueryService(s).list_results(task_id)
+            assert resp.total == 1
+            assert resp.items[0].title == "a-item"
+    with tenant_scope(tb):
+        async with db_session() as s:
+            with pytest.raises(NotFoundException, match="爬虫任务"):
+                await SpiderQueryService(s).list_results(task_id)
+
+
+@pytest.mark.asyncio
+async def test_wizard_test_crawl_result_stays_in_enqueue_tenant(db_session):
+    """GWT-10.2：向导试采归属=入队企业，不进别人的结果"""
+    ta, tb = await _tenant(db_session, "g102a"), await _tenant(db_session, "g102b")
+    async with db_session() as s:
+        task = SpiderTask(spider_name="flow_generic", tenant_id=ta, status="completed", params="{}")
+        s.add(task)
+        await s.flush()
+        s.add(SpiderResult(
+            task_id=task.id, spider_name="flow_generic", url="https://wiz.example",
+            title="wiz", tenant_id=ta,
+        ))
+        await s.commit()
+        task_id = int(task.id)
+
+    with tenant_scope(ta):
+        async with db_session() as s:
+            rows = (await s.execute(select(SpiderResult))).scalars().all()
+            assert [r.task_id for r in rows] == [task_id]
+    with tenant_scope(tb):
+        async with db_session() as s:
+            rows = (await s.execute(select(SpiderResult))).scalars().all()
+            assert rows == []
+
+
+def test_platform_admin_run_rejects_no_ownerless_task(
+    db_client, platform_admin_client, db_session,
+):
+    """GWT-09.4：平台超管无企业空间走租户任务提交 → 拒绝入队，无无主任务"""
+    resp = platform_admin_client.post(
+        "/api/v1/spiders/run",
+        json={"spider_name": "example", "params": "{}"},
+    )
+    assert resp.status_code == 400, resp.text
+    assert "没有企业身份" in resp.json()["message"]
+
+    async def _check():
+        async with db_session() as s:
+            assert (await s.execute(select(SpiderTask))).scalars().all() == []
+
+    asyncio.run(_check())
+
+
+def test_logged_in_tenant_submit_appears_in_own_list(db_client, db_session, monkeypatch):
+    """GWT-09.1 HTTP：经办已登录且企业有效，提交采集 → 本企业任务列表"""
+    from conftest import make_tenant_owner_headers
+    from stubs import FakeRedis, seed_worker_heartbeat
+
+    fake = FakeRedis()
+    seed_worker_heartbeat(fake)
+
+    def _get(key=None):
+        return fake
+
+    import backend.services.spider_task_service as svc_mod
+    import backend.services.quota_service as quota_mod
+    monkeypatch.setattr(svc_mod, "get_async_redis", _get)
+    monkeypatch.setattr(quota_mod, "get_async_redis", _get)
+
+    headers, tid = make_tenant_owner_headers(db_session, slug="g91http")
+    resp = db_client.post(
+        "/api/v1/spiders/run",
+        json={"spider_name": "example", "params": '{"urls": ["https://example.com"]}'},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    task_id = resp.json()["data"]["id"]
+    listing = db_client.get("/api/v1/spiders/tasks", headers=headers)
+    assert listing.status_code == 200, listing.text
+    ids = [i["id"] for i in listing.json()["data"]["items"]]
+    assert task_id in ids
+
+    async def _check():
+        async with db_session() as s:
+            row = (await s.execute(
+                select(SpiderTask).where(SpiderTask.id == task_id)
+            )).scalar_one()
+            assert row.tenant_id == tid
+
+    asyncio.run(_check())

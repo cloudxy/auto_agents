@@ -13,6 +13,7 @@ import { Tabs } from 'antd'
 import { listTenants, patchTenant, type TenantRow } from '../services/platformOps'
 import { clearDeadItems, discardDeadItem, listDeadItems, type DeadItem } from '../services/deadItems'
 import { apiErrorMessage } from '../utils/errorMessage'
+import ProductEvents from './ProductEvents'
 
 
 const { Text } = Typography
@@ -209,6 +210,7 @@ const DeadItemsTab: React.FC = () => {
             ),
           },
           { key: 'dead-items', label: '死信队列', children: <DeadItemsTab /> },
+          { key: 'product-events', label: '产品事实', children: <ProductEvents /> },
         ]}
       />
 

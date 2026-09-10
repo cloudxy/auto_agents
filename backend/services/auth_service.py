@@ -3,12 +3,41 @@ import asyncio
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories.user_repository import UserRepository
+from backend.services.tenant_expiry_service import assert_tenant_active
 from backend.utils.auth import verify_password, get_password_hash, create_access_token
 from platform_core.logger import get_logger
-from platform_core.exceptions import BusinessException
+from platform_core.exceptions import AuthenticationException, BusinessException
 from pydantic import BaseModel
 
 logger = get_logger("api")
+
+
+def _unique_tenant_id(users) -> int | None:
+    logger.debug("登录失败消歧企业")
+    ids = {getattr(u, "tenant_id", None) for u in users}
+    ids.discard(None)
+    return next(iter(ids)) if len(ids) == 1 else None
+
+
+async def emit_login_succeeded(session, user) -> None:
+    logger.info(f"登录成功事件 | user={getattr(user, 'username', None)}")
+    from backend.services.product_event_service import emit_product_event
+    role = getattr(user, "role", None) or ("admin" if getattr(user, "is_admin", False) else "operator")
+    await emit_product_event(
+        session, "login_succeeded",
+        tenant_id=getattr(user, "tenant_id", None),
+        actor_user_id=getattr(user, "id", None),
+        role=role,
+    )
+
+
+async def emit_login_failed(session, *, reason: str, tenant_id: int | None, actor_user_id: int | None = None) -> None:
+    logger.info(f"登录失败事件 | reason={reason} tenant={tenant_id}")
+    from backend.services.product_event_service import emit_product_event
+    await emit_product_event(
+        session, "login_failed", tenant_id=tenant_id, actor_user_id=actor_user_id,
+        props={"reason": reason},
+    )
 
 # 用户不存在时的哑哈希（P1-9）：做一次等代价 bcrypt 校验对齐时序，
 # 消除"用户名存在与否"的响应时间差（用户枚举侧信道）
@@ -63,11 +92,16 @@ class AuthService:
             # 时序对齐（P1-9）：对不存在的用户做一次等代价哈希校验
             await asyncio.to_thread(verify_password, password, _DUMMY_HASH)
             logger.warning(f"用户不存在: {username}")
+            await emit_login_failed(self.session, reason="credential", tenant_id=None)
             return None
 
+        inactive = [u for u in candidates if not u.is_active]
         candidates = [u for u in candidates if u.is_active]
         if not candidates:
             logger.warning(f"用户均已停用或被软删: {username}")
+            await emit_login_failed(
+                self.session, reason="locked", tenant_id=_unique_tenant_id(inactive),
+            )
             return None
 
         # 2. 密码消歧（P1-9：bcrypt 是同步 CPU 密集操作，转线程池避免阻塞事件循环）
@@ -78,10 +112,28 @@ class AuthService:
         if len(matched) != 1:
             # 皆不中（密码错误）/ 多行皆中（同密码重复名，凭据无法消歧）一律 401
             logger.warning(f"密码消歧失败: {username}")
+            await emit_login_failed(
+                self.session, reason="credential", tenant_id=_unique_tenant_id(candidates),
+            )
             return None
         user = matched[0]
+        # FR-08：密码命中后再查企业状态，凭证错误不得走到期句
+        try:
+            await assert_tenant_active(
+                self.session,
+                getattr(user, "tenant_id", None),
+                is_platform_admin=bool(getattr(user, "is_platform_admin", False)),
+            )
+        except AuthenticationException:
+            await emit_login_failed(
+                self.session, reason="expired",
+                tenant_id=getattr(user, "tenant_id", None),
+                actor_user_id=getattr(user, "id", None),
+            )
+            raise
 
         logger.info(f"用户认证成功: {username}")
+        await emit_login_succeeded(self.session, user)
         role = getattr(user, "role", None)
         return {
             "id": user.id,

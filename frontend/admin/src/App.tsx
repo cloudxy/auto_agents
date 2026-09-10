@@ -5,6 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import AdminLayout from './components/AdminLayout'
 import ErrorBoundary from './components/ErrorBoundary'
 import { registerNavigate } from './services/navigation'
+import { useAuthStore } from './store/useAuthStore'
 
 // 工单 69：19 页面全部 lazy——重依赖（recharts/代码编辑器等）按需分包，
 // 首屏只载 AdminLayout + 当前路由 chunk
@@ -23,6 +24,7 @@ const LogCenter = React.lazy(() => import('./pages/LogCenter'))
 const Members = React.lazy(() => import('./pages/Members'))
 const Usage = React.lazy(() => import('./pages/Usage'))
 const Capabilities = React.lazy(() => import('./pages/Capabilities'))
+const MyInstalls = React.lazy(() => import('./pages/MyInstalls'))
 const PlatformOps = React.lazy(() => import('./pages/PlatformOps'))
 const Unauthorized = React.lazy(() => import('./pages/Unauthorized'))
 const NotFound = React.lazy(() => import('./pages/NotFound'))
@@ -51,6 +53,19 @@ function Page({ label, children }: { label: string; children: React.ReactNode })
   )
 }
 
+/** 平台写面布局：非超管（含未登录）与缺页同一 NotFound，不进 Unauthorized */
+function PlatformAdminLayout() {
+  const { isAuthenticated, user } = useAuthStore()
+  if (!isAuthenticated || !user?.is_platform_admin) {
+    return <Page label="404"><NotFound /></Page>
+  }
+  return (
+    <ProtectedRoute>
+      <AdminLayout />
+    </ProtectedRoute>
+  )
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -58,13 +73,16 @@ function App() {
       <ErrorBoundary label="root">
         <Suspense fallback={PageLoading}>
           <Routes>
-            {/* 公开路由 */}
             <Route path="/login" element={<Page label="login"><Login /></Page>} />
             <Route path="/unauthorized" element={<Page label="unauthorized"><Unauthorized /></Page>} />
 
-            {/* 受保护路由 - 使用 Layout */}
+            <Route element={<PlatformAdminLayout />}>
+              <Route path="newapi" element={<Page label="newapi"><NewApiOps /></Page>} />
+              <Route path="platform-ops" element={<Page label="platform-ops"><PlatformOps /></Page>} />
+              <Route path="users" element={<Page label="users"><Users /></Page>} />
+            </Route>
+
             <Route
-              path="/"
               element={
                 <ProtectedRoute>
                   <AdminLayout />
@@ -93,46 +111,12 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              {/* 能力资产单入口（工单 73）：技能 Tab 内嵌 Skills 组件，权限由其内部 usePermission 控制 */}
+              <Route path="capabilities/installs" element={<Page label="installs"><MyInstalls /></Page>} />
               <Route path="capabilities" element={<Page label="capabilities"><Capabilities /></Page>} />
-              {/* 成员管理（SaaS S2）：租户内部事务，owner/admin 语义在页内守卫 */}
               <Route path="members" element={<Page label="members"><Members /></Page>} />
               <Route path="usage" element={<Page label="usage"><Usage /></Page>} />
-              {/* 平台运营为 admin 专属：菜单隐藏只是视觉，直达 URL 必须拦截（工单 69 修复） */}
-              <Route
-                path="platform-ops"
-                element={
-                  <ProtectedRoute requireAdmin>
-                    <Page label="platform-ops"><PlatformOps /></Page>
-                  </ProtectedRoute>
-                }
-              />
-              {/* UX-B4：路由级权限守卫——admin 专属页面（LLM 配置/中转站/用户/设置） */}
-              <Route
-                path="llm"
-                element={
-                  <ProtectedRoute requireAdmin>
-                    <Page label="llm"><LlmProviders /></Page>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="newapi"
-                element={
-                  <ProtectedRoute requireAdmin>
-                    <Page label="newapi"><NewApiOps /></Page>
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="llm" element={<Page label="llm"><LlmProviders /></Page>} />
               <Route path="logs" element={<Page label="logs"><LogCenter /></Page>} />
-              <Route
-                path="users"
-                element={
-                  <ProtectedRoute requireAdmin>
-                    <Page label="users"><Users /></Page>
-                  </ProtectedRoute>
-                }
-              />
               <Route path="data" element={<Page label="data"><Data /></Page>} />
               <Route
                 path="settings"
@@ -142,11 +126,8 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              {/* 布局内未匹配 → 404（保持导航可用） */}
-              <Route path="*" element={<Page label="404"><NotFound /></Page>} />
             </Route>
 
-            {/* 布局外未匹配（如匿名访问未知路径）→ 404 */}
             <Route path="*" element={<Page label="404"><NotFound /></Page>} />
           </Routes>
         </Suspense>

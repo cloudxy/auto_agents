@@ -20,7 +20,7 @@
 #   WATCHDOG_FAILURES     连续失败判定阈值，默认 3
 #   WATCHDOG_PID          目标进程 PID（第一优先）
 #   WATCHDOG_PID_FILE     PID 文件路径，取首行（第二优先）
-#   WATCHDOG_PID_PATTERN  pgrep -f 兜底匹配模式，默认 "run_backend.py"
+#   WATCHDOG_PID_PATTERN  pgrep -f 兜底匹配模式，默认 "scripts.runlib.backend"
 #                         （第三优先；slim 容器镜像无 pgrep，容器内前两者必填其一）
 #   WATCHDOG_RESTART      处置开关，默认 0：
 #                         0 = 只告警，不 kill 不拉起（安全缺省：深探测失败也可能
@@ -55,7 +55,7 @@ set -u
 INTERVAL="${WATCHDOG_INTERVAL:-10}"
 TIMEOUT="${WATCHDOG_TIMEOUT:-5}"
 FAILURES="${WATCHDOG_FAILURES:-3}"
-PID_PATTERN="${WATCHDOG_PID_PATTERN:-run_backend.py}"
+PID_PATTERN="${WATCHDOG_PID_PATTERN:-scripts.runlib.backend}"
 RESTART="${WATCHDOG_RESTART:-0}"
 RESTART_CMD="${WATCHDOG_RESTART_CMD:-}"
 ALERT_COOLDOWN="${WATCHDOG_ALERT_COOLDOWN:-300}"
@@ -220,7 +220,7 @@ act() {
 main() {
     if [ -z "$URL" ]; then
         echo "用法错误：必须设置 WATCHDOG_URL（健康端点完整 URL，含端口）" >&2
-        echo "示例：WATCHDOG_URL=http://127.0.0.1:9111/api/v1/health/deep WATCHDOG_DRY_RUN=1 bash scripts/watchdog.sh" >&2
+        echo "示例：WATCHDOG_URL=http://127.0.0.1:9111/api/v1/health/deep WATCHDOG_DRY_RUN=1 bash deploy/watchdog.sh" >&2
         exit 1
     fi
 

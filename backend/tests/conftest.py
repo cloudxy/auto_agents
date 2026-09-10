@@ -89,6 +89,13 @@ async def _current_user_override(request, credentials, session, default_role: st
                 identity = await load_auth_identity(session, payload["user_id"])
             if identity is None or not identity.is_active:
                 raise AuthenticationException(message="用户不存在或已停用")
+            from backend.services.tenant_expiry_service import assert_tenant_active
+
+            await assert_tenant_active(
+                session,
+                identity.tenant_id,
+                is_platform_admin=identity.is_platform_admin,
+            )
             return CurrentUser(
                 id=identity.id, username=identity.username, role=effective_role(identity),
                 tenant_id=identity.tenant_id, tenant_role=identity.tenant_role,
@@ -179,6 +186,103 @@ def viewer_client(app, client, _reset_auth_override):
     _set_auth_override(app, None)
 
 
+@pytest.fixture
+def platform_admin_client(app, client, _reset_auth_override):
+    """平台超管特权 TestClient（is_platform_admin=True；无凭据请求以超管快照通过）
+
+    T-04：平台写面 require_platform_admin。admin_client 是租户公司管理员
+    （role=admin 且 is_platform_admin=False）——GWT-06.3 拒绝身份，不是超管。
+    带真实 Bearer 仍走 JWT→DB 快照真链路。
+    """
+    from fastapi import Depends
+
+    from backend.app.api.deps import CurrentUser, _bearer, get_current_user
+    from platform_core.db import get_async_db as _get_async_db
+
+    async def _override(
+        request: _FastAPIRequest,
+        credentials=Depends(_bearer),
+        session=Depends(_get_async_db),
+    ):
+        if credentials is not None and getattr(credentials, "credentials", ""):
+            return await _current_user_override(
+                request, credentials, session, default_role=None,
+            )
+        return CurrentUser(
+            id=1, username="test-platform-admin", role="admin",
+            is_platform_admin=True,
+        )
+
+    app.dependency_overrides[get_current_user] = _override
+    yield client
+    _set_auth_override(app, None)
+
+
+def make_platform_admin_headers(db_session) -> dict:
+    """平台超管 Bearer（真链路：platform 租户 + is_platform_admin 用户 + JWT）"""
+    import asyncio
+
+    from backend.services.auth_service import AuthService
+    from platform_core.models.tenant import Tenant
+    from platform_core.models.user import User
+    from sqlalchemy import select
+
+    async def _go():
+        async with db_session() as s:
+            platform = Tenant(slug="platform", name="平台租户")
+            s.add(platform)
+            await s.flush()
+            s.add(User(
+                username="t04-root", email="t04-root@x.com", password_hash="x",
+                role="admin", tenant_id=platform.id, tenant_role=None,
+                is_platform_admin=True, is_admin=True,
+            ))
+            await s.commit()
+            root = (await s.execute(
+                select(User).where(User.username == "t04-root"))).scalar_one()
+            token = await AuthService(s).create_token({
+                "id": root.id, "username": "t04-root", "is_admin": True, "role": "admin",
+                "tenant_id": None, "tenant_role": None, "is_platform_admin": True,
+            })
+            return token.access_token
+
+    return {"Authorization": f"Bearer {asyncio.run(_go())}"}
+
+
+def make_tenant_owner_headers(db_session, *, slug: str = "co-a") -> tuple[dict, int]:
+    """企业负责人 Bearer（role=admin, is_platform_admin=False）+ tenant_id"""
+    import asyncio
+
+    from backend.services.auth_service import AuthService
+    from platform_core.models.tenant import Tenant
+    from platform_core.models.user import User
+    from sqlalchemy import select
+
+    async def _go():
+        async with db_session() as s:
+            tenant = Tenant(slug=slug, name=f"公司-{slug}")
+            s.add(tenant)
+            await s.flush()
+            tid = int(tenant.id)
+            s.add(User(
+                username=f"owner-{slug}", email=f"owner-{slug}@x.com", password_hash="x",
+                role="admin", tenant_id=tid, tenant_role="owner",
+                is_platform_admin=False, is_admin=True,
+            ))
+            await s.commit()
+            owner = (await s.execute(
+                select(User).where(User.username == f"owner-{slug}"))).scalar_one()
+            token = await AuthService(s).create_token({
+                "id": owner.id, "username": owner.username, "is_admin": True,
+                "role": "admin", "tenant_id": tid, "tenant_role": "owner",
+                "is_platform_admin": False,
+            })
+            return token.access_token, tid
+
+    token, tid = asyncio.run(_go())
+    return {"Authorization": f"Bearer {token}"}, tid
+
+
 # ---------------------------------------------------------------------------
 # DB fixture（E0.1a/1c 工单 01/03）：SQLite 会话与测试间隔离 + MySQL 保真通道
 #
@@ -253,7 +357,16 @@ def db_engine(tmp_path: Path) -> Iterator["AsyncEngine"]:
             await conn.run_sync(Base.metadata.create_all)
 
     asyncio.run(_create_all())
+    # ADR-0007 D4 / GWT-06.1：record_audit_standalone 读 DEFAULT。注入本测试引擎，
+    # 禁止 init_all() 连真库，也禁止 API 钩子回写请求 session。_reset_db_manager
+    # 在本 fixture 之前 purge，teardown 再 purge。
+    import platform_core.db as _db
+
+    manager = _db.get_manager()
+    manager.async_engines["DEFAULT"] = engine
     yield engine
+    if manager.async_engines.get("DEFAULT") is engine:
+        manager.async_engines.pop("DEFAULT", None)
     asyncio.run(engine.dispose())
     if mysql_schema is not None:
         asyncio.run(_run_schema_ddl(server_url, f"DROP DATABASE `{mysql_schema}`"))
@@ -318,6 +431,51 @@ def _reset_db_manager():
     _purge()
     yield
     _purge()
+
+
+@pytest.fixture(autouse=True)
+def _workers_online_unless_offline_node(request, monkeypatch):
+    """入队闸默认报告工人在线；GWT-18.2/18.4 离线节点走真心跳扫描。"""
+    if "test_spider_worker_offline.py" in request.node.nodeid:
+        return
+
+    async def _online(_client) -> int:
+        return 1
+
+    monkeypatch.setattr(
+        "backend.services.spider_worker_gate.count_online_workers",
+        _online,
+    )
+
+
+def _purge_quota_count_keys() -> None:
+    """DEL quota:count:* via URL 直连（禁止 redis_client→init_all 拉真 MySQL）。"""
+    import redis as redis_sync
+
+    from config import settings
+    from platform_core.queues import QUOTA_COUNT_PREFIX
+
+    url = str(settings.get("REDIS.DEFAULT.URL") or "")
+    if not url:
+        return
+    client = redis_sync.from_url(url, decode_responses=True, socket_connect_timeout=0.5)
+    try:
+        keys = list(client.scan_iter(match=f"{QUOTA_COUNT_PREFIX}*", count=200))
+        if keys:
+            client.delete(*keys)
+    finally:
+        client.close()
+
+
+@pytest.fixture(autouse=True)
+def _clear_quota_count_cache():
+    """每测前清配额 COUNT 缓存，避免 60s TTL 污染 SQLite 新库的 tenant 计数。"""
+    try:
+        _purge_quota_count_keys()
+    except Exception:  # noqa: BLE001 不可达则 _cached_count 回源 DB
+        pass
+    yield
+
 
 @pytest.fixture
 def db_client(

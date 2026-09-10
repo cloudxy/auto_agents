@@ -14,6 +14,7 @@ import os
 from typing import Optional
 
 from config import settings
+from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
 
 logger = get_logger("api")
@@ -30,7 +31,25 @@ __all__ = [
     "extract_store_targets",
     "extract_flow",
     "_read_task_log_sync",
+    "require_enqueue_tenant",
+    "NO_TENANT_ENQUEUE_MESSAGE",
 ]
+
+NO_TENANT_ENQUEUE_MESSAGE = "没有企业身份，无法入队"
+
+
+def require_enqueue_tenant(tenant_id: int | None) -> int:
+    logger.info(f"入队租户校验 | tenant={tenant_id}")
+    if tenant_id is None:
+        raise BusinessException(NO_TENANT_ENQUEUE_MESSAGE)
+    try:
+        tid = int(tenant_id)
+    except (TypeError, ValueError):
+        raise BusinessException(NO_TENANT_ENQUEUE_MESSAGE)
+    if tid <= 0:
+        raise BusinessException(NO_TENANT_ENQUEUE_MESSAGE)
+    return tid
+
 
 # 项目根目录（与 platform_core.logger 的日志根解析保持一致）
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

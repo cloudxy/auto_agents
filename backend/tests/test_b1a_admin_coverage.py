@@ -2,11 +2,10 @@
 
 覆盖路由清单（本轮补缺口；正常路径已由既有文件覆盖，见映射）：
 - GET  /api/v1/admin/tenants           匿名 401
-  （403 普通admin / 200 平台超管 → test_saas_signup_expiry.py::test_platform_ops_tenant_list）
-- POST /api/v1/admin/tenants           匿名 401 / viewer 403 / slug 撞名容错 + 落库副作用
-  （B5 修复 F-1：守卫对齐兄弟路由为 require_platform_admin，正面路径需平台超管
-  Bearer 真链路；普通 admin 现为 403）
-- PATCH /api/v1/admin/tenants/{id}     匿名 401 / 非平台 admin 403 / 不存在 404
+  （404 普通admin / 200 平台超管 → test_saas_signup_expiry.py::test_platform_ops_tenant_list）
+- POST /api/v1/admin/tenants           匿名 401 / viewer 404 / slug 撞名容错 + 落库副作用
+  （T-05：非超管 404 同形；正面路径需平台超管 Bearer 真链路）
+- PATCH /api/v1/admin/tenants/{id}     匿名 401 / 非平台 admin 404 / 不存在 404
   （status 白名单 → test_r5_r7_fixes.py）
 - GET|POST|PATCH|DELETE /api/v1/admin/users   匿名 401 / viewer 403
   （CRUD 正常路径 + 防自锁护栏 → test_admin_users_crud.py）
@@ -113,11 +112,11 @@ def test_create_tenant_anonymous_401(client, db_session):
     assert asyncio.run(_check()) == 0
 
 
-def test_create_tenant_viewer_403(viewer_client, db_session):
-    """viewer 直调创建公司 → 403，零落库"""
+def test_create_tenant_viewer_404(viewer_client, db_session):
+    """viewer 直调创建公司 → 404 同形，零落库"""
     resp = viewer_client.post(TENANTS_URL, json={"name": "越权公司"})
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
 
     async def _check():
         async with db_session() as s:
@@ -126,12 +125,11 @@ def test_create_tenant_viewer_403(viewer_client, db_session):
     assert asyncio.run(_check()) == 0
 
 
-def test_create_tenant_plain_admin_403(db_client, admin_client, db_session):
-    """B5 修复 F-1（用例由锁定 201 翻转为 403）：普通 admin（非平台超管）
-    创建租户 → 403——POST 守卫已对齐兄弟路由 GET/PATCH 的 require_platform_admin"""
+def test_create_tenant_plain_admin_404(db_client, admin_client, db_session):
+    """T-05：普通 admin（非平台超管）创建租户 → 404 同形，零落库"""
     resp = admin_client.post(TENANTS_URL, json={"name": "普通管理员建"})
-    assert resp.status_code == 403, resp.text
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["code"] == "HTTP_404"
 
     async def _check():
         async with db_session() as s:
@@ -162,11 +160,11 @@ def test_patch_tenant_anonymous_401(client):
     assert resp.json()["code"] == "AUTH_FAILED"
 
 
-def test_patch_tenant_plain_admin_403(admin_client):
-    """非平台超管的 admin → 403（require_platform_admin 守卫）"""
+def test_patch_tenant_plain_admin_404(admin_client):
+    """非平台超管的 admin → 404 同形（运营台存在性隐藏）"""
     resp = admin_client.patch(f"{TENANTS_URL}/1", json={"status": "disabled"})
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
 
 
 def test_patch_tenant_not_found_404(db_client, db_engine, db_session):

@@ -52,6 +52,7 @@ def _task(**overrides) -> MagicMock:
         updated_at=None,
         started_at=None,
         completed_at=None,
+        tenant_id=1,
     )
     base.update(overrides)
     return MagicMock(**base)
@@ -67,6 +68,7 @@ def _task_service() -> SpiderTaskService:
     svc.result_repo = MagicMock()
     svc.notifier = MagicMock()
     svc.notifier.notify_task_finished = AsyncMock()
+    svc._check_enqueue_quota = AsyncMock()
     return svc
 
 
@@ -214,15 +216,30 @@ class TestNotifyService:
 
 
 class TestExportResults:
-    """结果导出（csv / json）—— id 游标分批流式产出，内容与全量导出逐字节一致"""
+    """结果导出（csv / json）—— 非候选窗口最多 100 条；空窗不下载"""
 
     @staticmethod
     def _agen(rows):
-        """iter_by_task 桩：逐行产出 rows 的异步生成器"""
-        async def _gen(task_id):
+        """iter_by_task 桩：逐行产出 rows 的异步生成器（忽略 exclude/limit kwargs）"""
+        async def _gen(task_id, *args, **kwargs):
             for r in rows:
                 yield r
         return _gen(0)
+
+    @staticmethod
+    def _row(rid: int, source: str | None = "web", **overrides) -> MagicMock:
+        base = dict(
+            id=rid, task_id=1, spider_name="example", url=f"https://e.com/{rid}",
+            title=f"t{rid}", content=f"c{rid}", source=source, item_type="BaseItem",
+            extra=None, created_at=None,
+        )
+        base.update(overrides)
+        return MagicMock(**base)
+
+    def _bind_iter(self, svc, rows) -> None:
+        svc.result_repo.iter_by_task = MagicMock(
+            side_effect=lambda tid, *a, **kw: self._agen(rows)
+        )
 
     @pytest.mark.asyncio
     async def test_export_csv_with_bom(self):
@@ -233,7 +250,7 @@ class TestExportResults:
             title="标题", content="内容", source="web", item_type="BaseItem",
             extra=None, created_at=None,
         )
-        svc.result_repo.iter_by_task = MagicMock(side_effect=lambda tid: self._agen([row]))
+        self._bind_iter(svc, [row])
 
         stream, filename, media_type = await svc.export_results(1, "csv")
         content = b"".join([chunk async for chunk in stream])
@@ -250,7 +267,7 @@ class TestExportResults:
             id=1, task_id=1, spider_name="example", url=None, title=None,
             content="{}", source=None, item_type=None, extra=None, created_at=None,
         )
-        svc.result_repo.iter_by_task = MagicMock(side_effect=lambda tid: self._agen([row]))
+        self._bind_iter(svc, [row])
 
         stream, filename, _ = await svc.export_results(1, "json")
         content = b"".join([chunk async for chunk in stream])
@@ -274,7 +291,7 @@ class TestExportResults:
                 content=None, source=None, item_type=None, extra=None, created_at=None,
             ),
         ]
-        svc.result_repo.iter_by_task = MagicMock(side_effect=lambda tid: self._agen(rows))
+        self._bind_iter(svc, rows)
 
         stream, _, _ = await svc.export_results(1, "csv")
         content = b"".join([chunk async for chunk in stream])
@@ -316,7 +333,7 @@ class TestExportResults:
                 content=None, source=None, item_type=None, extra=None, created_at=None,
             ),
         ]
-        svc.result_repo.iter_by_task = MagicMock(side_effect=lambda tid: self._agen(rows))
+        self._bind_iter(svc, rows)
 
         stream, _, media_type = await svc.export_results(1, "json")
         content = b"".join([chunk async for chunk in stream])
@@ -339,26 +356,114 @@ class TestExportResults:
         assert content == expected
 
     @pytest.mark.asyncio
-    async def test_export_json_empty_task_is_bare_empty_array(self):
+    async def test_export_empty_task_raises_without_stream(self):
+        """GWT-03.2：0 条非候选 → 提示句，不返回可下载空文件"""
         svc = _query_service()
         svc.repo.get_by_id = AsyncMock(return_value=_task())
-        svc.result_repo.iter_by_task = MagicMock(side_effect=lambda tid: self._agen([]))
+        self._bind_iter(svc, [])
+        with pytest.raises(BusinessException, match="没有可导出的结果"):
+            await svc.export_results(1, "json")
+
+    @pytest.mark.asyncio
+    async def test_export_only_candidates_raises_without_stream(self):
+        svc = _query_service()
+        svc.repo.get_by_id = AsyncMock(return_value=_task())
+        self._bind_iter(svc, [self._row(1, source="marketplace"), self._row(2, source="marketplace")])
+        with pytest.raises(BusinessException, match="没有可导出的结果"):
+            await svc.export_results(1, "csv")
+        # 未进入编码：调用方拿不到迭代器
+
+    @pytest.mark.asyncio
+    async def test_export_thirty_non_candidate_rows_csv(self):
+        """GWT-03.1：30 条非候选 → 可打开 CSV，行数 30"""
+        svc = _query_service()
+        svc.repo.get_by_id = AsyncMock(return_value=_task())
+        self._bind_iter(svc, [self._row(i) for i in range(1, 31)])
+        stream, filename, media_type = await svc.export_results(1, "csv")
+        content = b"".join([chunk async for chunk in stream])
+        assert filename.endswith(".csv") and media_type == "text/csv"
+        text = content.decode("utf-8-sig")
+        parsed = list(csv.DictReader(io.StringIO(text)))
+        assert len(parsed) == 30
+        assert parsed[0]["id"] == "1" and parsed[-1]["id"] == "30"
+
+    @pytest.mark.asyncio
+    async def test_export_thirty_non_candidate_rows_json(self):
+        svc = _query_service()
+        svc.repo.get_by_id = AsyncMock(return_value=_task())
+        self._bind_iter(svc, [self._row(i) for i in range(1, 31)])
+        stream, filename, _ = await svc.export_results(1, "json")
+        data = json.loads(b"".join([c async for c in stream]))
+        assert filename.endswith(".json")
+        assert len(data) == 30
+
+    @pytest.mark.asyncio
+    async def test_export_one_hundred_twenty_capped_at_one_hundred(self):
+        """GWT-03.3：120 条非候选 → 最多 100"""
+        svc = _query_service()
+        svc.repo.get_by_id = AsyncMock(return_value=_task())
+        self._bind_iter(svc, [self._row(i) for i in range(1, 121)])
         stream, _, _ = await svc.export_results(1, "json")
-        assert b"".join([c async for c in stream]) == b"[]"
+        data = json.loads(b"".join([c async for c in stream]))
+        assert len(data) == 100
+        assert data[0]["id"] == 1 and data[-1]["id"] == 100
+        call_kw = svc.result_repo.iter_by_task.call_args
+        assert call_kw.kwargs.get("limit") == 100
+        assert call_kw.kwargs.get("exclude_source") == "marketplace"
+
+    @pytest.mark.asyncio
+    async def test_export_skips_marketplace_candidates(self):
+        svc = _query_service()
+        svc.repo.get_by_id = AsyncMock(return_value=_task())
+        rows = [
+            self._row(1, source="marketplace"),
+            self._row(2, source="web"),
+            self._row(3, source=None),
+            self._row(4, source="marketplace"),
+        ]
+        self._bind_iter(svc, rows)
+        stream, _, _ = await svc.export_results(1, "json")
+        data = json.loads(b"".join([c async for c in stream]))
+        assert [d["id"] for d in data] == [2, 3]
 
     @pytest.mark.asyncio
     async def test_export_missing_task_raises(self):
         svc = _query_service()
         svc.repo.get_by_id = AsyncMock(return_value=None)
+        svc.result_repo.iter_by_task = MagicMock()
         with pytest.raises(NotFoundException):
             await svc.export_results(999, "csv")
+        svc.result_repo.iter_by_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_export_cross_tenant_not_executed(self):
+        """GWT-03.4：企业 A 导出企业 B 任务 → 拒绝；iter 未执行"""
+        svc = _query_service()
+        # tenant_scope 下 B 的任务对 A 为 miss，与「没有这个任务」同形
+        svc.repo.get_by_id = AsyncMock(return_value=None)
+        svc.result_repo.iter_by_task = MagicMock()
+        with pytest.raises(NotFoundException):
+            await svc.export_results(42, "csv")
+        svc.result_repo.iter_by_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_list_results_missing_task_same_as_no_such_task(self):
+        """GWT-10.3：猜他企业任务编号 → 与「没有这个任务」同形"""
+        svc = _query_service()
+        svc.repo.get_by_id = AsyncMock(return_value=None)
+        svc.result_repo.list_by_task = AsyncMock()
+        with pytest.raises(NotFoundException, match="爬虫任务"):
+            await svc.list_results(42)
+        svc.result_repo.list_by_task.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_export_bad_format_raises(self):
         svc = _query_service()
         svc.repo.get_by_id = AsyncMock(return_value=_task())
-        with pytest.raises(BusinessException):
+        svc.result_repo.iter_by_task = MagicMock()
+        with pytest.raises(BusinessException, match="csv/json"):
             await svc.export_results(1, "xlsx")
+        svc.result_repo.iter_by_task.assert_not_called()
 
 
 class TestTaskLogOffset:
@@ -440,6 +545,18 @@ class TestScheduleService:
             )
 
     @pytest.mark.asyncio
+    async def test_create_rejects_without_tenant(self):
+        from platform_core.schemas.spider import ScheduleRequest
+        svc = self._schedule_service()
+        svc.repo.find_by_spider = AsyncMock(return_value=None)
+        svc.repo.create = AsyncMock()
+        with pytest.raises(BusinessException, match="没有企业身份"):
+            await svc.create_schedule(
+                ScheduleRequest(spider_name="example", cron_expr="*/10 * * * *")
+            )
+        svc.repo.create.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_create_success_computes_next_run(self):
         from platform_core.schemas.spider import ScheduleRequest
         svc = self._schedule_service()
@@ -451,11 +568,13 @@ class TestScheduleService:
         )
         svc.repo.create = AsyncMock(return_value=created)
         resp = await svc.create_schedule(
-            ScheduleRequest(spider_name="example", cron_expr="*/10 * * * *")
+            ScheduleRequest(spider_name="example", cron_expr="*/10 * * * *"),
+            tenant_id=8,
         )
         assert resp.id == 1
         kwargs = svc.repo.create.call_args.kwargs
         assert kwargs["next_run_at"] is not None
+        assert kwargs["tenant_id"] == 8
 
     @pytest.mark.asyncio
     async def test_update_disable_clears_next_run(self):
@@ -502,7 +621,7 @@ class TestSpiderSchedulerLockRenewal:
 
         repo = MagicMock()
         repo.list_due = AsyncMock(return_value=[
-            MagicMock(id=1, spider_name="example", cron_expr="* * * * *", params=None)
+            MagicMock(id=1, spider_name="example", cron_expr="* * * * *", params=None, tenant_id=8)
         ])
         repo.update = AsyncMock()
         ctx = MagicMock()
@@ -540,7 +659,7 @@ class TestSpiderSchedulerLockRenewal:
 
         repo = MagicMock()
         repo.list_due = AsyncMock(return_value=[
-            MagicMock(id=1, spider_name="example", cron_expr="* * * * *", params=None)
+            MagicMock(id=1, spider_name="example", cron_expr="* * * * *", params=None, tenant_id=8)
         ])
         repo.update = AsyncMock()
         ctx = MagicMock()
@@ -574,7 +693,9 @@ class TestSpiderSchedulerFire:
         session = MagicMock()
         repo = MagicMock()
         repo.update = AsyncMock()
-        schedule = MagicMock(id=1, spider_name="example", cron_expr="* * * * *", params=None)
+        schedule = MagicMock(
+            id=1, spider_name="example", cron_expr="* * * * *", params=None, tenant_id=42
+        )
 
         busy_service = MagicMock()
         busy_service.enqueue = AsyncMock(side_effect=BusinessException("已有进行中的任务"))
@@ -585,3 +706,38 @@ class TestSpiderSchedulerFire:
         kwargs = repo.update.call_args.kwargs
         assert kwargs["next_run_at"] is not None
         assert kwargs["last_run_at"] is not None
+        assert busy_service.enqueue.await_args.kwargs["tenant_id"] == 42
+
+    @pytest.mark.asyncio
+    async def test_fire_skips_enqueue_when_schedule_has_no_tenant(self):
+        """GWT-09.2 对称：计划无企业则不入队（enqueue 拒绝），仍推进时刻"""
+        scheduler = SpiderScheduler()
+        session = MagicMock()
+        repo = MagicMock()
+        repo.update = AsyncMock()
+        schedule = MagicMock(
+            id=2, spider_name="example", cron_expr="* * * * *", params=None, tenant_id=None
+        )
+        busy_service = MagicMock()
+        busy_service.enqueue = AsyncMock(side_effect=BusinessException("没有企业身份，无法入队"))
+        with patch("backend.services.schedule_service.SpiderService", return_value=busy_service):
+            await scheduler._fire(session, repo, schedule, next_fire_time("* * * * *"))
+        busy_service.enqueue.assert_awaited_once()
+        assert busy_service.enqueue.await_args.kwargs["tenant_id"] is None
+        repo.update.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_fire_enqueues_with_schedule_tenant(self):
+        """GWT-09.2：本企业定时规则触发 → 新任务仍属该企业"""
+        scheduler = SpiderScheduler()
+        session = MagicMock()
+        repo = MagicMock()
+        repo.update = AsyncMock()
+        schedule = MagicMock(
+            id=3, spider_name="example", cron_expr="* * * * *", params=None, tenant_id=42
+        )
+        ok_service = MagicMock()
+        ok_service.enqueue = AsyncMock()
+        with patch("backend.services.schedule_service.SpiderService", return_value=ok_service):
+            await scheduler._fire(session, repo, schedule, next_fire_time("* * * * *"))
+        assert ok_service.enqueue.await_args.kwargs["tenant_id"] == 42

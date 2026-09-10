@@ -27,6 +27,11 @@ BASE = "/api/v1/spiders/schedules"
 VALID_CRON = "*/5 * * * *"  # 10 字符，合法 5 段
 
 
+def _tenant_auth(db_session, slug="co-sch"):
+    from conftest import make_tenant_owner_headers
+    return make_tenant_owner_headers(db_session, slug=slug)
+
+
 # ---------------------------------------------------------------------------
 # GET /schedules（require_login：admin/operator/viewer 均可读）
 # ---------------------------------------------------------------------------
@@ -40,13 +45,14 @@ def test_list_schedules_empty_ok(db_client, viewer_client):
     assert data["items"] == []
 
 
-def test_list_schedules_returns_created(db_client, admin_client):
+def test_list_schedules_returns_created(db_client, db_session):
     """创建后列表回显（结构 + 计数一致）"""
-    post = admin_client.post(
-        BASE, json={"spider_name": "example", "cron_expr": VALID_CRON}
+    headers, _tid = _tenant_auth(db_session)
+    post = db_client.post(
+        BASE, json={"spider_name": "example", "cron_expr": VALID_CRON}, headers=headers,
     )
     assert post.status_code == 200, post.text
-    resp = admin_client.get(BASE)
+    resp = db_client.get(BASE, headers=headers)
     data = resp.json()["data"]
     assert data["total"] == 1
     item = data["items"][0]
@@ -68,12 +74,14 @@ def test_schedules_anonymous_401(client):
 # POST /schedules（require_admin）
 # ---------------------------------------------------------------------------
 
-def test_create_schedule_admin_ok(db_client, admin_client, db_engine, db_session):
+def test_create_schedule_admin_ok(db_client, db_engine, db_session):
     """admin 创建：CREATED 信封 + 落库一行 + next_run_at 已按 cron 预计算（副作用）"""
-    resp = admin_client.post(
+    headers, tid = _tenant_auth(db_session)
+    resp = db_client.post(
         BASE,
         json={"spider_name": "example", "cron_expr": VALID_CRON,
               "params": '{"urls": ["https://example.com"]}'},
+        headers=headers,
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -90,6 +98,7 @@ def test_create_schedule_admin_ok(db_client, admin_client, db_engine, db_session
             assert len(rows) == 1
             assert rows[0].cron_expr == VALID_CRON
             assert rows[0].next_run_at is not None
+            assert rows[0].tenant_id == tid
 
     asyncio.run(_check())
 
@@ -156,11 +165,16 @@ def test_create_schedule_unregistered_spider_400(db_client, admin_client, db_eng
     asyncio.run(_check())
 
 
-def test_create_schedule_duplicate_spider_400(db_client, admin_client, db_engine, db_session):
+def test_create_schedule_duplicate_spider_400(db_client, db_engine, db_session):
     """同爬虫第二条调度 → 400 + 库中仍只有一条（唯一性 + 副作用不变）"""
-    first = admin_client.post(BASE, json={"spider_name": "example", "cron_expr": VALID_CRON})
+    headers, _tid = _tenant_auth(db_session)
+    first = db_client.post(
+        BASE, json={"spider_name": "example", "cron_expr": VALID_CRON}, headers=headers,
+    )
     assert first.status_code == 200, first.text
-    second = admin_client.post(BASE, json={"spider_name": "example", "cron_expr": "0 * * * *"})
+    second = db_client.post(
+        BASE, json={"spider_name": "example", "cron_expr": "0 * * * *"}, headers=headers,
+    )
     assert second.status_code == 400
     assert "已存在调度计划" in second.json()["message"]
 
@@ -176,16 +190,19 @@ def test_create_schedule_duplicate_spider_400(db_client, admin_client, db_engine
 # PATCH /schedules/{id}（require_admin）
 # ---------------------------------------------------------------------------
 
-def _create_schedule(admin_client) -> int:
-    resp = admin_client.post(BASE, json={"spider_name": "example", "cron_expr": VALID_CRON})
+def _create_schedule(client, headers) -> int:
+    resp = client.post(
+        BASE, json={"spider_name": "example", "cron_expr": VALID_CRON}, headers=headers,
+    )
     assert resp.status_code == 200, resp.text
     return resp.json()["data"]["id"]
 
 
-def test_update_schedule_disable_clears_next_run(db_client, admin_client, db_engine, db_session):
+def test_update_schedule_disable_clears_next_run(db_client, db_engine, db_session):
     """停用 → UPDATED + next_run_at 清空 + 库中 enabled=False（状态变更副作用）"""
-    sid = _create_schedule(admin_client)
-    resp = admin_client.patch(f"{BASE}/{sid}", json={"enabled": False})
+    headers, _tid = _tenant_auth(db_session)
+    sid = _create_schedule(db_client, headers)
+    resp = db_client.patch(f"{BASE}/{sid}", json={"enabled": False}, headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["code"] == "UPDATED"
@@ -202,20 +219,22 @@ def test_update_schedule_disable_clears_next_run(db_client, admin_client, db_eng
     asyncio.run(_check())
 
 
-def test_update_schedule_change_cron_recalculates(db_client, admin_client):
+def test_update_schedule_change_cron_recalculates(db_client, db_session):
     """改表达式 → UPDATED + cron 更新 + next_run_at 按新表达式重算（非空）"""
-    sid = _create_schedule(admin_client)
-    resp = admin_client.patch(f"{BASE}/{sid}", json={"cron_expr": "0 3 * * *"})
+    headers, _tid = _tenant_auth(db_session)
+    sid = _create_schedule(db_client, headers)
+    resp = db_client.patch(f"{BASE}/{sid}", json={"cron_expr": "0 3 * * *"}, headers=headers)
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     assert data["cron_expr"] == "0 3 * * *"
     assert data["next_run_at"] is not None
 
 
-def test_update_schedule_invalid_cron_400(db_client, admin_client, db_engine, db_session):
+def test_update_schedule_invalid_cron_400(db_client, db_engine, db_session):
     """更新非法 cron → 400 + 原表达式未被破坏（拒绝路径零副作用）"""
-    sid = _create_schedule(admin_client)
-    resp = admin_client.patch(f"{BASE}/{sid}", json={"cron_expr": "* * * 99 *"})
+    headers, _tid = _tenant_auth(db_session)
+    sid = _create_schedule(db_client, headers)
+    resp = db_client.patch(f"{BASE}/{sid}", json={"cron_expr": "* * * 99 *"}, headers=headers)
     assert resp.status_code == 400
     assert "cron" in resp.json()["message"]
 
@@ -245,10 +264,11 @@ def test_update_schedule_operator_403(operator_client):
 # DELETE /schedules/{id}（require_admin）
 # ---------------------------------------------------------------------------
 
-def test_delete_schedule_ok(db_client, admin_client, db_engine, db_session):
+def test_delete_schedule_ok(db_client, db_engine, db_session):
     """删除 → DELETED + 回执 {schedule_id, spider_name} + 库中已无该行（副作用）"""
-    sid = _create_schedule(admin_client)
-    resp = admin_client.delete(f"{BASE}/{sid}")
+    headers, _tid = _tenant_auth(db_session)
+    sid = _create_schedule(db_client, headers)
+    resp = db_client.delete(f"{BASE}/{sid}", headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["code"] == "DELETED"
@@ -260,7 +280,7 @@ def test_delete_schedule_ok(db_client, admin_client, db_engine, db_session):
             assert rows == []  # 物理删除
 
     asyncio.run(_check())
-    listing = admin_client.get(BASE).json()["data"]
+    listing = db_client.get(BASE, headers=headers).json()["data"]
     assert listing["total"] == 0  # 列表同步消失
 
 

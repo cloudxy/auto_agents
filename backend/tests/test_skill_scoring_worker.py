@@ -151,6 +151,7 @@ async def test_invalid_then_valid_succeeds_on_retry(db_session, queue_redis, see
 
 
 def test_rescore_endpoint_pushes_queue(db_client, admin_client, db_engine, db_session, queue_redis, seeded):
+    """T-16：现网金标仅 HTTP 200 + 入队，不得勾 GWT-70.6 / 70.9 / 74.5。"""
     resp = db_client.post("/api/v1/skills/rate-me/rescore")
     assert resp.status_code == 200
     assert "rate-me" in queue_redis.items

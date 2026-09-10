@@ -37,6 +37,8 @@ services:
       retries: 20
     volumes:
       - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"   # 宿主机 run.py / setup.sh 走 127.0.0.1
 
   redis:
     image: redis:7-alpine
@@ -53,6 +55,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    ports:
+      - "6379:6379"   # 宿主机 run.py / setup.sh 走 127.0.0.1
 
   backend:
     build: .
@@ -63,7 +67,7 @@ services:
           memory: 1g
           cpus: "1.0"
     logging: *default-logging
-    command: ["uv", "run", "python", "run_backend.py", "--no-reload", "--env", "local"]
+    command: ["uv", "run", "python", "-m", "scripts.runlib.backend", "--no-reload", "--env", "local"]
     ports:
       - "9111:9111"
     environment:
@@ -100,3 +104,13 @@ services:
 
 volumes:
   mysql_data:
+
+# T-14: LiteLLM Proxy is an independent fault domain (deploy/litellm).
+# Root must not declare a litellm service (ADR-0010 / SH-01).
+# This network is created by deploy/litellm (name: litellm-net).
+# Backend may join later; do not attach it in this file yet.
+# If the root stack starts first: docker network create litellm-net
+networks:
+  litellm-net:
+    name: litellm-net
+    external: true

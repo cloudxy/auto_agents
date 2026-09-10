@@ -13,7 +13,9 @@ const api = createApiClient({
   getAuthToken: () => useAuthStore.getState().token,
   onUnauthorized: () => {
     useAuthStore.getState().logout()
-    navigateToLogin(window.location.pathname)
+    const here = window.location.pathname
+    if (here === '/login') return
+    navigateToLogin(here)
   },
 })
 

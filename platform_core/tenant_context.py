@@ -16,7 +16,7 @@
   （tenant_id IS NULL 可见），写侧仍注入本租户条件（平台公共行仅平台态可写）。
 
 豁免/共享读清单的唯一事实源在应用组装层（backend/app/tenant_isolation.py），
-启动时显式注册；scripts/check-arch.sh R13 从该事实源做同步校验（防双写漂移）。
+启动时显式注册；tools/check/arch.sh R13 从该事实源做同步校验（防双写漂移）。
 """
 from contextlib import contextmanager
 from contextvars import ContextVar

@@ -6,19 +6,107 @@ tenants.quota JSON 契约：{task_concurrency, result_storage, llm_tokens_month}
 - 结果存储：结果回流时统计本租户 spider_results 行数，超存储拒绝；
 - LLM token：月度用量（llm_token_usage 聚合）超配额拒绝 LLM 调用。
 超限统一抛 QuotaExceededException（业务码 QUOTA_EXCEEDED，文案可行动）。
+内部码可保留；用户可见句不得渲染 QUOTA_EXCEEDED / 裸 429。
 """
-from sqlalchemy import func, select
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import String, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.repositories.spider_result_repository import SpiderResultRepository
 from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
 from platform_core.models.llm_token_usage import LlmTokenUsage
-from platform_core.models.spider_result import SpiderResult
 from platform_core.models.spider_task import SpiderTask
 from platform_core.models.tenant import Tenant
 from platform_core.redis_async import get_async_redis
 
 logger = get_logger("service.quota")
+
+# 用户可见句（X-QUOTA / FR-12）。内部码 QUOTA_EXCEEDED 不得出现在这些常量里。
+PLAN_FULL_USER = "已达配额上限"
+PLAN_FULL_CTA = "申请提升配额"
+NEAR_LIMIT_USER = "接近上限。超额操作会被拒绝。"
+GATEWAY_UNREACHABLE_USER = "平台 LLM 网关不可达"
+NO_MODEL_USER = "还没有平台模型"
+PROVIDER_ERROR_USER = "本企业供应商调用失败"
+STORAGE_CLEANUP_CTA = "去结果库"
+SHANGHAI_TZ = "Asia/Shanghai"
+
+
+def shanghai_now() -> datetime:
+    logger.debug("计算 Asia/Shanghai 当前时刻")
+    return datetime.now(ZoneInfo(SHANGHAI_TZ))
+
+
+def shanghai_today() -> date:
+    logger.debug("计算 Asia/Shanghai 业务日")
+    return shanghai_now().date()
+
+
+def shanghai_year_month() -> str:
+    logger.debug("计算 Asia/Shanghai 业务月")
+    return shanghai_now().strftime("%Y-%m")
+
+
+def shanghai_window_start(days: int = 6) -> datetime:
+    logger.debug(f"计算 Asia/Shanghai 窗口起点 | days={days}")
+    start_local = datetime.combine(
+        shanghai_today() - timedelta(days=days), datetime.min.time(),
+        tzinfo=ZoneInfo(SHANGHAI_TZ),
+    )
+    return start_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def user_visible_llm_failure(code: str, message: str = "") -> str:
+    logger.debug(f"映射 LLM 失败码 | code={code}")
+    if code == "QUOTA_EXCEEDED":
+        return f"{PLAN_FULL_USER}。{PLAN_FULL_CTA}"
+    if code == "LLM_GATEWAY_UNREACHABLE":
+        return GATEWAY_UNREACHABLE_USER
+    if code == "LLM_GATEWAY_NO_MODEL":
+        return NO_MODEL_USER
+    if code == "LLM_PROVIDER_ERROR":
+        return PROVIDER_ERROR_USER
+    if code == "LLM_COST_FUSE":
+        return message or "平台 LLM 成本熔断，请稍后重试"
+    return message or "调用失败"
+
+
+def build_usage_alerts(usage: dict, quota: dict, llm_error_code: str | None = None) -> list[dict]:
+    logger.debug(f"生成用量告警 | llm_error_code={llm_error_code}")
+    alerts: list[dict] = []
+    if llm_error_code == "LLM_GATEWAY_UNREACHABLE":
+        alerts.append({
+            "metric": "llm_gateway",
+            "level": "error",
+            "message": user_visible_llm_failure(llm_error_code),
+        })
+    labels = {
+        "task_concurrency": "任务并发",
+        "result_storage": "结果存储",
+        "llm_tokens_month": "LLM Token",
+    }
+    for key in labels:
+        limit = int(quota.get(key) or 0)
+        used = int(usage.get(key) or 0)
+        if limit <= 0:
+            continue
+        ratio = used / limit
+        if ratio >= 1.0:
+            alerts.append({
+                "metric": key,
+                "level": "full",
+                "message": PLAN_FULL_USER,
+            })
+        elif ratio >= 0.9:
+            alerts.append({
+                "metric": key,
+                "level": "near",
+                "message": NEAR_LIMIT_USER,
+            })
+    return alerts
 
 # 免费档默认配额（tenants.quota 缺失时兜底；平台级默认，运营台可改行级）
 DEFAULT_QUOTA = {
@@ -52,6 +140,14 @@ _QUOTA_COUNT_PREFIX = "quota:count:"
 
 class QuotaService:
     """配额检查点（session 注入；调用方在写入路径前置调用）"""
+
+    async def _emit_quota(self, tenant_id: int, dimension: str) -> None:
+        logger.info(f"配额拒绝事件 | tenant={tenant_id} dim={dimension}")
+        from backend.services.product_event_service import emit_product_event
+        await emit_product_event(
+            self.session, "quota_exceeded", tenant_id=tenant_id,
+            props={"dimension": dimension},
+        )
 
     async def _cached_count(self, key: str, count_fn) -> int:
         """Redis TTL 缓存的计数（B4）：命中免 COUNT；miss/故障回源 DB"""
@@ -91,28 +187,28 @@ class QuotaService:
 
         active = await self._cached_count(f"active_tasks:{tenant_id}", _count_active)
         if active >= limit:
+            await self._emit_quota(tenant_id, "concurrency")
             raise QuotaExceededException(
-                f"任务并发已达配额上限（{active}/{limit}）：请等待运行中任务完成，"
-                "或联系平台管理员提升套餐"
+                f"任务并发{PLAN_FULL_USER}（{active}/{limit}）：请等待运行中任务完成，"
+                f"或{PLAN_FULL_CTA}"
             )
         logger.debug(f"配额检查·任务并发 | tenant={tenant_id} {active}/{limit}")
 
     async def check_result_storage(self, tenant_id: int) -> None:
-        """结果回流前：本租户 spider_results 行数 < result_storage"""
+        """结果回流前：本租户非候选 spider_results 行数 < result_storage"""
+        logger.info(f"配额检查·结果存储 | tenant={tenant_id}")
         tenant = await self._tenant(tenant_id)
         limit = int(quota_of(tenant)["result_storage"])
-        async def _count_results() -> int:
-            return int((await self.session.execute(
-                select(func.count()).select_from(SpiderResult).where(
-                    SpiderResult.tenant_id == tenant_id
-                )
-            )).scalar_one())
+        repo = SpiderResultRepository(self.session)
 
-        stored = await self._cached_count(f"results:{tenant_id}", _count_results)
+        async def _count_results() -> int:
+            return await repo.count_owned_by_tenant(tenant_id)
+
+        stored = await self._cached_count(f"results_owned:{tenant_id}", _count_results)
         if stored >= limit:
+            await self._emit_quota(tenant_id, "storage")
             raise QuotaExceededException(
-                f"结果存储已达配额上限（{stored}/{limit}）：请清理历史结果，"
-                "或联系平台管理员提升套餐"
+                f"结果存储{PLAN_FULL_USER}（{stored}/{limit}）：请{STORAGE_CLEANUP_CTA}清理历史结果"
             )
         logger.debug(f"配额检查·结果存储 | tenant={tenant_id} {stored}/{limit}")
 
@@ -124,13 +220,13 @@ class QuotaService:
         used = (await self.session.execute(
             select(func.coalesce(func.sum(LlmTokenUsage.total_tokens), 0)).where(
                 LlmTokenUsage.tenant_id == tenant_id,
-                func.cast(LlmTokenUsage.stat_date, String_).like(month_prefix + "%"),
+                func.cast(LlmTokenUsage.stat_date, String).like(month_prefix + "%"),
             )
         )).scalar_one()
         if int(used) >= limit:
+            await self._emit_quota(tenant_id, "llm_tokens")
             raise QuotaExceededException(
-                f"本月 LLM token 用量已达配额上限（{used}/{limit}）：请配置自有供应商 Key，"
-                "或联系平台管理员提升套餐"
+                f"本月 LLM token 用量{PLAN_FULL_USER}（{used}/{limit}）。{PLAN_FULL_CTA}"
             )
         logger.debug(f"配额检查·LLM 月度 | tenant={tenant_id} {used}/{limit}")
 
@@ -169,32 +265,31 @@ class QuotaService:
                 SpiderTask.status.in_(("pending", "running")),
             )
         )).scalar_one()
-        stored_results = (await self.session.execute(
-            select(func.count()).select_from(SpiderResult).where(
-                SpiderResult.tenant_id == tenant_id
-            )
-        )).scalar_one()
+        stored_results = await SpiderResultRepository(self.session).count_owned_by_tenant(
+            tenant_id
+        )
         month_prefix = f"{year_month}-"
         tokens_row = (await self.session.execute(
             select(LlmTokenUsage.provider_name,
                    func.sum(LlmTokenUsage.total_tokens).label("tokens"))
             .where(
                 LlmTokenUsage.tenant_id == tenant_id,
-                func.cast(LlmTokenUsage.stat_date, String_).like(month_prefix + "%"),
+                func.cast(LlmTokenUsage.stat_date, String).like(month_prefix + "%"),
             )
             .group_by(LlmTokenUsage.provider_name)
         )).all()
         tokens_total = sum(int(r.tokens or 0) for r in tokens_row)
+        usage = {
+            "task_concurrency": int(active_tasks),
+            "result_storage": int(stored_results),
+            "llm_tokens_month": tokens_total,
+        }
         return {
             "tenant_id": tenant_id,
             "quota": quota,
-            "usage": {
-                "task_concurrency": int(active_tasks),
-                "result_storage": int(stored_results),
-                "llm_tokens_month": tokens_total,
-            },
+            "usage": usage,
             "llm_by_provider": {r.provider_name: int(r.tokens or 0) for r in tokens_row},
+            "timezone": SHANGHAI_TZ,
+            "year_month": year_month,
+            "alerts": build_usage_alerts(usage, quota),
         }
-
-
-from sqlalchemy import String as String_  # noqa: E402（usage_overview cast 用）

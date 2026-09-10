@@ -1,17 +1,16 @@
 /**
  * 官方网站 - 首页（智能数据采集系统产品页）
  * 章节：Hero → 核心功能 → AI 采集流程 → 系统架构 → CTA（Header/Footer 归 SiteLayout，工单 70）
- * 说明：纯静态展示，不依赖后端接口；管理后台地址经环境变量注入
+ * 说明：Hero/功能介绍/定价入口为静态诚实文案；能力精选依赖公开列表；管理后台地址经环境变量注入
  */
 import React from 'react'
-import { Button } from 'antd'
+import { Button, message } from 'antd'
 import {
   RocketOutlined,
   LinkOutlined,
   DatabaseOutlined,
   ClusterOutlined,
   DownOutlined,
-  ArrowRightOutlined,
 } from '@ant-design/icons'
 import { motion } from 'framer-motion'
 import './Home.css'
@@ -20,19 +19,23 @@ import FeaturesSection from '../components/home/FeaturesSection'
 import AiFlowSection from '../components/home/AiFlowSection'
 import ArchitectureSection from '../components/home/ArchitectureSection'
 import SkillsSection from '../components/home/SkillsSection'
+import { trackCta } from '../services/beacon'
 
 // 管理后台地址（经环境变量注入，见 .env.development）
 const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
 
 const SITE_NAME = 'AutoAgents'
-const SITE_SLOGAN = 'AI 驱动的智能数据采集系统'
+const TOUCH_TARGET_STYLE: React.CSSProperties = {
+  minHeight: 'var(--size-touch, 44px)',
+  minWidth: 'var(--size-touch, 44px)',
+}
 
-/** Hero 平台能力概览（静态示意数据） */
-const HERO_STATS = [
-  { value: '128,000+', label: '累计执行任务', color: '#40a9ff' },
-  { value: '12 节点', label: '分布式 Worker 在线', color: '#13c2c2' },
-  { value: '3.2 亿条', label: '累计采集数据', color: '#95de64' },
-]
+const warnOfflineRegister = (event: React.MouseEvent) => {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    event.preventDefault()
+    message.warning('网络不可用。连接恢复后再注册。')
+  }
+}
 
 /** Hero：产品定位 + 双 CTA + 能力概览（深空指挥中心视觉） */
 const Hero: React.FC = () => (
@@ -114,8 +117,8 @@ const Hero: React.FC = () => (
           color: 'rgba(255,255,255,0.68)',
         }}
       >
-        {SITE_NAME} 是一个 AI 驱动的爬虫管理平台：粘贴目标链接，AI 自动规划采集方案、试采验证并一键上线；
-        配合可视化调度与分布式 Worker 集群，让数据获取稳定、高效、全程可控。
+        {SITE_NAME} 把采集控制面摊开：粘贴链接、提交任务、查看结果。
+        AI 规划与试采帮你走完从链接到入库；没有真实聚合时不展示规模数字。
       </motion.p>
 
       <motion.div
@@ -129,8 +132,11 @@ const Hero: React.FC = () => (
           size="large"
           shape="round"
           icon={<RocketOutlined />}
-          onClick={() => document.getElementById('ai-flow')?.scrollIntoView({ behavior: 'smooth' })}
+          href="/register"
+          onClick={warnOfflineRegister}
+          className="site-touch-target"
           style={{
+            ...TOUCH_TARGET_STYLE,
             height: 54,
             padding: '0 40px',
             fontSize: 16,
@@ -139,13 +145,15 @@ const Hero: React.FC = () => (
             boxShadow: '0 8px 24px rgba(24, 144, 255, 0.4)',
           }}
         >
-          体验 AI 采集流程
+          免费注册
         </Button>
         <Button
           size="large"
           shape="round"
           ghost
-          href={ADMIN_URL}
+          href={`${ADMIN_URL}/login`}
+          data-cta="enter_admin"
+          onClick={() => trackCta('enter_admin')}
           style={{
             height: 54,
             padding: '0 36px',
@@ -154,35 +162,27 @@ const Hero: React.FC = () => (
             borderColor: 'rgba(255,255,255,0.35)',
           }}
         >
-          进入管理后台
+          登录管理后台
         </Button>
       </motion.div>
 
-      {/* 平台能力概览 */}
       <motion.div
-        initial={{ opacity: 0, y: 30 }}
+        initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.7, delay: 0.45, ease: EASE_OUT_EXPO }}
-        style={{
-          maxWidth: 760,
-          margin: '64px auto 0',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 16,
-        }}
+        transition={{ duration: 0.6, delay: 0.4, ease: EASE_OUT_EXPO }}
+        style={{ marginTop: 20 }}
       >
-        {HERO_STATS.map((s) => (
-          <div key={s.label} className="hero-stat-card">
-            <div style={{ fontSize: 'clamp(22px, 3vw, 30px)', fontWeight: 800, color: s.color }}>
-              {s.value}
-            </div>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginTop: 6 }}>{s.label}</div>
-          </div>
-        ))}
-        {/* UX-B7：静态示意数据显式标注，避免被误读为真实运行数据 */}
-        <div style={{ gridColumn: '1 / -1', textAlign: 'right', fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
-          * 示意数据，非实时统计
-        </div>
+        <Button
+          type="link"
+          data-cta="try_ai_flow"
+          onClick={() => {
+            trackCta('try_ai_flow')
+            document.getElementById('ai-flow')?.scrollIntoView({ behavior: 'smooth' })
+          }}
+          style={{ color: 'rgba(255,255,255,0.72)' }}
+        >
+          体验 AI 采集流程
+        </Button>
       </motion.div>
     </div>
 
@@ -204,7 +204,7 @@ const CtaBand: React.FC = () => (
       </FadeIn>
       <FadeIn delay={0.1}>
         <p style={{ margin: '16px auto 0', maxWidth: 560, fontSize: 16, lineHeight: 1.8, color: 'rgba(255,255,255,0.66)' }}>
-          打开管理后台，粘贴第一条链接，体验从规划到上线的完整智能采集流程。
+          免费注册后即可粘贴链接、提交任务并查看结果。专业档与企业档尚未开通购买。
         </p>
       </FadeIn>
       <FadeIn delay={0.18}>
@@ -212,9 +212,12 @@ const CtaBand: React.FC = () => (
           type="primary"
           size="large"
           shape="round"
-          href={ADMIN_URL}
+          href="/register"
+          onClick={warnOfflineRegister}
           icon={<RocketOutlined />}
+          className="site-touch-target"
           style={{
+            ...TOUCH_TARGET_STYLE,
             height: 52,
             padding: '0 38px',
             fontSize: 16,
@@ -224,7 +227,7 @@ const CtaBand: React.FC = () => (
             boxShadow: '0 8px 24px rgba(19, 194, 194, 0.35)',
           }}
         >
-          立即开始
+          免费注册
         </Button>
       </FadeIn>
     </div>

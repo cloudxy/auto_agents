@@ -68,6 +68,30 @@ async def test_stats_no_finished_tasks_rate_none():
     assert stats.daily_tasks == []
 
 
+@pytest.mark.asyncio
+async def test_gwt_16_2_fail_rate_window_matches_last_7_days():
+    svc = _query_service()
+    svc.repo.count_by_status = AsyncMock(
+        return_value={"pending": 0, "running": 0, "completed": 2, "failed": 2}
+    )
+    svc.repo.avg_duration_seconds = AsyncMock(return_value=1.0)
+    svc.repo.daily_task_counts = AsyncMock(return_value=[("2026-09-01", 1)])
+    svc.repo.top_spiders_by_results = AsyncMock(return_value=[])
+    svc.result_repo.daily_result_counts = AsyncMock(return_value=[("2026-09-01", 1)])
+
+    stats = await svc.stats()
+    since_daily = svc.repo.daily_task_counts.await_args.args[0]
+    since_results = svc.result_repo.daily_result_counts.await_args.args[0]
+    window_since = next(
+        c.kwargs["since"] for c in svc.repo.count_by_status.await_args_list if c.kwargs.get("since")
+    )
+    assert since_daily == since_results == window_since
+    assert stats.timezone == "Asia/Shanghai"
+    assert stats.window_days == 7
+    assert stats.window_start == since_daily
+    assert stats.success_rate == pytest.approx(0.5)
+
+
 # ---------------- 2.2 list_nodes ----------------
 @pytest.mark.asyncio
 async def test_list_nodes_reads_heartbeat():

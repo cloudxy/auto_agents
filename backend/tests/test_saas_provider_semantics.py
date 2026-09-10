@@ -49,6 +49,9 @@ async def test_mutual_exclusion_scoped_to_tenant(db_session):
 
 @pytest.mark.asyncio
 async def test_resolve_prefers_tenant_then_platform(db_session, monkeypatch):
+    """DATA_PLANE=providers expand 回滚窗：三段解析仍可落到 https://pub。
+    T-16：本夹具不得勾 GWT-70.1，不得进绿闸。完成态见 test_no_own_key_falls_back_to_platform。
+    """
     from cryptography.fernet import Fernet
 
     monkeypatch.setenv("LLM_ENCRYPTION_KEY", Fernet.generate_key().decode())

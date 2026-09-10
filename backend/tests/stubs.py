@@ -39,6 +39,16 @@ def fake_settings(**kv) -> MagicMock:
     return m
 
 
+def seed_worker_heartbeat(fake: "FakeRedis", worker_id: str = "w-t13") -> None:
+    """预置 Worker 心跳，供入队闸放行（FR-18）"""
+    fake.hashes[f"spider:worker:{worker_id}"] = {
+        "pid": "1",
+        "spiders": "example",
+        "started_at": "2026-09-08T00:00:00",
+        "respawn_count": "0",
+    }
+
+
 class FakeRedis:
     """内存 Redis 桩（并集语义）：
 
@@ -74,7 +84,7 @@ class FakeRedis:
     async def expire(self, key, ttl):
         return key in self.strings or key in self.hashes  # Fake 无真实 TTL
 
-    async def scan_iter(self, match=None):
+    async def scan_iter(self, match=None, count=None):
         """异步生成器：遍历全部键（strings + hashes + sets）；match 走 fnmatch 通配"""
         import fnmatch
 
@@ -141,6 +151,18 @@ class FakeRedis:
         bucket = self.lists.setdefault(key, [])
         bucket.extend(values)
         return len(bucket)
+
+    async def lpop(self, key, count=None):
+        """与 redis-py 对齐：无 count 弹一条；count=N 弹最多 N 条（空键 None）。"""
+        bucket = self.lists.get(key)
+        if not bucket:
+            return None
+        if count is None:
+            return bucket.pop(0)
+        n = max(0, int(count))
+        out = bucket[:n]
+        del bucket[:n]
+        return out
 
     async def aclose(self):
         pass

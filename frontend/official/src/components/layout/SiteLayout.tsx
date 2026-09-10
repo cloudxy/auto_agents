@@ -5,10 +5,11 @@
  * 不再做 document.querySelector 锚点定位（该路径曾因路由链接被当
  * 选择器而抛 SyntaxError）。
  */
-import React from 'react'
+import React, { useEffect } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { Button } from 'antd'
 import { RocketOutlined, ArrowRightOutlined } from '@ant-design/icons'
+import { trackCta, trackPageView } from '../../services/beacon'
 
 const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
 
@@ -17,8 +18,7 @@ const SITE_SLOGAN = 'AI 驱动的智能数据采集系统'
 
 /** 顶部导航（路由内链） */
 const NAV_LINKS = [
-  { label: '技能广场', to: '/skills' },
-  { label: '能力广场', to: '/capabilities' },
+  { label: '能力市场', to: '/capabilities' },
   { label: '定价', to: '/pricing' },
   { label: '注册', to: '/register' },
 ]
@@ -30,8 +30,20 @@ const linkStyle: React.CSSProperties = {
 }
 const linkActiveStyle: React.CSSProperties = { ...linkStyle, color: '#fff', fontWeight: 600 }
 
+const PAGE_BY_PATH: Record<string, string> = {
+  '/': 'home',
+  '/pricing': 'pricing',
+  '/register': 'register',
+  '/capabilities': 'capabilities',
+  '/skills': 'capabilities',
+}
+
 const SiteLayout: React.FC = () => {
   const { pathname } = useLocation()
+  useEffect(() => {
+    const page = PAGE_BY_PATH[pathname]
+    if (page) trackPageView(page)
+  }, [pathname])
   return (
     <div style={{ minHeight: '100vh', background: '#f7f9fc', display: 'flex', flexDirection: 'column' }}>
       <header
@@ -68,6 +80,10 @@ const SiteLayout: React.FC = () => {
               <Link
                 key={l.to}
                 to={l.to}
+                data-cta={l.to === '/capabilities' ? 'browse_market' : undefined}
+                onClick={() => {
+                  if (l.to === '/capabilities') trackCta('browse_market')
+                }}
                 style={pathname === l.to ? linkActiveStyle : linkStyle}
               >
                 {l.label}
@@ -75,7 +91,14 @@ const SiteLayout: React.FC = () => {
             ))}
           </nav>
 
-          <Button type="primary" shape="round" href={ADMIN_URL} icon={<ArrowRightOutlined aria-hidden />}>
+          <Button
+            type="primary"
+            shape="round"
+            href={`${ADMIN_URL}/login`}
+            data-cta="login"
+            icon={<ArrowRightOutlined aria-hidden />}
+            onClick={() => trackCta('login')}
+          >
             管理后台
           </Button>
         </div>
@@ -101,7 +124,17 @@ const SiteLayout: React.FC = () => {
           </div>
           <nav aria-label="页脚导航" style={{ display: 'flex', gap: 22, flexWrap: 'wrap' }}>
             {NAV_LINKS.map((l) => (
-              <Link key={l.to} to={l.to} style={linkStyle}>{l.label}</Link>
+              <Link
+                key={l.to}
+                to={l.to}
+                data-cta={l.to === '/capabilities' ? 'browse_market' : undefined}
+                onClick={() => {
+                  if (l.to === '/capabilities') trackCta('browse_market')
+                }}
+                style={linkStyle}
+              >
+                {l.label}
+              </Link>
             ))}
           </nav>
         </div>

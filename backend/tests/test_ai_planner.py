@@ -63,7 +63,7 @@ def _plan(**overrides) -> MagicMock:
         id=1, target_url="https://example.com/list", status="draft",
         plan_json=None, generated_params=None, test_task_id=None,
         iteration_count=0, error_message=None, created_by="admin",
-        created_at=None, updated_at=None,
+        created_at=None, updated_at=None, tenant_id=1,
     )
     defaults.update(overrides)
     return MagicMock(**defaults)
@@ -168,17 +168,22 @@ class TestExecutePlan:
 class TestLlmChat:
     @pytest.mark.asyncio
     async def test_llm_disabled_raises_business_exception(self):
-        """LLM.ENABLED=false（测试环境默认）→ 明确业务异常，测试环境友好"""
+        """LLM.ENABLED=false → 明确业务异常；钉 providers 以免默认 litellm 探测勾 74.1"""
         svc = _service()
-        with pytest.raises(BusinessException) as ei:
-            await svc._llm_chat([{"role": "user", "content": "hi"}])
+        cfg = _fake_settings(**{"LLM.ENABLED": False, "LLM.DATA_PLANE": "providers"})
+        with patch("backend.services.ai_planner_service.settings", cfg):
+            with pytest.raises(BusinessException) as ei:
+                await svc._llm_chat([{"role": "user", "content": "hi"}])
         assert "未启用" in str(ei.value)
+        assert "平台 LLM 网关不可达" not in str(ei.value)
+        assert "还没有平台模型" not in str(ei.value)
 
     @pytest.mark.asyncio
     async def test_llm_missing_config_raises(self):
         svc = _service()
         with patch("backend.services.ai_planner_service.settings",
-                   _fake_settings(**{"LLM.ENABLED": True, "LLM.BASE_URL": "", "LLM.MODEL": ""})):
+                   _fake_settings(**{"LLM.ENABLED": True, "LLM.DATA_PLANE": "providers",
+                                     "LLM.BASE_URL": "", "LLM.MODEL": ""})):
             with pytest.raises(BusinessException) as ei:
                 await svc._llm_chat([{"role": "user", "content": "hi"}])
         assert "配置不完整" in str(ei.value)
@@ -187,7 +192,8 @@ class TestLlmChat:
     async def test_llm_missing_api_key_raises(self, monkeypatch):
         monkeypatch.delenv("LLM_API_KEY", raising=False)
         svc = _service()
-        cfg = _fake_settings(**{"LLM.ENABLED": True, "LLM.BASE_URL": "http://llm.test/v1",
+        cfg = _fake_settings(**{"LLM.ENABLED": True, "LLM.DATA_PLANE": "providers",
+                                "LLM.BASE_URL": "http://llm.test/v1",
                                 "LLM.MODEL": "m", "LLM.API_KEY": ""})
         with patch("backend.services.ai_planner_service.settings", cfg):
             with pytest.raises(BusinessException) as ei:
@@ -199,7 +205,8 @@ class TestLlmChat:
         """4xx（非 429）请求被拒绝：不重试直接抛业务异常"""
         monkeypatch.setenv("LLM_API_KEY", "test-key")
         svc = _service()
-        cfg = _fake_settings(**{"LLM.ENABLED": True, "LLM.BASE_URL": "http://llm.test/v1",
+        cfg = _fake_settings(**{"LLM.ENABLED": True, "LLM.DATA_PLANE": "providers",
+                                "LLM.BASE_URL": "http://llm.test/v1",
                                 "LLM.MODEL": "m", "LLM.MAX_RETRIES": 3})
         response = MagicMock(status_code=401)
         error = httpx.HTTPStatusError("401", request=MagicMock(), response=response)
@@ -221,7 +228,8 @@ class TestLlmChat:
         """网络故障指数退避重试后成功，并累计 token 用量"""
         monkeypatch.setenv("LLM_API_KEY", "test-key")
         svc = _service()
-        cfg = _fake_settings(**{"LLM.ENABLED": True, "LLM.BASE_URL": "http://llm.test/v1",
+        cfg = _fake_settings(**{"LLM.ENABLED": True, "LLM.DATA_PLANE": "providers",
+                                "LLM.BASE_URL": "http://llm.test/v1",
                                 "LLM.MODEL": "m", "LLM.MAX_RETRIES": 3,
                                 "LLM.MAX_TOKENS_BUDGET": 1000})
         ok_response = MagicMock()
@@ -265,6 +273,7 @@ class TestExecuteTest:
         enqueue_kwargs = spider.enqueue.await_args.kwargs
         assert enqueue_kwargs["spider_name"] == "flow_generic"
         assert enqueue_kwargs["priority"] == "low"
+        assert enqueue_kwargs["tenant_id"] == 1
         assert json.loads(enqueue_kwargs["params"])["urls"] == ["https://example.com/list"]
         assert svc.repo.update_status.await_args_list[0].args[1] == "testing"
         history_updates = [c for c in svc.repo.update.await_args_list if "plan_json" in c.kwargs]
@@ -808,7 +817,7 @@ def ai_client(admin_client, app):
 
 class TestApiEndpoints:
     def test_create_plan_endpoint(self, ai_client, monkeypatch):
-        async def fake_create(self, payload, created_by=None):
+        async def fake_create(self, payload, created_by=None, tenant_id=None):
             return AiPlanResponse(id=1, target_url=payload.target_url, status="draft",
                                   created_by=created_by)
         monkeypatch.setattr(AiPlannerService, "create_plan", fake_create)
@@ -838,6 +847,7 @@ class TestApiEndpoints:
                                 "total_pages": 0}
 
     def test_trigger_plan_endpoint(self, ai_client, monkeypatch):
+        """T-16：现网金标仅 HTTP 200 + planning，不得勾 GWT-70.1 / 70.2 / 74.1。"""
         async def fake_launch(self, plan_id):
             return AiPlanResponse(id=plan_id, target_url="https://a.b", status="planning")
         monkeypatch.setattr(AiPlannerService, "launch_plan", fake_launch)

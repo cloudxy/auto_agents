@@ -42,6 +42,14 @@ from platform_core.schemas.ai_plan import (
     AiPlanListResponse,
     validate_selector_expr,
 )
+from platform_core.schemas.product_event import (
+    PublicEventIn,
+    ProductEventOut,
+    ProductEventListOut,
+    CTA_FUNNEL,
+    CTA_BYPASS,
+    WAVE0_EVENT_NAMES,
+)
 from platform_core.schemas.newapi import (
     ProbeVerdict,
     ChannelEventAction,
@@ -94,4 +102,10 @@ __all__ = [
     "ChannelEventListResponse",
     "ChannelProbeResultResponse",
     "ChannelProbeResultListResponse",
+    "PublicEventIn",
+    "ProductEventOut",
+    "ProductEventListOut",
+    "CTA_FUNNEL",
+    "CTA_BYPASS",
+    "WAVE0_EVENT_NAMES",
 ]

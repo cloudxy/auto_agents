@@ -1,21 +1,19 @@
 """外部 API 鉴权与公开数据端点测试
 
-覆盖：
-- validate_api_key：配置合法 key 放行 / 非法拒绝 / 空配置一律拒绝 / 字符串配置容错
-- 双轨鉴权统一（H1）：仅配旧单 key（EXTERNAL_API.API_KEY）/ 仅配新列表（API_KEYS）/
-  两者都空 → 新旧端点同一校验函数同一 401 口径
-- /external/v1/public/data/{spider_name}：统一 _require_api_key 后与
-  status/results/stats 同为 401 口径（不再存在 403 分支）
-- /external/v1/public/spider/status|results|stats：真实数据 + API Key 鉴权 + 404 分支
-
-约定：不连接真实 MySQL/Redis（HTTP 层用 AsyncMock 桩，对齐 conftest 约定）。
+validate_api_key / 双轨鉴权（H1）/ 出站拉数 KEY_BINDINGS（GWT-13.1–13.4）/
+status|results|stats。HTTP 层 AsyncMock，不连真 MySQL/Redis。
 """
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.external_api.v1.webhooks import _configured_api_keys, validate_api_key
+from backend.app.external_api.v1.webhooks import (
+    _configured_api_keys,
+    bound_tenant_id,
+    validate_api_key,
+)
+from backend.repositories.spider_result_repository import CANDIDATE_SOURCE
 from config import settings
 from platform_core.exceptions import NotFoundException
 from platform_core.schemas.spider import (
@@ -26,16 +24,25 @@ from platform_core.schemas.spider import (
 
 PUBLIC_BASE = "/external/v1/public"
 VALID_KEY = "test-external-key"
+TENANT_A = 11
+TENANT_B = 22
+KEY_A = "bound-key-tenant-a"
+A_OWNED_ROW = {
+    "id": 101, "task_id": 1, "spider_name": "alpha",
+    "url": "https://a.example/1", "title": "a-owned", "source": "web",
+}
 
 
 def _set_api_keys(value) -> None:
-    """临时覆盖 EXTERNAL_API.API_KEYS（fixture 中恢复原值）"""
     settings.set("EXTERNAL_API.API_KEYS", value)
 
 
 def _set_legacy_api_key(value: str) -> None:
-    """临时覆盖旧单 key EXTERNAL_API.API_KEY（过渡期兼容配置）"""
     settings.set("EXTERNAL_API.API_KEY", value)
+
+
+def _set_key_bindings(value) -> None:
+    settings.set("EXTERNAL_API.KEY_BINDINGS", value)
 
 
 @pytest.fixture
@@ -63,6 +70,15 @@ def restore_legacy_key():
     _set_legacy_api_key("")
     yield
     _set_legacy_api_key(str(original or ""))
+
+
+@pytest.fixture(autouse=True)
+def restore_key_bindings():
+    """每测恢复 KEY_BINDINGS，避免出站绑定泄漏到其它用例"""
+    original = settings.get("EXTERNAL_API.KEY_BINDINGS", [])
+    _set_key_bindings([])
+    yield
+    _set_key_bindings(original)
 
 
 def _task(**overrides) -> MagicMock:
@@ -154,20 +170,21 @@ class TestDualTrackAuth:
         assert validate_api_key("") is False
         assert validate_api_key(VALID_KEY) is False
 
-    def test_data_endpoint_legacy_key_passes(self, client, restore_legacy_key):
-        """仅配旧单 key 时 /data/{spider_name} 也通过（统一校验函数）"""
+    def test_data_endpoint_legacy_key_rejected(self, client, restore_legacy_key):
+        """GWT-13.4：仅配旧单 key 拉数视为未绑定，拒绝且不查库"""
         _set_api_keys([])
         _set_legacy_api_key(VALID_KEY)
         with patch(
             "backend.app.external_api.v1.public.SpiderQueryService.query_public_results",
-            new=AsyncMock(return_value=([], 0)),
-        ):
+            new=AsyncMock(return_value=([A_OWNED_ROW], 1)),
+        ) as mocked:
             resp = client.get(
                 f"{PUBLIC_BASE}/data/demo_spider",
                 headers={"X-API-Key": VALID_KEY},
             )
-        assert resp.status_code == 200
-        assert resp.json()["total"] == 0
+        assert resp.status_code == 401
+        assert resp.json().get("items") in (None, [])
+        mocked.assert_not_called()
 
     def test_data_endpoint_invalid_key_401(self, client, api_keys, restore_legacy_key):
         """/data/{spider_name} 密钥不匹配时 401（与其他公开端点同口径）"""
@@ -321,3 +338,155 @@ class TestPublicStatsEndpoint:
         assert body["total_tasks"] == 10
         assert body["completed"] == 6
         assert body["failed"] == 1
+
+
+class TestBoundTenantId:
+    """bound_tenant_id：配置绑定恰好一租户；旧列表 / 冲突 = 未绑定"""
+
+    def test_list_binding_resolves(self):
+        _set_key_bindings([{"key": KEY_A, "tenant_id": TENANT_A}])
+        assert bound_tenant_id(KEY_A) == TENANT_A
+        assert bound_tenant_id("other") is None
+
+    def test_dict_and_json_string_binding(self):
+        _set_key_bindings({KEY_A: TENANT_A})
+        assert bound_tenant_id(KEY_A) == TENANT_A
+        _set_key_bindings(f'[{{"key": "{KEY_A}", "tenant_id": {TENANT_A}}}]')
+        assert bound_tenant_id(KEY_A) == TENANT_A
+
+    def test_string_list_in_bindings_is_unbound(self):
+        _set_key_bindings([KEY_A, VALID_KEY])
+        assert bound_tenant_id(KEY_A) is None
+
+    def test_conflicting_tenants_unbound(self):
+        _set_key_bindings([
+            {"key": KEY_A, "tenant_id": TENANT_A},
+            {"key": KEY_A, "tenant_id": TENANT_B},
+        ])
+        assert bound_tenant_id(KEY_A) is None
+
+    def test_same_tenant_twice_still_bound(self):
+        _set_key_bindings([
+            {"key": KEY_A, "tenant_id": TENANT_A},
+            {"key": KEY_A, "tenant_id": TENANT_A},
+        ])
+        assert bound_tenant_id(KEY_A) == TENANT_A
+
+
+class TestOutboundPullBinding:
+    """GWT-13.1–13.4：出站拉数必须绑恰好一家企业；绑定后仍排除候选"""
+
+    def test_gwt_13_1_bound_key_only_tenant_a(
+        self, client, restore_legacy_key,
+    ):
+        """GWT-13.1：钥匙已绑定企业 A，拉 A 的非候选结果 → 只看到 A 的行"""
+        _set_api_keys([])
+        _set_legacy_api_key("")
+        _set_key_bindings([{"key": KEY_A, "tenant_id": TENANT_A}])
+        with patch(
+            "backend.app.external_api.v1.public.SpiderQueryService.query_public_results",
+            new=AsyncMock(return_value=([A_OWNED_ROW], 1)),
+        ) as mocked:
+            resp = client.get(
+                f"{PUBLIC_BASE}/data/alpha",
+                headers={"X-API-Key": KEY_A},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"] == [A_OWNED_ROW]
+        kwargs = mocked.await_args.kwargs
+        assert kwargs["tenant_id"] == TENANT_A
+        assert kwargs["spider_name"] == "alpha"
+
+    def test_gwt_13_2_no_binding_rejects_any_key(
+        self, client, api_keys, restore_legacy_key,
+    ):
+        """GWT-13.2：未配置任何绑定，任意钥匙拉数 → 拒绝，0 行"""
+        _set_legacy_api_key("")
+        _set_key_bindings([])
+        with patch(
+            "backend.app.external_api.v1.public.SpiderQueryService.query_public_results",
+            new=AsyncMock(return_value=([A_OWNED_ROW], 1)),
+        ) as mocked:
+            resp = client.get(
+                f"{PUBLIC_BASE}/data/alpha",
+                headers={"X-API-Key": VALID_KEY},
+            )
+        assert resp.status_code == 401
+        assert resp.json().get("items") in (None, [])
+        mocked.assert_not_called()
+
+    def test_gwt_13_3_tenant_a_key_spider_b_zero_rows_of_b(
+        self, client, restore_legacy_key,
+    ):
+        """GWT-13.3：绑定 A 的钥匙指定 B 的爬虫名 → 0 行 B 数据"""
+        _set_api_keys([])
+        _set_legacy_api_key("")
+        _set_key_bindings([{"key": KEY_A, "tenant_id": TENANT_A}])
+        with patch(
+            "backend.app.external_api.v1.public.SpiderQueryService.query_public_results",
+            new=AsyncMock(return_value=([], 0)),
+        ) as mocked:
+            resp = client.get(
+                f"{PUBLIC_BASE}/data/beta",
+                headers={"X-API-Key": KEY_A},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 0
+        assert body["items"] == []
+        kwargs = mocked.await_args.kwargs
+        assert kwargs["tenant_id"] == TENANT_A
+        assert kwargs["tenant_id"] != TENANT_B
+        assert kwargs["spider_name"] == "beta"
+
+    def test_gwt_13_4_string_list_key_rejected(
+        self, client, api_keys, restore_legacy_key,
+    ):
+        """GWT-13.4：旧字符串列表钥匙尚未绑企业 → 视为未绑定，拒绝"""
+        _set_legacy_api_key("")
+        _set_key_bindings([])
+        with patch(
+            "backend.app.external_api.v1.public.SpiderQueryService.query_public_results",
+            new=AsyncMock(return_value=([A_OWNED_ROW], 1)),
+        ) as mocked:
+            resp = client.get(
+                f"{PUBLIC_BASE}/data/alpha",
+                headers={"X-API-Key": VALID_KEY},
+            )
+        assert resp.status_code == 401
+        assert resp.json().get("items") in (None, [])
+        mocked.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_bound_pull_still_excludes_marketplace(self):
+        """绑定后仍 source <> marketplace（T-08 谓词，T-10 不放宽）"""
+        from backend.services.spider_query_service import SpiderQueryService
+
+        svc = SpiderQueryService.__new__(SpiderQueryService)
+        svc.result_repo = MagicMock()
+        svc.result_repo.query_by_spider = AsyncMock(return_value=([], 0))
+
+        items, total = await svc.query_public_results(
+            spider_name="alpha", tenant_id=TENANT_A,
+        )
+
+        assert items == [] and total == 0
+        kwargs = svc.result_repo.query_by_spider.await_args.kwargs
+        assert kwargs.get("exclude_source") == CANDIDATE_SOURCE
+        assert kwargs.get("tenant_id") == TENANT_A
+
+    @pytest.mark.asyncio
+    async def test_unbound_service_returns_zero_rows_without_query(self):
+        """未绑 tenant_id 时服务层 fail-closed：0 行且不打仓储"""
+        from backend.services.spider_query_service import SpiderQueryService
+
+        svc = SpiderQueryService.__new__(SpiderQueryService)
+        svc.result_repo = MagicMock()
+        svc.result_repo.query_by_spider = AsyncMock(return_value=([A_OWNED_ROW], 1))
+
+        items, total = await svc.query_public_results(spider_name="alpha")
+
+        assert items == [] and total == 0
+        svc.result_repo.query_by_spider.assert_not_called()

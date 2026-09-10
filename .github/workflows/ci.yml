@@ -2,9 +2,9 @@
 #
 # 五阶段质量关卡（对齐 /cicd Skill 与 /verify Skill 的验证约定）：
 # 1. python-lint-test:  ruff lint + pytest（backend/tests）
-# 2. arch-check:        scripts/check-arch.sh 的 12 条架构红线 + 3 条核心边界
-# 3. db-migration-gate: scripts/check-db-ir.sh + check-db-migrations.sh 迁移破坏性变更门禁
-# 4. frontend-build:    admin + official 两个 React 应用构建
+# 2. arch-check:        tools/check/arch.sh（R1–R13 + B1–B3）
+# 3. db-migration-gate: tools/check/db_ir.sh + db_migrations.sh
+# 4. frontend-build:    npm workspaces：shared dist → admin + official
 # 5. docker-validate:   Dockerfile 构建 + compose 语法校验
 #
 # 触发：推送任意分支 + 向 main 发起 PR
@@ -87,7 +87,7 @@ jobs:
           backend/tests/test_saas_rbac_deep.py
 
   arch-check:
-    name: Architecture Red Lines (12 rules + 3 boundaries)
+    name: Architecture Red Lines (R1-R13 + B1-B3)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,7 +102,27 @@ jobs:
         run: uv sync
 
       - name: Run check-arch.sh
-        run: bash scripts/check-arch.sh
+        run: bash tools/check/arch.sh
+
+      # FR-14 / T-11：生成网关配置不得在跟踪树；样例模式不把真密钥写进 workflow。
+      - name: FR-14 generated gateway config not tracked
+        run: |
+          tracked="$(git ls-files -- deploy/litellm/config.gen.yaml)"
+          if [ -n "$tracked" ]; then
+            echo "generated gateway config still tracked"
+            exit 1
+          fi
+
+      - name: FR-14 tracked deploy/config has no plaintext upstream key pattern
+        run: |
+          prefix="sk-"
+          pat="api_key[[:space:]]*:[[:space:]]*['\"]?${prefix}[A-Za-z0-9_-]{16,}"
+          hits="$(git grep -lE "$pat" -- deploy config || true)"
+          if [ -n "$hits" ]; then
+            echo "pattern hits (filenames only):"
+            echo "$hits"
+            exit 1
+          fi
 
   db-migration-gate:
     name: DB Migration Gate (check-db-ir + check-db-migrations)
@@ -114,10 +134,10 @@ jobs:
       # 故不挂 MySQL service 容器。脚本退出码 = 违规数，非零即红。
       # CI 下 git diff 无增量 → 脚本自动兜底扫描 backend/alembic/versions 全部迁移。
       - name: Run check-db-ir.sh (DBML IR lint)
-        run: bash scripts/check-db-ir.sh
+        run: bash tools/check/db_ir.sh
 
       - name: Run check-db-migrations.sh (strong_migrations 语义)
-        run: bash scripts/check-db-migrations.sh
+        run: bash tools/check/db_migrations.sh
 
   frontend-build:
     name: Frontend Build (admin + official)
@@ -141,14 +161,14 @@ jobs:
       - name: Generate OpenAPI types
         run: |
           uv python install 3.13 >/dev/null 2>&1 || true
-          uv run python scripts/dump_openapi.py
+          uv run python tools/dump_openapi.py
           npm run codegen:api -w @auto-agents/frontend-shared
 
       - name: Build shared
         run: npm run build -w @auto-agents/frontend-shared
 
       - name: Frontend gate (F-5/F-6)
-        run: bash scripts/check-frontend.sh
+        run: bash tools/check/frontend.sh
 
       - name: Build admin
         run: CI= npm run build -w admin

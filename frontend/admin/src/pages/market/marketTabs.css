@@ -1,0 +1,11 @@
+/* 窄屏滚动不删叶：关掉 antd more 下拉，横向滚。 */
+.market-tabs .ant-tabs-nav-wrap {
+  overflow-x: auto !important;
+}
+.market-tabs .ant-tabs-nav-operations {
+  display: none !important;
+}
+.market-tabs .ant-tabs-nav-list {
+  flex-wrap: nowrap;
+  transform: none !important;
+}

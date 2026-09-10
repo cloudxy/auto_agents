@@ -150,4 +150,16 @@ def test_register_creates_default_tenant_user(db_client, db_session):
     login = db_client.post("/api/v1/auth/login", json={
         "username": "pub-reg-user", "password": "PubPass123!"})
     assert login.status_code == 200
-    assert login.json()["data"]["tenant_id"] == STATE["default_id"]
+    data = login.json()["data"]
+    assert data["tenant_id"] == STATE["default_id"]
+    assert data["is_platform_admin"] is False
+
+
+def test_login_projects_is_platform_admin_false_for_tenant(db_client):
+    """T-05：登录信封投影 is_platform_admin（缺省 false；旧客户端当 false）"""
+    resp = db_client.post("/api/v1/auth/login",
+                          json={"username": "dup-user", "password": "alpha-pass-123"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert "is_platform_admin" in data
+    assert data["is_platform_admin"] is False

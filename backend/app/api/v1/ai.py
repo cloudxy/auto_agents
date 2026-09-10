@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_admin, require_login, require_operator
+from backend.app.api.deps import CurrentUser, require_admin, require_login, require_operator, task_actor_tenant_id
 from backend.app.responses import (
     ApiResponse,
     PaginatedResponse,
@@ -41,7 +41,9 @@ async def create_plan(
     user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[AiPlanResponse]:
     """创建 AI 采集计划（draft，target_url 必填；html_snippet 可选降级离线规划）"""
-    plan = await service.create_plan(payload, created_by=user.username)
+    plan = await service.create_plan(
+        payload, created_by=user.username, tenant_id=task_actor_tenant_id(user),
+    )
     await record_audit(session, user, "ai.plan.create", f"ai_plan#{plan.id}",
                  {"target_url": payload.target_url})
     return created(plan)

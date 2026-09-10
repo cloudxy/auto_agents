@@ -5,7 +5,7 @@
  * - 统计卡片（/admin/stats，ApiResponse 信封需解包 data）
  * - 跨任务结果表格：爬虫/时间范围/关键词筛选，服务端分页（GET /spiders/results）
  * - 行内操作：查看详情（复用 ResultDrawer，按结果所属任务打开）、删除（仅管理员，二次确认）
- * - 导出：按当前筛选条件拉取最多 100 条生成 CSV 下载
+ * - 导出：按当前筛选条件拉取最多 100 条非候选，格式仅 CSV/JSON（无 xlsx）
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
@@ -91,6 +91,8 @@ const Data: React.FC = () => {
 
   // 详情抽屉（复用 ResultDrawer）
   const [detailTask, setDetailTask] = useState<Task | null>(null)
+  const [exportFmt, setExportFmt] = useState<'csv' | 'json'>('csv')
+  const [exporting, setExporting] = useState(false)
 
   const loadStats = useCallback(async () => {
     try {
@@ -161,25 +163,34 @@ const Data: React.FC = () => {
     }
   }
 
-  // 按当前筛选条件导出（最多 100 条）
+  // 按当前筛选条件导出（最多 100 条非候选；空窗不下载）
   const onExport = async () => {
+    setExporting(true)
     try {
       const res = await searchResults({ ...buildQuery(), page: 1, page_size: 100 })
-      const items = res.items || []
+      const items = (res.items || [])
+        .filter((r) => r.source !== 'marketplace')
+        .slice(0, 100)
       if (!items.length) {
-        message.warning('当前筛选条件下没有可导出的数据')
+        message.warning('没有可导出的结果')
         return
       }
-      const blob = new Blob([toCsv(items)], { type: 'text/csv;charset=utf-8' })
+      const isJson = exportFmt === 'json'
+      const blob = new Blob(
+        [isJson ? JSON.stringify(items, null, 2) : toCsv(items)],
+        { type: isJson ? 'application/json' : 'text/csv;charset=utf-8' },
+      )
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `data_center_export_${Date.now()}.csv`
+      link.download = `data_center_export_${Date.now()}.${exportFmt}`
       link.click()
       URL.revokeObjectURL(url)
-      message.success(`已导出 ${items.length} 条结果（CSV，当前筛选条件前 100 条）`)
+      message.success(`已导出 ${items.length} 条结果（${exportFmt.toUpperCase()}）`)
     } catch (error) {
-      message.error(apiErrorMessage(error, '导出失败'))
+      message.error(apiErrorMessage(error, '导出失败。检查网络后重试。'))
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -289,7 +300,20 @@ const Data: React.FC = () => {
           />
           <Button type="primary" onClick={onSearch}>查询</Button>
           <Button onClick={onReset}>重置</Button>
-          <Button icon={<DownloadOutlined />} onClick={onExport}>导出 CSV</Button>
+          <Select
+            value={exportFmt}
+            onChange={(v) => setExportFmt(v)}
+            style={{ width: 110 }}
+            options={[
+              { label: 'CSV', value: 'csv' },
+              { label: 'JSON', value: 'json' },
+            ]}
+            aria-label="导出格式"
+          />
+          <Button icon={<DownloadOutlined />} onClick={onExport} loading={exporting}>
+            {exporting ? '导出中…' : '导出'}
+          </Button>
+          <Text type="secondary">单次最多 100 条</Text>
           <Button
             icon={<ReloadOutlined />}
             onClick={() => { loadStats(); loadResults(page) }}
@@ -312,7 +336,7 @@ const Data: React.FC = () => {
         />
         <div style={{ marginTop: 8 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            「详情」打开该结果所属任务的完整采集结果；导出为当前筛选条件下前 100 条。
+            「详情」打开该结果所属任务的完整采集结果。导出仅 CSV 或 JSON，单次最多 100 条。
           </Text>
         </div>
       </Card>

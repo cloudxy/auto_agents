@@ -27,7 +27,14 @@ import pytest
 
 from backend.services.audit_service import AuditService
 from backend.services.schedule_service import ScheduleService
-from backend.services.spider_query_service import SpiderQueryService
+from backend.repositories.spider_result_repository import (
+    CANDIDATE_SOURCE,
+    SpiderResultRepository,
+)
+from backend.services.spider_query_service import (
+    EMPTY_DATACENTER_COPY,
+    SpiderQueryService,
+)
 from backend.services.spider_registry_service import SpiderRegistryService
 from backend.services.spider_task_service import SpiderTaskService
 from platform_core.exceptions import BusinessException, NotFoundException
@@ -115,6 +122,7 @@ def _task_service() -> SpiderTaskService:
     svc.repo = MagicMock()
     svc.result_repo = MagicMock()
     svc.notifier = MagicMock()
+    svc._check_enqueue_quota = AsyncMock()
     return svc
 
 
@@ -288,7 +296,7 @@ class TestEnqueueRegistryValidation:
         ):
             fake_settings.get.return_value = 2
             with pytest.raises(BusinessException):
-                await svc.enqueue("example")
+                await svc.enqueue("example", tenant_id=1)
 
         svc.repo.create.assert_not_called()  # 停用爬虫不入库不投递
         fake_redis.rpush.assert_not_called()
@@ -312,7 +320,7 @@ class TestEnqueueRegistryValidation:
                 2 if k == "SPIDER_MAX_CONCURRENT_PER_SPIDER"
                 else ({"example": {}} if k == "SPIDERS" else d)
             )
-            resp = await svc.enqueue("example")
+            resp = await svc.enqueue("example", tenant_id=1)
 
         assert resp.id == 40  # yml 种子兜底放行（存量 yml-only 爬虫不破坏）
 
@@ -333,7 +341,7 @@ class TestEnqueueRegistryValidation:
                 else ({} if k == "SPIDERS" else d)
             )
             with pytest.raises(BusinessException):
-                await svc.enqueue("ghost_spider")
+                await svc.enqueue("ghost_spider", tenant_id=1)
 
         svc.repo.create.assert_not_called()
 
@@ -354,7 +362,7 @@ class TestEnqueueRegistryValidation:
             patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
-            resp = await svc.enqueue("example")
+            resp = await svc.enqueue("example", tenant_id=1)
 
         assert resp.id == 41
 
@@ -573,6 +581,7 @@ class TestSearchResults:
         assert kwargs["spider_name"] == "example"
         assert kwargs["page"] == 2 and kwargs["page_size"] == 10
         assert kwargs["keyword"] == "标题"
+        assert kwargs.get("exclude_source") == CANDIDATE_SOURCE
         assert resp.total == 1
         assert resp.items[0].id == 7
         assert resp.items[0].created_at == datetime(2026, 8, 29, 10, 0, 0)
@@ -586,7 +595,65 @@ class TestSearchResults:
 
         kwargs = svc.result_repo.query_by_spider.await_args.kwargs
         assert kwargs["spider_name"] is None
+        assert kwargs.get("exclude_source") == CANDIDATE_SOURCE
         assert resp.total == 0 and resp.items == []
+
+    @pytest.mark.asyncio
+    async def test_search_results_only_candidates_is_empty_copy(self):
+        """GWT-11.2：只有候选、没有自己的条 → 数据中心空列表，不列出候选"""
+        svc = _query_service()
+        svc.result_repo.query_by_spider = AsyncMock(return_value=([], 0))
+
+        resp = await svc.search_results()
+
+        kwargs = svc.result_repo.query_by_spider.await_args.kwargs
+        assert kwargs.get("exclude_source") == "marketplace"
+        assert resp.total == 0 and resp.items == []
+        assert EMPTY_DATACENTER_COPY == "还没有采集结果"
+
+    @pytest.mark.asyncio
+    async def test_query_public_results_excludes_marketplace(self):
+        """出站拉数绑定后仍 source <> marketplace，且 SQL 带 tenant_id"""
+        svc = _query_service()
+        svc.result_repo.query_by_spider = AsyncMock(return_value=([], 0))
+
+        items, total = await svc.query_public_results(
+            spider_name="example", tenant_id=11,
+        )
+
+        kwargs = svc.result_repo.query_by_spider.await_args.kwargs
+        assert kwargs.get("exclude_source") == CANDIDATE_SOURCE
+        assert kwargs.get("tenant_id") == 11
+        assert items == [] and total == 0
+
+    @pytest.mark.asyncio
+    async def test_query_public_results_unbound_zero_rows(self):
+        """未绑企业的出站拉数：服务层 0 行、不查仓储"""
+        svc = _query_service()
+        svc.result_repo.query_by_spider = AsyncMock(return_value=([{"id": 1}], 1))
+
+        items, total = await svc.query_public_results(spider_name="example")
+
+        assert items == [] and total == 0
+        svc.result_repo.query_by_spider.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_list_results_excludes_marketplace(self):
+        """「我的结果」按任务列表排除候选"""
+        svc = _query_service()
+        svc.repo.get_by_id = AsyncMock(return_value=_task())
+        svc.result_repo.count_by_task = AsyncMock(return_value=0)
+        svc.result_repo.list_by_task = AsyncMock(return_value=[])
+
+        resp = await svc.list_results(9)
+
+        assert resp.total == 0 and resp.items == []
+        assert svc.result_repo.count_by_task.await_args.kwargs.get(
+            "exclude_source"
+        ) == CANDIDATE_SOURCE
+        assert svc.result_repo.list_by_task.await_args.kwargs.get(
+            "exclude_source"
+        ) == CANDIDATE_SOURCE
 
     @pytest.mark.asyncio
     async def test_delete_result_missing_raises(self):
@@ -694,7 +761,140 @@ class TestScheduleSpiderValidation:
             "backend.services.schedule_service.SpiderDefinitionRepository", return_value=repo
         ):
             resp = await svc.create_schedule(
-                ScheduleRequest(spider_name="example", cron_expr="*/5 * * * *")
+                ScheduleRequest(spider_name="example", cron_expr="*/5 * * * *"),
+                tenant_id=3,
             )
 
         assert resp.id == 3
+
+
+def _compiled(stmt) -> str:
+    return str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+
+def _count_result(total: int) -> MagicMock:
+    r = MagicMock()
+    r.scalar.return_value = total
+    return r
+
+
+def _rows_result(rows: list) -> MagicMock:
+    r = MagicMock()
+    r.scalars.return_value.all.return_value = rows
+    return r
+
+
+class TestCandidateSqlPaginationAndOwnedPredicate:
+    """FR-11：超管候选 SQL 分页；配额/数据中心 SQL 排除 marketplace"""
+
+    @pytest.mark.asyncio
+    async def test_pending_candidates_paginates_in_sql(self):
+        """禁止先拉全表再内存滤：COUNT + LIMIT/OFFSET 都在 SQL 侧"""
+        session = MagicMock()
+        session.execute = AsyncMock()
+        session.execute.side_effect = [_count_result(25), _rows_result([])]
+        repo = SpiderResultRepository(session=session)
+
+        items, total = await repo.list_pending_marketplace_candidates(
+            page=2, page_size=20,
+        )
+
+        assert items == [] and total == 25
+        sql_count = _compiled(session.execute.call_args_list[0].args[0])
+        sql_page = _compiled(session.execute.call_args_list[1].args[0])
+        assert "marketplace" in sql_count
+        assert "json_extract" in sql_page.lower() or "JSON_EXTRACT" in sql_page
+        assert "LIMIT 20" in sql_page
+        assert "OFFSET 20" in sql_page
+        assert session.execute.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_query_by_spider_sql_excludes_marketplace(self):
+        session = MagicMock()
+        session.execute = AsyncMock()
+        count_r = MagicMock()
+        count_r.scalar.return_value = 0
+        session.execute.side_effect = [count_r, _rows_result([])]
+        repo = SpiderResultRepository(session=session)
+
+        items, total = await repo.query_by_spider(page=1, page_size=20)
+
+        assert items == [] and total == 0
+        sql_count = _compiled(session.execute.call_args_list[0].args[0])
+        sql_page = _compiled(session.execute.call_args_list[1].args[0])
+        assert "marketplace" in sql_count
+        assert "marketplace" in sql_page
+        assert "IS NULL" in sql_count
+
+    @pytest.mark.asyncio
+    async def test_query_by_spider_sql_binds_tenant(self):
+        """出站拉数 SQL 等值 tenant_id（跨租户红线）"""
+        session = MagicMock()
+        session.execute = AsyncMock()
+        count_r = MagicMock()
+        count_r.scalar.return_value = 0
+        session.execute.side_effect = [count_r, _rows_result([])]
+        repo = SpiderResultRepository(session=session)
+
+        items, total = await repo.query_by_spider(
+            spider_name="beta", page=1, page_size=20, tenant_id=11,
+        )
+
+        assert items == [] and total == 0
+        sql_count = _compiled(session.execute.call_args_list[0].args[0])
+        sql_page = _compiled(session.execute.call_args_list[1].args[0])
+        assert "tenant_id" in sql_count
+        assert "tenant_id" in sql_page
+        assert "11" in sql_count
+        assert "marketplace" in sql_count
+
+    @pytest.mark.asyncio
+    async def test_count_owned_by_tenant_sql_excludes_marketplace(self):
+        session = MagicMock()
+        session.execute = AsyncMock()
+        count_r = MagicMock()
+        count_r.scalar.return_value = 9
+        session.execute.return_value = count_r
+        repo = SpiderResultRepository(session=session)
+
+        n = await repo.count_owned_by_tenant(7)
+
+        assert n == 9
+        sql = _compiled(session.execute.call_args.args[0])
+        assert "marketplace" in sql
+        assert "tenant_id" in sql
+
+
+def test_datacenter_empty_when_only_marketplace(db_client, db_session):
+    """GWT-11.2 HTTP：只有候选 → 数据中心 0 条，不列出候选"""
+    import asyncio
+
+    from conftest import make_tenant_owner_headers
+    from platform_core.models.spider_result import SpiderResult
+    from platform_core.models.spider_task import SpiderTask
+
+    headers, tid = make_tenant_owner_headers(db_session, slug="dc-empty")
+
+    async def _seed() -> None:
+        async with db_session() as s:
+            task = SpiderTask(
+                spider_name="skill_harvester", tenant_id=tid,
+                status="completed", params="{}",
+            )
+            s.add(task)
+            await s.flush()
+            s.add(SpiderResult(
+                task_id=task.id, spider_name="skill_harvester",
+                title="only-candidate", source="marketplace",
+                url="https://market.example/item", tenant_id=tid,
+            ))
+            await s.commit()
+
+    asyncio.run(_seed())
+    resp = db_client.get("/api/v1/spiders/results", headers=headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    data = body["data"]
+    assert data["total"] == 0
+    assert data["items"] == []
+    assert body["message"] == EMPTY_DATACENTER_COPY

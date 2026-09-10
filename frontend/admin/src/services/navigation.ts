@@ -12,11 +12,17 @@ export const registerNavigate = (fn: NavigateFunction): void => {
   navigateImpl = fn
 }
 
-/** 跳登录页并携带来源路径（登录成功后可回跳） */
+/** 跳登录页并携带来源路径（登录成功后可回跳；query `from` 只接受站内相对 path） */
 export const navigateToLogin = (from?: string): void => {
+  const raw = (from || '').trim()
+  const safe =
+    raw.startsWith('/') && !raw.startsWith('//') && !raw.includes('://') && !raw.includes('\\') && raw !== '/login'
+      ? raw
+      : ''
+  const search = safe ? `?from=${encodeURIComponent(safe)}` : ''
   if (navigateImpl) {
-    navigateImpl('/login', { state: { from } })
+    navigateImpl(`/login${search}`, { state: { from: safe || from, sessionExpired: true } })
   } else {
-    window.location.href = '/login'
+    window.location.href = `/login${search}`
   }
 }
