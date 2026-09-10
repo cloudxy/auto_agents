@@ -21,6 +21,7 @@ from backend.services.llm_common.seam import bind, seam
 from backend.services.llm_common.runtime import (
     LlmRuntimeConfig,
     resolve_config_from_settings,
+    resolve_own_tenant_config,
     resolve_runtime_config,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "LlmRuntimeConfig",
     "bind",
     "resolve_config_from_settings",
+    "resolve_own_tenant_config",
     "resolve_runtime_config",
     "seam",
 ]

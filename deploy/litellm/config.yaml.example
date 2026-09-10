@@ -1,0 +1,15 @@
+# Sample only. Copy to config.gen.yaml on the eval host (that file is gitignored).
+# Upstream keys are injected at runtime via os.environ/<NAME> (T-14).
+# Do not put plaintext keys here. MASTER_KEY / SALT_KEY / DATABASE_URL
+# come from container env, not this file.
+model_list:
+  - model_name: example-chat
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  store_model_in_db: true
+
+litellm_settings:
+  drop_params: true

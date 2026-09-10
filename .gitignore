@@ -42,6 +42,10 @@ config/**/.env
 !config/prod/.env.example
 config/.secrets.yml
 
+# Generated LiteLLM gateway config (FR-14 / T-11). Runtime inject is T-14. Never track.
+deploy/litellm/config.gen.yaml
+deploy/litellm/*.gen.yaml
+
 # OS
 .DS_Store
 Thumbs.db
@@ -54,6 +58,7 @@ htmlcov/
 .claude/*
 !.claude/rules/
 !.claude/skills
+!.claude/plugins
 !.claude/agents/
 !.claude/hooks/
 !.claude/memory/
@@ -62,6 +67,10 @@ htmlcov/
 !.claude/MEMORY.md
 !.claude/settings.json
 .claude/settings.local.json
+
+# ZCode：工作区命令走 .zcode/commands → .agents/commands；其余本地态不入库
+.zcode/*
+!.zcode/commands
 .lingma/*
 .gemini/*
 ai_tool/*

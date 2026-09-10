@@ -24,9 +24,9 @@ auto_agents/
 ├── config/               # Dynaconf 配置（default + local/dev/prod + scrapy 子层）
 ├── scripts/              # 运维脚本（init-db / migrate / start / run-spider）
 ├── skills-library/       # 多工具共享 skill 库（内容文件/adapters；治理并入主 API v1/skills）
-├── capability-library/   # 能力资产目录；plugins/sdlc-workflow 是符号链接，源头在 ~/.zcode/local-plugins
-├── .agents/skills/       # 本仓库开发协作 skill（/new-svc /check-arch 等）
-└── .claude/              # 规则和技能库
+├── capability-library/   # 能力资产目录；plugins/ 适配器 → .agents/plugins
+├── .agents/              # 开发协作中枢（skills/ + plugins/ 指针农场）
+└── .claude/              # 规则和技能库；skills/ plugins/ 为适配器软链
 ```
 
 ## 核心架构哲学

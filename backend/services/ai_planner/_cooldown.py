@@ -29,6 +29,7 @@ def _key(provider_id: int, model_id: str) -> str:
 
 async def record_failure(provider_id: int, model_id: str) -> None:
     """记录一次失败（pipeline INCR+EXPIRE 原子提交；达阈值时刷新 TTL 确保窗口完整）。"""
+    logger.debug(f"记录模型失败 | provider={provider_id} model={model_id}")
     if not provider_id:
         return
     try:
@@ -46,6 +47,7 @@ async def record_failure(provider_id: int, model_id: str) -> None:
 
 async def is_cooled_down(provider_id: int, model_id: str) -> bool:
     """模型是否冷却中：GET 值 ≥ 阈值（非仅 EXISTS——QA-2 修复：首次失败建键但值 < 阈值不算冷却）。"""
+    logger.debug(f"查询模型冷却 | provider={provider_id} model={model_id}")
     if not provider_id:
         return False
     try:
@@ -58,6 +60,7 @@ async def is_cooled_down(provider_id: int, model_id: str) -> bool:
 
 async def filter_cooled(provider_id: int, model_ids: list[str]) -> list[str]:
     """批量过滤冷却模型（单次 MGET，NFR-02：不逐模型 EXISTS）。"""
+    logger.debug(f"过滤冷却模型 | provider={provider_id} n={len(model_ids)}")
     if not provider_id or not model_ids:
         return model_ids
     try:
@@ -72,6 +75,7 @@ async def filter_cooled(provider_id: int, model_ids: list[str]) -> list[str]:
 
 async def clear(provider_id: int, model_id: str) -> None:
     """清除冷却（手动重测连通成功时调用）。"""
+    logger.debug(f"清除模型冷却 | provider={provider_id} model={model_id}")
     if not provider_id:
         return
     try:

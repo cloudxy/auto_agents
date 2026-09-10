@@ -64,11 +64,11 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push  # 安装�
 - 数据契约改动（models/schemas）：额外跑 `bash scripts/check-arch.sh`
 - CI 三阶段关卡：Python lint+test / 架构红线 / 前端构建
 
-## Skill 路由（.agents/skills/）
+## Skill 路由（.agents/）
 
-项目协作 skill 在 `.agents/skills/`。跨工具共享的 skill 目录库在 `skills-library/`（**技能治理已并入主 API `v1/skills`**，本地 8765 后台已退役；用法见该目录 README）。
+项目协作中枢在 `.agents/`（`skills/` 为本仓库 skill，`plugins/` 为第三方插件指针）。跨工具共享的 skill 目录库在 `skills-library/`（**技能治理已并入主 API `v1/skills`**，本地 8765 后台已退役；用法见该目录 README）。
 
-`~/.zcode/local-plugins/` 是第三方插件的唯一维护源。本仓库只引用（`.grok/plugins/<name>` 与 `capability-library/plugins/<name>` 符号链接），禁止把插件内容复制进仓库。Grok 已启用：`sdlc-workflow` / `superpowers` / `mattpocock-skills` / `drama-skills` / `oh-story`。`dev-team` 因 manifest 名与 `mattpocock-skills` 冲突，不进 `.grok/plugins`，仅能力库保留引用。跳过 `sdlc-workflow-eval-workspace`。
+`~/.zcode/local-plugins/` 是第三方插件的唯一维护源。本仓库只在 `.agents/plugins/<name>` 放符号链接，禁止把插件内容复制进仓库。`.grok/plugins/<name>` 与 `.claude/plugins/<name>` 只链 Grok/Claude 启用子集；`capability-library/plugins` 指向整农场。Grok 加载：`sdlc-workflow` / `dev-team` / `drama-skills` / `oh-story`。`superpowers` / `mattpocock-skills` 只留在农场供产品扫描（已含于 `dev-team`；重叠项用 Grok bundled skill）。跳过 `sdlc-workflow-eval-workspace`。Codex / Kimi 等确认发现路径后再加适配器。
 
 | 场景 | Skill |
 |------|-------|
