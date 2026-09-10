@@ -26,6 +26,7 @@ const Usage = React.lazy(() => import('./pages/Usage'))
 const Capabilities = React.lazy(() => import('./pages/Capabilities'))
 const MyInstalls = React.lazy(() => import('./pages/MyInstalls'))
 const PlatformOps = React.lazy(() => import('./pages/PlatformOps'))
+const RelayGroups = React.lazy(() => import('./pages/RelayGroups'))
 const Unauthorized = React.lazy(() => import('./pages/Unauthorized'))
 const NotFound = React.lazy(() => import('./pages/NotFound'))
 const RbacManagement = React.lazy(() => import('./pages/RbacManagement'))
@@ -115,6 +116,7 @@ function App() {
               <Route path="capabilities" element={<Page label="capabilities"><Capabilities /></Page>} />
               <Route path="members" element={<Page label="members"><Members /></Page>} />
               <Route path="usage" element={<Page label="usage"><Usage /></Page>} />
+              <Route path="relay" element={<Page label="relay"><RelayGroups /></Page>} />
               <Route path="llm" element={<Page label="llm"><LlmProviders /></Page>} />
               <Route path="logs" element={<Page label="logs"><LogCenter /></Page>} />
               <Route path="data" element={<Page label="data"><Data /></Page>} />

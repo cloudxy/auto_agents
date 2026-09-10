@@ -14,6 +14,12 @@ jest.mock('../services/usage', () => ({
   fetchUsageByMember: jest.fn().mockResolvedValue([]),
 }))
 
+jest.mock('../services/billing', () => ({
+  listPlans: jest.fn().mockResolvedValue([{ id: 2, slug: 'pro', name: '专业档', price_cents: 29900, period: 'month' }]),
+  createOrder: jest.fn().mockResolvedValue({ id: 9, plan_id: 2, amount_cents: 29900, status: 'pending', channel: 'offline' }),
+  listMyOrders: jest.fn().mockResolvedValue([]),
+}))
+
 jest.mock('../hooks/usePermission', () => ({
   usePermission: jest.fn(),
 }))

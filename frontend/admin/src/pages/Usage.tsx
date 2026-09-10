@@ -4,11 +4,12 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Alert, Button, Card, Col, Modal, Progress, Row, Spin, Table, Typography } from 'antd'
+import { Alert, Button, Card, Col, Modal, Progress, Row, Spin, Table, Typography, message } from 'antd'
 
 import { usePermission } from '../hooks/usePermission'
 import { useAuthStore } from '../store/useAuthStore'
 import { fetchUsageByMember, fetchUsageOverview, type MemberUsageRow, type UsageOverview } from '../services/usage'
+import { createOrder, listPlans } from '../services/billing'
 import { apiErrorMessage } from '../utils/errorMessage'
 
 const { Title, Text, Paragraph } = Typography
@@ -50,6 +51,25 @@ const Usage: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [byMember, setByMember] = useState<MemberUsageRow[]>([])
   const [contactOpen, setContactOpen] = useState(false)
+  const [ordering, setOrdering] = useState(false)
+
+  const submitUpgrade = async () => {
+    setOrdering(true)
+    try {
+      const plans = await listPlans()
+      const pro = plans.find((p) => p.slug === 'pro') || plans.find((p) => p.price_cents > 0)
+      if (!pro) {
+        message.warning('暂无付费档')
+        return
+      }
+      const order = await createOrder(pro.id)
+      message.success(`已提交升级订单 #${order.id}，等待人工确认收款`)
+    } catch (e) {
+      message.error(apiErrorMessage(e, '提交订单失败'))
+    } finally {
+      setOrdering(false)
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -128,6 +148,12 @@ const Usage: React.FC = () => {
                 <Button type="primary" size="small" style={{ marginRight: 8 }}
                         onClick={() => setContactOpen(true)}>
                   {PLAN_FULL_CTA}
+                </Button>
+              )}
+              {tokenFull && !readonly && (
+                <Button size="small" style={{ marginRight: 8 }} loading={ordering}
+                        onClick={submitUpgrade}>
+                  提交升级订单
                 </Button>
               )}
               {storageFull && (
