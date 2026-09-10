@@ -221,9 +221,34 @@ class SourceSync:
     async def _upsert_commands(
         self, source: CapabilitySource, pkg: Path, plugin_name: str, manifest: dict,
     ) -> None:
+        keep: set[str] = set()
         for item in _fold_commands(pkg, manifest):
             name = _bundled_slug(plugin_name, item["origin_local_name"])
+            keep.add(name)
             await self._upsert_command_row(source, plugin_name, name, item)
+        await self._retract_missing_commands(source, plugin_name, keep)
+
+    async def _retract_missing_commands(
+        self, source: CapabilitySource, plugin_name: str, keep: set[str],
+    ) -> None:
+        """包里已经没有的命令：软删，不再出现在治理/商店。"""
+        logger.info(
+            f"src_sync 收回缺失命令: source={source.name} plugin={plugin_name} keep={len(keep)}"
+        )
+        rows = (await self.session.execute(
+            select(CapabilityAsset).where(
+                CapabilityAsset.asset_type == "command",
+                CapabilityAsset.source_id == source.id,
+                CapabilityAsset.origin_plugin_name == plugin_name,
+                CapabilityAsset.deleted_at.is_(None),
+            )
+        )).scalars().all()
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            if row.name in keep:
+                continue
+            row.deleted_at = now
+            row.sync_state = "gone"
 
     async def _upsert_command_row(
         self, source: CapabilitySource, plugin_name: str, name: str, item: dict,

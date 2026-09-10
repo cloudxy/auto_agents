@@ -29,14 +29,15 @@ const Capabilities: React.FC = () => {
   const [target, setTarget] = useState<{ type: string; name: string } | null>(
     bounceType && bounceName ? { type: bounceType, name: bounceName } : null,
   )
+  const [catalogFocus, setCatalogFocus] = useState<string | null>(null)
 
   useEffect(() => {
     if (bounceType && bounceName) setTarget({ type: bounceType, name: bounceName })
   }, [bounceType, bounceName])
 
   const openCatalog = (name: string) => {
+    setCatalogFocus(name)
     setTab('catalog')
-    void name
   }
 
   return (
@@ -51,7 +52,7 @@ const Capabilities: React.FC = () => {
         destroyOnHidden={false}
         items={[
           { key: TABS[0].key, label: TABS[0].label, children: <SourceTab /> },
-          { key: TABS[1].key, label: TABS[1].label, children: <CatalogTab /> },
+          { key: TABS[1].key, label: TABS[1].label, children: <CatalogTab focusName={catalogFocus} /> },
           { key: TABS[2].key, label: TABS[2].label, children: (
             <PluginTab
               onSubscribe={(name) => setTarget({ type: 'plugin', name })}
