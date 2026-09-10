@@ -1,0 +1,5 @@
+# Generated / runtime — never commit (FR-14 / T-11 / T-14)
+config.gen.yaml
+*.gen.yaml
+.env
+postgres-data/

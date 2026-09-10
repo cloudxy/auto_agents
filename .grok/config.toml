@@ -1,15 +1,19 @@
 # 项目级 Grok 配置（仅 [mcp_servers] / [plugins] / [permission] / [mcp] 生效）。
-# 插件内容只在 ~/.zcode/local-plugins/<name> 维护；.grok/plugins/<name> 是符号链接。
+# 插件内容只在 ~/.zcode/local-plugins/<name> 维护。
+# .grok/plugins/<name> 只链启用子集（→ .agents/plugins/<name>）。
 # 不要再 grok plugin install 这些名字：会在 ~/.grok/installed-plugins 留下哈希副本并双载。
 # 跳过 sdlc-workflow-eval-workspace（评测工作区，不是插件）。
+# superpowers / mattpocock-skills 仍在指针农场（产品扫描要用），Grok 不启用：
+# 二者已被 dev-team 完全覆盖；与 bundled 重叠的 skill 用 Grok 自带。
 
 [plugins]
 enabled = [
   "sdlc-workflow",
-  "superpowers",
-  "mattpocock-skills",
+  "dev-team",
   "drama-skills",
   "oh-story",
 ]
-# dev-team 的 plugin.json name 仍是 mattpocock-skills，链进 .grok/plugins 会盖住正本。
-# 能力库仍保留 capability-library/plugins/dev-team 引用（扫描按目录名）。
+disabled = [
+  "superpowers",
+  "mattpocock-skills",
+]

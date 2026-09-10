@@ -9,7 +9,8 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.deps import CurrentUser, require_login
+from backend.app.api._helpers import omit_local_abs_paths_for_non_platform_admin
+from backend.app.api.deps import CurrentUser, require_login, require_platform_admin
 from backend.app.responses import ok
 from backend.services.capability_service import CapabilityService
 from platform_core.db import get_async_db
@@ -49,7 +50,11 @@ async def list_capabilities(
         }
         for r in rows
     ]
-    return ok(data={"total": total, "items": items})
+    payload: dict = {"total": total, "items": items}
+    if total == 0:
+        payload["empty"] = True
+        payload["message"] = "目录为空，可扫描同步包"
+    return ok(data=payload)
 
 
 # ---------- P6 C3/C4：插件域（扫描/详情/验证） ----------
@@ -57,13 +62,16 @@ async def list_capabilities(
 
 @router.post("/scan-plugins")
 async def scan_plugins(
-    _user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_platform_admin),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """扫描 capability-library/plugins/（plugin.json 解析入库）"""
+    """扫描 capability-library/plugins/（plugin.json 解析入库；仅平台超管）"""
+    from backend.app.api._helpers import record_audit
     from backend.services.plugin_service import PluginService
 
     result = await PluginService(session).scan_plugins()
+    await record_audit(session, user, "plugin.scan", "plugins",
+                       detail={"total": result.get("total")})
     return ok(data=result)
 
 
@@ -82,7 +90,7 @@ async def get_plugin(
 @router.post("/plugins/{name}/verify")
 async def verify_plugin(
     name: str,
-    user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_platform_admin),
     session: AsyncSession = Depends(get_async_db),
 ):
     """插件验证管线（ADR-0001）：MCP 连接→tools/list→抽样 call→健康落库"""
@@ -100,13 +108,16 @@ async def verify_plugin(
 
 @router.post("/scan-experts")
 async def scan_experts(
-    _user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_platform_admin),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """扫描 capability-library/experts/（subagent 格式解析入库）"""
+    """扫描 capability-library/experts/（subagent 格式解析入库；仅平台超管）"""
+    from backend.app.api._helpers import record_audit
     from backend.services.expert_service import ExpertService
 
     result = await ExpertService(session).scan_experts()
+    await record_audit(session, user, "expert.scan", "experts",
+                       detail={"total": result.get("total")})
     return ok(data=result)
 
 
@@ -125,7 +136,7 @@ async def get_expert(
 @router.post("/teams")
 async def upsert_team(
     body: dict,
-    user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_platform_admin),
     session: AsyncSession = Depends(get_async_db),
 ):
     """专家团定义（团长/成员引用校验；执行引擎二期）"""
@@ -174,16 +185,17 @@ async def export_team(
 async def get_capability_detail(
     asset_type: str,
     name: str,
-    _user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_login),
     service: CapabilityService = Depends(_service),
 ):
     """统一详情（治理字段 + 类型化细节由各域端点补充）
 
     注意：本路由为二段式动态段，必须保持在文件末尾注册，否则遮蔽
     /plugins/{name} /experts/{name} /teams/{name} 三条静态详情路由（恒 404）。
+    非超管不发出本机绝对路径（GWT-14.1/14.2）；相对库路径可保留。
     """
     asset = await service.get_asset(asset_type, name)
-    return ok(data={
+    data = {
         "id": asset.id, "asset_type": asset.asset_type, "name": asset.name,
         "title": asset.title, "description": asset.description,
         "category": asset.category, "status": asset.status, "tier": asset.tier,
@@ -192,4 +204,5 @@ async def get_capability_detail(
         "ai_suggested_score": float(asset.ai_suggested_score) if asset.ai_suggested_score is not None else None,
         "similar_to": asset.similar_to, "file_path": asset.file_path,
         "sync_state": asset.sync_state,
-    })
+    }
+    return ok(data=omit_local_abs_paths_for_non_platform_admin(data, user))

@@ -12,10 +12,11 @@
 #   F-7 .tsx ≤ 400 行（F-1 pages 禁直调 api 已由工单 71 承接，grep 验收）
 # ============================================================================
 set -u
+# shellcheck source=common.sh
+. "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
 VIOLATIONS=0
 RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 report() {
     echo -e "${RED}✗ [$1]${NC} $2"
@@ -70,6 +71,7 @@ f6() {
     local shared_count
     shared_count=$(grep -rE "(interface|type)\s+ApiEnvelope\s*[<{]" \
         "$ROOT/frontend/shared/src" --include="*.ts" 2>/dev/null | wc -l | tr -d ' ')
+    shared_count=${shared_count:-0}
     if [ "$shared_count" -ne 1 ]; then
         report "F-6" "shared 内 ApiEnvelope 定义数 = $shared_count（应为 1）"
     fi

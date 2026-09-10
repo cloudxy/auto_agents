@@ -120,8 +120,8 @@ auto_agents/
 ├── deploy/newapi/                # new-api 网关独立部署编排
 ├── scripts/                      # bootstrap-db / check-arch / migrate / start ...
 ├── skills-library/               # 多工具共享 skill 库（内容文件/adapters；治理并入主 API v1/skills）
-├── .agents/skills/               # 工具中立 AI 资产（/new-svc /new-spider /check-arch ...）
-└── .claude/                      # Claude Code 协作层（IDENTITY/SOUL/MEMORY/agents/hooks）
+├── .agents/                      # 开发协作中枢（skills/ + plugins/ 指针农场）
+└── .claude/                      # Claude Code 协作层（IDENTITY/SOUL/MEMORY/agents/hooks；skills/plugins 为适配器）
 ```
 
 ---
@@ -434,7 +434,7 @@ CI 三阶段：Python lint+test → 架构红线 → 前端构建。
 | 包管理 | uv（Python workspace）/ npm |
 | AI 协作 | Claude Code（`.claude/` 协作层：IDENTITY / SOUL / MEMORY / agents / hooks / skills） |
 
-> AI 协作层不是运行时依赖；项目名 `auto_agents` 中的 "agents" 指自动化爬虫工人。项目协作 skills 位于 `.agents/skills/`（工具中立），`.claude/skills` 为 symlink。跨工具共享的 skill 目录库在 [`skills-library/`](skills-library/README.md)（内容文件与适配器载体；**治理/评分/矫正并入主 API `v1/skills`**，本地 8765 后台已退役 deprecated）。
+> AI 协作层不是运行时依赖；项目名 `auto_agents` 中的 "agents" 指自动化爬虫工人。开发协作中枢在 `.agents/`（技能 + 插件指针）；`.claude/skills` 为技能适配器，`.grok/plugins` / `.claude/plugins` 为启用子集，`capability-library/plugins` 为整农场扫描入口。跨工具共享的 skill 目录库在 [`skills-library/`](skills-library/README.md)（内容文件与适配器载体；**治理/评分/矫正并入主 API `v1/skills`**，本地 8765 后台已退役 deprecated）。
 
 ---
 

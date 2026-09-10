@@ -24,17 +24,23 @@ backend.app 的路由聚合（api/v1/ai.py）与一切 patch 门面路径的单�
 from types import ModuleType
 from typing import Optional
 
+from platform_core.logger import get_logger
+
+logger = get_logger("api")
+
 _seam_ns: Optional[ModuleType] = None
 
 
 def bind(namespace: ModuleType) -> None:
     """注入晚绑定命名空间（门面初始化完成时调用；后绑覆盖前绑，幂等可重复）"""
+    logger.debug("装配 llm_common.seam 命名空间")
     global _seam_ns
     _seam_ns = namespace
 
 
 def seam() -> ModuleType:
     """取晚绑定命名空间（调用期解析：对门面属性的 patch 即刻可见）"""
+    logger.debug("读取 llm_common.seam 命名空间")
     if _seam_ns is None:
         raise RuntimeError(
             "llm_common.seam 未装配：需先 import backend.services.ai_planner_service"

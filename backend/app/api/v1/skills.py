@@ -10,8 +10,14 @@ from backend.config_consts import (SKILLS_LIBRARY_ROOT)
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_admin, require_login, require_operator
+from backend.app.api._helpers import omit_local_abs_paths_for_non_platform_admin, record_audit
+from backend.app.api.deps import (
+    CurrentUser,
+    require_admin,
+    require_login,
+    require_operator,
+    require_platform_admin,
+)
 from backend.app.responses import ok
 import backend.services.skill_import_service as _skill_import_service
 from backend.services.skill_service import SkillService
@@ -40,11 +46,11 @@ def _service(session: AsyncSession = Depends(get_async_db)) -> SkillService:
 
 @router.post("/scan")
 async def scan_skills(
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """全量/增量扫描 capability-library（admin）；事务由 service 持有（ADR-0007）"""
+    """全量/增量扫描 capability-library（仅平台超管）；事务由 service 持有（ADR-0007）"""
     summary = await service.scan_library()
     await record_audit(session, user, "skill.scan", "skills", detail={"total": summary["total"]})
     return ok(data=summary)
@@ -220,7 +226,7 @@ async def get_skill_detail(
     detail = SkillDetailResponse.model_validate(row)
     detail.skill_md, detail.meta_yaml = _read_skill_files(row.file_path)
     detail.reviews = [SkillReviewResponse.model_validate(rv) for rv in reviews]
-    return ok(data=detail.model_dump())
+    return ok(data=omit_local_abs_paths_for_non_platform_admin(detail.model_dump(), user))
 
 
 @router.post("/{name}/rescore")

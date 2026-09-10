@@ -2,20 +2,18 @@
 # 架构合规检查 - project_rule.md 架构红线 + 核心代码边界的机械化扫描
 #
 # 用法：
-#   bash scripts/check-arch.sh          # 从任意目录调用（自动定位仓库根）
+#   bash tools/check/arch.sh
 #
 # 退出码：0 = 全部通过；非 0 = 违规总数（上限 255）
 # 与 /check-arch Skill 的检查命令保持一致，供 pre-commit 与 CI 复用。
 #
 # 规则分两组：
-#   R1-R12  架构红线（配置/安全/反爬/模型/日志/异步 Redis/门面白名单）
-#   B1-B3   核心代码边界（模块依赖方向）
+#   R1-R13  架构红线（配置/安全/反爬/模型/日志/异步 Redis/门面白名单/租户）
+#   B1-B4   核心代码边界（模块依赖方向 + 四柱域 import）
 
 set -uo pipefail
-
-# 定位仓库根目录（脚本所在目录的上一级）
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+# shellcheck source=common.sh
+. "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
 VIOLATIONS=0
 
@@ -35,7 +33,7 @@ report() {
     fi
 }
 
-echo "架构合规检查（13 条红线 + 3 条边界）"
+echo "架构合规检查（13 条红线 + 4 条边界）"
 echo "======================================"
 
 # --- 配置即代码 ---
@@ -96,15 +94,47 @@ else
 fi
 
 # --- 日志即证据 ---
-R10_OUTPUT=""
-for f in backend/services/*.py; do
-    [ -e "$f" ] || continue
-    FOUND="$(awk '/^(async )?def [a-z]/ {name=$0; getline; if ($0 !~ /logger\./) print FILENAME":"NR-1": "name}' "$f" 2>/dev/null || true)"
-    if [ -n "$FOUND" ]; then
-        R10_OUTPUT="${R10_OUTPUT}${FOUND}
-"
-    fi
-done
+# R10: 扫描 backend/services/**/*.py（含子包）。模块级公开函数（非 _ 前缀）
+# 的第一条语句（跳过 docstring）必须含 logger.。签名跨行与嵌套包一并覆盖。
+R10_OUTPUT="$(uv run python - <<'PYEOF' 2>/dev/null || echo "R10 递归扫描执行失败（uv/python 环境）"
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+hits: list[str] = []
+for path in sorted(Path("backend/services").rglob("*.py")):
+    if "__pycache__" in path.parts:
+        continue
+    src = path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as exc:
+        hits.append(f"{path}:1: syntax error {exc}")
+        continue
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        name = node.name
+        if not name or name[0] == "_" or not name[0].islower():
+            continue
+        body = list(node.body)
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(getattr(body[0], "value", None), ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            body = body[1:]
+        if not body:
+            hits.append(f"{path}:{node.lineno}: def {name}")
+            continue
+        seg = ast.get_source_segment(src, body[0]) or ""
+        if "logger." not in seg:
+            hits.append(f"{path}:{node.lineno}: def {name}")
+print("\n".join(hits), end="")
+PYEOF
+)"
 report "R10" "service 方法入口缺 logger" "${R10_OUTPUT%$'\n'}"
 
 # --- 异步 Redis 收口（期 3 → 期 4 全域生效）---
@@ -202,10 +232,58 @@ report "B2" "backend → scrapy 直接依赖" \
 report "B3" "config → 业务模块反向依赖" \
     "$(grep -rnE "${GREP_EXCLUDES[@]}" '^(from|import) (backend|scrapy|platform_core)' config/ 2>/dev/null || true)"
 
+# B4: 四柱域 import（ADR-0010 全表；grep 写死。ai_planner 只禁 admin，
+# 允许 llm_client.py import chat。power_market 同一条含 llm_gateway。）
+# power_market 禁这些前缀（含 llm_gateway）
+report "B4" "power_market 禁 spider_/newapi_/litellm_/relay_/channel_/ai_planner/llm_gateway 直连" \
+    "$(grep -rnE '^(from|import) backend\.services\.(spider_|newapi_|litellm_|relay_|channel_|ai_planner|llm_gateway)' backend/services/power_market/ 2>/dev/null || true)"
+
+# ai_planner 只禁 admin（三模式）
+report "B4" "ai_planner 禁 llm_gateway.admin（三模式）" \
+    "$(grep -rnE 'from backend\.services\.llm_gateway\.admin|import backend\.services\.llm_gateway\.admin|from backend\.services\.llm_gateway import admin' backend/services/ai_planner/ 2>/dev/null || true)"
+
+# ai_planner 除 llm_client.py 禁 chat（三模式）
+report "B4" "ai_planner 除 llm_client.py 禁 llm_gateway.chat（三模式）" \
+    "$(grep -rnE 'from backend\.services\.llm_gateway\.chat|import backend\.services\.llm_gateway\.chat|from backend\.services\.llm_gateway import chat' backend/services/ai_planner/ --exclude=llm_client.py 2>/dev/null || true)"
+
+# 禁网关 DSN / create_async_engine 打网关库（backend 只 HTTP）
+report "B4" "禁止 LITELLM.DB_DSN" \
+    "$(grep -rnE "${GREP_EXCLUDES[@]}" --exclude-dir=tests 'LITELLM\.DB_DSN' backend/ config/ 2>/dev/null || true)"
+
+report "B4" "禁止 create_async_engine 打网关库" \
+    "$( {
+        grep -rnE "${GREP_EXCLUDES[@]}" --exclude-dir=tests 'create_async_engine\([^)]*LITELLM' backend/ 2>/dev/null || true
+        grep -rnE "${GREP_EXCLUDES[@]}" 'create_async_engine\(' backend/services/llm_gateway/ 2>/dev/null || true
+    } )"
+
+# --- 发布物密钥（FR-14 / T-11；不加 R14 编号，避免与 R1–R13 账本冲突）---
+echo ""
+echo "--- 发布物密钥（FR-14）---"
+
+TRACKED_GEN="$(git ls-files -- deploy/litellm/config.gen.yaml 2>/dev/null || true)"
+if [ -n "$TRACKED_GEN" ]; then
+    echo "❌ FR-14: deploy/litellm/config.gen.yaml 仍在跟踪树"
+    VIOLATIONS=$((VIOLATIONS + 1))
+else
+    echo "✓ FR-14: config.gen.yaml 不在跟踪树"
+fi
+
+# 样例模式由片段拼接，脚本内不出现真实上游 Key。-l 只打文件名，避免 CI 日志泄密。
+_SK_PREFIX="sk-"
+_KEY_PAT="api_key[[:space:]]*:[[:space:]]*['\"]?${_SK_PREFIX}[A-Za-z0-9_-]{16,}"
+SECRET_FILES="$(git grep -lE "${_KEY_PAT}" -- deploy config 2>/dev/null || true)"
+if [ -n "$SECRET_FILES" ]; then
+    echo "❌ FR-14: 跟踪的 deploy/config 命中上游 Key 样例模式（仅文件名）"
+    echo "$SECRET_FILES"
+    VIOLATIONS=$((VIOLATIONS + $(echo "$SECRET_FILES" | wc -l | tr -d ' ')))
+else
+    echo "✓ FR-14: 跟踪的 deploy/config 无上游 Key 样例模式"
+fi
+
 # --- 汇总 ---
 echo ""
 if [ "$VIOLATIONS" -eq 0 ]; then
-    echo "✓ 架构合规检查通过（13 红线 + 3 边界，全部通过）"
+    echo "✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥，全部通过）"
     exit 0
 else
     echo "共 $VIOLATIONS 处违规，请按 /check-arch Step 3 路由修复"

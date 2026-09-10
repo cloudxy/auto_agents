@@ -10,7 +10,7 @@
 |---|---|
 | **能力资产**（capability asset） | 平台级公共资产的 **五类平级** 统称：技能 / 插件 / 命令 / 智能体 / 专家团。统一目录（`capability_assets`）治理，`tenant_id` 恒 NULL（平台级豁免）。公开 API `asset_type` ∈ `skill` / `plugin` / `command` / `agent` / `team`。 |
 | **技能**（skill） | 原子工具能力（"让 AI 能做某件事"）。形态：SKILL.md（frontmatter+正文）+ 可选 meta.yaml 治理快照。可独立上架、独立订阅。 |
-| **插件**（plugin） | 磁盘上的打包单位：清单 + 其下的 skill / command / 智能体合集，以及 mcp_servers / hooks。对齐 zcode / Claude Code / Grok（根级 `plugin.json` 或 `.zcode-plugin/` / `.claude-plugin/` / `.grok-plugin/`）。**订阅插件不会带上子卡片。** 含 MCP 的包须验证通过后方可 enable-host；**上架是独立闸门**（ADR-0001 修订）。仓库内 `capability-library/plugins/<name>` 只放指向唯一维护源的符号链接或指针，禁止复制内容。 |
+| **插件**（plugin） | 磁盘上的打包单位：清单 + 其下的 skill / command / 智能体合集，以及 mcp_servers / hooks。对齐 zcode / Claude Code / Grok（根级 `plugin.json` 或 `.zcode-plugin/` / `.claude-plugin/` / `.grok-plugin/`）。**订阅插件不会带上子卡片。** 含 MCP 的包须验证通过后方可 enable-host；**上架是独立闸门**（ADR-0001 修订）。仓库内指针农场是 `.agents/plugins/<name>`（指向 `~/.zcode/local-plugins/<name>`）；`.grok/plugins` / `.claude/plugins` 只链启用子集，`capability-library/plugins` 链整农场。禁止复制内容。 |
 | **命令**（command） | 斜杠命令。形态：`commands/*.md`（或清单声明的 command 文件）。**独立上架、独立订阅**，不是插件 JSON 里的附属字段。 |
 | **智能体**（agent） | 人设 + 方法论 + 工具链。canonical = Claude Code subagent（`agents/*.md`：frontmatter name/description/tools + 正文 system prompt）。产品文案不再说「专家」。库表仍名 `capability_experts`（表名≠产品名词）。可引用技能；引用解析 **不看** 该技能是否上架。一期资产+导出，二期平台内召唤执行。 |
 | **专家团**（team） | 团长智能体 + 成员智能体[] + 协作流程。公开 `asset_type=team`（库内旧值 `expert_team` 回填）。一期定义与导出；执行引擎二期。 |
