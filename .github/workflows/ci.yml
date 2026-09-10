@@ -34,6 +34,15 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -89,6 +98,10 @@ jobs:
   arch-check:
     name: Architecture Red Lines (R1-R13 + B1-B3)
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: local
+      AUTO_AGENTS_JWT__SECRET_KEY: ci-test-secret-key-not-for-production
+      AUTO_AGENTS_WEBHOOK__SECRET_KEY: ci-test-webhook-secret
     steps:
       - uses: actions/checkout@v4
 
@@ -142,6 +155,10 @@ jobs:
   frontend-build:
     name: Frontend Build (admin + official)
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: local
+      AUTO_AGENTS_JWT__SECRET_KEY: ci-test-secret-key-not-for-production
+      AUTO_AGENTS_WEBHOOK__SECRET_KEY: ci-test-webhook-secret
 
     steps:
       - uses: actions/checkout@v4
@@ -154,13 +171,21 @@ jobs:
           # npm workspaces：lockfile 已收敛到根（D2，npm@10 生成）
           cache-dependency-path: package-lock.json
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Sync Python deps (OpenAPI dump)
+        run: uv sync
+
       # workspaces 根安装 + shared 先构建（D1/D2：app 经 dist 产物消费 shared）
       - name: Install workspaces
         run: npm ci
 
       - name: Generate OpenAPI types
         run: |
-          uv python install 3.13 >/dev/null 2>&1 || true
           uv run python tools/dump_openapi.py
           npm run codegen:api -w @auto-agents/frontend-shared
 
