@@ -40,6 +40,15 @@ export const HEALTH_UNKNOWN = '未知'
 export const HEALTH_UNAVAILABLE = '不可用'
 export const OPEN_IN_CATALOG = '在目录中打开'
 export const LIST_CHILD = '单独上架'
+export const GOVERNANCE_PAGE_SIZE = 20
+export const GOVERNANCE_PAGINATION = {
+  pageSize: GOVERNANCE_PAGE_SIZE,
+  showSizeChanger: false,
+  hideOnSinglePage: false,
+  showTotal: (total: number) => `共 ${total} 条`,
+} as const
+
+export const catalogFocusCopy = (name: string): string => `已定位短名 ${name}`
 export const VERIFY = '验证'
 export const DETAIL = '详情'
 
