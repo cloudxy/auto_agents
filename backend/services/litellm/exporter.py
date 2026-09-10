@@ -154,6 +154,7 @@ def build_litellm_config(rows: list[ProviderExportRow]) -> dict:
     跳过并警告：协议无 LiteLLM 前缀映射 / base_url 或 api_key 缺失 /
     无任何可用模型（子表空且父表兜底模型也空）的行。
     """
+    logger.debug("构建 LiteLLM config dict")
     model_list: list[dict] = []
     for row in rows:
         prefix = _MODEL_PREFIX_BY_PROTOCOL.get(row.protocol)
@@ -202,6 +203,7 @@ def build_litellm_config(rows: list[ProviderExportRow]) -> dict:
 
 def render_config_yaml(config: dict) -> str:
     """config dict → YAML 文本（含安全头注释；排序关闭保持 model_list 顺序）"""
+    logger.debug("渲染 LiteLLM config YAML")
     return _GENERATED_HEADER + yaml.safe_dump(
         config, sort_keys=False, allow_unicode=True, default_flow_style=False
     )

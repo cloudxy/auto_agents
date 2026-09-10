@@ -203,6 +203,8 @@ def test_role_permissions_mapping():
     assert "btn:delete" in _ROLE_PERMISSIONS["admin"]
     assert "btn:schedule" in _ROLE_PERMISSIONS["admin"]
     assert "btn:delete" not in _ROLE_PERMISSIONS["operator"]
+    assert "menu:llm" in _ROLE_PERMISSIONS["operator"]
+    assert "menu:newapi" not in _ROLE_PERMISSIONS["operator"]
     assert "btn:create" not in _ROLE_PERMISSIONS["viewer"]
     assert "menu:members" not in _ROLE_PERMISSIONS["viewer"]
     assert "menu:usage" not in _ROLE_PERMISSIONS["viewer"]

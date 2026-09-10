@@ -3,13 +3,24 @@
  */
 import api, { unwrap } from './api'
 
+export interface UsageAlert {
+  metric: string
+  level: 'near' | 'full' | 'error' | string
+  message: string
+}
+
 export interface UsageOverview {
-  tenant_id: number
-  quota: { task_concurrency: number; result_storage: number; llm_tokens_month: number }
-  usage: { task_concurrency: number; result_storage: number; llm_tokens_month: number }
-  llm_by_provider: Record<string, number>
-  cost_by_provider: Record<string, number>
-  cost_cents_total: number
+  tenant_id?: number
+  quota?: { task_concurrency: number; result_storage: number; llm_tokens_month: number }
+  usage?: { task_concurrency: number; result_storage: number; llm_tokens_month: number }
+  llm_by_provider?: Record<string, number>
+  cost_by_provider?: Record<string, number>
+  cost_cents_total?: number
+  timezone?: string
+  year_month?: string
+  alerts?: UsageAlert[]
+  scope?: string
+  message?: string
 }
 
 export const fetchUsageOverview = (): Promise<UsageOverview> =>

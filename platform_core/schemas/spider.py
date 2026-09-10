@@ -17,6 +17,7 @@ class SpiderTaskResponse(BaseModel):
     result_count: int = 0
     retry_count: int = 0
     error_message: Optional[str] = None
+    worker_offline: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
@@ -161,6 +162,9 @@ class SpiderStatsResponse(BaseModel):
     daily_tasks: List[DailyPoint] = []
     daily_results: List[DailyPoint] = []
     top_spiders: List[TopSpider] = []
+    timezone: str = "Asia/Shanghai"
+    window_days: int = 7
+    window_start: Optional[datetime] = None
 
 
 # ----------------------------------------------------------------------

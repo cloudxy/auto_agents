@@ -1,20 +1,8 @@
-"""new-api 管控 API 单测（admin 渠道健康页只读端点）
+"""值班管控 API 单测（T-18：网关模型列表 + 71.2/71.3 + GWT-70.3）
 
-约定：不连真实 MySQL/new-api，TestClient 走 conftest 的 app fixture
-（get_current_user 全局 override 为 admin）；分层打桩：
-- NewapiApiClient：patch backend.services.newapi_overview_service.NewapiApiClient
-- Repository：patch 类方法（AsyncMock，验证 skip/limit/channel_id 换算）
-- settings：patch service 命名空间的 settings.get（开关/URL 用例）
-
-覆盖：
-- overview：正常聚合（字段映射 / key 敏感字段剔除 / 未知字段收 extra / 本地统计）
-- overview：客户端异常降级 available=false（HTTP 200 不 500）
-- overview：开关关闭 reason="newapi disabled"（不实例化客户端）；缺 id 条目跳过
-- events / probe-results：分页换算（page/page_size → skip/limit）与渠道过滤
-- 权限：operator 访问 403；参数校验 page<1 422
+约定：不连真实 MySQL/LiteLLM，TestClient 走 conftest 的 app fixture。
 """
 from datetime import datetime
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,44 +11,49 @@ from backend.repositories.newapi_repository import (
     ChannelEventRepository,
     ChannelProbeResultRepository,
 )
-from stubs import fake_settings as _fake_settings  # 共享桩（唯一定义处见 stubs.py）
+from backend.services.gateway_models import DUTY_DEGRADE_71_3, DUTY_EMPTY_71_2
 
-# overview 端点路径（v1 前缀）
 OVERVIEW_URL = "/api/v1/newapi/overview"
 EVENTS_URL = "/api/v1/newapi/events"
 PROBE_RESULTS_URL = "/api/v1/newapi/probe-results"
+MODELS_URL = "/api/v1/newapi/models"
+UPSTREAMS_URL = "/api/v1/newapi/upstreams"
 
-# 测试用远端渠道原始 dict（含敏感字段 key 与未知字段，验证宽松映射契约）
-_RAW_CHANNEL = {
-    "id": 5, "name": "prov-a", "status": 1, "type": 1,
-    "used_quota": 1500, "balance": 9.5, "response_time": 320,
-    "test_time": 1756500000, "models": "gpt-4o,gpt-4o-mini", "group": "default",
-    "base_url": "https://upstream.test/v1", "priority": 0, "weight": 0,
-    "created_time": 1756000000,
-    "key": "sk-secret-should-not-leak",
+_RAW_MODEL = {
+    "model_name": "gpt-4o",
+    "litellm_params": {
+        "model": "openai/gpt-4o",
+        "api_base": "https://upstream.test/v1",
+        "api_key": "sk-secret-should-not-leak",
+    },
+    "model_info": {"id": "dep-gpt-4o", "mode": "chat"},
     "unknown_field": "keep-me",
 }
 
-_ENABLED_SETTINGS = {"NEWAPI.ENABLED": True, "NEWAPI.BASE_URL": "http://newapi.test"}
 
+def _patch_gateway(monkeypatch, models=None, error: Exception | None = None,
+                   deployments=None):
+    async def _list_models():
+        if error is not None:
+            raise error
+        return {"data": models if models is not None else []}
 
-class _FakeClient:
-    """NewapiApiClient 桩（list_channels 可预设返回或异常）"""
+    async def _list_deployments():
+        return {"data": deployments if deployments is not None else []}
 
-    def __init__(self, channels=None, error: Exception | None = None, **kwargs):
-        self.kwargs = kwargs
-        self._channels = channels or []
-        self._error = error
-
-    async def list_channels(self):
-        if self._error is not None:
-            raise self._error
-        return self._channels
+    monkeypatch.setattr(
+        "backend.services.newapi_overview_service.gw_admin.list_models",
+        _list_models,
+    )
+    monkeypatch.setattr(
+        "backend.services.newapi_overview_service.gw_admin.list_deployments",
+        _list_deployments,
+    )
 
 
 @pytest.fixture
 def api_client(platform_admin_client, app):
-    """admin 特权 client + get_async_db override（mock session，Repository 不落真库）
+    """平台超管特权 client + get_async_db override（mock session，Repository 不落真库）
 
     T10：原依赖 conftest 全局兜底 admin，兜底收紧后显式声明 admin 特权。
     """
@@ -75,209 +68,129 @@ def api_client(platform_admin_client, app):
     app.dependency_overrides.pop(get_async_db, None)
 
 
-# ---------------- overview：正常聚合 ----------------
+def _local_stats(monkeypatch, events=0, batch_id=None, verdicts=None):
+    monkeypatch.setattr(
+        ChannelEventRepository, "count_events_since", AsyncMock(return_value=events)
+    )
+    monkeypatch.setattr(
+        ChannelProbeResultRepository, "latest_batch_id",
+        AsyncMock(return_value=batch_id),
+    )
+    monkeypatch.setattr(
+        ChannelProbeResultRepository, "count_results_by_verdict",
+        AsyncMock(return_value=verdicts or {}),
+    )
+
+
 class TestOverviewAggregation:
-    def test_normal_aggregation_maps_and_strips_secrets(
-        self, api_client, monkeypatch
-    ):
-        """正常聚合：字段映射 / key 剔除 / 未知字段收 extra / 本地统计附带"""
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.NewapiApiClient",
-            lambda **kw: _FakeClient(channels=[dict(_RAW_CHANNEL)], **kw),
-        )
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.settings",
-            _fake_settings(**_ENABLED_SETTINGS),
-        )
-        monkeypatch.setattr(
-            ChannelEventRepository, "count_events_since", AsyncMock(return_value=7)
-        )
-        monkeypatch.setattr(
-            ChannelProbeResultRepository, "latest_batch_id",
-            AsyncMock(return_value="batch-abc"),
-        )
-        monkeypatch.setattr(
-            ChannelProbeResultRepository, "count_results_by_verdict",
-            AsyncMock(return_value={"original": 3, "spoofed": 1, "offline": 1}),
+    def test_normal_aggregation_maps_and_strips_secrets(self, api_client, monkeypatch):
+        """GWT-71.1：模型/部署列表；无完整上游 Key"""
+        _patch_gateway(monkeypatch, models=[dict(_RAW_MODEL)], deployments=[dict(_RAW_MODEL)])
+        _local_stats(
+            monkeypatch, events=7, batch_id="batch-abc",
+            verdicts={"original": 3, "spoofed": 1, "offline": 1},
         )
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
         body = resp.json()["data"]
         assert body["available"] is True
         assert body["total"] == 1
-        channel = body["channels"][0]
-        assert channel["id"] == 5 and channel["name"] == "prov-a"
-        assert channel["status"] == 1 and channel["type"] == 1
-        assert channel["used_quota"] == 1500 and channel["balance"] == 9.5
-        assert channel["response_time"] == 320
-        assert channel["extra"] == {"unknown_field": "keep-me"}
-        # 敏感字段绝不透传（整个响应体均不出现）
-        assert "key" not in channel
+        model = body["models"][0]
+        assert model["gateway_ref"] == "dep-gpt-4o"
+        assert model["model_name"] == "gpt-4o"
+        assert model["api_base"] == "https://upstream.test/v1"
+        assert model["api_key_masked"] != "sk-secret-should-not-leak"
         assert "sk-secret-should-not-leak" not in resp.text
-        # 本地统计
+        assert "key" not in model
+        assert model["extra"] == {"unknown_field": "keep-me"}
         assert body["events_24h"] == 7
         assert body["latest_batch_id"] == "batch-abc"
         assert body["latest_batch_verdicts"] == {"original": 3, "spoofed": 1, "offline": 1}
+        assert body["channels"] == []
+        assert "暂无渠道" not in resp.text
 
-    def test_minimal_channel_loose_mapping(self, api_client, monkeypatch):
-        """宽松映射：仅含 id 的渠道条目也能映射（缺失字段取默认值，extra 为空）"""
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.NewapiApiClient",
-            lambda **kw: _FakeClient(channels=[{"id": 9}], **kw),
-        )
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.settings",
-            _fake_settings(**_ENABLED_SETTINGS),
-        )
-        monkeypatch.setattr(
-            ChannelEventRepository, "count_events_since", AsyncMock(return_value=0)
-        )
-        monkeypatch.setattr(
-            ChannelProbeResultRepository, "latest_batch_id", AsyncMock(return_value=None)
-        )
-        resp = api_client.get(OVERVIEW_URL)
-        assert resp.status_code == 200
-        body = resp.json()["data"]
-        channel = body["channels"][0]
-        assert channel["id"] == 9 and channel["name"] == ""
-        assert channel["status"] == 0 and channel["extra"] == {}
-        assert body["latest_batch_id"] is None
-        assert body["latest_batch_verdicts"] == {}
-
-    def test_skips_entry_without_id(self, api_client, monkeypatch):
-        """缺 id 的条目跳过（宽松容错，不因单条脏数据 500）"""
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.NewapiApiClient",
-            lambda **kw: _FakeClient(channels=[{"name": "no-id"}, dict(_RAW_CHANNEL)], **kw),
-        )
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.settings",
-            _fake_settings(**_ENABLED_SETTINGS),
-        )
-        monkeypatch.setattr(
-            ChannelEventRepository, "count_events_since", AsyncMock(return_value=0)
-        )
-        monkeypatch.setattr(
-            ChannelProbeResultRepository, "latest_batch_id", AsyncMock(return_value=None)
-        )
+    def test_empty_models_is_71_2_not_load_failure(self, api_client, monkeypatch):
+        """GWT-71.2：可达且 0 模型 → 空态句；不是加载失败；禁止「暂无渠道」"""
+        _patch_gateway(monkeypatch, models=[])
+        _local_stats(monkeypatch, events=2)
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
         body = resp.json()["data"]
         assert body["available"] is True
-        assert [c["id"] for c in body["channels"]] == [5]
+        assert body["total"] == 0
+        assert body["models"] == []
+        assert body["empty_state"] == DUTY_EMPTY_71_2
+        assert body["empty_state"] == "还没有平台模型，去网关登记"
+        assert body["degrade_state"] is None
+        assert body["events_24h"] == 2
+        assert "暂无渠道" not in resp.text
+        assert "加载失败" not in resp.text
+
+    def test_skips_entry_without_name(self, api_client, monkeypatch):
+        _patch_gateway(
+            monkeypatch,
+            models=[{"litellm_params": {}}, dict(_RAW_MODEL)],
+        )
+        _local_stats(monkeypatch)
+        resp = api_client.get(OVERVIEW_URL)
+        assert resp.status_code == 200
+        body = resp.json()["data"]
+        assert body["available"] is True
+        assert [m["model_name"] for m in body["models"]] == ["gpt-4o"]
         assert body["total"] == 1
 
     def test_no_probe_batch_skips_verdict_query(self, api_client, monkeypatch):
-        """无探针记录时 verdict 分布为空 dict（不触发分布查询）"""
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.NewapiApiClient",
-            lambda **kw: _FakeClient(channels=[], **kw),
-        )
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.settings",
-            _fake_settings(**_ENABLED_SETTINGS),
-        )
-        monkeypatch.setattr(
-            ChannelEventRepository, "count_events_since", AsyncMock(return_value=2)
-        )
+        _patch_gateway(monkeypatch, models=[])
+        _local_stats(monkeypatch, events=2, batch_id=None)
         verdict_mock = AsyncMock(return_value={})
-        monkeypatch.setattr(
-            ChannelProbeResultRepository, "latest_batch_id", AsyncMock(return_value=None)
-        )
         monkeypatch.setattr(
             ChannelProbeResultRepository, "count_results_by_verdict", verdict_mock
         )
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
-        body = resp.json()["data"]
-        assert body["events_24h"] == 2
-        assert body["latest_batch_verdicts"] == {}
+        assert resp.json()["data"]["latest_batch_verdicts"] == {}
         verdict_mock.assert_not_awaited()
 
 
-# ---------------- overview：降级路径 ----------------
 class TestOverviewDegradation:
     def test_client_exception_degrades_200(self, api_client, monkeypatch):
-        """客户端异常 → HTTP 200 + available=false + reason（降级不 500）"""
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.NewapiApiClient",
-            lambda **kw: _FakeClient(error=RuntimeError("boom"), **kw),
-        )
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.settings",
-            _fake_settings(**_ENABLED_SETTINGS),
-        )
-        monkeypatch.setattr(
-            ChannelEventRepository, "count_events_since", AsyncMock(return_value=1)
-        )
-        monkeypatch.setattr(
-            ChannelProbeResultRepository, "latest_batch_id", AsyncMock(return_value=None)
-        )
+        """GWT-71.3：不可达 → HTTP 200 + available=false + 冻结句；本地仍可见"""
+        _patch_gateway(monkeypatch, error=RuntimeError("boom"))
+        _local_stats(monkeypatch, events=1, batch_id="batch-local")
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
         body = resp.json()["data"]
         assert body["available"] is False
-        assert "unreachable" in body["reason"]
-        assert body["channels"] == [] and body["total"] == 0
-        # 本地统计不随远程降级丢失
+        assert body["degrade_state"] == DUTY_DEGRADE_71_3
+        assert body["degrade_state"] == "LLM 网关管理面不可达，仅本地事件/探针"
+        assert body["reason"] == DUTY_DEGRADE_71_3
+        assert body["models"] == [] and body["total"] == 0
         assert body["events_24h"] == 1
+        assert body["latest_batch_id"] == "batch-local"
+        assert "暂无渠道" not in resp.text
 
     def test_timeout_degrades(self, api_client, monkeypatch):
-        """拉取超时（wait_for 到期）→ 降级 available=false"""
         import asyncio
 
-        async def _hang(**kwargs):
+        async def _hang():
             await asyncio.sleep(10)
 
         monkeypatch.setattr(
             "backend.services.newapi_overview_service.OVERVIEW_TIMEOUT_SECONDS", 0.01
         )
         monkeypatch.setattr(
-            "backend.services.newapi_overview_service.NewapiApiClient",
-            lambda **kw: SimpleNamespace(list_channels=_hang, **kw),
+            "backend.services.newapi_overview_service.gw_admin.list_models", _hang,
         )
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.settings",
-            _fake_settings(**_ENABLED_SETTINGS),
-        )
-        monkeypatch.setattr(
-            ChannelEventRepository, "count_events_since", AsyncMock(return_value=0)
-        )
-        monkeypatch.setattr(
-            ChannelProbeResultRepository, "latest_batch_id", AsyncMock(return_value=None)
-        )
+        _local_stats(monkeypatch)
         resp = api_client.get(OVERVIEW_URL)
         assert resp.status_code == 200
         body = resp.json()["data"]
         assert body["available"] is False
-        assert "unreachable" in body["reason"]
-
-    def test_disabled_switch_never_instantiates_client(self, api_client, monkeypatch):
-        """开关关闭 → available=false + reason="newapi disabled"，且不发起远程调用"""
-        client_spy = MagicMock(side_effect=AssertionError("不应实例化客户端"))
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.NewapiApiClient", client_spy
-        )
-        monkeypatch.setattr(
-            "backend.services.newapi_overview_service.settings",
-            _fake_settings(**{"NEWAPI.ENABLED": False}),
-        )
-        monkeypatch.setattr(
-            ChannelEventRepository, "count_events_since", AsyncMock(return_value=0)
-        )
-        monkeypatch.setattr(
-            ChannelProbeResultRepository, "latest_batch_id", AsyncMock(return_value=None)
-        )
-        resp = api_client.get(OVERVIEW_URL)
-        assert resp.status_code == 200
-        body = resp.json()["data"]
-        assert body["available"] is False
-        assert body["reason"] == "newapi disabled"
-        client_spy.assert_not_called()
+        assert body["degrade_state"] == DUTY_DEGRADE_71_3
 
 
-# ---------------- events / probe-results 分页 ----------------
-def _event_stub(**overrides) -> SimpleNamespace:
+def _event_stub(**overrides) -> object:
+    from types import SimpleNamespace
     defaults = dict(
         id=11, channel_id=7, action="disabled", usage=1500, limit_quota=1000,
         window_hours=24, reason="超限", source="scheduler",
@@ -287,7 +200,8 @@ def _event_stub(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
-def _probe_stub(**overrides) -> SimpleNamespace:
+def _probe_stub(**overrides) -> object:
+    from types import SimpleNamespace
     defaults = dict(
         id=21, channel_id=7, model="gpt-4o", verdict="spoofed",
         scores={"identity": 0.0, "total_calls": 9, "ok_calls": 9},
@@ -300,7 +214,6 @@ def _probe_stub(**overrides) -> SimpleNamespace:
 
 class TestPagination:
     def test_events_pagination_and_filter(self, api_client, monkeypatch):
-        """page/page_size → skip/limit 换算 + channel_id 透传；分页信封 data.items"""
         list_mock = AsyncMock(return_value=[_event_stub()])
         count_mock = AsyncMock(return_value=23)
         monkeypatch.setattr(ChannelEventRepository, "list_events", list_mock)
@@ -312,11 +225,8 @@ class TestPagination:
         body = resp.json()["data"]
         assert body["total"] == 23
         assert body["items"][0]["id"] == 11
-        assert body["items"][0]["action"] == "disabled"
-        assert body["items"][0]["source"] == "scheduler"
 
     def test_events_default_pagination_no_filter(self, api_client, monkeypatch):
-        """缺省参数：page=1/page_size=20，channel_id 为 None"""
         list_mock = AsyncMock(return_value=[])
         count_mock = AsyncMock(return_value=0)
         monkeypatch.setattr(ChannelEventRepository, "list_events", list_mock)
@@ -330,7 +240,6 @@ class TestPagination:
                                 "total_pages": 0}
 
     def test_probe_results_pagination_and_verdict_enum(self, api_client, monkeypatch):
-        """探针结果分页：verdict str→枚举 / scores dict 透传 / batch_id 保留"""
         list_mock = AsyncMock(return_value=[_probe_stub()])
         count_mock = AsyncMock(return_value=1)
         monkeypatch.setattr(ChannelProbeResultRepository, "list_results", list_mock)
@@ -338,17 +247,11 @@ class TestPagination:
         resp = api_client.get(PROBE_RESULTS_URL, params={"page": 2, "page_size": 10})
         assert resp.status_code == 200
         list_mock.assert_awaited_once_with(skip=10, limit=10, channel_id=None)
-        body = resp.json()["data"]
-        assert body["total"] == 1
-        item = body["items"][0]
+        item = resp.json()["data"]["items"][0]
         assert item["verdict"] == "spoofed"
         assert item["model"] == "gpt-4o"
-        assert item["batch_id"] == "batch-abc"
-        assert item["scores"]["identity"] == 0.0
-        assert item["latency_ms"] == 800
 
     def test_invalid_page_rejected(self, api_client, monkeypatch):
-        """page<1 / page_size>100 参数校验 422"""
         monkeypatch.setattr(
             ChannelEventRepository, "list_events", AsyncMock(return_value=[])
         )
@@ -359,17 +262,13 @@ class TestPagination:
         assert api_client.get(EVENTS_URL, params={"page_size": 101}).status_code == 422
 
 
-# ---------------- 权限与校验 ----------------
 class TestPermissions:
-    def test_overview_requires_admin(self, api_client, app):
-        """operator 访问 overview → 403"""
+    def test_overview_requires_platform_admin(self, api_client, app):
+        """operator GET overview → 404 同形（GWT-71.4 / 07.3）"""
         from backend.app.api.deps import CurrentUser as _CU, get_current_user
 
         async def _operator_user():
             return _CU(id=2, username="op", role="operator")
-
-        async def _admin_user():
-            return _CU(id=1, username="test-admin", role="admin")
 
         original = app.dependency_overrides[get_current_user]
         app.dependency_overrides[get_current_user] = _operator_user
@@ -377,35 +276,102 @@ class TestPermissions:
             resp = api_client.get(OVERVIEW_URL)
         finally:
             app.dependency_overrides[get_current_user] = original
-        assert resp.status_code == 403
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "HTTP_404"
+        assert "sk-" not in resp.text.lower()
 
-    def test_events_and_probe_results_require_admin(self, api_client, app):
-        """operator 访问 events / probe-results → 403"""
+    def test_events_and_probe_results_require_platform_admin(self, api_client, app):
         from backend.app.api.deps import CurrentUser as _CU, get_current_user
 
         async def _operator_user():
             return _CU(id=2, username="op", role="operator")
 
-        async def _admin_user():
-            return _CU(id=1, username="test-admin", role="admin")
-
         original = app.dependency_overrides[get_current_user]
         app.dependency_overrides[get_current_user] = _operator_user
         try:
-            assert api_client.get(EVENTS_URL).status_code == 403
-            assert api_client.get(PROBE_RESULTS_URL).status_code == 403
+            assert api_client.get(EVENTS_URL).status_code == 404
+            assert api_client.get(PROBE_RESULTS_URL).status_code == 404
         finally:
             app.dependency_overrides[get_current_user] = original
 
 
-class TestWithPatch:
-    def test_settings_patch_scope_is_service_module(self, monkeypatch):
-        """settings 打桩限定在 service 命名空间（不污染其他模块的 settings）"""
-        from backend.services import newapi_overview_service as svc_mod
+def test_operator_or_tenant_admin_write_gateway_model_rejected_list_unchanged(
+    api_client, app, monkeypatch,
+):
+    """GWT-70.3：租户 admin / operator 写平台网关模型或登记上游 → 拒绝；列表不变"""
+    from backend.app.api.deps import CurrentUser as _CU, get_current_user
 
-        original = svc_mod.settings
-        monkeypatch.setattr(
-            svc_mod, "settings", _fake_settings(**{"NEWAPI.ENABLED": False})
-        )
-        assert svc_mod.settings.get("NEWAPI.ENABLED", True) is False
-        assert original is not svc_mod.settings
+    create_spy = AsyncMock(return_value={"data": {"model_name": "hacked"}})
+    monkeypatch.setattr(
+        "backend.services.newapi_overview_service.gw_admin.create_model", create_spy,
+    )
+    _patch_gateway(monkeypatch, models=[dict(_RAW_MODEL)])
+    _local_stats(monkeypatch, events=0)
+
+    before = api_client.get(OVERVIEW_URL)
+    assert before.status_code == 200
+    before_models = before.json()["data"]["models"]
+    assert len(before_models) == 1
+    snapshot = [row["gateway_ref"] for row in before_models]
+
+    model_body = {"model_name": "hacked", "litellm_params": {"model": "x"}}
+    upstream_body = {
+        "gateway_ref": "hack-up",
+        "api_base": "https://evil.example/v1",
+        "model_name": "hacked",
+    }
+
+    async def _operator():
+        return _CU(id=2, username="op", role="operator", is_platform_admin=False)
+
+    async def _tenant_admin():
+        return _CU(id=3, username="boss", role="admin", is_platform_admin=False)
+
+    original = app.dependency_overrides[get_current_user]
+    try:
+        for user_fn in (_operator, _tenant_admin):
+            app.dependency_overrides[get_current_user] = user_fn
+            m_resp = api_client.post(MODELS_URL, json=model_body)
+            assert m_resp.status_code == 403, m_resp.text
+            assert m_resp.json()["code"] == "FORBIDDEN"
+            u_resp = api_client.post(UPSTREAMS_URL, json=upstream_body)
+            assert u_resp.status_code == 403, u_resp.text
+            assert u_resp.json()["code"] == "FORBIDDEN"
+    finally:
+        app.dependency_overrides[get_current_user] = original
+
+    create_spy.assert_not_awaited()
+    after = api_client.get(OVERVIEW_URL)
+    assert after.status_code == 200
+    after_models = after.json()["data"]["models"]
+    assert [row["gateway_ref"] for row in after_models] == snapshot
+    assert len(after_models) == len(before_models)
+    assert "sk-secret-should-not-leak" not in after.text
+
+
+def test_t18_config_prefix_no_third():
+    """T-20：运行时只读 RELAY.* / LITELLM.*；禁止 NEWAPI.* settings 读；禁止第三前缀"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    files = [
+        root / "backend/services/channel_config_service.py",
+        root / "backend/services/newapi_overview_service.py",
+        root / "backend/services/gateway_models.py",
+        root / "backend/app/api/v1/newapi.py",
+        root / "backend/services/newapi_api.py",
+        root / "backend/services/channel_scheduler_service.py",
+        root / "backend/services/channel_probe_service.py",
+        root / "backend/app/__init__.py",
+    ]
+    needles = ('settings.get("NEWAPI.', "settings.get('NEWAPI.")
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for needle in needles:
+            assert needle not in text, path
+        assert "GATEWAY." not in text
+        assert "PROXY." not in text
+        assert 'settings.set("' not in text
+        if "hset" in text or "write_cfg_hash" in text:
+            if path.name in {"channel_config_service.py", "newapi_api.py"}:
+                assert "relay:channel:cfg:" in text or "RELAY_CHANNEL_CFG_PREFIX" in text

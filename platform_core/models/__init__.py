@@ -9,7 +9,9 @@ from platform_core.models.base import Base
 from platform_core.models.mixins import AuditMixin, SoftDeleteMixin, TenantMixin
 from platform_core.models.tenant import Tenant
 from platform_core.models.capability import (
-    CapabilityAsset, CapabilityExpert, CapabilityPlugin, CapabilityTeam,
+    CapabilityAlias, CapabilityAsset, CapabilityCommand, CapabilityComponent,
+    CapabilityExpert, CapabilityInstall, CapabilityPlugin, CapabilitySource,
+    CapabilityTeam,
 )
 from platform_core.models.spider_task import SpiderTask
 from platform_core.models.spider_result import SpiderResult
@@ -24,6 +26,7 @@ from platform_core.models.ai_plan import AiPlan
 from platform_core.models.llm_provider import LlmProvider
 from platform_core.models.channel_event import ChannelEvent
 from platform_core.models.channel_probe_result import ChannelProbeResult
+from platform_core.models.product_event import ProductEvent
 from platform_core.models.llm_token_usage import LlmTokenUsage
 from platform_core.models.skill import Skill, SkillJob, SkillReview
 from platform_core.models.llm_provider_model import LlmProviderModel
@@ -48,8 +51,11 @@ __all__ = [
     "Base", "SpiderTask", "SpiderResult", "SpiderSchedule", "SpiderDefinition",
     "User", "OperationLog", "SystemConfig", "AlertRule", "TaskTemplate", "AiPlan",
     "LlmProvider", "ChannelEvent", "ChannelProbeResult", "LlmTokenUsage",
+    "ProductEvent",
     "Skill", "SkillReview", "SkillJob", "LlmProviderModel", "Tenant", "TenantMixin", "CapabilityAsset", "CapabilityPlugin",
-    "CapabilityExpert", "CapabilityTeam", "SoftDeleteMixin", "AuditMixin",
+    "CapabilityExpert", "CapabilityTeam", "CapabilityCommand", "CapabilityComponent",
+    "CapabilityInstall", "CapabilitySource", "CapabilityAlias",
+    "SoftDeleteMixin", "AuditMixin",
     # DB 升级 2026-09 Phase B/C 横切功能表
     "Tag", "Tagging", "Attachment", "Notification", "ResourceVersion",
     "WorkflowDefinition", "WorkflowInstance", "WorkflowStep", "WorkflowTransition",

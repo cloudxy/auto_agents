@@ -2,7 +2,7 @@
 
 覆盖路由（backend/app/api/v1/configs.py，此前零 HTTP 覆盖）：
 - GET /api/v1/configs/          全量配置（require_login；data 为 {key: value} 字典）
-- PUT /api/v1/configs/{key}     单项更新（require_admin；存在则改、缺省则建）
+- PUT /api/v1/configs/{key}     单项更新（require_platform_admin；存在则改、缺省则建）
 
 既有覆盖对照：test_config_service.py 仅 Service 单元（session 直查），HTTP 层零覆盖；
 test_t10_api_coverage.py 的 notify-config 是 /admin 域另一端点，不重复。
@@ -109,9 +109,9 @@ def test_put_config_anonymous_401(client):
     assert resp.json()["code"] == "AUTH_FAILED"
 
 
-@pytest.mark.parametrize("low_client", ["operator_client", "viewer_client"])
+@pytest.mark.parametrize("low_client", ["operator_client", "viewer_client", "admin_client"])
 def test_put_config_low_role_403(request, low_client):
-    """operator / viewer 直调 admin 端点 → 403（角色矩阵逐格）"""
+    """operator / viewer / 租户 admin 直调 → 403（平台超管才可写系统配置）"""
     resp = request.getfixturevalue(low_client).put(f"{BASE}/site.name", json={"value": "x"})
     assert resp.status_code == 403
     assert resp.json()["code"] == "FORBIDDEN"

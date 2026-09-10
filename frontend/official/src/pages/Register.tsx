@@ -1,85 +1,254 @@
 /**
- * 企业注册页（SaaS S5-1）：公司名 + 管理员邮箱/密码 → tenant + owner（免费档）。
+ * 企业注册：开通成功主按钮去后台登录；失败留在表单（GWT-04.1–04.4）。
  */
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Alert, Button, Card, Checkbox, Form, Input, Typography, message } from 'antd'
+import { Alert, Button, Card, Form, Input, Space, Typography, message } from 'antd'
 import { CheckCircleOutlined } from '@ant-design/icons'
-import { tenantSignup } from '../services/signup'
-import { apiErrorMessage } from '../utils/errorMessage'
-
+import { FREE_TIER_FEATURE_COPY } from '@auto-agents/frontend-shared'
+import { getAnonymousId } from '../services/beacon'
+import { tenantSignup, type SignupPayload, type SignupResult } from '../services/signup'
+import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
 
 const { Title, Text } = Typography
 
-const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
+const ADMIN_URL = (process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112').replace(/\/$/, '')
+const ADMIN_LOGIN_HREF = `${ADMIN_URL}/login?from=${encodeURIComponent('/dashboard')}`
 
-interface SignupResult {
-  tenant: { slug: string; name: string }
-  owner: { username: string }
+const SIGNUP_INCOMPLETE_CODE = 'SIGNUP_INCOMPLETE'
+const COPY_INCOMPLETE_GENERIC = '注册未完成，请检查填写内容'
+const COPY_OFFLINE = '创建企业失败：网络不可用。检查连接后重试。'
+const COPY_CREATED_TOAST = '企业已创建'
+const COPY_LOGIN_ADMIN = '登录管理后台'
+const COPY_REGISTER_ANOTHER = '再注册一家'
+const FREE_TIER_LINE = `免费档：${FREE_TIER_FEATURE_COPY.task_concurrency} / ${FREE_TIER_FEATURE_COPY.result_storage} / ${FREE_TIER_FEATURE_COPY.llm_tokens_month}`
+const TOUCH_TARGET_STYLE: React.CSSProperties = {
+  minHeight: 'var(--size-touch, 44px)',
+  minWidth: 'var(--size-touch, 44px)',
+}
+
+type ApiErrorLike = {
+  code?: string
+  message?: string
+  response?: {
+    status?: number
+    data?: { code?: string; message?: string; request_id?: string }
+  }
+}
+
+const isApiErrorLike = (e: unknown): e is ApiErrorLike =>
+  typeof e === 'object' && e !== null
+
+const apiErrorCode = (e: unknown): string | undefined => {
+  if (!isApiErrorLike(e)) return undefined
+  return e.response?.data?.code || e.code
+}
+
+const apiTraceId = (e: unknown): string | undefined => {
+  if (!isApiErrorLike(e)) return undefined
+  const id = e.response?.data?.request_id
+  return id ? String(id) : undefined
+}
+
+const isNetworkError = (e: unknown): boolean => {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true
+  if (!isApiErrorLike(e)) return false
+  return e.response == null && !('errorFields' in e)
+}
+
+const displayName = (raw: string | undefined): string => (raw || '').trim()
+
+const successCopy = (company: string, username: string): string =>
+  `企业「${company}」已开通，负责人 ${username}。登录后开始采集。`
+
+const incompleteWithReason = (reason: string, traceId?: string): string => {
+  const base = `注册未完成：${reason}。改正后再次创建企业。`
+  return traceId ? `${base}错误编号 ${traceId}` : base
 }
 
 const Register: React.FC = () => {
-  const [form] = Form.useForm()
+  const [form] = Form.useForm<SignupPayload>()
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState<SignupResult | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
+  const loginBtnRef = useRef<HTMLAnchorElement | HTMLButtonElement | null>(null)
 
-  const onSubmit = async () => {
-    const values = await form.validateFields()
+  useEffect(() => {
+    if (done) loginBtnRef.current?.focus()
+  }, [done])
+
+  const resetForAnother = () => {
+    setDone(null)
+    setFormError(null)
+    form.resetFields()
+  }
+
+  const onFinish = async (values: SignupPayload) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setFormError(COPY_OFFLINE)
+      return
+    }
     try {
       setSubmitting(true)
-      const result = await tenantSignup(values)
-      setDone(result)
-      message.success('注册成功，即可登录开始第一次采集')
+      setFormError(null)
+      const anonymousId = getAnonymousId()
+      const result = await tenantSignup(
+        anonymousId ? { ...values, anonymous_id: anonymousId } : values,
+      )
+      const company = displayName(result.tenant?.name)
+      const username = displayName(result.owner?.username)
+      if (!company || !username) {
+        setFormError(incompleteWithReason('开通结果缺少企业名或负责人'))
+        return
+      }
+      setDone({
+        tenant: { name: company, slug: result.tenant.slug },
+        owner: { username },
+      })
+      message.success(COPY_CREATED_TOAST)
     } catch (e) {
-      message.error(apiErrorMessage(e, '注册失败'))
+      if (isFormValidateError(e)) return
+      if (isNetworkError(e)) {
+        setFormError(COPY_OFFLINE)
+        return
+      }
+      if (apiErrorCode(e) === SIGNUP_INCOMPLETE_CODE) {
+        setFormError(COPY_INCOMPLETE_GENERIC)
+        return
+      }
+      const reason = apiErrorMessage(e, '请检查填写内容')
+      setFormError(incompleteWithReason(reason, apiTraceId(e)))
     } finally {
       setSubmitting(false)
     }
   }
 
+  const companyName = displayName(done?.tenant.name)
+  const ownerName = displayName(done?.owner.username)
+
   return (
-    <div style={{ minHeight: '100vh', background: '#f7f9fc', display: 'flex',
-                 alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <Card style={{ width: 420 }}>
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'var(--color-surface-sunken)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+      }}
+    >
+      <Card style={{ width: 420, background: 'var(--color-surface)' }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <Link to='/' style={{ fontSize: 20, fontWeight: 700, color: '#12233f', textDecoration: 'none' }}>AutoAgents</Link>
-          <Title level={4} style={{ margin: '12px 0 4px' }}>企业注册</Title>
-          <Text type="secondary">免费档：5 并发 / 10000 条结果 / 20 万 tokens/月</Text>
+          <Link
+            to="/"
+            style={{
+              fontSize: 20,
+              fontWeight: 700,
+              color: 'var(--color-text-primary)',
+              textDecoration: 'none',
+            }}
+          >
+            AutoAgents
+          </Link>
+          <Title level={4} style={{ margin: '12px 0 4px', color: 'var(--color-text-primary)' }}>
+            企业注册
+          </Title>
+          <Text type="secondary">{FREE_TIER_LINE}</Text>
         </div>
-        {done ? (
-          <Alert type="success" showIcon icon={<CheckCircleOutlined />}
-                 message={`企业「${done.tenant.name}」注册成功`}
-                 description={(
-                   <div>
-                     <p>管理员账号：<Text code>{done.owner.username}</Text></p>
-                     <p>首次登录后请尽快修改密码。</p>
-                     <Button type="primary" href={`${ADMIN_URL}/login`}>进入管理后台登录</Button>
-                     {' '}<Button href="/">返回官网</Button>
-                   </div>
-                 )} />
+        {done && companyName && ownerName ? (
+          <div aria-live="polite">
+            <Alert
+              type="success"
+              showIcon
+              icon={<CheckCircleOutlined />}
+              title={
+                <Text ellipsis={{ tooltip: companyName }} style={{ maxWidth: 340 }}>
+                  {successCopy(companyName, ownerName)}
+                </Text>
+              }
+              description={(
+                <Space wrap style={{ marginTop: 8 }}>
+                  <Button
+                    type="primary"
+                    href={ADMIN_LOGIN_HREF}
+                    ref={loginBtnRef as React.Ref<HTMLAnchorElement>}
+                    autoInsertSpace={false}
+                    className="site-touch-target"
+                    style={TOUCH_TARGET_STYLE}
+                  >
+                    {COPY_LOGIN_ADMIN}
+                  </Button>
+                  <Button autoInsertSpace={false} onClick={resetForAnother}>
+                    {COPY_REGISTER_ANOTHER}
+                  </Button>
+                </Space>
+              )}
+            />
+          </div>
         ) : (
-          <Form form={form} layout="vertical" onFinish={onSubmit}>
-            <Form.Item name="company" label="公司名称" rules={[{ required: true, min: 2 }]}>
-              <Input placeholder="如：Acme Corp" />
-            </Form.Item>
-            <Form.Item name="admin_email" label="管理员邮箱" rules={[{ required: true, type: 'email' }]}>
-              <Input placeholder="admin@company.com" />
-            </Form.Item>
-            <Form.Item name="admin_password" label="初始密码" rules={[{ required: true, min: 8 }]}>
-              <Input.Password placeholder="至少 8 位" autoComplete="new-password" />
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={onFinish}
+            onFinishFailed={({ errorFields }) => {
+              const name = errorFields[0]?.name
+              if (name) form.scrollToField(name)
+            }}
+          >
+            {formError ? (
+              <Alert
+                type="error"
+                showIcon
+                title={formError}
+                style={{ marginBottom: 16 }}
+                role="alert"
+              />
+            ) : null}
+            <Form.Item
+              name="company"
+              label="企业名"
+              rules={[
+                { required: true, message: '请填写企业名' },
+                { min: 2, message: '企业名至少 2 个字符' },
+              ]}
+            >
+              <Input placeholder="如：Acme Corp" maxLength={128} />
             </Form.Item>
             <Form.Item
-              name="agree"
-              valuePropName="checked"
-              rules={[{ validator: (_, v) => (v ? Promise.resolve() : Promise.reject(new Error('请先阅读并同意服务条款与隐私政策'))) }]}
+              name="admin_email"
+              label="管理员邮箱"
+              rules={[{ required: true, type: 'email', message: '请填写管理员邮箱' }]}
             >
-              <Checkbox>
-                我已阅读并同意 <a href="/terms" target="_blank" rel="noreferrer">服务条款</a>
-                {' '}与{' '}
-                <a href="/privacy" target="_blank" rel="noreferrer">隐私政策</a>
-              </Checkbox>
+              <Input placeholder="admin@company.com" autoComplete="username" />
             </Form.Item>
-            <Button type="primary" htmlType="submit" block loading={submitting}>创建企业租户</Button>
+            <Form.Item
+              name="admin_password"
+              label="密码"
+              rules={[
+                { required: true, message: '请填写密码' },
+                { min: 8, message: '密码至少 8 位' },
+              ]}
+            >
+              <Input.Password placeholder="至少 8 位" autoComplete="new-password" />
+            </Form.Item>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+              创建即表示已阅读{' '}
+              <a href="/terms" target="_blank" rel="noreferrer">服务条款</a>
+              {' '}与{' '}
+              <a href="/privacy" target="_blank" rel="noreferrer">隐私政策</a>
+            </Text>
+            <Button
+              type="primary"
+              htmlType="submit"
+              block
+              loading={submitting}
+              disabled={submitting}
+              autoInsertSpace={false}
+              className="site-touch-target"
+              style={TOUCH_TARGET_STYLE}
+            >
+              {submitting ? '创建中…' : '创建企业'}
+            </Button>
           </Form>
         )}
       </Card>

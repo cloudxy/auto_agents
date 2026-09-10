@@ -42,6 +42,10 @@ config/**/.env
 !config/prod/.env.example
 config/.secrets.yml
 
+# Generated LiteLLM gateway config (FR-14 / T-11). Runtime inject is T-14. Never track.
+deploy/litellm/config.gen.yaml
+deploy/litellm/*.gen.yaml
+
 # OS
 .DS_Store
 Thumbs.db
@@ -61,6 +65,7 @@ deploy/litellm/config.gen.yaml
 .claude/*
 !.claude/rules/
 !.claude/skills
+!.claude/plugins
 !.claude/agents/
 !.claude/hooks/
 !.claude/memory/

@@ -19,7 +19,7 @@ import pytest
 
 from backend.tasks.consumer import SpiderTaskConsumer, extract_selectors
 
-# scrapy 项目根加入路径（与 run_spider.py 相同的加载方式）
+# scrapy 项目根加入路径（与 scripts.runlib.spider 相同的加载方式）
 _SCRAPY_DIR = str(Path(__file__).resolve().parents[2] / "scrapy")
 if _SCRAPY_DIR not in sys.path:
     sys.path.insert(0, _SCRAPY_DIR)

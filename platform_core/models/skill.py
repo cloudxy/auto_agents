@@ -29,8 +29,8 @@ class Skill(SoftDeleteMixin, AuditMixin, Base):
     industries = Column(JSON, comment='行业标签数组，对齐 taxonomy/industries.yaml')
     status = Column(String(16), nullable=False, default="experimental", index=True,
                     comment="experimental/testing/stable/recommended/deprecated/blacklist")
-    source_type = Column(String(16), nullable=False, default="self_built",
-                         comment="self_built/network_imported/marketplace_crawled")
+    source_type = Column(String(32), nullable=False, default="self_built",
+                         comment="self_built/network_imported/marketplace_crawled/source_indexed")
     source_url = Column(String(512), default="", comment="来源地址")
     source_author = Column(String(128), default="", comment="来源作者")
     imported_at = Column(DateTime, comment="导入时间")
@@ -88,3 +88,7 @@ class SkillJob(Base):
     detail = Column(JSON, comment="失败清单等")
     started_at = Column(DateTime, server_default=func.now(), comment="开始时间")
     finished_at = Column(DateTime, comment="结束时间")
+    source_id = Column(
+        Integer, ForeignKey("capability_sources.id", ondelete="SET NULL"),
+        nullable=True, index=True, comment="src_sync 作业指向源；其它 job_type 为 NULL",
+    )

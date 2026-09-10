@@ -1,100 +1,72 @@
 /**
- * 中转站管控页（阶段三）- new-api 渠道健康只读视图
- *
- * 三个区块（Tabs，手动刷新、不轮询）：
- * - 渠道总览：远程渠道列表（available=false 时降级 Alert，本地统计仍展示）+
- *   统计行（渠道数 / 近 24h 事件数 / 最近探针批次 verdict 概览）
- * - 探针结果：verdict 分布 + 分页表（scores 可展开），支持渠道 ID 过滤
- * - 事件时间线：调度启停事件分页表，支持渠道 ID 过滤
- *
- * 约定：全只读无写操作；状态 Tag 颜色对齐 new-api 语义（1 绿 / 2 橙 / 3 红 / 未知灰）。
+ * 值班页 /newapi（T-18）：网关模型/部署；空态 71.2 / 降级 71.3；URL 保留
  */
-import React, { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import React, { useCallback, useEffect, useState } from 'react'
 import ProbeResults from '../components/newapi/ProbeResults'
 import EventsList from '../components/newapi/EventsList'
 import {
-  Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Space, Statistic,
+  DUTY_DEGRADE_71_3,
+  DUTY_DEGRADE_71_3_HINT,
+  DUTY_EMPTY_71_2,
+  DUTY_EMPTY_71_2_HINT,
+  DUTY_LOAD_FAILED,
+  DUTY_TABLE_UNAVAILABLE,
+  VERDICT_TAG,
+  fmtQuota,
+} from '../components/newapi/newapiShared'
+import {
+  Alert, Button, Card, Empty, Form, InputNumber, Modal, Popconfirm, Space, Statistic,
   Table, Tabs, Tag, Tooltip, Typography, message,
 } from 'antd'
 import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import {
-  CHANNEL_STATUS, clearChannelConfig, fetchChannelsWithConfig, fetchNewapiEvents,
-  fetchNewapiOverview, fetchNewapiProbeResults, setChannelConfig,
+  clearModelConfig, fetchChannelsWithConfig, fetchNewapiOverview, setModelConfig,
 } from '../services/newapi'
 import type {
-  ChannelEventItem, ChannelProbeResultItem, ChannelWithConfig, NewapiOverview, ProbeVerdict,
+  GatewayModelWithConfig, NewapiOverview, ProbeVerdict,
 } from '../services/newapi'
 
 const { Text } = Typography
 
-/** 渠道状态 Tag 映射（1 绿 启用 / 2 橙 人工禁用 / 3 红 自动禁用 / 未知灰） */
-const STATUS_TAG: Record<number, { color: string; text: string }> = {
-  [CHANNEL_STATUS.ENABLED]: { color: 'green', text: '启用' },
-  [CHANNEL_STATUS.MANUALLY_DISABLED]: { color: 'orange', text: '人工禁用' },
-  [CHANNEL_STATUS.AUTO_DISABLED]: { color: 'red', text: '自动禁用' },
-}
-
-/** 常见渠道类型名（new-api 常量，未收录的展示 type 数字） */
-const CHANNEL_TYPE_NAMES: Record<number, string> = {
-  1: 'OpenAI',
-  14: 'Anthropic',
-  24: 'Gemini',
-}
-
-/** verdict Tag 映射（original 绿 / spoofed 红 / offline 灰） */
-const VERDICT_TAG: Record<ProbeVerdict, { color: string; text: string }> = {
-  original: { color: 'green', text: 'original 正品' },
-  spoofed: { color: 'red', text: 'spoofed 伪装' },
-  offline: { color: 'default', text: 'offline 不可用' },
-}
-
-/** 动作 Tag 映射 */
-const ACTION_TAG: Record<string, { color: string; text: string }> = {
-  disabled: { color: 'red', text: '下线' },
-  enabled: { color: 'green', text: '上线' },
-}
-
-const fmtTime = (v?: string | null): string => {
-  if (!v) return '-'
-  const d = new Date(v)
-  return Number.isNaN(d.getTime()) ? v : d.toLocaleString('zh-CN', { hour12: false })
-}
-
-const fmtQuota = (v?: number | null): string =>
-  v === null || v === undefined ? '-' : Number(v).toLocaleString('zh-CN')
-
-const fmtMoney = (v?: number | null): string =>
-  v === null || v === undefined ? '-' : `$${Number(v).toFixed(2)}`
-
-const fmtLatency = (v?: number | null): string =>
-  v === null || v === undefined || v < 0 ? '-' : `${v} ms`
-
-const DEFAULT_PAGE_SIZE = 10
-
 const NewApiOps: React.FC = () => {
-  // ---------------- 总览 ----------------
-  const qc = useQueryClient()
-  const overviewQ = useQuery({ queryKey: ['newapi-overview'], queryFn: fetchNewapiOverview })
-  const overview = overviewQ.data ?? null
-  const overviewLoading = overviewQ.isLoading
-  const loadOverview = (_showSpin = true) => { qc.invalidateQueries({ queryKey: ['newapi-overview'] }) }
+  const [overview, setOverview] = useState<NewapiOverview | null>(null)
+  const [overviewLoading, setOverviewLoading] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
 
-  // ---------------- 渠道额度配置（4.2 接线） ----------------
-  const channelsQ = useQuery({ queryKey: ['newapi-channels'], queryFn: fetchChannelsWithConfig })
-  const channelsCfg = channelsQ.data ?? []
-  const channelsCfgLoading = channelsQ.isLoading
-  const [cfgTarget, setCfgTarget] = useState<ChannelWithConfig | null>(null)
+  const loadOverview = useCallback(async (showSpin = true) => {
+    if (showSpin) setOverviewLoading(true)
+    try {
+      setOverview(await fetchNewapiOverview())
+      setLoadFailed(false)
+    } catch (error) {
+      setLoadFailed(true)
+      message.error(DUTY_LOAD_FAILED)
+    } finally {
+      if (showSpin) setOverviewLoading(false)
+    }
+  }, [])
+
+  const [channelsCfg, setChannelsCfg] = useState<GatewayModelWithConfig[]>([])
+  const [channelsCfgLoading, setChannelsCfgLoading] = useState(false)
+  const [cfgTarget, setCfgTarget] = useState<GatewayModelWithConfig | null>(null)
   const [cfgSaving, setCfgSaving] = useState(false)
   const [cfgForm] = Form.useForm()
-  // 工单 80：子组件经 refreshSignal 联动刷新（events/probes 状态已下沉组件）
   const [refreshSignal, setRefreshSignal] = useState(0)
   const [configSaved, setConfigSaved] = useState(0)
 
-  const loadChannelsCfg = (_showSpin = true) => { qc.invalidateQueries({ queryKey: ['newapi-channels'] }) }
+  const loadChannelsCfg = useCallback(async (showSpin = true) => {
+    if (showSpin) setChannelsCfgLoading(true)
+    try {
+      setChannelsCfg(await fetchChannelsWithConfig())
+    } catch (error) {
+      setChannelsCfg([])
+    } finally {
+      if (showSpin) setChannelsCfgLoading(false)
+    }
+  }, [])
 
-  const openCfg = (record: ChannelWithConfig) => {
+  const openCfg = (record: GatewayModelWithConfig) => {
     setCfgTarget(record)
     cfgForm.setFieldsValue({
       limit_quota: record.effective.limit_quota,
@@ -108,14 +80,14 @@ const NewApiOps: React.FC = () => {
     try {
       const values = await cfgForm.validateFields()
       setCfgSaving(true)
-      await setChannelConfig(cfgTarget.id, values)
-      message.success(`渠道 #${cfgTarget.id} 额度配置已保存（调度器下一轮巡检生效）`)
+      await setModelConfig(cfgTarget.gateway_ref, values)
+      message.success(`模型 ${cfgTarget.model_name} 窗口配置已保存`)
       setCfgTarget(null)
       loadChannelsCfg(false)
-      setConfigSaved((s) => s + 1) // config_updated 事件已落库
+      setConfigSaved((s) => s + 1)
     } catch (error) {
       if ((error as { errorFields?: unknown })?.errorFields) return
-      message.error('保存渠道配置失败')
+      message.error('保存窗口配置失败')
     } finally {
       setCfgSaving(false)
     }
@@ -125,17 +97,22 @@ const NewApiOps: React.FC = () => {
     if (!cfgTarget) return
     try {
       setCfgSaving(true)
-      await clearChannelConfig(cfgTarget.id)
-      message.success(`渠道 #${cfgTarget.id} 已清除渠道级配置（回退全局默认）`)
+      await clearModelConfig(cfgTarget.gateway_ref)
+      message.success(`模型 ${cfgTarget.model_name} 已清除窗口配置`)
       setCfgTarget(null)
       loadChannelsCfg(false)
       setConfigSaved((s) => s + 1)
     } catch (error) {
-      message.error('清除渠道配置失败')
+      message.error('清除窗口配置失败')
     } finally {
       setCfgSaving(false)
     }
   }
+
+  useEffect(() => {
+    loadOverview()
+    loadChannelsCfg()
+  }, [loadOverview, loadChannelsCfg])
 
   const refreshAll = () => {
     loadOverview(false)
@@ -143,69 +120,28 @@ const NewApiOps: React.FC = () => {
     setRefreshSignal((s) => s + 1)
   }
 
-  /** 渠道 ID 过滤输入解析（非正整数视为清空过滤） */
-
-  // ---------------- 表格列 ----------------
-  const channelColumns: ColumnsType<ChannelWithConfig> = [
-    { title: 'ID', dataIndex: 'id', key: 'id', width: 70 },
+  const channelColumns: ColumnsType<GatewayModelWithConfig> = [
     {
-      title: '名称', dataIndex: 'name', key: 'name', width: 160,
+      title: '模型/部署', dataIndex: 'model_name', key: 'model_name', width: 200,
       render: (v: string) => <Text strong>{v || '-'}</Text>,
     },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: 110,
-      render: (v: number) => {
-        const meta = STATUS_TAG[v] || { color: 'default', text: `未知(${v})` }
-        return <Tag color={meta.color}>{meta.text}</Tag>
-      },
+      title: '引用', dataIndex: 'gateway_ref', key: 'gateway_ref', width: 180, ellipsis: true,
+      render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text>,
     },
     {
-      title: '类型', dataIndex: 'type', key: 'type', width: 110,
-      render: (v: number) =>
-        CHANNEL_TYPE_NAMES[v] ? (
-          <Tag color="blue">{CHANNEL_TYPE_NAMES[v]}</Tag>
-        ) : (
-          <Text type="secondary">type {v}</Text>
-        ),
+      title: '上游地址', dataIndex: 'api_base', key: 'api_base', ellipsis: true,
+      render: (v: string | null | undefined) => v || '-',
     },
     {
-      title: '已用额度', dataIndex: 'used_quota', key: 'used_quota', width: 110, align: 'right',
-      render: (v: number | null | undefined) => <Text code>{fmtQuota(v)}</Text>,
+      title: '密钥', dataIndex: 'api_key_masked', key: 'api_key_masked', width: 120,
+      render: (v: string | null | undefined) => (v ? <Text code>{v}</Text> : '—'),
     },
     {
-      title: '余额', dataIndex: 'balance', key: 'balance', width: 100, align: 'right',
-      render: (v: number | null | undefined) => fmtMoney(v),
-    },
-    {
-      title: '响应时间', dataIndex: 'response_time', key: 'response_time', width: 100, align: 'right',
-      render: (v: number | null | undefined) => {
-        if (v === null || v === undefined) return '-'
-        return v < 0 ? (
-          <Tooltip title="未测速"><Text type="secondary">未测</Text></Tooltip>
-        ) : (
-          <span>{fmtLatency(v)}</span>
-        )
-      },
-    },
-    {
-      title: '模型', dataIndex: 'models', key: 'models', ellipsis: true,
-      render: (v: string | null) => (v ? <Text code style={{ fontSize: 12 }}>{v}</Text> : '-'),
-    },
-    {
-      title: '分组', dataIndex: 'group', key: 'group', width: 100,
-      render: (v: string | null) => v || '-',
-    },
-    {
-      title: '创建时间', dataIndex: 'created_time', key: 'created_time', width: 170,
-      render: (v: number | null | undefined) =>
-        v ? new Date(v * 1000).toLocaleString('zh-CN', { hour12: false }) : '-',
-    },
-    {
-      // 4.2 额度调度配置：生效额度（渠道级 > 全局默认）+ 来源标识 + 配置入口
       title: '额度调度', key: 'quota_cfg', width: 190,
-      render: (_: unknown, record: ChannelWithConfig) => {
+      render: (_: unknown, record: GatewayModelWithConfig) => {
         const sourceMeta: Record<string, { color: string; text: string }> = {
-          channel: { color: 'blue', text: '渠道级' },
+          channel: { color: 'blue', text: '模型级' },
           global: { color: 'cyan', text: '全局默认' },
           none: { color: 'default', text: '未纳管' },
         }
@@ -226,20 +162,43 @@ const NewApiOps: React.FC = () => {
     },
   ]
 
-  /** verdict 概览计数（original 绿 / spoofed 红 / offline 灰） */
   const verdicts = overview?.latest_batch_verdicts || {}
+  const reachableEmpty = Boolean(overview?.available && (overview?.total ?? 0) === 0)
+  const tableEmpty = overview && !overview.available
+    ? DUTY_TABLE_UNAVAILABLE
+    : reachableEmpty
+      ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={
+            <span>
+              <div>{overview?.empty_state || DUTY_EMPTY_71_2}</div>
+              <Text type="secondary">{DUTY_EMPTY_71_2_HINT}</Text>
+            </span>
+          }
+        >
+          <Button type="primary" onClick={refreshAll}>刷新</Button>
+        </Empty>
+      )
+      : DUTY_EMPTY_71_2
 
   const renderOverviewTab = () => (
     <>
+      {loadFailed && (
+        <Alert
+          type="error" showIcon style={{ marginBottom: 16 }}
+          title={DUTY_LOAD_FAILED}
+        />
+      )}
       {overview && !overview.available && (
         <Alert
           type="warning" showIcon style={{ marginBottom: 16 }}
-          title="中转站管理面不可达（已降级，仅展示本地数据）"
-          description={`原因：${overview.reason || '未知'}。渠道列表来自 new-api 管理面，恢复后点击「刷新」重试；下方本地统计不受影响。`}
+          title={overview.degrade_state || DUTY_DEGRADE_71_3}
+          description={DUTY_DEGRADE_71_3_HINT}
         />
       )}
       <Space size={40} wrap style={{ marginBottom: 16 }}>
-        <Statistic title="渠道总数" value={overview?.available ? overview.total : '-'} />
+        <Statistic title="模型/部署" value={overview?.available ? overview.total : '-'} />
         <Statistic title="近 24h 事件数" value={overview?.events_24h ?? '-'} />
         <div>
           <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 14, marginBottom: 4 }}>
@@ -257,22 +216,18 @@ const NewApiOps: React.FC = () => {
       <Table
         columns={channelColumns}
         dataSource={overview?.available ? channelsCfg : []}
-        rowKey="id"
+        rowKey="gateway_ref"
         loading={overviewLoading || channelsCfgLoading}
         pagination={false}
-        scroll={{ x: 1290 }}
-        locale={{
-          emptyText: overview && !overview.available
-            ? '降级模式：中转站不可达，无渠道数据'
-            : '暂无渠道（new-api 侧未配置或拉取为空，请检查 NEWAPI 配置）',
-        }}
+        scroll={{ x: 900 }}
+        locale={{ emptyText: tableEmpty }}
       />
     </>
   )
 
   return (
     <Card
-      title="中转站管控（new-api）"
+      title="LLM 网关值班"
       extra={
         <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={overviewLoading}>
           刷新
@@ -282,15 +237,14 @@ const NewApiOps: React.FC = () => {
       <Tabs
         defaultActiveKey="overview"
         items={[
-          { key: 'overview', label: '渠道总览', children: renderOverviewTab() },
-          { key: 'probes', label: '探针结果', children: <ProbeResults refreshSignal={refreshSignal} /> },
-          { key: 'events', label: '事件时间线', children: <EventsList refreshSignal={refreshSignal} configSaved={configSaved} /> },
+          { key: 'overview', label: '总览', children: renderOverviewTab() },
+          { key: 'probes', label: '探针', children: <ProbeResults refreshSignal={refreshSignal} /> },
+          { key: 'events', label: '事件', children: <EventsList refreshSignal={refreshSignal} configSaved={configSaved} /> },
         ]}
       />
 
-      {/* 渠道额度调度配置（4.2 接线：写入 Redis hash，调度器下一轮巡检生效） */}
       <Modal
-        title={`渠道 #${cfgTarget?.id ?? ''} 额度调度配置${cfgTarget ? `（${cfgTarget.name}）` : ''}`}
+        title={`窗口配置 ${cfgTarget?.model_name ?? ''}`}
         open={!!cfgTarget}
         onOk={onSaveCfg}
         onCancel={() => setCfgTarget(null)}
@@ -299,17 +253,9 @@ const NewApiOps: React.FC = () => {
         cancelText="取消"
         destroyOnHidden
       >
-        <Alert
-          type="info" showIcon style={{ marginBottom: 16 }}
-          message="窗口内用量达到上限后渠道自动下线，冷却到期自动恢复；额度设为 0 表示显式关闭该渠道调度。"
-        />
         <Form form={cfgForm} layout="vertical">
-          <Form.Item
-            name="limit_quota" label="窗口用量上限（quota）"
-            rules={[{ required: true, message: '请输入额度上限' }]}
-            tooltip="new-api quota 单位；0 = 关闭该渠道调度"
-          >
-            <InputNumber min={0} step={100} style={{ width: '100%' }} placeholder="如 100000" />
+          <Form.Item name="limit_quota" label="窗口用量上限" rules={[{ required: true }]}>
+            <InputNumber min={0} step={100} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="window_hours" label="统计窗口（小时）" initialValue={24} rules={[{ required: true }]}>
             <InputNumber min={1} max={720} style={{ width: '100%' }} />
@@ -320,12 +266,11 @@ const NewApiOps: React.FC = () => {
         </Form>
         {cfgTarget?.config && (
           <Popconfirm
-            title="确认清除该渠道的渠道级配置？"
-            description="清除后回退全局默认额度；若无全局默认则该渠道退出调度纳管。"
+            title="确认清除该模型的窗口配置？"
             okText="清除" okButtonProps={{ danger: true }} onConfirm={onClearCfg}
           >
             <Button danger type="link" style={{ padding: 0 }} disabled={cfgSaving}>
-              清除渠道级配置（回退全局默认）
+              清除窗口配置
             </Button>
           </Popconfirm>
         )}

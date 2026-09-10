@@ -2,8 +2,7 @@
  * 成员管理页（SaaS S2-2）：租户 owner/admin 自助管理子账号。
  * Users 页归平台超管（页面分叉）——本页是租户视角。
  */
-import React, { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Card,
   Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch,
   Table, Tag, Typography, message,
@@ -41,21 +40,27 @@ const ROLE_COLORS: Record<string, string> = {
 }
 
 const Members: React.FC = () => {
-  const qc = useQueryClient()
-  const membersQ = useQuery({ queryKey: ['members'], queryFn: listMembers })
-  const auditQ = useQuery({ queryKey: ['members-audit'], queryFn: () => listMemberAudit() })
-  const rows = membersQ.data ?? []
-  const audit = auditQ.data ?? []
-  const loading = membersQ.isLoading
+  const [rows, setRows] = useState<MemberRow[]>([])
+  const [audit, setAudit] = useState<MemberAuditRow[]>([])
+  const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [form] = Form.useForm()
   const [resetTarget, setResetTarget] = useState<MemberRow | null>(null)
   const [resetForm] = Form.useForm()
 
-  const load = () => {
-    qc.invalidateQueries({ queryKey: ['members'] })
-    qc.invalidateQueries({ queryKey: ['members-audit'] })
-  }
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      setRows(await listMembers())
+    } catch (e) {
+      message.error(apiErrorMessage(e, '成员加载失败'))
+    } finally {
+      setLoading(false)
+    }
+    try { setAudit(await listMemberAudit()) } catch { /* 审计非关键路径 */ }
+  }, [])
+
+  useEffect(() => { load() }, [load])
 
   const onCreate = async () => {
     try {
@@ -167,10 +172,6 @@ const Members: React.FC = () => {
     <div>
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
              title="成员管理是租户内部事务（owner/admin 可操作）；平台级用户管理请用「用户管理」页（平台超管）" />
-      {membersQ.isError ? (
-        <Alert type="error" showIcon style={{ marginBottom: 12 }}
-               title={apiErrorMessage(membersQ.error, '成员加载失败')} />
-      ) : null}
       <Space style={{ marginBottom: 12 }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>添加成员</Button>
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>

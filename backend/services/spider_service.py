@@ -76,14 +76,11 @@ class SpiderService:
 
     # 任务编排 → SpiderTaskService
     async def enqueue(
-        self,
-        spider_name,
-        params: Optional[str] = None,
-        priority: str = "normal",
+        self, spider_name, params: Optional[str] = None, priority: str = "normal",
         tenant_id: int | None = None,
     ):
         return await self._task_svc.enqueue(
-            spider_name=spider_name, params=params, priority=priority, tenant_id=tenant_id
+            spider_name=spider_name, params=params, priority=priority, tenant_id=tenant_id,
         )
 
     async def finish_task(self, task_id, status, error_message=None, item_count=None):

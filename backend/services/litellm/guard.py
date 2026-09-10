@@ -18,6 +18,9 @@ tag 判定口径：
 import re
 
 import yaml
+from platform_core.logger import get_logger
+
+logger = get_logger("service.litellm.guard")
 
 # 供应链红线：恶意版本黑名单（比较时剥离前导 v）
 BLACKLISTED_VERSIONS = frozenset({"1.82.7", "1.82.8"})
@@ -38,6 +41,7 @@ def extract_litellm_image(compose_text: str) -> str | None:
     被守卫的契约）。用 yaml.safe_load 而非文本 grep：compose 是结构化 YAML，
     grep 会误伤注释与无关服务。
     """
+    logger.debug("解析 compose 文本提取 litellm image")
     try:
         doc = yaml.safe_load(compose_text)
     except yaml.YAMLError:
@@ -61,6 +65,7 @@ def image_tag(image: str) -> str:
     litellm/litellm-database@sha256:abc → sha256:abc（digest pin 识别）
     litellm/litellm-database（无 tag）→ ""（隐式 latest）
     """
+    logger.debug("提取 image tag")
     if _DIGEST_RE.search(image):
         return "sha256:" + image.split("@sha256:", 1)[1]
     base = image.rsplit("/", 1)[-1]
@@ -74,6 +79,7 @@ def check_version(tag: str) -> tuple[bool, str]:
 
     reason 在 ok=False 时给出机械可读的拒绝理由（红测断言文本）。
     """
+    logger.debug("校验 LiteLLM 镜像 tag")
     if not tag:
         return False, "未 pin 版本（空 tag = 隐式 latest）"
     if tag.startswith("sha256:"):
@@ -93,8 +99,9 @@ def check_compose(compose_text: str) -> tuple[bool, str]:
     """守卫组合入口：compose 文本 → (ok, reason)。
 
     litellm 服务存在性 + image tag 精确 pin + 黑名单断言一次完成；
-    测试直接传仓库根 docker-compose.yml 的文件内容。
+    测试直接传 deploy/litellm/docker-compose.yml 的文件内容。
     """
+    logger.debug("守卫组合入口：校验 compose 中的 litellm 镜像")
     image = extract_litellm_image(compose_text)
     if image is None:
         return False, "compose 中未定义 litellm 服务（或 image 键缺失/YAML 非法）"

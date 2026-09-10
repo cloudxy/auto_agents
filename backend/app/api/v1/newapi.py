@@ -1,13 +1,9 @@
-"""new-api 中转站管控接口（阶段三 + 4.2 接线）—— 总览/事件/探针只读 + 渠道额度配置读写
+"""值班管控接口（T-18）—— 总览/事件/探针只读 + 网关模型/上游写 + 窗口配置
 
-设计：
-- overview 聚合远程渠道列表与本地统计；远程异常/超时/开关关闭时 HTTP 200 降级
-  available=false（不 500）；events / probe-results 直出本地表，始终可用
-- 4.2 渠道调度接线：GET /channels 合并视图 + PUT/DELETE /channels/{id}/config
-  写 Redis hash（newapi:channel:cfg:{id}），调度器下一轮巡检即按新额度受管
-- 响应契约：统一 ApiResponse 信封（ADR-001）；events / probe-results 为
-  PaginatedResponse 分页信封（data.items/total，与前端消费字段命名对齐）
-- 全部 require_admin（中转站管控仅管理员可见，与前端 menu:newapi 权限对齐）
+- 路径 `/api/v1/newapi/*` 一周期保留；页 URL `/newapi` 保留
+- 列表来自 LiteLLM 模型/部署，不是 new-api 渠道
+- GET：require_platform_admin_or_404（GWT-71.4 / 07.3 同形）
+- 写：require_platform_admin（GWT-70.3）；信封远端不可达 = 200 + available=false
 """
 from typing import Optional
 
@@ -15,7 +11,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_platform_admin
+from backend.app.api.deps import (
+    CurrentUser,
+    require_platform_admin,
+    require_platform_admin_or_404,
+)
 from backend.app.responses import ApiResponse, PaginatedResponse, ok, paginated
 from backend.services.channel_config_service import ChannelConfigService
 from backend.services.newapi_overview_service import NewapiOverviewService
@@ -25,7 +25,11 @@ from platform_core.schemas.newapi import (
     ChannelConfigUpdateResult,
     ChannelEventResponse,
     ChannelProbeResultResponse,
-    ChannelWithConfigResponse,
+    GatewayConfigUpdateResult,
+    GatewayModelResponse,
+    GatewayModelWithConfigResponse,
+    GatewayModelWriteRequest,
+    GatewayUpstreamWriteRequest,
     NewapiOverviewResponse,
 )
 
@@ -43,19 +47,19 @@ def _config_service() -> ChannelConfigService:
 @router.get("/overview", response_model=ApiResponse[NewapiOverviewResponse])
 async def get_overview(
     service: NewapiOverviewService = Depends(_service),
-    _user: CurrentUser = Depends(require_platform_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> ApiResponse[NewapiOverviewResponse]:
-    """中转站总览：远程渠道列表（异常降级 available=false）+ 本地事件/探针统计"""
+    """值班总览：网关模型（异常降级 available=false）+ 本地事件/探针统计"""
     return ok(await service.get_overview())
 
 
 @router.get("/events", response_model=PaginatedResponse[ChannelEventResponse])
 async def list_events(
-    channel_id: Optional[int] = Query(None, description="按 new-api 渠道 ID 过滤"),
+    channel_id: Optional[int] = Query(None, description="按渠道 ID 过滤（BIGINT，类型不改）"),
     page: int = Query(1, ge=1, description="页码（1 起）"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     service: NewapiOverviewService = Depends(_service),
-    _user: CurrentUser = Depends(require_platform_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> PaginatedResponse[ChannelEventResponse]:
     """渠道启停事件分页（时间倒序；本地表，始终可用）"""
     resp = await service.list_events(channel_id=channel_id, page=page, page_size=page_size)
@@ -66,13 +70,13 @@ async def list_events(
 
 @router.get("/probe-results", response_model=PaginatedResponse[ChannelProbeResultResponse])
 async def list_probe_results(
-    channel_id: Optional[int] = Query(None, description="按 new-api 渠道 ID 过滤"),
+    channel_id: Optional[int] = Query(None, description="按渠道 ID 过滤（BIGINT，类型不改）"),
     page: int = Query(1, ge=1, description="页码（1 起）"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     service: NewapiOverviewService = Depends(_service),
-    _user: CurrentUser = Depends(require_platform_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> PaginatedResponse[ChannelProbeResultResponse]:
-    """渠道真伪探针结果分页（时间倒序；本地表，始终可用）"""
+    """探针结果分页（时间倒序；本地表，始终可用）"""
     resp = await service.list_probe_results(
         channel_id=channel_id, page=page, page_size=page_size
     )
@@ -81,15 +85,12 @@ async def list_probe_results(
     )
 
 
-# ---------------- 4.2 渠道调度配置（写路径：管理面 → Redis → 调度器生效） ----------------
-
-
-@router.get("/channels", response_model=ApiResponse[list[ChannelWithConfigResponse]])
+@router.get("/channels", response_model=ApiResponse[list[GatewayModelWithConfigResponse]])
 async def list_channels_with_config(
     service: ChannelConfigService = Depends(_config_service),
-    _user: CurrentUser = Depends(require_platform_admin),
-) -> ApiResponse[list[ChannelWithConfigResponse]]:
-    """渠道列表 + 调度配置合并视图（渠道级 > 全局默认；远程不可达返回业务码 502）"""
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
+) -> ApiResponse[list[GatewayModelWithConfigResponse]]:
+    """网关模型 + 调度配置；远端不可达返回空列表（200，不 502）"""
     return ok(await service.list_channels())
 
 
@@ -101,7 +102,7 @@ async def set_channel_config(
     service: ChannelConfigService = Depends(_config_service),
     user: CurrentUser = Depends(require_platform_admin),
 ) -> ApiResponse[ChannelConfigUpdateResult]:
-    """写入渠道级额度配置（limit_quota=0 表示显式关闭该渠道调度）"""
+    """int 路径 expand 写窗口配置（channel_id 类型不改）"""
     info = await service.set_config(channel_id, payload)
     await record_audit(
         session, user, "newapi.channel_config.set", f"channel:{channel_id}",
@@ -118,7 +119,7 @@ async def clear_channel_config(
     service: ChannelConfigService = Depends(_config_service),
     user: CurrentUser = Depends(require_platform_admin),
 ) -> ApiResponse[ChannelConfigUpdateResult]:
-    """清除渠道级配置（该渠道回退全局默认额度；无全局默认则退出纳管）"""
+    """清除 int 路径配置"""
     previous = await service.clear_config(channel_id)
     await record_audit(
         session, user, "newapi.channel_config.clear", f"channel:{channel_id}",
@@ -127,3 +128,75 @@ async def clear_channel_config(
     return ok(ChannelConfigUpdateResult(
         channel_id=channel_id, cleared=True, config=previous,
     ))
+
+
+@router.put(
+    "/models/{gateway_ref}/config",
+    response_model=ApiResponse[GatewayConfigUpdateResult],
+)
+async def set_model_config(
+    gateway_ref: str,
+    payload: ChannelConfigInfo,
+    session: AsyncSession = Depends(get_async_db),
+    service: ChannelConfigService = Depends(_config_service),
+    user: CurrentUser = Depends(require_platform_admin),
+) -> ApiResponse[GatewayConfigUpdateResult]:
+    """按 string gateway_ref 写窗口配置"""
+    info = await service.set_config_ref(gateway_ref, payload)
+    await record_audit(
+        session, user, "newapi.channel_config.set", f"gateway:{gateway_ref}",
+        {"limit_quota": info.limit_quota},
+    )
+    return ok(GatewayConfigUpdateResult(gateway_ref=gateway_ref, config=info))
+
+
+@router.delete(
+    "/models/{gateway_ref}/config",
+    response_model=ApiResponse[GatewayConfigUpdateResult],
+)
+async def clear_model_config(
+    gateway_ref: str,
+    session: AsyncSession = Depends(get_async_db),
+    service: ChannelConfigService = Depends(_config_service),
+    user: CurrentUser = Depends(require_platform_admin),
+) -> ApiResponse[GatewayConfigUpdateResult]:
+    previous = await service.clear_config_ref(gateway_ref)
+    await record_audit(
+        session, user, "newapi.channel_config.clear", f"gateway:{gateway_ref}",
+        {"previous": previous.model_dump() if previous else None},
+    )
+    return ok(GatewayConfigUpdateResult(
+        gateway_ref=gateway_ref, cleared=True, config=previous,
+    ))
+
+
+@router.post("/models", response_model=ApiResponse[GatewayModelResponse])
+async def write_gateway_model(
+    payload: GatewayModelWriteRequest,
+    session: AsyncSession = Depends(get_async_db),
+    service: NewapiOverviewService = Depends(_service),
+    user: CurrentUser = Depends(require_platform_admin),
+) -> ApiResponse[GatewayModelResponse]:
+    """改/登记平台网关模型（GWT-70.3 非超管拒绝）"""
+    info = await service.register_model(payload)
+    await record_audit(
+        session, user, "newapi.gateway_model.set", f"gateway:{info.gateway_ref}",
+        {"model_name": info.model_name},
+    )
+    return ok(info)
+
+
+@router.post("/upstreams", response_model=ApiResponse[GatewayModelResponse])
+async def register_platform_upstream(
+    payload: GatewayUpstreamWriteRequest,
+    session: AsyncSession = Depends(get_async_db),
+    service: NewapiOverviewService = Depends(_service),
+    user: CurrentUser = Depends(require_platform_admin),
+) -> ApiResponse[GatewayModelResponse]:
+    """登记平台上游（GWT-70.3 非超管拒绝）"""
+    info = await service.register_upstream(payload)
+    await record_audit(
+        session, user, "newapi.gateway_upstream.set", f"gateway:{info.gateway_ref}",
+        {"api_base": info.api_base},
+    )
+    return ok(info)

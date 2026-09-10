@@ -29,8 +29,8 @@ repos:
         stages: [pre-push]
 
       - id: check-arch
-        name: 架构合规检查（13 红线 + 3 边界）
-        entry: bash scripts/check-arch.sh
+        name: 架构合规检查（R1–R13 + B1–B4）
+        entry: bash tools/check/arch.sh
         language: system
         pass_filenames: false
         always_run: true
@@ -38,14 +38,14 @@ repos:
       # D 线 D2：数据库设计流水线执法（*.dbml 或 alembic/versions 变更时触发）
       - id: check-db-ir
         name: DBML IR 静态 lint（ADR-0002）
-        entry: bash scripts/check-db-ir.sh
+        entry: bash tools/check/db_ir.sh
         language: system
         pass_filenames: false
         always_run: true
 
       - id: check-db-migrations
         name: 迁移破坏性变更检测（strong_migrations 语义）
-        entry: bash scripts/check-db-migrations.sh
+        entry: bash tools/check/db_migrations.sh
         language: system
         pass_filenames: false
         always_run: true
@@ -53,7 +53,7 @@ repos:
       # 工单 68：前端工程门禁（规则随批次启用，当前 F-5/F-6）
       - id: check-frontend
         name: 前端工程门禁（F-5 互引禁令 / F-6 Envelope 单源）
-        entry: bash scripts/check-frontend.sh
+        entry: bash tools/check/frontend.sh
         language: system
         pass_filenames: false
         always_run: true

@@ -44,14 +44,21 @@ def _fake_redis(monkeypatch):
     def _get(key=None):
         return fake
 
+    import backend.services.quota_service as quota_mod
     import backend.services.spider_task_service as svc_mod
     monkeypatch.setattr(svc_mod, "get_async_redis", _get)
+    monkeypatch.setattr(quota_mod, "get_async_redis", _get)
     return fake
 
 
-def _create_template(operator_client, **overrides) -> dict:
+def _tenant_auth(db_session, slug="co-tpl"):
+    from conftest import make_tenant_owner_headers
+    return make_tenant_owner_headers(db_session, slug=slug)
+
+
+def _create_template(client, headers, **overrides) -> dict:
     payload = {**TEMPLATE_PAYLOAD, **overrides}
-    resp = operator_client.post(BASE, json=payload)
+    resp = client.post(BASE, json=payload, headers=headers)
     assert resp.status_code == 200, resp.text
     return resp.json()["data"]
 
@@ -76,9 +83,10 @@ def test_list_templates_anonymous_401(client):
 # POST /templates（require_operator）
 # ---------------------------------------------------------------------------
 
-def test_create_template_operator_ok(db_client, operator_client, db_engine, db_session):
+def test_create_template_operator_ok(db_client, db_engine, db_session):
     """operator 创建：CREATED + created_by 取操作者用户名 + 落库一行（副作用）"""
-    resp = operator_client.post(BASE, json=TEMPLATE_PAYLOAD)
+    headers, _tid = _tenant_auth(db_session)
+    resp = db_client.post(BASE, json=TEMPLATE_PAYLOAD, headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["code"] == "CREATED"
@@ -86,22 +94,24 @@ def test_create_template_operator_ok(db_client, operator_client, db_engine, db_s
     assert data["id"] > 0
     assert data["name"] == "example-每日采集"
     assert data["priority"] == "high"
-    assert data["created_by"] == "test-operator"  # 审计列由 API 层传入
+    assert data["created_by"] == "owner-co-tpl"
 
     async def _check():
         async with db_session() as s:
             rows = (await s.execute(select(TaskTemplate))).scalars().all()
             assert len(rows) == 1
             assert rows[0].spider_name == "example"
-            assert rows[0].created_by == "test-operator"
+            assert rows[0].created_by == "owner-co-tpl"
+            assert rows[0].tenant_id == _tid
 
     asyncio.run(_check())
 
 
-def test_create_template_duplicate_name_400(db_client, operator_client, db_engine, db_session):
+def test_create_template_duplicate_name_400(db_client, db_engine, db_session):
     """重名模板 → 400 + 库中仍只有一条（唯一性副作用）"""
-    _create_template(operator_client)
-    resp = operator_client.post(BASE, json={**TEMPLATE_PAYLOAD, "spider_name": "generic"})
+    headers, _tid = _tenant_auth(db_session)
+    _create_template(db_client, headers)
+    resp = db_client.post(BASE, json={**TEMPLATE_PAYLOAD, "spider_name": "generic"}, headers=headers)
     assert resp.status_code == 400, resp.text
     assert "已存在" in resp.json()["message"]
 
@@ -151,12 +161,13 @@ def test_templates_anonymous_401(client):
 # PATCH /templates/{id}（require_operator）
 # ---------------------------------------------------------------------------
 
-def test_update_template_ok(db_client, operator_client, db_engine, db_session):
+def test_update_template_ok(db_client, db_engine, db_session):
     """局部更新 name/priority → UPDATED + 未提交字段保持 + DB 同步（副作用）"""
-    template = _create_template(operator_client)
-    resp = operator_client.patch(f"{BASE}/{template['id']}", json={
+    headers, _tid = _tenant_auth(db_session)
+    template = _create_template(db_client, headers)
+    resp = db_client.patch(f"{BASE}/{template['id']}", json={
         "name": "example-改名", "priority": "low",
-    })
+    }, headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["code"] == "UPDATED"
@@ -173,11 +184,14 @@ def test_update_template_ok(db_client, operator_client, db_engine, db_session):
     asyncio.run(_check())
 
 
-def test_update_template_rename_conflict_400(db_client, operator_client):
+def test_update_template_rename_conflict_400(db_client, db_session):
     """改名撞已有模板名 → 400（唯一性在更新路径同样生效）"""
-    _create_template(operator_client)
-    other = _create_template(operator_client, name="第二模板")
-    resp = operator_client.patch(f"{BASE}/{other['id']}", json={"name": TEMPLATE_PAYLOAD["name"]})
+    headers, _tid = _tenant_auth(db_session)
+    _create_template(db_client, headers)
+    other = _create_template(db_client, headers, name="第二模板")
+    resp = db_client.patch(
+        f"{BASE}/{other['id']}", json={"name": TEMPLATE_PAYLOAD["name"]}, headers=headers,
+    )
     assert resp.status_code == 400
     assert "已存在" in resp.json()["message"]
 
@@ -198,20 +212,21 @@ def test_update_template_viewer_403(viewer_client):
 # DELETE /templates/{id}（require_operator；软删）
 # ---------------------------------------------------------------------------
 
-def test_delete_template_ok(db_client, operator_client, db_engine, db_session):
+def test_delete_template_ok(db_client, db_engine, db_session):
     """删除 → DELETED + 回执 {id, deleted} + 列表不再回显 + 行已移除（副作用）
 
     观察记录（非缺陷）：模型含 SoftDeleteMixin 且 025 迁移为「软删脱离唯一约束」
     设计，但 Service 走 repo.delete（物理删除）——行为契约（删后可重建同名）仍
     成立，见下一条用例；仅审计痕迹不保留，无 GWT 依据不定缺陷。
     """
-    template = _create_template(operator_client)
-    resp = operator_client.delete(f"{BASE}/{template['id']}")
+    headers, _tid = _tenant_auth(db_session)
+    template = _create_template(db_client, headers)
+    resp = db_client.delete(f"{BASE}/{template['id']}", headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["code"] == "DELETED"
     assert body["data"] == {"id": template["id"], "deleted": True}
-    assert operator_client.get(BASE).json()["data"] == []
+    assert db_client.get(BASE, headers=headers).json()["data"] == []
 
     async def _check():
         async with db_session() as s:
@@ -221,14 +236,15 @@ def test_delete_template_ok(db_client, operator_client, db_engine, db_session):
     asyncio.run(_check())
 
 
-def test_recreate_same_name_after_delete_ok(db_client, operator_client):
+def test_recreate_same_name_after_delete_ok(db_client, db_session):
     """删后同名模板可重建（025 唯一约束设计承诺：删后可重建同名）"""
-    first = _create_template(operator_client)
-    assert operator_client.delete(f"{BASE}/{first['id']}").status_code == 200
-    resp = operator_client.post(BASE, json=TEMPLATE_PAYLOAD)
+    headers, _tid = _tenant_auth(db_session)
+    first = _create_template(db_client, headers)
+    assert db_client.delete(f"{BASE}/{first['id']}", headers=headers).status_code == 200
+    resp = db_client.post(BASE, json=TEMPLATE_PAYLOAD, headers=headers)
     assert resp.status_code == 200, resp.text
     assert resp.json()["code"] == "CREATED"
-    items = operator_client.get(BASE).json()["data"]
+    items = db_client.get(BASE, headers=headers).json()["data"]
     assert len(items) == 1
     assert items[0]["name"] == TEMPLATE_PAYLOAD["name"]  # 同名重建成功且仅一条
 
@@ -249,12 +265,13 @@ def test_delete_template_viewer_403(viewer_client):
 # POST /templates/{id}/run（require_operator；核心运营入口）
 # ---------------------------------------------------------------------------
 
-def test_run_from_template_ok(db_client, operator_client, db_engine, db_session, monkeypatch):
+def test_run_from_template_ok(db_client, db_engine, db_session, monkeypatch):
     """一键运行：CREATED + 任务落库 pending + params/priority 透传 + 消息投递队列（副作用）"""
     fake = _fake_redis(monkeypatch)
-    template = _create_template(operator_client)
+    headers, tid = _tenant_auth(db_session)
+    template = _create_template(db_client, headers)
 
-    resp = operator_client.post(f"{BASE}/{template['id']}/run")
+    resp = db_client.post(f"{BASE}/{template['id']}/run", headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["code"] == "CREATED"
@@ -269,27 +286,32 @@ def test_run_from_template_ok(db_client, operator_client, db_engine, db_session,
                 select(SpiderTask).where(SpiderTask.spider_name == "example"))).scalars().all()
             assert len(rows) == 1
             assert rows[0].status == "pending"
+            assert rows[0].tenant_id == tid
             assert json.loads(rows[0].params)["urls"] == ["https://example.com"]
 
     asyncio.run(_check())
     assert sum(len(v) for v in fake.lists.values()) == 1  # 恰好投递一条队列消息
 
 
-def test_run_from_template_not_found_404(db_client, operator_client, monkeypatch):
+def test_run_from_template_not_found_404(db_client, db_session, monkeypatch):
     _fake_redis(monkeypatch)  # 守卫在 enqueue 之前，但保持环境一致
-    resp = operator_client.post(f"{BASE}/99999999/run")
+    headers, _tid = _tenant_auth(db_session)
+    resp = db_client.post(f"{BASE}/99999999/run", headers=headers)
     assert resp.status_code == 404
     assert resp.json()["code"] == "NOT_FOUND"
 
 
 def test_run_from_template_unregistered_spider_400(
-    db_client, operator_client, db_engine, db_session, monkeypatch
+    db_client, db_engine, db_session, monkeypatch
 ):
     """未登记爬虫的模板 → run 时 400 + 任务零落库（注册表校验在 enqueue 内生效）"""
     _fake_redis(monkeypatch)
-    template = _create_template(operator_client, name="坏模板", spider_name="no-such-spider-b1b")
+    headers, _tid = _tenant_auth(db_session)
+    template = _create_template(
+        db_client, headers, name="坏模板", spider_name="no-such-spider-b1b",
+    )
 
-    resp = operator_client.post(f"{BASE}/{template['id']}/run")
+    resp = db_client.post(f"{BASE}/{template['id']}/run", headers=headers)
     assert resp.status_code == 400, resp.text
     assert "未在注册表登记" in resp.json()["message"]
 

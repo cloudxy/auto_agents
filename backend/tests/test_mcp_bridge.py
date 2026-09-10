@@ -95,3 +95,45 @@ def test_plugin_scan_bad_manifest_marked(db_client, db_engine, db_session, tmp_p
     result = asyncio.run(_scan())
     assert result["failed"] == 1 and "bad-plugin" in result["failed_names"]
     settings.set("SKILLS.LIBRARY_ROOT", original)
+
+
+@pytest.mark.asyncio
+async def test_plugin_scan_zcode_nested_manifest(db_session, tmp_path):
+    """zcode 布局（.zcode-plugin/plugin.json）+ 符号链接目录：扫描跟源头，不复制内容"""
+    from config import settings
+    from backend.services.plugin_service import PluginService
+
+    original = settings.get("SKILLS.LIBRARY_ROOT")
+    settings.set("SKILLS.LIBRARY_ROOT", str(tmp_path))
+    canonical = tmp_path / "canonical" / "sdlc-workflow"
+    canonical.mkdir(parents=True)
+    (canonical / ".zcode-plugin").mkdir()
+    (canonical / ".zcode-plugin" / "plugin.json").write_text(json.dumps({
+        "name": "sdlc-workflow", "version": "3.5.5", "description": "SDLC",
+        "author": {"name": "xuyun"},
+    }), encoding="utf-8")
+    (canonical / "skills" / "pm").mkdir(parents=True)
+    plugins_root = tmp_path / "plugins"
+    plugins_root.mkdir()
+    (plugins_root / "sdlc-workflow").symlink_to(canonical)
+
+    async with db_session() as s:
+        result = await PluginService(s).scan_plugins(root=plugins_root)
+        await s.commit()
+
+    assert result["total"] == 1 and result["failed"] == 0
+
+    async with db_session() as s:
+        asset = (await s.execute(
+            select(CapabilityAsset).where(
+                CapabilityAsset.asset_type == "plugin",
+                CapabilityAsset.name == "sdlc-workflow",
+            )
+        )).scalar_one()
+        detail = (await s.execute(
+            select(CapabilityPlugin).where(CapabilityPlugin.asset_id == asset.id)
+        )).scalar_one()
+
+    assert detail.version == "3.5.5"
+    assert detail.bundled_skills == ["pm"]
+    settings.set("SKILLS.LIBRARY_ROOT", original)

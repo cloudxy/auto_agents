@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-# scrapy 项目根加入路径（与 run_spider.py 相同的加载方式）
+# scrapy 项目根加入路径（与 scripts.runlib.spider 相同的加载方式）
 _SCRAPY_DIR = str(Path(__file__).resolve().parents[2] / "scrapy")
 if _SCRAPY_DIR not in sys.path:
     sys.path.insert(0, _SCRAPY_DIR)

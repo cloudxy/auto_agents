@@ -51,8 +51,8 @@ const FEATURES: Feature[] = [
     color: '#13c2c2',
     tint: 'rgba(19, 194, 194, 0.1)',
     title: '数据管理',
-    desc: '采集结果结构化入库，内置清洗与去重管线，支持 CSV / Excel 一键导出。',
-    points: ['字段级清洗', '多格式导出'],
+    desc: '采集结果结构化入库，内置清洗与去重管线。当前可导出 CSV 或 JSON，单次最多 100 条。',
+    points: ['CSV 或 JSON', '单次最多 100 条'],
   },
   {
     icon: <AlertOutlined />,

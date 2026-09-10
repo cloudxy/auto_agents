@@ -12,17 +12,18 @@ if (typeof (global as any).TextDecoder === 'undefined') {
   (global as any).TextDecoder = TextDecoder;
 }
 
-// @rc-component/form 的宏任务调度依赖 MessageChannel（jsdom 未实现；
-// 不能用 worker_threads 的实现——其句柄会吊住 jest 进程，故以 setTimeout stub）
+// @rc-component/form 的宏任务调度依赖 MessageChannel（jsdom 未实现）。
+// 不能用 worker_threads：句柄会吊住 jest。也不能 setTimeout(0)：antd 6
+// Form/Modal 会灌满宏任务队列，waitFor/Jest 超时器饿死。
 if (typeof (global as any).MessageChannel === 'undefined') {
   (global as any).MessageChannel = class SimpleMessageChannel {
     port1 = { onmessage: null as any, postMessage: (_data: any) => undefined as void };
     port2 = { onmessage: null as any, postMessage: (_data: any) => undefined as void };
     constructor() {
       this.port1.postMessage = (data: any) =>
-        setTimeout(() => this.port2.onmessage?.({ data }), 0);
+        queueMicrotask(() => this.port2.onmessage?.({ data }))
       this.port2.postMessage = (data: any) =>
-        setTimeout(() => this.port1.onmessage?.({ data }), 0);
+        queueMicrotask(() => this.port1.onmessage?.({ data }))
     }
   };
 }

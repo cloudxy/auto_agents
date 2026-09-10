@@ -27,9 +27,14 @@ ITEM_PIPELINES:
   pipelines.StorePipeline: 400
 
 # === 任务收尾 ===
-# 空闲自动收尾（秒）：>0 时单次任务模式下连续空闲即以 finished 收尾；
-# 0 = 禁用（常驻分布式 Worker 场景）
-SPIDER_IDLE_CLOSE_SECONDS: 0
+# IdleAutoClose（秒）：连续空闲即以 finished 收尾（含 0 条）。默认 30。
+# 须 < 120 且 ≠ 21600，以便 example+httpbin 在提交后 120s 内完成（GWT-18.1）。
+# 21600 是渠道探针锁，禁止当本窗。
+SPIDER_IDLE_CLOSE_SECONDS: 30
+
+# GWT-18.4 离线标注窗（秒）：无终态满此时长才标工人不在线。不得复用 IdleAutoClose。
+# 21600 是渠道探针锁，禁止当本窗。
+SPIDER_WORKER_OFFLINE_SECONDS: 120
 
 # === 代理池（配置化，默认关闭直连） ===
 # 代理源优先级：PROXY_REDIS_KEY（Redis List 动态池）> PROXY_LIST（静态列表）

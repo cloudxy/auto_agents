@@ -1,35 +1,24 @@
-# LiteLLM Proxy sidecar 配置（L1 影子接入，product-review 任务二）
+# 平台 LLM 网关（LiteLLM Proxy）HTTP 连接 + L1 影子开关。
+# backend 只持虚拟 Key，禁止直连网关库。根 compose 不焊 litellm 服务。
 #
-# 嵌套读取方式（与 config/default/newapi.yml 等既有风格一致）：
-#   settings.get("LITELLM.EXPORT.DEFAULT_OUT", ...)
-# 环境变量覆盖（Dynaconf 双下划线嵌套约定，前缀见 config/__init__.py）：
-#   AUTO_AGENTS_LITELLM__EXPORT__DEFAULT_OUT=...
+# 嵌套读取：settings.get("LITELLM.BASE_URL") / LITELLM.ENABLED
+# 环境变量：AUTO_AGENTS_LITELLM__BASE_URL / AUTO_AGENTS_LITELLM__MASTER_KEY
 #
-# 部署形态：sidecar proxy（docker-compose.yml litellm 服务，profiles=["litellm"]
-# 默认不启动，影子阶段显式开启）；无 DB 静态 config.yaml 模式；本仓 MySQL 保持
-# 唯一业务事实源，治理层（L2+）未来只走 LiteLLM Admin API、禁直连其库。
-#
-# 安全红线：
-# - 生成的 config 含明文 api_key（LiteLLM config 原生形态），路径已 gitignore；
-# - 镜像版本守卫（黑名单 1.82.7/1.82.8 恶意版本）：backend/tests/test_litellm_version_guard.py
-#   解析 docker-compose.yml 断言精确 pin（compose 变更时红）；
-# - 影子阶段 sidecar 仅绑定 127.0.0.1，不接任何生产流量。
+# MASTER_KEY 不落本 yml。上游 Key 只活在 LiteLLM 密钥面。compose 见 deploy/litellm/。
 LITELLM:
-  ENABLED: false                      # 影子阶段总开关（默认关：不生成配置、不做对比）
+  ENABLED: false                      # 影子/网关总开关（默认关）
+  BASE_URL: "http://127.0.0.1:4000"  # 同机 Proxy；容器加入 litellm-net 后用 http://litellm:4000
+  TIMEOUT: 60                        # 单次 HTTP 超时（秒）
   EXPORT:
-    DEFAULT_OUT: "deploy/litellm/config.gen.yaml"  # 生成路径（含明文 key，gitignore 已登记）
+    DEFAULT_OUT: "deploy/litellm/config.gen.yaml"  # 生成路径（含明文 key，gitignore）
   PROXY:
-    ROUTE_INTERNAL: false             # L4：内部 LLM 调用切到 sidecar（默认关）
-    PORT: 4000                        # sidecar 端口；docker-compose.yml litellm 服务的
-                                      # ports 映射与此对齐（compose 静态文件无法读
-                                      # Dynaconf，改端口两处同步，同 backend 服务 9111 约定）
-    HEALTH_PATH: "/health/liveliness" # 容器 healthcheck 端点（liveliness=进程存活浅探测，
-                                      # 深度健康 /health endpoints 留给 L2 治理层）
+    ROUTE_INTERNAL: false             # 内部 LLM 调用切到 sidecar（默认关）
+    PORT: 4000
+    HEALTH_PATH: "/health/liveliness"
   SHADOW:
-    ENABLED: false                    # 影子只读对比器开关（backend/services/litellm/shadow.py；
-                                      # 只读对比，不发起任何真实 LLM 调用）
+    ENABLED: false                    # 只读对比器，不发起真实 LLM 调用
   ADMIN:
-    ENABLED: false                    # L2：治理层走 Admin API，默认关（sidecar 未起时不签发虚拟键）
-    BASE_URL: "http://127.0.0.1:4000" # 与 PROXY.PORT 对齐；密钥走环境变量
-    MASTER_KEY: ""                    # AUTO_AGENTS_LITELLM__ADMIN__MASTER_KEY（LiteLLM 主密钥）
+    ENABLED: false
+    BASE_URL: "http://127.0.0.1:4000"
+    MASTER_KEY: ""                    # AUTO_AGENTS_LITELLM__ADMIN__MASTER_KEY
     TIMEOUT_SECONDS: 15

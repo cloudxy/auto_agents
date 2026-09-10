@@ -1,6 +1,5 @@
 /**
- * 权限缓存生命周期回归（侧边栏缺失修复）：F5 后 persist 恢复登录态、
- * 模块缓存归零 → hook 挂载自动补拉 → 菜单经重渲染恢复。
+ * 权限缓存 + 租户壳（T-05）：空缓存读叶；平台写叶仅 is_platform_admin。
  */
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
@@ -23,6 +22,10 @@ const ADMIN_PERMS = [
   'menu:llm', 'menu:newapi',
 ]
 
+function labelsOf(root: HTMLElement): string {
+  return root.textContent || ''
+}
+
 function Probe() {
   const { filteredMenus, permissionsReady } = usePermission()
   return (
@@ -37,20 +40,27 @@ function Probe() {
   )
 }
 
+const tenantAdmin = {
+  username: 'boss', role: 'admin' as const, is_admin: true,
+  is_platform_admin: false, tenant_id: 9,
+}
+
+beforeEach(() => {
+  clearCachedPermissions()
+  ;(api.get as jest.Mock).mockReset()
+})
+
 test('F5 后缓存空：挂载自动补拉，菜单恢复', async () => {
-  // 模拟 persist 恢复登录态（token/user 存在），模块权限缓存为空
   useAuthStore.setState({
     token: 't', isAuthenticated: true,
-    user: { username: 'admin', role: 'admin', is_admin: true } as never,
+    user: { ...tenantAdmin } as never,
   })
   ;(api.get as jest.Mock).mockResolvedValue({ data: ADMIN_PERMS })
 
   render(<MemoryRouter><Probe /></MemoryRouter>)
 
-  // 初始：缓存空 → 菜单全隐（安全侧）
   expect(screen.getByTestId('ready').textContent).toBe('false')
 
-  // 补拉完成后：组结构与叶子恢复
   expect(await screen.findByText(/概览/)).toBeInTheDocument()
   await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
   expect(screen.getByText(/数据工厂/)).toBeInTheDocument()
@@ -59,52 +69,37 @@ test('F5 后缓存空：挂载自动补拉，菜单恢复', async () => {
 })
 
 test('未登录：不拉取，菜单保持全隐', async () => {
-  clearCachedPermissions()  // 前一用例的模块级缓存不跨用例（被测设计）
+  clearCachedPermissions()
   useAuthStore.setState({ token: null, isAuthenticated: false, user: null })
   const callCount = (api.get as jest.Mock).mock.calls.length
   render(<MemoryRouter><Probe /></MemoryRouter>)
   expect(screen.getByTestId('ready').textContent).toBe('false')
-  expect((api.get as jest.Mock).mock.calls.length).toBe(callCount)  // 无新增请求
+  expect((api.get as jest.Mock).mock.calls.length).toBe(callCount)
 })
 
-/**
- * bea13b5 回归：权限不可知（后端重启/网络瞬断 → refreshPermissions 失败 →
- * cachedPermissions=[]）时，filterMenu 返回全量菜单（仅保留 tenantOnly 过滤），
- * 侧边栏不再消失。修复前：缓存空 → 按空权限全滤光 → 菜单消失（复发链条）。
- */
-test('补拉失败（后端不可达）：菜单全量兜底而非全滤光（bea13b5）', async () => {
-  clearCachedPermissions()
+test('空缓存/补拉失败：读叶保留，不得露出平台写叶（GWT-17.2）', async () => {
   useAuthStore.setState({
     token: 't', isAuthenticated: true,
-    user: { username: 'admin', role: 'admin', is_admin: true } as never,
+    user: { ...tenantAdmin } as never,
   })
   ;(api.get as jest.Mock).mockRejectedValue(new Error('backend unreachable'))
 
-  render(<MemoryRouter><Probe /></MemoryRouter>)
-
-  // 补拉已尝试且失败（in-flight 结束，revision 已 bump）
+  const { container } = render(<MemoryRouter><Probe /></MemoryRouter>)
   await waitFor(() => expect(api.get).toHaveBeenCalled())
-
-  // 兜底断言：非 tenantOnly 组保留（全量菜单），而非全滤光
   expect(await screen.findByText(/概览/)).toBeInTheDocument()
   expect(screen.getByText(/数据工厂/)).toBeInTheDocument()
   expect(screen.getByText(/系统管理/)).toBeInTheDocument()
-  // 权限仍未就绪（ready=false——兜底是显示语义，不是权限通过）
   expect(screen.getByTestId('ready').textContent).toBe('false')
+  const text = labelsOf(container)
+  expect(text).not.toMatch(/中转站管控/)
+  expect(text).not.toMatch(/平台运营台/)
+  expect(text).not.toMatch(/用户管理/)
 })
 
-/**
- * bea13b5 边界缺陷（T10 报，T12/F-T10-1 修复转正）：兜底分支此前只过滤
- * 顶层菜单的 tenantOnly，而 tenantOnly 标记实际全在叶子层（成员管理/用量
- * 看板）——后端不可达时纯平台超管（tenant_id=NULL）仍见 tenantOnly 菜单，
- * 点击 403。修复：filterTenantOnly 递归过滤（与权限分支同口径）。
- */
-test('兜底分支同样过滤叶子层 tenantOnly（F-T10-1 修复转正）', async () => {
-  clearCachedPermissions()
+test('兜底分支同样过滤叶子层 tenantOnly（F-T10-1）', async () => {
   useAuthStore.setState({
     token: 't', isAuthenticated: true,
-    // 纯平台超管（tenant_id=NULL）
-    user: { username: 'admin', role: 'admin', is_admin: true } as never,
+    user: { username: 'root', role: 'admin', is_admin: true, is_platform_admin: true } as never,
   })
   ;(api.get as jest.Mock).mockRejectedValue(new Error('backend unreachable'))
 
@@ -114,4 +109,40 @@ test('兜底分支同样过滤叶子层 tenantOnly（F-T10-1 修复转正）', a
 
   expect(screen.queryByText(/成员管理/)).not.toBeInTheDocument()
   expect(screen.queryByText(/用量看板/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/我的安装/)).not.toBeInTheDocument()
+})
+
+test('租户公司管理员权限已加载：有仪表盘/数据工厂，无中转写/运营/用户管理（GWT-07.2/17.1）', async () => {
+  useAuthStore.setState({
+    token: 't', isAuthenticated: true,
+    user: { ...tenantAdmin } as never,
+  })
+  ;(api.get as jest.Mock).mockResolvedValue({ data: ADMIN_PERMS })
+
+  const { container } = render(<MemoryRouter><Probe /></MemoryRouter>)
+  await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
+  expect(screen.getByText(/仪表盘/)).toBeInTheDocument()
+  expect(screen.getByText(/数据工厂/)).toBeInTheDocument()
+  expect(screen.getByText(/LLM 配置/)).toBeInTheDocument()
+  expect(screen.getByText(/我的安装/)).toBeInTheDocument()
+  const text = labelsOf(container)
+  expect(text).not.toMatch(/中转站管控/)
+  expect(text).not.toMatch(/平台运营台/)
+  expect(text).not.toMatch(/用户管理/)
+  expect(text).not.toMatch(/产品事实/)
+  expect(text).not.toMatch(/分析入口/)
+  expect(text).not.toMatch(/市场分析/)
+})
+
+test('平台超管权限已加载：中转站管控可见（GWT-07.1）', async () => {
+  useAuthStore.setState({
+    token: 't', isAuthenticated: true,
+    user: { username: 'root', role: 'admin', is_admin: true, is_platform_admin: true } as never,
+  })
+  ;(api.get as jest.Mock).mockResolvedValue({ data: ADMIN_PERMS })
+
+  render(<MemoryRouter><Probe /></MemoryRouter>)
+  await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
+  expect(screen.getByText(/中转站管控/)).toBeInTheDocument()
+  expect(screen.getByText(/平台运营台/)).toBeInTheDocument()
 })

@@ -24,6 +24,8 @@ export interface LlmProvider {
   remark?: string | null
   /** 脱敏后的 API Key（如 sk-***abc），用于编辑态 placeholder 展示 */
   api_key_masked?: string | null
+  /** 所属租户；null=平台级行（写控件仅超管） */
+  tenant_id?: number | null
   created_at?: string | null
   updated_at?: string | null
 }

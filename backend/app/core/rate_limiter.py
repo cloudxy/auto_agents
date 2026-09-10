@@ -28,6 +28,7 @@ from platform_core.queues import (
     REGISTER_ATTEMPT_PREFIX,
     SIGNUP_RATE_PREFIX,
     SKILL_PUBLIC_RATE_PREFIX,
+    EVENTS_PUBLIC_RATE_PREFIX,
 )
 
 logger = get_logger("api.ratelimit")
@@ -68,6 +69,11 @@ SIGNUP_RATE_POLICY = RateLimitPolicy(
 SKILL_PUBLIC_RATE_POLICY = RateLimitPolicy(
     name="skill_public", key_prefix=SKILL_PUBLIC_RATE_PREFIX,
     window_seconds=60, max_requests=60, fail_open=True, xff_mode="last",
+)
+
+EVENTS_PUBLIC_RATE_POLICY = RateLimitPolicy(
+    name="product_events_public", key_prefix=EVENTS_PUBLIC_RATE_PREFIX,
+    window_seconds=60, max_requests=120, fail_open=True, xff_mode="last",
 )
 
 

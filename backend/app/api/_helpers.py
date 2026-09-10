@@ -1,8 +1,8 @@
 """API 层共享辅助函数
 
 职责：
-- 收敛各路由模块重复的横切逻辑（当前仅审计写入），保持 API 层行为一致
-- ADR-0007 D4：本函数是纯委托——审计的独立 session 开启与提交归属
+- 收敛各路由模块重复的横切逻辑（审计写入、租户路径投影），保持 API 层行为一致
+- ADR-0007 D4：审计是纯委托——独立 session 开启与提交归属
   backend/services/audit_service.record_audit_standalone（Service 层），
   API 层不碰任何 session 生命周期
 """
@@ -13,6 +13,29 @@ from backend.services.audit_service import record_audit_standalone
 from platform_core.logger import get_logger
 
 logger = get_logger("api")
+
+
+def is_local_absolute_path(value: object) -> bool:
+    """本机绝对路径（POSIX / Windows 盘符 / ~）；库内相对路径不算。"""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    text = value.strip()
+    if text.startswith("/") or text.startswith("~"):
+        return True
+    return len(text) >= 3 and text[0].isalpha() and text[1] == ":" and text[2] in "\\/"
+
+
+def omit_local_abs_paths_for_non_platform_admin(
+    payload: dict, user: CurrentUser,
+) -> dict:
+    """GWT-14.1/14.2：非超管响应不得把本机绝对路径当可复制字段发出。"""
+    if user.is_platform_admin:
+        return payload
+    out = dict(payload)
+    for key, val in list(out.items()):
+        if is_local_absolute_path(val):
+            out.pop(key, None)
+    return out
 
 
 async def record_audit(

@@ -1,4 +1,4 @@
-"""系统配置接口 - 管理网站基础信息（读需登录，写仅管理员）
+"""系统配置接口 - 管理网站基础信息（读需登录，写仅平台超管）
 
 响应契约：统一 ApiResponse 信封（ADR-001）。
 """
@@ -42,7 +42,7 @@ async def update_config(
     session: AsyncSession = Depends(get_async_db),
     user: CurrentUser = Depends(require_platform_admin),
 ) -> ApiResponse:
-    """更新单个配置项（仅管理员，写入审计；set_config 内部已提交业务事务，
+    """更新单个配置项（仅平台超管，写入审计；set_config 内部已提交业务事务，
     审计记录由 record_audit 单独提交）"""
     service = ConfigService(session)
     await service.set_config(key, data.value)

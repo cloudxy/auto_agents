@@ -6,7 +6,7 @@ import { Layout, Menu, Typography, Button, Tag } from 'antd'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
 import { usePermission } from '../hooks/usePermission'
-import { pageTitleFor, MENU_ICON_MAP } from '../config/menuConfig'
+import { pageTitleFor, MENU_ICON_MAP, PLATFORM_WRITE_KEYS } from '../config/menuConfig'
 import { useQuery } from '@tanstack/react-query'
 import { fetchDynamicMenus, type DynamicMenuNode } from '../services/menus'
 
@@ -17,7 +17,8 @@ const AdminLayout: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout } = useAuthStore()
-  const { filteredMenus } = usePermission()
+  const { filteredMenus, permissionsReady, permissionsLoadState } = usePermission()
+  const isPlatformAdmin = Boolean(user?.is_platform_admin)
 
   // 动态菜单（SaaS 化：menus 表经 /auth/menus 下发，按权限已过滤）；
   // 空响应/失败回退前端静态 menuConfig（登录链路永不因菜单故障阻断）
@@ -31,14 +32,17 @@ const AdminLayout: React.FC = () => {
     if (dynamicMenus && dynamicMenus.length) {
       // 平台超管（无租户）隐藏租户视角菜单
       const tenantBound = user?.tenant_id != null
+      const allowPlatform = isPlatformAdmin && permissionsReady
       const toItems = (nodes: DynamicMenuNode[]): any[] => nodes
         .filter((n) => !n.tenantOnly || tenantBound)
+        .filter((n) => allowPlatform || !(PLATFORM_WRITE_KEYS as readonly string[]).includes(n.key))
         .map((n) => ({
           key: n.key,
           icon: n.icon ? MENU_ICON_MAP[n.icon] : undefined,
           label: n.label,
           children: n.children?.length ? toItems(n.children) : undefined,
         }))
+        .filter((n) => !n.children || n.children.length > 0)
       return toItems(dynamicMenus)
     }
     return filteredMenus.map(item => ({
@@ -50,7 +54,7 @@ const AdminLayout: React.FC = () => {
         label: child.label
       }))
     }))
-  }, [dynamicMenus, filteredMenus, user?.tenant_id])
+  }, [dynamicMenus, filteredMenus, user?.tenant_id, isPlatformAdmin, permissionsReady])
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -58,6 +62,11 @@ const AdminLayout: React.FC = () => {
         <div style={{ height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Title level={4} style={{ color: 'white', margin: 0 }}>AutoAgents</Title>
         </div>
+        {!permissionsReady && (
+          <div style={{ color: 'rgba(255,255,255,0.65)', padding: '8px 16px', fontSize: 12 }}>
+            {permissionsLoadState === 'error' ? '权限暂时刷新失败，已保留上次菜单。' : '权限加载中'}
+          </div>
+        )}
         <Menu
           theme="dark"
           mode="inline"

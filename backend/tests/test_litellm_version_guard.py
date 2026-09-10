@@ -1,7 +1,8 @@
 """L1 版本守卫红测：compose litellm 镜像 tag 精确 pin + 恶意版本黑名单
 
-核心用例 test_real_compose_pinned_and_not_blacklisted 直接读取仓库根
-docker-compose.yml——任何人把 tag 改成 latest / 黑名单版本 / 摘掉 tag，
+核心用例 test_real_compose_pinned_and_not_blacklisted 直接读取
+deploy/litellm/docker-compose.yml——根 compose 按 ADR-0010 不得焊 litellm
+服务。任何人把独立 compose 的 tag 改成 latest / 黑名单版本 / 摘掉 tag，
 本文件即红（「compose 变更时红」的机械保证）。
 """
 from pathlib import Path
@@ -17,20 +18,26 @@ from backend.services.litellm.guard import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-COMPOSE_PATH = PROJECT_ROOT / "docker-compose.yml"
+COMPOSE_PATH = PROJECT_ROOT / "deploy" / "litellm" / "docker-compose.yml"
+ROOT_COMPOSE_PATH = PROJECT_ROOT / "docker-compose.yml"
 
 
 class TestRealCompose:
-    """真实 docker-compose.yml 守卫（防回归主阵地）"""
+    """真实 deploy/litellm/docker-compose.yml 守卫（防回归主阵地）"""
 
     def test_real_compose_pinned_and_not_blacklisted(self):
         ok, reason = check_compose(COMPOSE_PATH.read_text(encoding="utf-8"))
-        assert ok, f"docker-compose.yml litellm 镜像守卫失败: {reason}"
+        assert ok, f"deploy/litellm/docker-compose.yml litellm 镜像守卫失败: {reason}"
 
     def test_real_compose_extract_image_shape(self):
         image = extract_litellm_image(COMPOSE_PATH.read_text(encoding="utf-8"))
-        assert image is not None, "compose 缺 litellm 服务定义"
-        assert image.startswith("litellm/litellm-database:"), f"镜像仓库漂移: {image}"
+        assert image is not None, "独立 compose 缺 litellm 服务定义"
+        assert image.startswith("ghcr.io/berriai/litellm:"), f"镜像仓库漂移: {image}"
+
+    def test_root_compose_has_no_litellm_service(self):
+        """ADR-0010 / SH-01：根 compose 不得焊 litellm 服务。"""
+        image = extract_litellm_image(ROOT_COMPOSE_PATH.read_text(encoding="utf-8"))
+        assert image is None, "根 docker-compose.yml 不得声明 litellm 服务"
 
 
 class TestCheckVersion:

@@ -23,9 +23,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from backend.services.tenant_expiry_service import (
+    AUTH_TENANT_EXPIRED,
+    TENANT_EXPIRED_MESSAGE,
+    assert_tenant_active,
+)
 from backend.services.user_service import load_auth_identity
 from backend.utils.auth import decode_access_token
 from platform_core.db import get_async_db
+from platform_core.exceptions import AuthenticationException
 from platform_core.logger import get_logger
 from platform_core.tenant_context import platform_scope, tenant_scope
 
@@ -63,6 +69,38 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 "request_id": None,
             },
         )
+
+    @staticmethod
+    def _reject_tenant_expired() -> JSONResponse:
+        """FR-08 到期/停用：与凭证失败同形信封，code/文案不同"""
+        return JSONResponse(
+            status_code=401,
+            content={
+                "success": False,
+                "code": AUTH_TENANT_EXPIRED,
+                "message": TENANT_EXPIRED_MESSAGE,
+                "data": None,
+                "request_id": None,
+            },
+        )
+
+    async def _guard_tenant_active(self, request: Request, tenant_id: int) -> JSONResponse | None:
+        """已颁发会话的后续写/读：企业到期或停用则拒绝（fail-closed）"""
+        factory = getattr(request.app.state, "identity_session_factory", None) \
+            or _default_identity_session
+        try:
+            async with factory() as session:
+                await assert_tenant_active(session, tenant_id)
+        except AuthenticationException as exc:
+            if exc.code == AUTH_TENANT_EXPIRED:
+                return self._reject_tenant_expired()
+            return self._reject()
+        except Exception as exc:  # noqa: BLE001 复核链路任何异常均按拒绝处理
+            logger.error(
+                f"租户可用性复核失败（fail-closed）| tenant_id={tenant_id} err={exc}"
+            )
+            return self._reject()
+        return None
 
     async def _verify_platform_claim(self, request: Request, payload: dict):
         """平台态 DB 复核（F-01 单一事实源）：返回 AuthIdentity，None = fail-closed 拒绝
@@ -107,6 +145,9 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             if identity.tenant_id is None:
                 logger.warning(f"拒绝无租户归属的降级平台 token | sub={payload.get('sub')}")
                 return self._reject()
+            denied = await self._guard_tenant_active(request, identity.tenant_id)
+            if denied is not None:
+                return denied
             with tenant_scope(identity.tenant_id):
                 return await call_next(request)
 
@@ -121,5 +162,8 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         except (TypeError, ValueError):
             logger.warning(f"拒绝租户字段不合法 token | sub={payload.get('sub')}")
             return self._reject()
+        denied = await self._guard_tenant_active(request, scoped_id)
+        if denied is not None:
+            return denied
         with tenant_scope(scoped_id):
             return await call_next(request)

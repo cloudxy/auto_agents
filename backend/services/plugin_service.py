@@ -16,6 +16,21 @@ from platform_core.models.skill import SkillJob
 logger = get_logger("service.plugin")
 
 _DESCRIPTION_MAX = 1024
+# 根级 plugin.json 优先；否则认各 host 的嵌套清单（zcode / Claude Code / Grok）。
+_MANIFEST_CANDIDATES = (
+    "plugin.json",
+    ".zcode-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+    ".grok-plugin/plugin.json",
+)
+
+
+def _plugin_manifest_path(plugin_dir: Path) -> Optional[Path]:
+    for rel in _MANIFEST_CANDIDATES:
+        path = plugin_dir / rel
+        if path.is_file():
+            return path
+    return None
 
 
 def _utcnow() -> datetime:
@@ -29,8 +44,13 @@ class PluginService:
         self.session = session
 
     async def scan_plugins(self, root: Optional[Path] = None) -> dict:
-        """扫描 capability-library/plugins/：解析 plugin.json → asset + detail upsert"""
+        """扫描 capability-library/plugins/：解析 plugin.json → asset + detail upsert
+
+        D16：本入口永远走本机 plugins/ iterdir，不假装已切源注册表。
+        """
         from config import settings
+
+        logger.info("plugin.scan_plugins.start")
 
         if root is None:
             library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT)))
@@ -58,13 +78,17 @@ class PluginService:
         await self.session.flush()
         # ADR-0007 D2：快照先于 commit（job 属性 expire 后读取会抛 MissingGreenlet）
         result = {"total": len(dirs), "succeeded": succeeded, "failed": failed,
-                  "failed_names": failed_names, "job_id": job.id}
+                  "failed_names": failed_names, "job_id": job.id,
+                  "scan_mode": "local_plugins"}
+        if result["total"] == 0:
+            result["empty"] = True
+            result["message"] = "没有可同步的包"
         await self.session.commit()
         return result
 
     async def _upsert_from_dir(self, plugin_dir: Path, root: Path) -> CapabilityAsset:
-        manifest_path = plugin_dir / "plugin.json"
-        if not manifest_path.exists():
+        manifest_path = _plugin_manifest_path(plugin_dir)
+        if manifest_path is None:
             raise ValidationException(message=f"plugin.json 缺失: {plugin_dir.name}", field="url")
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -148,6 +172,9 @@ class PluginService:
             "hooks_registered": bool((detail.hooks if detail else {}) or {}),
             "commands_registered": bool((detail.commands if detail else {}) or {}),
             "health_status": detail.health_status if detail else "unknown",
+            "listing_state": asset.listing_state,
+            "listed_at": asset.listed_at.isoformat() if asset.listed_at else None,
+            "source_type": asset.source_type,
             "last_verified_at": (
                 detail.last_verified_at.isoformat() if detail and detail.last_verified_at else None
             ),
@@ -174,11 +201,11 @@ class PluginService:
 
         servers = detail.mcp_servers or {}
         if not servers:
-            detail.health_status = "degraded"
+            detail.health_status = "unknown"
             detail.verify_detail = {"error": "插件未声明 MCP servers（无可验证工具链）"}
             detail.last_verified_at = _utcnow()
             await self.session.flush()
-            result = {"health": "degraded", "detail": dict(detail.verify_detail)}
+            result = {"health": "unknown", "detail": dict(detail.verify_detail)}
             await self.session.commit()
             return result
 

@@ -17,7 +17,6 @@ dim 即 llm_client 的 usage_dim："provider:<id>" 或 "config"。
 """
 import asyncio
 import sys
-import time
 from datetime import date
 from typing import Optional
 
@@ -51,7 +50,9 @@ _METRICS = ("prompt", "completion", "total", "requests", "failed")
 
 
 def _today() -> date:
-    return date.fromtimestamp(time.time())
+    logger.debug("LLM 用量业务日（Asia/Shanghai）")
+    from backend.services.quota_service import shanghai_today
+    return shanghai_today()
 
 
 def _daily_key(day: date) -> str:

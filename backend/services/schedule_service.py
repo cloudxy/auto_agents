@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories.spider_definition_repository import SpiderDefinitionRepository
 from backend.repositories.spider_schedule_repository import SpiderScheduleRepository
 from backend.repositories.spider_task_repository import SpiderTaskRepository
+from backend.services.spider_common import require_enqueue_tenant
 from backend.services.spider_service import SpiderService
 from config import settings
 from platform_core.db import get_manager
@@ -89,7 +90,9 @@ class ScheduleService:
         if isinstance(spiders_cfg, dict) and spider_name not in spiders_cfg:
             raise BusinessException(f"爬虫 {spider_name} 未在注册表登记")
 
-    async def create_schedule(self, payload: ScheduleRequest) -> SpiderScheduleResponse:
+    async def create_schedule(
+        self, payload: ScheduleRequest, tenant_id: int | None = None,
+    ) -> SpiderScheduleResponse:
         """创建调度计划（校验：爬虫注册表存在 / cron 合法 / 同爬虫唯一）"""
         await self._ensure_spider_registered(payload.spider_name)
         if not validate_cron(payload.cron_expr):
@@ -97,6 +100,7 @@ class ScheduleService:
         existing = await self.repo.find_by_spider(payload.spider_name)
         if existing is not None:
             raise BusinessException(f"爬虫 {payload.spider_name} 已存在调度计划（id={existing.id}）")
+        owner_id = require_enqueue_tenant(tenant_id)
 
         schedule = await self.repo.create(
             spider_name=payload.spider_name,
@@ -104,6 +108,7 @@ class ScheduleService:
             params=payload.params,
             enabled=payload.enabled,
             next_run_at=next_fire_time(payload.cron_expr) if payload.enabled else None,
+            tenant_id=owner_id,
         )
         await self.session.commit()
         await self.session.refresh(schedule)
@@ -268,14 +273,12 @@ class SpiderScheduler:
             await self._advance_schedule(repo, schedule, now)
             return
 
-        # ── 4. 入队（使用计算出的优先级） ──
+        # ── 4. 入队（使用计算出的优先级；归属=计划入队企业，工人不带企业） ──
         triggered = False
         try:
             service = SpiderService(session)
             await service.enqueue(
-                spider_name=spider_name,
-                params=schedule.params,
-                priority=priority,
+                spider_name=spider_name, params=schedule.params, priority=priority,
                 tenant_id=getattr(schedule, "tenant_id", None),
             )
             triggered = True

@@ -28,9 +28,11 @@ import ModelSetDrawer from '../components/llm/ModelSetDrawer'
 const { Text } = Typography
 
 const LlmProviders: React.FC = () => {
-  const { hasPermission } = usePermission()
+  const { hasPermission, isPlatformAdmin } = usePermission()
   const canOperate = hasPermission('btn:create')
   const canDelete = hasPermission('btn:delete')
+  const canWriteRow = (row: LlmProvider) =>
+    canOperate && (isPlatformAdmin || row.tenant_id !== null)
 
   const qc = useQueryClient()
   const listQ = useQuery({ queryKey: ['llm-providers'], queryFn: fetchLlmProviders })
@@ -85,12 +87,18 @@ const LlmProviders: React.FC = () => {
       setTestingId(row.id)
       const res = await testLlmProvider(row.id)
       setTestResults((prev) => ({ ...prev, [row.id]: res }))
-      res.ok ? message.success(`「${row.name}」连通正常（${res.latency_ms ?? '-'}ms）`)
-             : message.error(`「${row.name}」连通失败：${res.error || '未知错误'}`)
+      if (res.ok) {
+        message.success('连接成功')
+        return
+      }
+      const reason = res.error || '该行地址无响应'
+      const failText = `连接失败：连的是本企业供应商「${row.name}」，不是平台网关。${reason}。检查该行地址与密钥后，再点测试连接。`
+      setTestResults((prev) => ({ ...prev, [row.id]: { ...res, error: failText } }))
     } catch (error) {
-      const failed: LlmTestResult = { ok: false, latency_ms: null, model: null, error: apiErrorMessage(error, '请求异常') }
+      const reason = apiErrorMessage(error, '该行地址无响应')
+      const failText = `连接失败：连的是本企业供应商「${row.name}」，不是平台网关。${reason}。检查该行地址与密钥后，再点测试连接。`
+      const failed: LlmTestResult = { ok: false, latency_ms: null, model: null, error: failText }
       setTestResults((prev) => ({ ...prev, [row.id]: failed }))
-      message.error(`「${row.name}」连通失败：${failed.error}`)
     } finally {
       setTestingId(null)
     }
@@ -108,7 +116,12 @@ const LlmProviders: React.FC = () => {
 
   // ---------------- 表格列 ----------------
   const columns: ColumnsType<LlmProvider> = [
-    { title: '名称', dataIndex: 'name', key: 'name', width: 140, render: (v: string) => <Text strong>{v}</Text> },
+    { title: '名称', dataIndex: 'name', key: 'name', width: 140, render: (v: string, record: LlmProvider) => (
+      <Space size={4}>
+        <Text strong>{v}</Text>
+        {record.tenant_id === null && <Tag>平台</Tag>}
+      </Space>
+    ) },
     {
       title: '协议', dataIndex: 'provider_type', key: 'provider_type', width: 120,
       render: (v: string | null) => <Tag color="blue">{PROTOCOL_NAMES[v || 'openai_compatible'] || v}</Tag>,
@@ -134,7 +147,7 @@ const LlmProviders: React.FC = () => {
     { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 80, render: (v: boolean) => (v ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>) },
     {
       title: '激活', dataIndex: 'is_active', key: 'is_active', width: 90,
-      render: (v: boolean, record: LlmProvider) => (canOperate ? (
+      render: (v: boolean, record: LlmProvider) => (canWriteRow(record) ? (
         <Switch
           checked={v} checkedChildren="已激活" unCheckedChildren="未激活"
           loading={activatingId === record.id}
@@ -157,19 +170,21 @@ const LlmProviders: React.FC = () => {
         const res = testResults[record.id]
         return (
           <Space size={0} wrap>
-            {canOperate && (
+            {canWriteRow(record) && (
               <Button type="link" size="small" icon={<ThunderboltOutlined />}
-                      loading={testingId === record.id} onClick={() => onTest(record)}>测试</Button>
+                      loading={testingId === record.id} onClick={() => onTest(record)}>
+                {testingId === record.id ? '测试连接中…' : '测试连接'}
+              </Button>
             )}
-            {canOperate && (
+            {canWriteRow(record) && (
               <Button type="link" size="small" icon={<EditOutlined />}
                       onClick={() => { setEditing(record); setModalOpen(true) }}>编辑</Button>
             )}
-            {canOperate && (
+            {canWriteRow(record) && (
               <Button type="link" size="small" icon={<CloudDownloadOutlined />}
                       onClick={() => setDrawerProvider(record)}>管理模型</Button>
             )}
-            {canDelete && (
+            {canDelete && canWriteRow(record) && (
               <Popconfirm title="确认删除该供应商？" okText="删除" okButtonProps={{ danger: true }} cancelText="取消"
                           onConfirm={() => onDelete(record)}>
                 <Button type="link" danger size="small" icon={<ThunderboltOutlined />}>删除</Button>
@@ -186,9 +201,10 @@ const LlmProviders: React.FC = () => {
 
   return (
     <>
+      <h1 style={{ marginTop: 0, fontSize: 20, fontWeight: 600 }}>LLM 配置</h1>
       {!canOperate && (
-        <Alert type="info" showIcon style={{ marginBottom: 16 }} title="仅管理员可管理供应商"
-               description="当前账号为只读视图；新建/激活/测试/编辑/删除操作仅管理员可用。" />
+        <Alert type="info" showIcon style={{ marginBottom: 16 }} title="当前账号不能管理供应商"
+               description="需要经办或企业负责人权限。" />
       )}
       {listQ.isError ? (
         <Alert type="error" showIcon style={{ marginBottom: 16 }}

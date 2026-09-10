@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories.spider_definition_repository import SpiderDefinitionRepository
 from backend.repositories.spider_task_repository import SpiderTaskRepository
 from backend.repositories.task_template_repository import TaskTemplateRepository
-from backend.services.spider_common import _SPIDERS_DIR
+from backend.services.spider_common import _SPIDERS_DIR, require_enqueue_tenant
 from config import settings
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
@@ -321,14 +321,18 @@ class SpiderRegistryService:
         items = await repo.list_all()
         return [TaskTemplateResponse.model_validate(item) for item in items]
 
-    async def create_template(self, payload: dict, created_by: str | None = None) -> TaskTemplateResponse:
+    async def create_template(
+        self, payload: dict, created_by: str | None = None, tenant_id: int | None = None,
+    ) -> TaskTemplateResponse:
         """创建任务模板（名称唯一性校验）"""
         logger.info(f"创建任务模板: name={payload.get('name')}")
+        owner_id = require_enqueue_tenant(tenant_id)
         repo = TaskTemplateRepository(self.session)
         existing = await repo.get_by_name(payload["name"])
         if existing:
             raise BusinessException(f"模板名称 '{payload['name']}' 已存在")
-        item = await repo.create(**payload, created_by=created_by)
+        data = {k: v for k, v in payload.items() if k != "tenant_id"}
+        item = await repo.create(**data, created_by=created_by, tenant_id=owner_id)
         await self.session.commit()
         await self.session.refresh(item)
         return TaskTemplateResponse.model_validate(item)
@@ -360,12 +364,22 @@ class SpiderRegistryService:
         await self.session.commit()
         return {"id": template_id, "deleted": True}
 
-    async def create_task_from_template(self, template_id: int) -> SpiderTaskResponse:
+    async def create_task_from_template(
+        self, template_id: int, tenant_id: int | None = None,
+    ) -> SpiderTaskResponse:
         """从模板创建并运行任务"""
         logger.info(f"从模板创建任务: template_id={template_id}")
+        owner_id = require_enqueue_tenant(tenant_id)
         repo = TaskTemplateRepository(self.session)
         template = await repo.get_by_id(template_id)
         if template is None:
+            raise NotFoundException("任务模板")
+        tmpl_tid = getattr(template, "tenant_id", None)
+        try:
+            tmpl_owner = int(tmpl_tid) if tmpl_tid is not None else None
+        except (TypeError, ValueError):
+            tmpl_owner = None
+        if tmpl_owner != owner_id:
             raise NotFoundException("任务模板")
         # 局部构造（无状态）：避免 registry → task 顶层互相依赖
         from backend.services.spider_task_service import SpiderTaskService
@@ -373,4 +387,5 @@ class SpiderRegistryService:
             spider_name=template.spider_name,
             params=template.params,
             priority=template.priority or "normal",
+            tenant_id=owner_id,
         )

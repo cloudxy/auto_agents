@@ -3,7 +3,7 @@
 Seam（工单预确认）：tenant_context 的作用域助手与事件钩子（db_session 直测）。
 """
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from platform_core.models.ai_plan import AiPlan
 from platform_core.models.llm_provider import LlmProvider
@@ -199,3 +199,201 @@ async def test_registered_exempt_update_unfiltered_vs_unregistered_filtered(db_s
             select(SpiderTask.spider_name, SpiderTask.status))).all()}
     assert states == {"hash_changed"}
     assert statuses == {"a-task": "running", "b-task": "pending"}
+
+
+@pytest.mark.asyncio
+async def test_capability_assets_exempt_update_unfiltered(db_session):
+    """T-04 / PIT-3：capability_assets 已登记豁免 → 租户态 Core UPDATE 不注入；
+    恒 NULL 行全部命中（不豁免则 rowcount=0，超管刷新看不见自己的改动）"""
+    from platform_core.models.capability import CapabilityAsset
+    from platform_core.tenant_context import tenant_exempt_tables
+
+    assert "capability_assets" in tenant_exempt_tables()
+    assert "capability_installs" not in tenant_exempt_tables()
+
+    async with db_session() as s:
+        s.add_all([
+            CapabilityAsset(asset_type="plugin", name="ca-1", category="plugin"),
+            CapabilityAsset(asset_type="plugin", name="ca-2", category="plugin"),
+        ])
+        await s.commit()
+
+    with tenant_scope(1):
+        async with db_session() as s:
+            result = await s.execute(
+                update(CapabilityAsset).values(sync_state="hash_changed")
+                .execution_options(synchronize_session=False)
+            )
+            await s.commit()
+            assert result.rowcount == 2  # 豁免：NULL 行不被注入条件失配
+
+    async with db_session() as s:
+        states = set((await s.execute(select(CapabilityAsset.sync_state))).scalars().all())
+    assert states == {"hash_changed"}
+
+
+@pytest.mark.asyncio
+async def test_t21_catalog_tables_exempt_and_installs_not(db_session):
+    """T-21 / PIT-3：本票平台目录表在豁免清单；capability_installs 不在"""
+    from backend.app.tenant_isolation import TENANT_EXEMPT_TABLES
+    from platform_core.models.capability import (
+        CapabilityAsset, CapabilityCommand, CapabilityComponent,
+    )
+    from platform_core.tenant_context import tenant_exempt_tables
+
+    for table in ("capability_commands", "capability_components"):
+        assert table in TENANT_EXEMPT_TABLES
+        assert table in tenant_exempt_tables()
+    assert "capability_installs" not in TENANT_EXEMPT_TABLES
+    assert "capability_installs" not in tenant_exempt_tables()
+
+    async with db_session() as s:
+        parent = CapabilityAsset(asset_type="plugin", name="t21-parent", category="plugin")
+        child = CapabilityAsset(asset_type="command", name="t21-child", category="command")
+        s.add_all([parent, child])
+        await s.flush()
+        s.add(CapabilityCommand(asset_id=parent.id, slash="t21", description="d"))
+        s.add(CapabilityComponent(
+            parent_asset_id=parent.id, child_asset_id=child.id, role="bundled_command",
+        ))
+        await s.commit()
+
+    with tenant_scope(1):
+        async with db_session() as s:
+            r_cmd = await s.execute(
+                update(CapabilityCommand).values(description="patched")
+                .execution_options(synchronize_session=False)
+            )
+            r_edge = await s.execute(
+                update(CapabilityComponent).values(role="uses_skill")
+                .execution_options(synchronize_session=False)
+            )
+            await s.commit()
+            assert r_cmd.rowcount == 1  # 已登记豁免：不注入
+            assert r_edge.rowcount == 1
+
+
+@pytest.mark.asyncio
+async def test_t29_sources_table_exempt(db_session):
+    """T-29 / PIT-3：capability_sources 平台表进豁免清单；租户态 UPDATE 不注入失配。"""
+    from backend.app.tenant_isolation import TENANT_EXEMPT_TABLES
+    from platform_core.models.capability import CapabilitySource
+    from platform_core.tenant_context import tenant_exempt_tables
+
+    assert "capability_sources" in TENANT_EXEMPT_TABLES
+    assert "capability_sources" in tenant_exempt_tables()
+    assert "capability_installs" not in TENANT_EXEMPT_TABLES
+
+    async with db_session() as s:
+        s.add(CapabilitySource(
+            name="t29-src", source_kind="local", uri="/tmp/t29", last_succeeded=0,
+        ))
+        await s.commit()
+
+    with tenant_scope(1):
+        async with db_session() as s:
+            result = await s.execute(
+                update(CapabilitySource).values(last_error="probe")
+                .execution_options(synchronize_session=False)
+            )
+            await s.commit()
+            assert result.rowcount == 1
+
+
+@pytest.mark.asyncio
+async def test_t33_aliases_table_exempt(db_session):
+    """T-33 / PIT-3：capability_aliases 平台表进豁免清单；安装表仍不在。"""
+    from backend.app.tenant_isolation import TENANT_EXEMPT_TABLES
+    from platform_core.models.capability import CapabilityAlias, CapabilityAsset
+    from platform_core.tenant_context import tenant_exempt_tables
+
+    assert "capability_aliases" in TENANT_EXEMPT_TABLES
+    assert "capability_aliases" in tenant_exempt_tables()
+    assert "capability_installs" not in TENANT_EXEMPT_TABLES
+    assert "capability_installs" not in tenant_exempt_tables()
+
+    async with db_session() as s:
+        asset = CapabilityAsset(
+            asset_type="skill", name="t33-alias-asset", category="cat-a",
+        )
+        s.add(asset)
+        await s.flush()
+        s.add(CapabilityAlias(
+            slug="t33-vanity", asset_id=asset.id, asset_type="skill",
+        ))
+        await s.commit()
+
+    with tenant_scope(1):
+        async with db_session() as s:
+            result = await s.execute(
+                update(CapabilityAlias).values(slug="t33-patched")
+                .execution_options(synchronize_session=False)
+            )
+            await s.commit()
+            assert result.rowcount == 1
+
+
+@pytest.mark.asyncio
+async def test_capability_installs_update_delete_injects_tenant_id(db_session):
+    """T-25 / PIT-3：capability_installs 禁止豁免 → 租户态 Core UPDATE/DELETE 注入 tenant_id。
+
+    与 test_registered_exempt_update_unfiltered_vs_unregistered_filtered 同形、方向相反：
+    豁免表 rowcount=全表；本表 rowcount 收窄本租户。
+    """
+    from backend.app.tenant_isolation import TENANT_EXEMPT_TABLES
+    from platform_core.models.capability import CapabilityAsset, CapabilityInstall
+    from platform_core.models.tenant import Tenant
+    from platform_core.tenant_context import tenant_exempt_tables
+
+    assert "capability_installs" not in TENANT_EXEMPT_TABLES
+    assert "capability_installs" not in tenant_exempt_tables()
+
+    async with db_session() as s:
+        s.add_all([
+            Tenant(slug="inst-a", name="A"),
+            Tenant(slug="inst-b", name="B"),
+        ])
+        await s.flush()
+        ta = (await s.execute(select(Tenant).where(Tenant.slug == "inst-a"))).scalar_one()
+        tb = (await s.execute(select(Tenant).where(Tenant.slug == "inst-b"))).scalar_one()
+        asset = CapabilityAsset(asset_type="skill", name="inst-skill", category="cat-a")
+        s.add(asset)
+        await s.flush()
+        s.add_all([
+            CapabilityInstall(tenant_id=ta.id, asset_id=asset.id, host="grok"),
+            CapabilityInstall(tenant_id=tb.id, asset_id=asset.id, host="grok"),
+        ])
+        await s.commit()
+        tid_a, tid_b, aid = int(ta.id), int(tb.id), int(asset.id)
+
+    with tenant_scope(tid_a):
+        async with db_session() as s:
+            r_upd = await s.execute(
+                update(CapabilityInstall).values(enabled=0)
+                .execution_options(synchronize_session=False)
+            )
+            await s.commit()
+            assert r_upd.rowcount == 1  # 未豁免：只动本租户
+
+    async with db_session() as s:
+        flags = {
+            int(tid): int(en)
+            for tid, en in (await s.execute(
+                select(CapabilityInstall.tenant_id, CapabilityInstall.enabled)
+            )).all()
+        }
+    assert flags[tid_a] == 0
+    assert flags[tid_b] == 1
+
+    with tenant_scope(tid_a):
+        async with db_session() as s:
+            r_del = await s.execute(
+                delete(CapabilityInstall).execution_options(synchronize_session=False)
+            )
+            await s.commit()
+            assert r_del.rowcount == 1
+
+    async with db_session() as s:
+        left = (await s.execute(select(CapabilityInstall.tenant_id))).scalars().all()
+    assert list(left) == [tid_b]
+    assert aid  # 资产行仍在（RESTRICT，未级联）
