@@ -1,0 +1,4 @@
+# 能力市场源注册表（ADR-0011 D16：默认关 → 扫描仍走本机 plugins/）
+POWER_MARKET:
+  ENABLED: false
+  SRC_SYNC_LOCK_TTL: 900

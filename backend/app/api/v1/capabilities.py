@@ -1,0 +1,424 @@
+"""能力资产目录 API（P6 C2）——统一读路径（四类资产共用）
+
+路由注册顺序约束（同 skills.py 防线）：二段式静态前缀路由
+（/plugins/{name} /experts/{name} /teams/{name}）必须先于二段式动态路由
+/{asset_type}/{name} 注册，否则后者把复数 asset_type（plugins/experts/teams）
+当第一段吞掉，三条静态详情路由恒 404（B5 修复 B1c F-1）。
+新增二段式路由一律置于 get_capability_detail（本文件末尾）之前。
+"""
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.app.api._helpers import omit_local_abs_paths_for_non_platform_admin
+from backend.app.api.deps import CurrentUser, require_login, require_platform_admin
+from backend.app.responses import ok
+from backend.services.capability_service import CapabilityService
+from backend.services.market_events import run_subscribe
+from backend.services.power_market import (
+    CorrectRequest,
+    CreateSourceRequest,
+    PowerMarketService,
+    PatchLicenseOverrideRequest,
+    PatchListingRequest,
+    PutAliasRequest,
+)
+from backend.services.power_market.types import PatchInstallRequest, SubscribeRequest
+from platform_core.db import get_async_db
+
+router = APIRouter()
+
+
+def _service(session: AsyncSession = Depends(get_async_db)) -> CapabilityService:
+    return CapabilityService(session)
+
+
+def _market(session: AsyncSession = Depends(get_async_db)) -> PowerMarketService:
+    return PowerMarketService(session)
+
+
+@router.get("")
+async def list_capabilities(
+    type: str = Query(None, description="skill/plugin/command/agent/team（expert/expert_team 一周期可读）"),
+    category: str = Query(None),
+    status: str = Query(None),
+    listing_state: str = Query(None),
+    q: str = Query(None, max_length=100),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    _user: CurrentUser = Depends(require_login),
+    service: CapabilityService = Depends(_service),
+):
+    """统一资产列表（管理端）"""
+    rows, total = await service.list_assets(
+        asset_type=type, category=category, status=status, q=q,
+        listing_state=listing_state,
+        offset=(page - 1) * page_size, limit=page_size,
+    )
+    items = [
+        {
+            "id": r.id, "asset_type": r.asset_type, "name": r.name,
+            "title": r.title or "", "description": r.description,
+            "category": r.category, "status": r.status, "tier": r.tier,
+            "score": float(r.score) if r.score is not None else None,
+            "ai_suggested_score": float(r.ai_suggested_score) if r.ai_suggested_score is not None else None,
+            "sync_state": r.sync_state,
+            "listing_state": r.listing_state,
+            "listed_at": r.listed_at.isoformat() if r.listed_at else None,
+            "source_type": r.source_type,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
+        for r in rows
+    ]
+    payload: dict = {"total": total, "items": items}
+    if total == 0:
+        payload["empty"] = True
+        payload["message"] = "还没有目录项。同步源或扫描后会出现在这里。"
+    return ok(data=payload)
+
+
+# ---------- P6 C3/C4：插件域（扫描/详情/验证） ----------
+
+
+@router.get("/sources")
+async def list_capability_sources(
+    user: CurrentUser = Depends(require_platform_admin),
+    market: PowerMarketService = Depends(_market),
+):
+    """源列表。仅超管。"""
+    return ok(data=await market.list_sources())
+
+
+@router.post("/sources")
+async def register_capability_source(
+    payload: CreateSourceRequest,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
+):
+    """登记源。url 类失败说明未支持。"""
+    from backend.app.api._helpers import record_audit
+
+    data = await market.register_source(payload, actor=user.username)
+    await record_audit(session, user, "source.register", f"source#{data['name']}")
+    return ok(data=data)
+
+
+@router.post("/sources/{name}/sync")
+async def sync_capability_source(
+    name: str,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
+):
+    """触发 src_sync。第三方新行保持 unlisted。"""
+    from backend.app.api._helpers import record_audit
+
+    data = await market.sync_source(name)
+    await record_audit(
+        session, user, "source.sync", f"source#{name}",
+        detail={"succeeded": data.get("succeeded"), "failed": data.get("failed")},
+    )
+    return ok(data=data)
+
+
+@router.post("/backfill-first-party")
+async def backfill_first_party_listing(
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
+):
+    """第一方已发布/推荐 → listed；host_compat 保持 NULL。非迁移。"""
+    from backend.app.api._helpers import record_audit
+
+    data = await market.backfill_first_party()
+    await record_audit(session, user, "source.backfill", "first-party", detail=data)
+    return ok(data=data)
+
+
+@router.post("/scan-plugins")
+async def scan_plugins(
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """扫描 capability-library/plugins/（plugin.json 解析入库；仅平台超管）"""
+    from backend.app.api._helpers import record_audit
+    from backend.services.plugin_service import PluginService
+
+    result = await PluginService(session).scan_plugins()
+    await record_audit(session, user, "plugin.scan", "plugins",
+                       detail={"total": result.get("total")})
+    return ok(data=result)
+
+
+@router.get("/plugins/{name}")
+async def get_plugin(
+    name: str,
+    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """插件详情（manifest/mcp_servers/健康态）"""
+    from backend.services.plugin_service import PluginService
+
+    return ok(data=await PluginService(session).get_plugin_detail(name))
+
+
+@router.post("/plugins/{name}/verify")
+async def verify_plugin(
+    name: str,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """插件验证管线（ADR-0001）：MCP 连接→tools/list→抽样 call→健康落库"""
+    from backend.app.api._helpers import record_audit
+    from backend.services.plugin_service import PluginService
+
+    result = await PluginService(session).verify_plugin(name)
+    await record_audit(session, user, "plugin.verify", f"plugin#{name}",
+                       detail={"health": result["health"]})
+    return ok(data=result)
+
+
+# ---------- P6 C5/C6：专家域（扫描/详情/组队） ----------
+
+
+@router.post("/scan-experts")
+async def scan_experts(
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """扫描 capability-library/experts/（subagent 格式解析入库；仅平台超管）"""
+    from backend.app.api._helpers import record_audit
+    from backend.services.expert_service import ExpertService
+
+    result = await ExpertService(session).scan_experts()
+    await record_audit(session, user, "expert.scan", "experts",
+                       detail={"total": result.get("total")})
+    return ok(data=result)
+
+
+@router.get("/experts/{name}")
+async def get_expert(
+    name: str,
+    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """专家详情（persona/tools/skills/mcp）"""
+    from backend.services.expert_service import ExpertService
+
+    return ok(data=await ExpertService(session).get_expert_detail(name))
+
+
+@router.post("/teams")
+async def upsert_team(
+    body: dict,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """专家团定义（团长/成员引用校验；执行引擎二期）"""
+    from backend.app.api._helpers import record_audit
+    from backend.services.expert_service import TeamService
+
+    team = await TeamService(session).upsert_team(
+        name=str(body.get("name") or ""),
+        leader=str(body.get("leader") or ""),
+        members=[str(m) for m in (body.get("members") or [])],
+        workflow_md=str(body.get("workflow_md") or ""),
+        title=str(body.get("title") or ""),
+    )
+    await record_audit(session, user, "team.upsert", f"team#{team['name']}")
+    return ok(data=team)
+
+
+@router.get("/teams/{name}")
+async def get_team(
+    name: str,
+    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """专家团详情"""
+    from backend.services.expert_service import TeamService
+
+    return ok(data=await TeamService(session).get_team_detail(name))
+
+
+@router.get("/teams/{name}/export")
+async def export_team(
+    name: str,
+    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """专家团导出（TEAM.md 文档形态）"""
+    from backend.services.expert_service import TeamService
+
+    return ok(data={"markdown": await TeamService(session).export_team_md(name)})
+
+
+# ---------- 订阅 / 安装行（静态段必须先于 /{asset_type}/{name}） ----------
+
+
+@router.get("/installs")
+async def list_capability_installs(
+    user: CurrentUser = Depends(require_login),
+    market: PowerMarketService = Depends(_market),
+):
+    """本企业安装行（T-25 可查询；T-26 展示/卸载）。"""
+    return ok(data=await market.list_installs(user))
+
+
+@router.patch("/installs/{install_id}")
+async def patch_capability_install(
+    install_id: int,
+    payload: PatchInstallRequest,
+    user: CurrentUser = Depends(require_login),
+    market: PowerMarketService = Depends(_market),
+):
+    """改启用/信任。黑名单/软删行只读这两列；只读角色走 MARKET_READONLY_ROLE。"""
+    return ok(data=await market.patch_install(install_id, user, payload))
+
+
+@router.delete("/installs/{install_id}")
+async def delete_capability_install(
+    install_id: int,
+    user: CurrentUser = Depends(require_login),
+    market: PowerMarketService = Depends(_market),
+):
+    """软删这一行。不沿合集边级联。unlist/黑名单经办可卸。"""
+    return ok(data=await market.uninstall(install_id, user))
+
+
+@router.post("/{asset_type}/{name}/correct")
+async def correct_capability_asset(
+    asset_type: str,
+    name: str,
+    payload: CorrectRequest,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
+):
+    """D5：第三方纠正不可用，不写源树。"""
+    from backend.app.api._helpers import record_audit
+
+    body = payload.model_dump(exclude_none=True)
+    data = await market.correct_asset(asset_type, name, body)
+    await record_audit(session, user, "asset.correct", f"{asset_type}#{name}")
+    return ok(data=data)
+
+
+@router.patch("/{asset_type}/{name}/listing")
+async def patch_capability_listing(
+    asset_type: str,
+    name: str,
+    payload: PatchListingRequest,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
+):
+    """上架三态。与验证/治理 status 分闸。listed_at unlist 不清空。"""
+    from backend.app.api._helpers import record_audit
+
+    data = await market.set_listing(asset_type, name, payload)
+    await record_audit(
+        session, user, "listing.change", f"{asset_type}#{name}",
+        detail={"listing_state": data["listing_state"]},
+    )
+    return ok(data=data)
+
+
+@router.patch("/{asset_type}/{name}/license-override")
+async def patch_license_override(
+    asset_type: str,
+    name: str,
+    payload: PatchLicenseOverrideRequest,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
+):
+    """特例放行。仅超管。收回不拆已订行与引用解析。"""
+    from backend.app.api._helpers import record_audit
+
+    data = await market.set_license_override(asset_type, name, payload)
+    await record_audit(
+        session, user, "license.override", f"{asset_type}#{name}",
+        detail={"public_license_override": data["public_license_override"]},
+    )
+    return ok(data=data)
+
+
+@router.put("/{asset_type}/{name}/alias")
+async def put_capability_alias(
+    asset_type: str,
+    name: str,
+    payload: PutAliasRequest,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
+):
+    """指定/改人工短名。仅超管。撞存活目录短名或存活 alias → 409。"""
+    from backend.app.api._helpers import record_audit
+
+    data = await market.set_alias(asset_type, name, payload, actor=user.username)
+    await record_audit(
+        session, user, "alias.set", f"{asset_type}#{name}",
+        detail={"slug": data["slug"]},
+    )
+    return ok(data=data)
+
+
+@router.post("/{asset_type}/{name}/subscribe")
+async def subscribe_capability(
+    asset_type: str,
+    name: str,
+    payload: SubscribeRequest | None = None,
+    user: CurrentUser = Depends(require_login),
+    market: PowerMarketService = Depends(_market),
+):
+    """订这一行到一个宿主。不礼包、不占三类配额。"""
+    host = payload.host if payload else None
+    data = await run_subscribe(
+        market.session, market, asset_type=asset_type, name=name, host=host, user=user,
+    )
+    return ok(data=data)
+
+
+@router.get("/{asset_type}/{name}/references")
+async def list_capability_references(
+    asset_type: str,
+    name: str,
+    user: CurrentUser = Depends(require_platform_admin),
+    market: PowerMarketService = Depends(_market),
+):
+    """超管/系统引用列表（FR-36）。忽略子行 listing；黑名单/软删跳过并审计。"""
+    return ok(data=await market.list_runtime_references(asset_type, name, user=user))
+
+
+# ---------- 统一详情（动态段，必须最后注册，见文件头顺序约束） ----------
+
+
+@router.get("/{asset_type}/{name}")
+async def get_capability_detail(
+    asset_type: str,
+    name: str,
+    user: CurrentUser = Depends(require_login),
+    service: CapabilityService = Depends(_service),
+):
+    """统一详情（治理字段 + 类型化细节由各域端点补充）
+
+    注意：本路由为二段式动态段，必须保持在文件末尾注册，否则遮蔽
+    /plugins/{name} /experts/{name} /teams/{name} 三条静态详情路由（恒 404）。
+    非超管不发出本机绝对路径（GWT-14.1/14.2）；相对库路径可保留。
+    """
+    asset = await service.get_asset(asset_type, name)
+    data = {
+        "id": asset.id, "asset_type": asset.asset_type, "name": asset.name,
+        "title": asset.title, "description": asset.description,
+        "category": asset.category, "status": asset.status, "tier": asset.tier,
+        "source_url": asset.source_url, "source_author": asset.source_author,
+        "score": float(asset.score) if asset.score is not None else None,
+        "ai_suggested_score": float(asset.ai_suggested_score) if asset.ai_suggested_score is not None else None,
+        "similar_to": asset.similar_to, "file_path": asset.file_path,
+        "sync_state": asset.sync_state,
+        "listing_state": asset.listing_state,
+        "listed_at": asset.listed_at.isoformat() if asset.listed_at else None,
+        "source_type": asset.source_type,
+    }
+    return ok(data=omit_local_abs_paths_for_non_platform_admin(data, user))

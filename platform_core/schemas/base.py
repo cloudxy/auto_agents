@@ -4,7 +4,6 @@
 - RequestBody: POST/PUT 请求体基类（自动 XSS 清理）
 - PaginationQuery: 分页查询参数（复用率高）
 """
-from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from platform_core.schemas.validators import sanitize_input
 

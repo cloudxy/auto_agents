@@ -1,0 +1,101 @@
+# 爬虫注册表 - 定义可调度爬虫的类型与任务参数契约
+#
+# type 决定新增任务弹窗渲染的参数表单（前端按 SPIDER_TYPES[type].fields 动态渲染）：
+#   - api：采集 JSON 接口（如 OpenWeather），参数以接口地址/请求头为主
+#   - web：采集 HTML 页面（如知乎/点评），参数以页面地址/提取范围为主
+#   - custom：自定义采集（免代码），参数为页面地址 + 选择器规则，由 generic 爬虫执行
+#
+# 约定：
+# - name 必须与 scrapy/spiders/ 中的 spider name 一致（redis_key = {name}:start_urls）
+# - params 统一为 JSON 字符串入库（spider_tasks.params），消费者从中提取 urls 分发
+# - 爬虫清单 DB 优先：本文件仅作为初始种子/兑底（DB 空表或查询失败时生效），
+#   新增爬虫请通过 API 登记（POST /spiders/definitions，仅管理员），无需改本文件
+
+SPIDER_TYPES:
+  api:
+    label: "API 接口"
+    fields:
+      - name: "urls"
+        label: "API 接口地址"
+        kind: "urls"
+        required: true
+        help: "返回 JSON 的接口 URL，可填多个（每行一个）"
+      - name: "headers"
+        label: "请求头"
+        kind: "json"
+        required: false
+        help: "可选，JSON 格式，如 {\"Authorization\": \"Bearer xxx\"}"
+  web:
+    label: "Web 网页"
+    fields:
+      - name: "urls"
+        label: "网页地址"
+        kind: "urls"
+        required: true
+        help: "待采集的页面 URL，可填多个（每行一个）"
+      - name: "extract_mode"
+        label: "提取范围"
+        kind: "select"
+        required: false
+        default: "auto"
+        options:
+          - value: "auto"
+            label: "自动提取（标题+正文）"
+          - value: "title"
+            label: "仅标题"
+          - value: "full"
+            label: "完整页面文本"
+  custom:
+    label: "自定义采集"
+    fields:
+      - name: "urls"
+        label: "页面地址"
+        kind: "urls"
+        required: true
+        help: "待采集的页面 URL，可填多个（每行一个）"
+      - name: "selectors"
+        label: "提取规则"
+        kind: "selectors"
+        required: true
+        help: "字段名 + 选择器类型（xpath/css/regex）+ 表达式，可增删多行"
+      - name: "pagination"
+        label: "分页设置"
+        kind: "pagination"
+        required: false
+        help: "可选：下一页选择器 + 最大页数，自动翻页（由流程引擎 flow_generic 执行）"
+      - name: "detail"
+        label: "详情页设置"
+        kind: "detail"
+        required: false
+        help: "可选：列表项选择器 + 链接选择器 + 详情页字段规则，二次采集详情页"
+      - name: "filters"
+        label: "条件过滤"
+        kind: "filters"
+        required: false
+        help: "可选：按 包含/等于/正则 过滤提取字段值（字段/操作符/值）"
+
+SPIDERS:
+  example:
+    title: "通用采集示例"
+    type: "web"
+    description: "多模式演示爬虫：自动识别 JSON/HTML 内容类型"
+  openweather:
+    title: "OpenWeather 天气接口"
+    type: "api"
+    description: "采集全球城市实时天气（需在配置中心配置 API Key）"
+  dianping_home:
+    title: "大众点评首页"
+    type: "web"
+    description: "高风控站点采集演示（需代理与会话保持）"
+  zhihu_feed:
+    title: "知乎推荐流"
+    type: "web"
+    description: "知乎推荐页内容采集（需登录态）"
+  generic:
+    title: "自定义采集（免代码）"
+    type: "custom"
+    description: "按页面地址 + 选择器规则采集任意站点，无需编写爬虫代码"
+  flow_generic:
+    title: "流程化采集（分页/详情/过滤）"
+    type: "custom"
+    description: "按流程定义采集：列表字段 + 自动翻页 + 详情页二次采集 + 条件过滤"

@@ -1,13 +1,19 @@
 """数据库初始化模块 - 统一管理所有 MySQL/Redis 连接（含 Async Session）"""
 import os
+import sys
 from typing import Dict
 import redis
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 from urllib.parse import quote_plus
 from config import settings
 from platform_core.logger import get_logger
+
+# 测试态（TestClient 每请求新建事件循环）连接池中的连接会绑定旧循环，
+# 复用时报 "attached to a different loop"，改用 NullPool 每请求新建连接。
+_IN_PYTEST = "pytest" in sys.modules
 
 
 class DBManager:
@@ -64,19 +70,28 @@ class DBManager:
 
             try:
                 # 1. 同步引擎
-                engine = create_engine(sync_url, pool_size=5, max_overflow=10, pool_recycle=3600)
+                # P1-13：统一 pool_pre_ping（与 channel_scheduler 自建引擎口径一致），
+                # MySQL wait_timeout 后的陈旧连接借一次往返探测自动重连，
+                # 消除非整点回收窗口的 "server has gone away"
+                engine = create_engine(
+                    sync_url, pool_size=5, max_overflow=10, pool_recycle=3600,
+                    pool_pre_ping=True,
+                )
                 with engine.connect() as conn:
                     conn.execute(text("SELECT 1"))
                 self.mysql[key] = sessionmaker(bind=engine)
-                
-                # 2. 异步引擎
-                async_engine = create_async_engine(
-                    async_url,
-                    pool_size=5,
-                    max_overflow=10,
-                    pool_recycle=3600,
-                    echo=False,
-                )
+
+                # 2. 异步引擎（测试态用 NullPool，见模块头部说明）
+                async_engine_kwargs: Dict = {
+                    "pool_recycle": 3600,
+                    "pool_pre_ping": True,
+                    "echo": False,
+                }
+                if _IN_PYTEST:
+                    async_engine_kwargs["poolclass"] = NullPool
+                else:
+                    async_engine_kwargs.update(pool_size=5, max_overflow=10)
+                async_engine = create_async_engine(async_url, **async_engine_kwargs)
                 self.async_engines[key] = async_engine
                 
                 global_log.success(f"MySQL [{key}] OK: {host}:{port}/{dbname}")

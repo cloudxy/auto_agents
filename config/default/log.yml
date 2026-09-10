@@ -1,6 +1,7 @@
 # 日志配置 - 默认值
 
-LOG_FORMAT: "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
+# request_id 经请求中间件 loguru.contextualize 绑定（B4：错误日志全链路可关联；未绑定行留空）
+LOG_FORMAT: "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {extra[request_id]} | {name}:{function}:{line} - {message}"
 
 LOGGERS:
   global:

@@ -1,0 +1,5 @@
+# 生产环境 LLM 覆盖（叠加 default/llm.yml）
+LLM:
+  # 10.2-D 审计定案：prod 预算熔断 fail-closed——Redis 读数不可用即拒绝 LLM 调用
+  # （保成本；与登录限流 fail-open 方向相反，属刻意不对称，见 llm_client 预算段 docstring）
+  BUDGET_FAIL_CLOSED: true

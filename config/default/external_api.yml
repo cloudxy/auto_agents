@@ -1,0 +1,14 @@
+# 外部 API 密钥配置（第三方调用方鉴权）
+
+EXTERNAL_API:
+  # 允许调用外部 API（Webhook 之外的状态/统计端点）的 API Key 列表
+  # 默认空数组 = 全部拒绝（未配置时一律 401）
+  # 环境变量 / .env 覆盖示例（值为 JSON 数组字符串）：
+  #   AUTO_AGENTS_EXTERNAL_API__API_KEYS='["key1","key2"]'
+  # 出站拉数（/public/data/{spider_name}）不认本列表：无企业维 = 未绑定（FR-13 / GWT-13.4）
+  API_KEYS: []
+  # 出站拉数：每把钥匙恰好绑一个 tenant_id。空 = 拉数拒绝、0 行（GWT-13.2）
+  # 禁止把旧字符串列表静默当成某企业的钥匙。
+  # 环境变量：
+  #   AUTO_AGENTS_EXTERNAL_API__KEY_BINDINGS='[{"key":"k1","tenant_id":1}]'
+  KEY_BINDINGS: []

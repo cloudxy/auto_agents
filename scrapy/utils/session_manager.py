@@ -36,10 +36,10 @@ class SessionManager:
         # 解析 JSON 字符串
         try:
             return {
-                "cookies": json.loads(data.get(b'cookies', b'{}')),
-                "headers": json.loads(data.get(b'headers', b'{}')),
-                "ua": data.get(b'ua', b'').decode(),
-                "is_logged_in": data.get(b'is_logged_in', b'False').decode() == "True"
+                "cookies": json.loads(data.get('cookies', '{}')),
+                "headers": json.loads(data.get('headers', '{}')),
+                "ua": data.get('ua', ''),
+                "is_logged_in": data.get('is_logged_in', 'False') == "True"
             }
         except Exception as e:
             logger.error(f"解析会话数据失败: {e}")
@@ -53,4 +53,4 @@ class SessionManager:
     def is_valid(self) -> bool:
         """检查会话是否有效"""
         status = self.r.hget(self.redis_key, "is_logged_in")
-        return status == b"True"
+        return status == "True"

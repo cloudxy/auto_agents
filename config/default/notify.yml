@@ -1,0 +1,32 @@
+# 任务终态告警通知配置
+#
+# 触发时机：任务推进到终态（completed/failed）后，由 finish_task 异步触发
+# 渠道说明（渠道互不影响，单渠道失败仅记日志）：
+#   - log：写 platform_core 日志（始终可用，兜底渠道）
+#   - webhook：POST JSON 到 NOTIFY.WEBHOOK_URL
+#   - email：SMTP 发送（aiosmtplib；密钥走 .env 注入，禁硬编码）
+#   - dingtalk：群机器人 webhook（可选 HmacSHA256 加签）
+#   - wechat_work：企业微信群机器人 webhook（markdown 消息）
+# 环境覆盖示例（.env）：AUTO_AGENTS_NOTIFY__EMAIL__SMTP_PASSWORD=<secret>
+
+NOTIFY:
+  ENABLED: true
+  CHANNELS:
+    - log
+  WEBHOOK_URL: ""          # webhook 渠道的目标地址，为空时跳过该渠道
+  TIMEOUT_SECONDS: 10
+
+  # --- 阶段 4.3 新增渠道（配置缺失时该渠道自动跳过）---
+  EMAIL:
+    SMTP_HOST: ""
+    SMTP_PORT: 465
+    SMTP_USER: ""
+    SMTP_PASSWORD: ""      # 生产经 .env 注入：AUTO_AGENTS_NOTIFY__EMAIL__SMTP_PASSWORD
+    SMTP_SSL: true
+    MAIL_FROM: ""          # 缺省回退 SMTP_USER
+    MAIL_TO: []
+  DINGTALK:
+    WEBHOOK_URL: ""
+    SECRET: ""             # 可选：机器人加签密钥（HmacSHA256）
+  WECHAT_WORK:
+    WEBHOOK_URL: ""

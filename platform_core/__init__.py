@@ -35,3 +35,6 @@ __all__ = [
     "init_storage",
     "get_storage",
 ]
+
+# S1-2：租户隔离事件钩子随包导入自动安装（幂等）
+from platform_core import tenant_context as _tenant_context  # noqa: E402,F401

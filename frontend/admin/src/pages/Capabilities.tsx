@@ -1,0 +1,90 @@
+/**
+ * T-28 治理台七叶：源 | 目录 | 插件 | 技能 | 命令 | 智能体 | 专家团
+ * 窄屏滚动不删叶。无「上架全部子资产」。无 enable-host。
+ */
+import React, { useEffect, useState } from 'react'
+import { ConfigProvider, Tabs } from 'antd'
+import { useSearchParams } from 'react-router-dom'
+
+import Skills from './Skills'
+import SubscribeModal from '../components/SubscribeModal'
+import CatalogTab from './market/CatalogTab'
+import PluginTab from './market/PluginTab'
+import SourceTab from './market/SourceTab'
+import TeamLeafTab from './market/TeamLeafTab'
+import TypeLeafTab from './market/TypeLeafTab'
+import {
+  AGENT_EMPTY, COMMAND_EMPTY, TABS,
+} from './market/marketCopy'
+import './market/marketTabs.css'
+
+const COMMAND_TYPES = ['command']
+const AGENT_TYPES = ['agent', 'expert']
+
+const Capabilities: React.FC = () => {
+  const [tab, setTab] = useState('catalog')
+  const [params] = useSearchParams()
+  const bounceType = params.get('subscribeType') || ''
+  const bounceName = params.get('subscribeName') || ''
+  const [target, setTarget] = useState<{ type: string; name: string } | null>(
+    bounceType && bounceName ? { type: bounceType, name: bounceName } : null,
+  )
+
+  useEffect(() => {
+    if (bounceType && bounceName) setTarget({ type: bounceType, name: bounceName })
+  }, [bounceType, bounceName])
+
+  const openCatalog = (name: string) => {
+    setTab('catalog')
+    void name
+  }
+
+  return (
+    <ConfigProvider button={{ autoInsertSpace: false }}>
+    <div>
+      <Tabs
+        className="market-tabs"
+        activeKey={tab}
+        onChange={setTab}
+        more={{ icon: null }}
+        animated={false}
+        destroyOnHidden={false}
+        items={[
+          { key: TABS[0].key, label: TABS[0].label, children: <SourceTab /> },
+          { key: TABS[1].key, label: TABS[1].label, children: <CatalogTab /> },
+          { key: TABS[2].key, label: TABS[2].label, children: (
+            <PluginTab
+              onSubscribe={(name) => setTarget({ type: 'plugin', name })}
+              onOpenCatalog={openCatalog}
+            />
+          ) },
+          { key: TABS[3].key, label: TABS[3].label, children: (
+            <Skills onSubscribe={(name) => setTarget({ type: 'skill', name })} />
+          ) },
+          { key: TABS[4].key, label: TABS[4].label, children: (
+            <TypeLeafTab types={COMMAND_TYPES} leaf="命令" emptyCopy={COMMAND_EMPTY}
+                         onGoSource={() => setTab('sources')}
+                         onSubscribe={(name) => setTarget({ type: 'command', name })} />
+          ) },
+          { key: TABS[5].key, label: TABS[5].label, children: (
+            <TypeLeafTab types={AGENT_TYPES} leaf="智能体" emptyCopy={AGENT_EMPTY} />
+          ) },
+          { key: TABS[6].key, label: TABS[6].label, children: (
+            <TeamLeafTab onSubscribe={(name) => setTarget({ type: 'team', name })} />
+          ) },
+        ]}
+      />
+      {target ? (
+        <SubscribeModal
+          open
+          assetType={target.type}
+          assetName={target.name}
+          onClose={() => setTarget(null)}
+        />
+      ) : null}
+    </div>
+    </ConfigProvider>
+  )
+}
+
+export default Capabilities
