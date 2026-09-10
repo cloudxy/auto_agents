@@ -14,12 +14,31 @@ jest.mock('../services/api', () => {
   const envelope = { success: true, code: 'SUCCESS', message: 'ok', data: members };
   return {
     __esModule: true,
-    default: { get: jest.fn(() => Promise.resolve(envelope)), post: jest.fn(), patch: jest.fn() },
+    default: { get: jest.fn(() => Promise.resolve(envelope)), post: jest.fn(), patch: jest.fn(), delete: jest.fn() },
     unwrap: (e: unknown) => (e as typeof envelope).data,
   };
 });
 
+jest.mock('antd', () => {
+  const actual = jest.requireActual('antd');
+  return {
+    ...actual,
+    message: {
+      error: jest.fn(),
+      success: jest.fn(),
+      warning: jest.fn(),
+      info: jest.fn(),
+    },
+  };
+});
+
+import { message } from 'antd';
 import Members from './Members';
+
+beforeEach(() => {
+  (message.error as jest.Mock).mockClear();
+  (message.success as jest.Mock).mockClear();
+});
 
 test('renders member list with owner row visible', async () => {
   render(<Members />);
@@ -65,9 +84,11 @@ test('create 422 (soft-deleted name conflict): toast with actionable copy, form 
 
   fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }));
 
-  // 可理解文案（含软删占位语义与可行动作），而非静默失败
-  expect(await screen.findByText(/该用户名已被占用/)).toBeInTheDocument();
-  expect(await screen.findByText(/不可恢复/)).toBeInTheDocument();
+  // antd 6 toast 不进 testing-library 容器；钉 message.error 映射文案
+  await waitFor(() => {
+    expect(message.error).toHaveBeenCalledWith(expect.stringMatching(/该用户名已被占用/));
+  });
+  expect((message.error as jest.Mock).mock.calls[0][0]).toMatch(/不可恢复/);
   // 表单不清空、弹窗不关闭（用户可直接改名重试）
   expect((screen.getByLabelText('用户名') as HTMLInputElement).value).toBe('alice');
   expect(screen.getByLabelText('初始密码')).toBeInTheDocument();
@@ -87,7 +108,9 @@ test('create 422 (email taken): mapped copy shown, form kept (F-02)', async () =
 
   fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }));
 
-  expect(await screen.findByText(/该邮箱已被占用/)).toBeInTheDocument();
+  await waitFor(() => {
+    expect(message.error).toHaveBeenCalledWith(expect.stringMatching(/该邮箱已被占用/));
+  });
   expect((screen.getByLabelText('邮箱') as HTMLInputElement).value).toBe('dup@acme.com');
 });
 
@@ -104,7 +127,8 @@ test('reset password failure: backend message shown, modal kept (F-02 顺带)', 
 
   fireEvent.click(screen.getByRole('button', { name: /^\s*重\s*置\s*$/ }));
 
-  // 后端 message 透传 + 弹窗保留可直接重试
-  expect(await screen.findByText('成员 2 不存在')).toBeInTheDocument();
+  await waitFor(() => {
+    expect(message.error).toHaveBeenCalledWith('成员 2 不存在');
+  });
   expect((screen.getByLabelText('新密码') as HTMLInputElement).value).toBe('secret2');
 });
