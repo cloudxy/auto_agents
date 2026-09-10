@@ -103,6 +103,7 @@ _ROLE_PERMISSIONS = {
     "operator": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
         'menu:data', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
+        'menu:llm',
         'btn:create', 'btn:skill:edit',
     ],
     "admin": [

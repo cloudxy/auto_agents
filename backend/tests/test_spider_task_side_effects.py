@@ -41,6 +41,7 @@ def _task(**overrides) -> MagicMock:
         id=21, spider_name="example", status="running", priority="normal",
         result_count=0, retry_count=0, error_message=None, params=None,
         created_at=None, updated_at=None, started_at=None, completed_at=None,
+        tenant_id=None,
     )
     defaults.update(overrides)
     return MagicMock(**defaults)
@@ -51,7 +52,7 @@ def _snapshot(**overrides) -> dict:
     base = dict(
         id=21, spider_name="example", status="completed",
         result_count=0, retry_count=0, error_message=None, params=None,
-        started_at=None, completed_at=None,
+        started_at=None, completed_at=None, tenant_id=None,
     )
     base.update(overrides)
     return base
@@ -111,6 +112,7 @@ class TestSpawnOnFinish:
                 "id": 21, "spider_name": "example", "status": "completed",
                 "result_count": 3, "retry_count": 0, "error_message": None,
                 "params": None, "started_at": None, "completed_at": None,
+                "tenant_id": None,
             }
             await coro  # 直接执行副作用协程（不经 create_task）
 

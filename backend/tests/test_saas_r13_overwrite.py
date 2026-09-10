@@ -248,9 +248,10 @@ def test_revoked_platform_admin_token_immediately_loses_platform_scope(
 
     asyncio.run(_revoke())
 
-    # 双源一致：守卫层 403 + 隔离层降级租户态（跨租户不可见），同一 token
+    # 双源一致：守卫层 404 同形 + 隔离层降级租户态（跨租户不可见），同一 token
     guarded = db_client.get("/api/v1/admin/tenants", headers=auth)
-    assert guarded.status_code == 403
+    assert guarded.status_code == 404
+    assert guarded.json()["code"] == "HTTP_404"
     scoped = db_client.get("/api/v1/spiders/registry", headers=auth)
     assert scoped.status_code == 200
     assert "b-def-" not in scoped.text

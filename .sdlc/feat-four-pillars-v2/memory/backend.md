@@ -4,30 +4,27 @@
 
 ## Last
 
-- Date: 2026-09-08
-- Hat: backend 定义帽只读诊断
-- Outputs: `.sdlc/feat-four-pillars-v2/01-define/diagnosis/backend.md`
+- Date: 2026-09-10
+- Hat: backend prep IdleAutoClose / 18.4 分窗
+- Outputs: `.sdlc/feat-four-pillars-v2/03-impl/prep-idle-close-evidence.md`
 
 ## Facts
 
-- 守卫：`backend/app/api/deps.py`。`require_admin`≠超管。`require_platform_admin`几乎只挂 `/admin/tenants*`。无 `require_permission`。
-- P0 仍在：scan/verify=`require_login`；newapi/LLM写=`require_admin`；`test_b1c` viewer scan 金标。
-- 入队仅 `POST /spiders/run` 带 `tenant_id`。门面不转发。`before_flush`只断言不回填。
-- `check_llm_tokens_month`仅测试。`llm_chat`走 `MAX_TOKENS_BUDGET`。月 Redis `{dim}|total` 无 tenant。
-- 结果 COUNT/数据中心不排除 `source=marketplace`。管理详情仍回 `file_path`。用量 `utcnow`。
-- POWER_MARKET/listing_state(代码)/sources/installs/`power_market/`/`power_market.yml`=0。
-- `capability_assets` 未豁免。Alembic 头=027。`marketplace_crawled` 19 vs VARCHAR(16)。
-- 登录已出 `is_platform_admin`。`_ROLE_PERMISSIONS[admin]` 仍含 `menu:newapi`。LiteLLM 仅 pycache。R7/R11 干净。
-- 旧塑形不是现行合同；D14/D16/D5、NOT NULL、两本账必须吸收。
+- IdleAutoClose 与 GWT-18.4 是两口钟：`SPIDER_IDLE_CLOSE_SECONDS` 默认 **30**（连续空闲 → finished）；`SPIDER_WORKER_OFFLINE_SECONDS` 默认 **120**（`annotate_tasks` 专用）。禁止同一键。21600 只属于 RELAY 探针锁。
+- `product_idle_close_seconds()` / `product_worker_offline_seconds()`；≤0 或 21600 回该口默认。`scrapy/settings.py` `IDLE_CLOSE_SECONDS` 缺省 30。local yml 必须一起改，否则盖回 120。
+- 18.1 live Worker 交 sre；本帽只钉 idle<120、≠21600、idle+5s crawl<120。
+- `test_saas_wiring.py` 超并发 Then：`QuotaExceededException` + `code==QUOTA_EXCEEDED` + `PLAN_FULL_*`。禁止 `or True`。
+- `test_saas_byok.py` source 是 `provider:{id}` 不是名字；隔离 Then = URL + visible 名 + provider_id。括号化，禁永真。
+- 启用闸：`LLM.ENABLED` 或 `POWER_MARKET.ENABLED` 且 `OPS.DUTY_CONTACT` 空 → lifespan `_validate_enablement_duty_contact` 拒绝启动。空串占位，不代填号码。不关闭 Q-OPS-DUTY。
+- `llm_chat`：`if not cfg.enabled` 必须在网关探测前。`DATA_PLANE=litellm` except 禁止 `resolve_config_from_settings()`。70.2 与 74.1 不得混句。
+- `record_audit` 只委托 `record_audit_standalone`。pytest `_reset_db_manager` 清空 DEFAULT。
 
 ## Open (mine)
 
-- btn:market Depends vs 只改 platform_admin
-- BYOK 平台行 vs 租户行；RBAC/configs 是否同波
-- 到期登录；FR-03 100条；FR-12 code；CACHE_DIR 锁；公开四类 vs 五类
+- 无。六问不代选。live 18.1 归 sre。
 
 ## Do not re-litigate
 
-- 不另起 /market；不合并 skills 三表；不 Mixin 回填；候选禁止 NULL tenant
-- LiteLLM/MCP工具面/代写 ~/.zcode 不做；不拆门面（只转发 tenant_id）
-- 收 scan 同 PR 改 test_b1c；D16 ENABLED 默认 false 回退 LIBRARY_ROOT/plugins
+- 不改 GWT-18.4 120s Then；不把 idle 调回 120；不把两口钟并回一键
+- 不改 `uq_asset_type_name_alive`；不自动建 alias；不代选六问；不施工 Wave 2/3；不把 LiteLLM 焊进根 compose
+- 不改 74.1 族文案；except 不回 yml；不混 70.2/74.1

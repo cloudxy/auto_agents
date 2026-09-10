@@ -24,7 +24,7 @@ logger = get_logger("api")
 # 审计任何失败只记日志，绝不影响业务事务与响应码；业务回滚也不连带丢审计
 # （拒绝/失败操作的留痕价值）。事务所有权在本函数（Service 层），API 审计
 # 钩子（api/_helpers.record_audit）仅做委托，不碰 session 生命周期。
-async def record_audit_standalone(actor_id: Optional[int], actor_name: str, action: str, target: str, detail: Any = None) -> None:
+async def record_audit_standalone(actor_id: Optional[int], actor_name: str, action: str, target: str, detail: Any = None) -> bool:
     logger.info(f"审计独立短事务写入 | actor={actor_name} action={action} target={target}")
     try:
         manager = get_manager()
@@ -33,8 +33,21 @@ async def record_audit_standalone(actor_id: Optional[int], actor_name: str, acti
                 actor_id, actor_name, action, target, detail
             )
             await audit_session.commit()
+        return True
     except Exception as e:  # noqa: BLE001 审计失败绝不影响业务响应
         logger.error(f"审计写入失败（已忽略，不影响业务）: action={action}, error={e}")
+        return False
+
+
+# GWT-06.3 leftover：写调用方 session 并提交（越权拒绝发生在业务事务外，
+# 独立 DEFAULT 短事务不是本 leftover 的契约）。提交失败只记日志，不改变随后的 403。
+async def record_authz_denied(session: AsyncSession, actor_id: Optional[int], actor_name: str, target: str, detail: Any = None) -> None:
+    logger.warning(f"越权拒绝留痕 | actor={actor_name} target={target}")
+    try:
+        await AuditService(session).record(actor_id, actor_name, "authz.denied", target, detail)
+        await session.commit()
+    except Exception as e:  # noqa: BLE001 留痕失败不得吞掉 403
+        logger.error(f"越权审计写入失败（已忽略）: target={target}, error={e}")
 
 
 class AuditService:

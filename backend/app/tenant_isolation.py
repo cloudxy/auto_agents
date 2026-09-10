@@ -4,7 +4,7 @@ platform_core/tenant_context.py 只提供注册机制，不含任何业务表名
 基建不感知业务表）。哪些业务表是平台级/平台共享，由本文件声明并经应用组装点
 （backend/app/__init__.py create_app）显式注册——platform_core 零业务表名。
 
-防漂移：scripts/check-arch.sh R13 从本文件读取清单做双向校验
+防漂移：tools/check/arch.sh R13 从本文件读取清单做双向校验
 （组装点注册生效 + platform_core 未回写表名字面量），改清单只改这里。
 
 登记语义（platform_core/tenant_context.py）：
@@ -50,6 +50,25 @@ TENANT_EXEMPT_TABLES: "tuple[str, ...]" = (
     # 供应商模型子表：无独立归属，随父表 llm_providers 行走（访问经父行收口）；
     # 无 tenant_id 列（防御性声明）
     "llm_provider_models",
+    # 能力目录（PIT-3 / GWT-20）：tenant_id 恒 NULL——不豁免则租户态 Core
+    # UPDATE/DELETE 注入 tenant_id 条件，恒 NULL 行全部失配，超管刷新看不见
+    # 自己的扫描/治理改动。禁止给本表加 TenantMixin。
+    "capability_assets",
+    # 插件/专家/专家团细节：随 capability_assets 同域平台级；无 tenant_id 列
+    # （防御性声明）。不登记 capability_installs（租户订购行，禁止豁免）。
+    "capability_plugins",
+    "capability_experts",
+    "capability_teams",
+    # T-21 平台目录/边：无 tenant_id；与 TENANT_EXEMPT_TABLES 同 PR。
+    "capability_commands",
+    "capability_components",
+    # T-29 平台源：tenant_id 恒 NULL。禁止迁移里 attach 源。
+    "capability_sources",
+    # T-33 人工短名：tenant_id 恒 NULL。禁止 TenantMixin；同步不建。
+    "capability_aliases",
+    # 产品事实（T-12 / ADR-0016）：tenant_id 是事件主语可 NULL，非 Mixin。
+    # 不豁免则租户态 UPDATE 注入打不中匿名行，且「有列⇒Mixin或豁免」S4 会红。
+    "product_events",
 )
 
 # 平台共享读表：tenant_scope 读注入保留平台公共行（tenant_id IS NULL 可见，

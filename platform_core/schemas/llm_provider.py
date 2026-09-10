@@ -197,6 +197,7 @@ class LlmProviderResponse(BaseModel):
     max_retries: int
     is_active: bool = False
     enabled: bool = True
+    tenant_id: Optional[int] = Field(None, description="所属租户；NULL=平台级行")
     remark: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

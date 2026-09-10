@@ -5,27 +5,21 @@
 
 ## Last
 
-- Date: 2026-09-08
-- Hat: sdlc-workflow:frontend（定义帽只读诊断，未改 UI）
-- Outputs: `.sdlc/feat-four-pillars-v2/01-define/diagnosis/frontend.md`
+- Date: 2026-09-10
+- Hat: sdlc-workflow:frontend（qc cond B + NFR-07 44px）
+- Outputs: `Register.tsx` · `Register.test.tsx` · `Home.tsx` · `Home.test.tsx` · `Pricing.tsx` · `Pricing.test.tsx` · `tokens.css` · `03-impl/prep-register-nfr07-evidence.md`
 
 ## Facts
 
-- 代码仍停在 P6：官网双广场（`/skills` + `/capabilities` 四 Tab `expert`/`expert_team`）；后台 `Capabilities` 四 Tab、菜单叶「资产目录」；`listing_state` / `btn:market:*` / `coming_soon` 前端 0 命中。`is_platform_admin` 只在 Users 列表。
-- `Register.tsx` 在 `tenantSignup` 已 unwrap 后再剥 `.data`（P-FE-04）。`ProtectedRoute.requireAdmin` = `role==='admin' || is_admin`。空缓存菜单兜底露出系统管理（bea13b5）。`AdminLayout` 优先 `/auth/menus`，只改 `menuConfig` 不够。
-- 已过审 UI 合同：五类 `skill|plugin|command|agent|team`；治理台 **7 Tab**（源+目录+五类），禁止抄旧「六 Tab」；智能体不是专家；订插件不带礼包；租户直打 `/newapi` = NotFound 不是 Unauthorized；`/llm` 不要整页 404。
-- 本轮闸门：`check-frontend.sh` exit 0。official Jest 3 passed。admin 全量 12 passed + Members「reset password」20s timeout（单跑 18.5s 过，P-FE-07 悬崖）。shared `dist` 仍 export `queryViewState`，`src/index.ts` 已无。
-- official：`QueryClientProvider` 挂了，0 处 `useQuery`；无鉴权 client；三处 catch→空。
+- `FREE_TIER_FEATURE_COPY` =「5 个并发任务 / 10,000 条结果存储 / 20 万 LLM tokens/月」。Pricing / Usage / Register 同三句。Register 组合 `免费档：{三句}`，禁止手写 `10000`。
+- GWT-01.1 Given 字面：`5` / `10,000` / `20 万`（用量页展示 `200,000`）。独立 oracle，禁止 `mock(DEFAULT_QUOTA); expect(DEFAULT_QUOTA)`。
+- NFR-07：官网主按钮 minHeight/minWidth ≥44。`--size-touch: 44px` + `.site-touch-target` + 内联 `var(--size-touch, 44px)`（jsdom 量宽）。落点：Home 免费注册、Pricing 档 CTA、Register 创建企业/登录管理后台。
+- 闸：Register+Home+Pricing Jest 25；GWT-04.1–04.4 未改断言。
 
 ## Open (mine)
 
-- 租户安装面：官网 JWT vs 跳 admin returnUrl vs 一期只逛（堵 FR-20/21）。
-- 超管字段：登录加 `is_platform_admin` vs `tenant_id==null`。
-- 空缓存兜底排除写叶会红 `usePermission.test`「系统管理」。
-- `/llm` 租户自有供应商 vs Dashboard 链 `/llm` vs 渠道 404，不得合成。
+- 前端 `DEFAULT_QUOTA` 与 backend 仍是拷贝。
 
 ## Do not re-litigate
 
-- D22–D29 五类 / 7 Tab / 智能体 / D24 无礼包 / D20 只禁插件行。
-- T-31：不重组五组、不修幽灵 `/enterprise` `/rbac`。
-- enable-host 冻 PR8。Q-VOICE 禁止新写四柱 Hero。
+- 不代选六问。不实现支付。不改 GWT。不 Wave 2/3。不把 Usage 默认夹具改成免费档上限。

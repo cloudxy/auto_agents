@@ -1,0 +1,562 @@
+// schema.dbml · feat-four-pillars-v2
+// 上游：db-spec.md ｜ 下游：Alembic autogenerate → /backend ORM
+// 泳道：L4｜作者：/dba｜日期：2026-09-10｜合同 v1.8
+// 规范：每个索引注释必须标注访问模式 ID。物理类型 VARCHAR，禁止 MySQL ENUM。
+// 主键跟仓 INT。naive DATETIME 存 UTC。LiteLLM Postgres 不在本 IR。
+// 禁止复制旧 .sdlc/feat-four-pillars/02-shape/ 当现行 IR。
+// 已有表 = live 全列（ORM + 011/014/018/019/025）∪ 本特征加列。禁止看起来像全表的 stub。
+// 列序：live 物理序，本特征 ADD 接表尾。source_type 在原位加宽。对齐禁止 DROP 现网列/索引。
+
+Project four_pillars_v2 {
+  database_type: 'MySQL'
+  note: 'Wave 0 product_events + 豁免；Wave L gateway_ref 加列；Wave 1 五表与 assets 加列。头修订 039。listed_at DATETIME(6)。生产禁止 downgrade past 037。'
+}
+
+// ─────────────────────────────────────────────
+// 枚举：文档合法值（物理 VARCHAR + 应用校验）
+// ─────────────────────────────────────────────
+
+enum listing_state {
+  unlisted     [note: '商店不可见、不可新订']
+  listed       [note: '商店可见可新订']
+  coming_soon  [note: '商店可见不可订']
+}
+
+enum asset_governance_status {
+  experimental
+  testing
+  stable
+  recommended
+  deprecated
+  blacklist
+}
+
+enum asset_type {
+  skill
+  plugin
+  command
+  agent
+  team
+  expert       [note: 'expand 一周期可读；回填 → agent']
+  expert_team  [note: 'expand 一周期可读；回填 → team']
+}
+
+enum source_kind {
+  local
+  git
+  url          [note: '创建失败未支持；列仍登记字面量']
+}
+
+enum source_type {
+  self_built
+  network_imported
+  marketplace_crawled
+  source_indexed
+}
+
+enum component_role {
+  bundled_skill
+  bundled_command
+  bundled_agent
+  uses_skill
+  team_member
+}
+
+enum install_host {
+  grok
+  zcode
+  kimi
+  claude
+}
+
+enum product_event_name {
+  official_page_viewed
+  official_cta_clicked
+  tenant_signup_succeeded
+  login_succeeded
+  login_failed
+  task_run_submitted
+  task_completed
+  results_exported
+  quota_exceeded
+  market_list_viewed
+  market_search_submitted
+  market_detail_viewed
+  market_subscribe_succeeded
+  market_subscribe_rejected
+  market_uninstalled
+  market_listing_changed
+  market_source_sync_completed
+}
+
+enum skill_job_status {
+  running
+  done
+  failed
+}
+
+enum skill_job_type {
+  scan
+  score_batch
+  export_meta
+  import
+  src_sync
+  scan_plugins
+  promote
+}
+
+enum plugin_health_status {
+  unknown
+  healthy
+  degraded
+  down
+}
+
+// ─────────────────────────────────────────────
+// Wave 0
+// ─────────────────────────────────────────────
+
+Table product_events {
+  id             int          [pk, increment, note: '代理主键，跟仓 INT']
+  occurred_at    datetime     [not null, note: '业务时间 UTC；切日 Asia/Shanghai']
+  event_name     varchar(64)  [not null, note: '见 enum product_event_name；dba 不改口径']
+  tenant_id      int          [null, note: 'NULL=匿名或无法消歧。事件主语，非隔离归属']
+  actor_user_id  int          [null, note: '匿名 NULL；不加 FK']
+  anonymous_id   varchar(64)  [null, note: '浏览匿名身份；signup 必须带回']
+  role           varchar(32)  [null, note: '已登录才有']
+  props          json         [null, note: '非查询列：cta/page/spider/source/result_count/...']
+  created_at     datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '记录时间']
+  updated_at     datetime     [not null, default: `CURRENT_TIMESTAMP`, note: 'R-AUD；应用永不更新']
+
+  indexes {
+    (event_name, occurred_at) [name: 'idx_product_events_name_occurred']
+    // 服务 P-E01：超管按事件名 + 发生时间范围。ESR：等值 event_name → 范围/排序 occurred_at
+
+    (tenant_id, occurred_at) [name: 'idx_product_events_tenant_occurred']
+    // 服务 P-E02：超管按企业过滤（GWT-15.13 / 43.10）
+  }
+
+  note: '一行=一次产品事实。追加；≥90d；v1 无精确一次键；租户无查询面。进 TENANT_EXEMPT_TABLES（T-12 同 PR）。'
+}
+
+// ─────────────────────────────────────────────
+// Wave 1 平台目录
+// ─────────────────────────────────────────────
+
+Table capability_sources {
+  id              int          [pk, increment]
+  name            varchar(128) [not null, note: '源稳定名']
+  source_kind     varchar(16)  [not null, note: '见 enum source_kind；非列名 type']
+  uri             varchar(512) [not null]
+  is_enabled      tinyint      [not null, default: 1, note: '0=停用不清行']
+  last_sync_at    datetime     [null, note: 'NULL=从未同步结束']
+  last_succeeded  int          [not null, default: 0]
+  last_failed     int          [not null, default: 0]
+  last_error      varchar(512) [null]
+  tenant_id       int          [null, note: '平台级恒 NULL']
+  deleted_at      datetime     [null, note: 'NULL=存活']
+  alive_flag      smallint     [null, note: '生成列 CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END']
+  created_by      varchar(64)  [null]
+  updated_by      varchar(64)  [null]
+  created_at      datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at      datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (name, alive_flag) [unique, name: 'uq_sources_name_alive']
+    // 业务唯一：存活源名。兼作源登记点查
+  }
+
+  note: '一行=一条已登记外部树。同步不得 listed。T-29 与 TENANT_EXEMPT_TABLES 同 PR。'
+}
+
+Table capability_assets {
+  // live 018 建表列（source_type 原位 16→32；其余类型/可空跟 018）
+  id                       int           [pk, increment]
+  asset_type               varchar(16)   [not null, note: '见 enum asset_type；值域 expand-contract，不改列类型']
+  name                     varchar(128)  [not null, note: '目录名，类型内全局唯一；bundled slug = plugin double-underscore origin_local_name']
+  title                    varchar(256)  [null]
+  description              varchar(1024) [null]
+  category                 varchar(64)   [not null, default: 'uncategorized']
+  status                   asset_governance_status [not null, default: 'experimental', note: '物理 VARCHAR(16)；与 listing_state 独立']
+  source_type              varchar(32)   [not null, default: 'self_built', note: 'live VARCHAR(16)；本特征原位加宽 16→32']
+  source_url               varchar(512)  [null]
+  source_author            varchar(128)  [null]
+  content_hash             varchar(64)   [null]
+  score                    decimal(3,1)  [null]
+  ai_suggested_score       decimal(3,1)  [null, note: 'live 018/ORM；禁止漏列']
+  tier                     varchar(2)    [null, note: 'live 018/ORM']
+  reviewed_by              varchar(64)   [null, note: 'live 018/ORM']
+  reviewed_at              datetime      [null, note: 'live 018/ORM']
+  similar_to               json          [null, note: 'live 018/ORM']
+  file_path                varchar(512)  [null]
+  sync_state               varchar(16)   [not null, default: 'ok']
+  tenant_id                int           [null, note: '平台级恒 NULL；T-04 豁免；禁止 TenantMixin']
+  detail_id                int           [null]
+  created_at               datetime      [null, default: `CURRENT_TIMESTAMP`, note: '018 nullable']
+  updated_at               datetime      [null, note: '018 nullable']
+  // live 019
+  deleted_at               datetime      [null]
+  created_by               varchar(64)   [null]
+  updated_by               varchar(64)   [null]
+  // live 025
+  alive_flag               smallint      [null, note: '025 生成列；uq 组件']
+  // 本特征 ADD 接表尾（autogenerate 无 AFTER）
+  listing_state            varchar(16)   [not null, default: 'unlisted', note: 'server_default 必带；见 enum listing_state']
+  listed_at                datetime(6)   [null, note: 'DATETIME(6)；最近一次 listed；unlist 不清空；NULL=从未 listed；GWT-37.6 isoformat 微秒往返']
+  source_id                int           [null, ref: > capability_sources.id, note: 'NULL=未 attach；禁止假设永远第一方']
+  origin_ref               varchar(256)  [null, note: 'Q6 默认 256']
+  origin_local_name        varchar(128)  [null]
+  origin_plugin_name       varchar(128)  [null]
+  host_compat              json          [null, note: 'NULL=四宿主可订；[]=都不可订；禁止第三种空']
+  alias_origin_refs        json          [null, note: '非查询列']
+  license                  varchar(64)   [null, note: '同步拷贝（现在）']
+  public_license_override  tinyint       [not null, default: 0]
+  writable                 tinyint       [not null, default: 1, note: '1 第一方 / 0 第三方']
+
+  indexes {
+    (asset_type, name, alive_flag) [unique, name: 'uq_asset_type_name_alive']
+    // 服务 P-M02。禁止改列集/列序/加 source。ADR-0012
+
+    (listing_state, status, asset_type, category) [name: 'idx_assets_listing_status_type_cat']
+    // 服务 P-M01：公开 FR-33 查询侧闸。ESR：等值 listing/status → type/category
+
+    (source_id, origin_ref, alive_flag) [name: 'idx_assets_source_origin_alive']
+    // 服务 P-M05。Step1 普通索引；Step3 升 UNIQUE uq_asset_source_origin_alive
+
+    (asset_type) [name: 'ix_capability_assets_asset_type']
+    // 已有；服务 P-M04 治理台按类型。本特征不删
+
+    (category) [name: 'ix_capability_assets_category']
+    // 已有；P-M01 非最左覆盖不足时的存量。本特征不删、不新建同类
+
+    (status) [name: 'ix_capability_assets_status']
+    // 已有存量。评估：基数差；不作为新索引模板
+
+    // 已评估不建：listing_state 单列；host_compat 函数索引；alias_origin_refs
+  }
+
+  note: '一行=五类 catalog 身份。live 全列 ∪ 本特征加列。不改 uq_asset_type_name_alive。T-04 豁免。禁止 stub。'
+}
+
+Table capability_commands {
+  id           int          [pk, increment]
+  asset_id     int          [not null, ref: > capability_assets.id]
+  slash        varchar(64)  [not null, note: '非全局唯一']
+  description  varchar(512) [null]
+  body_md      text         [null, note: '本表即侧表']
+  created_at   datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at   datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (asset_id) [unique, name: 'uq_commands_asset']
+    // 1:1 细节。slash 全局索引评估不建（非 Top-N）
+  }
+
+  note: '一行=一条 slash 命令细节。无软删。T-21 豁免。'
+}
+
+Table capability_components {
+  id               int          [pk, increment]
+  parent_asset_id  int          [not null, ref: > capability_assets.id]
+  child_asset_id   int          [not null, ref: > capability_assets.id]
+  role             varchar(32)  [not null, note: '见 enum component_role；VARCHAR(32)']
+  created_at       datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at       datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (parent_asset_id, child_asset_id) [unique, name: 'uq_components_parent_child']
+    // 服务 P-M08。最左前缀覆盖 parent 点查 → 不建 ix_components_parent
+
+    (child_asset_id) [name: 'idx_components_child']
+    // FK 支撑（InnoDB）。反向脸非 Top-N
+  }
+
+  note: '一行=一条出处或引用边。不是礼包。无软删。T-21 豁免。'
+}
+
+Table capability_installs {
+  id          int          [pk, increment]
+  tenant_id   int          [not null, note: 'TenantMixin；迁移层 NOT NULL；禁止豁免']
+  asset_id    int          [not null, ref: > capability_assets.id]
+  host        varchar(16)  [not null, note: '见 enum install_host']
+  enabled     tinyint      [not null, default: 1, note: '我的安装开关；不是 enable-host']
+  trusted     tinyint      [not null, default: 0]
+  deleted_at  datetime     [null]
+  alive_flag  smallint     [null, note: '生成列，同 025']
+  created_by  varchar(64)  [null]
+  updated_by  varchar(64)  [null]
+  created_at  datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '订阅成功时刻']
+  updated_at  datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (tenant_id, asset_id, host, alive_flag) [unique, name: 'uq_installs_tenant_asset_host_alive']
+    // 服务 P-M06 / P-M07。ESR：tenant 最左 → 等值资产/宿主。卸载后可再订
+
+    (asset_id) [name: 'idx_installs_asset']
+    // FK 支撑
+  }
+
+  note: '一行=一企业×一资产×一宿主。T-25 禁止进 TENANT_EXEMPT_TABLES。订/卸不沿边级联。'
+}
+
+Table capability_aliases {
+  id          int          [pk, increment]
+  slug        varchar(128) [not null]
+  asset_id    int          [not null, ref: > capability_assets.id]
+  asset_type  varchar(16)  [not null, note: '反规范化；D22b 须同步']
+  tenant_id   int          [null, note: '平台级恒 NULL']
+  deleted_at  datetime     [null]
+  alive_flag  smallint     [null, note: '生成列']
+  created_by  varchar(64)  [null]
+  updated_by  varchar(64)  [null]
+  created_at  datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at  datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (slug, alive_flag) [unique, name: 'uq_aliases_slug_alive']
+    // 服务 P-M03。应用另挡存活 assets.name（不建第三表）
+
+    (asset_id, alive_flag) [unique, name: 'uq_aliases_asset_alive']
+    // v1 一资产一条存活 alias
+  }
+
+  note: '一行=一条人工短名。同步不建。T-33 豁免。'
+}
+
+// 已有 1:1 细节（本特征不加列；018 已有 uq_*_asset，autogenerate 禁止再 create / 禁止 DROP live 列）
+
+Table capability_plugins {
+  id               int          [pk, increment]
+  asset_id         int          [not null, ref: > capability_assets.id]
+  version          varchar(32)  [null, note: 'live 018']
+  author           varchar(128) [null, note: 'live 018']
+  license          varchar(64)  [null, note: 'live 018；本波不删列']
+  manifest         json         [null, note: 'live 018 plugin.json 原文']
+  bundled_skills   json         [null, note: 'live 018']
+  mcp_servers      json         [null, note: 'live 018']
+  hooks            json         [null, note: 'live 018']
+  commands         json         [null, note: 'live 018']
+  health_status    plugin_health_status [not null, default: 'unknown', note: '物理 VARCHAR(16)；无 MCP=unknown 可 listed']
+  last_verified_at datetime     [null, note: 'live 018']
+  verify_detail    json         [null, note: 'live 018']
+  created_at       datetime     [null, default: `CURRENT_TIMESTAMP`, note: '018 nullable']
+  updated_at       datetime     [null, note: '018 nullable']
+
+  indexes {
+    (asset_id) [unique, name: 'uq_capability_plugins_asset']
+    // 已有 018 UniqueConstraint。1:1。本特征不新建、不 drop
+
+    (asset_id) [name: 'ix_capability_plugins_asset_id']
+    // 已有 018 单列；与 UNIQUE 并存于真库。本特征不 drop
+  }
+
+  note: '已有插件细节 live 全列。本特征不加列。T-04 防御性豁免。禁止 stub。'
+}
+
+Table capability_experts {
+  id              int          [pk, increment]
+  asset_id        int          [not null, ref: > capability_assets.id]
+  persona_md      text         [null, note: 'live 018 正文=system prompt']
+  tools           json         [null, note: 'live 018']
+  bundled_skills  json         [null, note: 'live 018']
+  mcp_refs        json         [null, note: 'live 018']
+  model_pref      varchar(64)  [null, note: 'live 018']
+  created_at      datetime     [null, default: `CURRENT_TIMESTAMP`, note: '018 nullable']
+  updated_at      datetime     [null, note: '018 nullable']
+
+  indexes {
+    (asset_id) [unique, name: 'uq_capability_experts_asset']
+    // 已有 018。禁止 rename 本表
+
+    (asset_id) [name: 'ix_capability_experts_asset_id']
+    // 已有 018 单列；与 UNIQUE 并存。本特征不 drop
+  }
+
+  note: '智能体人设细节 live 全列。表名≠产品名词。本特征不加列。禁止 stub。'
+}
+
+Table capability_teams {
+  id             int          [pk, increment]
+  asset_id       int          [not null, ref: > capability_assets.id]
+  leader_expert  varchar(128) [null, note: 'live 018']
+  members        json         [null, note: 'live 018']
+  workflow_md    text         [null, note: 'live 018']
+  created_at     datetime     [null, default: `CURRENT_TIMESTAMP`, note: '018 nullable']
+  updated_at     datetime     [null, note: '018 nullable']
+
+  indexes {
+    (asset_id) [unique, name: 'uq_capability_teams_asset']
+    // 已有 018
+
+    (asset_id) [name: 'ix_capability_teams_asset_id']
+    // 已有 018 单列；与 UNIQUE 并存。本特征不 drop
+  }
+
+  note: '专家团细节 live 全列。公开 asset_type=team。本特征不加列。禁止 stub。'
+}
+
+// ─────────────────────────────────────────────
+// Wave L / Wave 1 加列（已有表；物理无 updated_at 的在 note 里 grandfather）
+// ─────────────────────────────────────────────
+
+Table channel_events {
+  // live 011 全列（channel_id 类型禁止改）
+  id           int          [pk, increment]
+  channel_id   bigint       [not null, note: '禁止本特征改类型。新 LiteLLM 行写 0 哨兵']
+  action       varchar(20)  [not null]
+  usage        bigint       [null, note: 'live 011 触发时窗口用量']
+  limit_quota  bigint       [null, note: 'live 011 用量上限']
+  window_hours int          [null, note: 'live 011 统计窗口小时']
+  reason       varchar(255) [null, note: 'live 011']
+  source       varchar(20)  [not null]
+  created_at   datetime     [null, default: `CURRENT_TIMESTAMP`, note: '011 nullable']
+  // 本特征 ADD 接表尾
+  gateway_ref  varchar(191) [null, note: '稳定字符串 ref；NULL=历史行双读回退 channel_id']
+  // physical table has no updated_at column; do not ADD updated_at this feature (R-AUD grandfather)
+
+  indexes {
+    (channel_id, created_at) [name: 'ix_channel_events_channel_created']
+    // 已有 011。服务 P-G03 expand 双读旧路径。本特征不删
+
+    (created_at) [name: 'ix_channel_events_created_at']
+    // 已有 011。ORM index=True。本特征不删
+
+    (gateway_ref, created_at) [name: 'idx_channel_events_gateway_ref_created']
+    // 服务 P-G01
+  }
+
+  note: '已有值班审计 live 全列 ∪ gateway_ref。物理表无 updated_at 列，禁止为过 R-AUD 而 ADD updated_at。禁止 stub。'
+}
+
+Table channel_probe_results {
+  // live 011 全列
+  id           int          [pk, increment]
+  channel_id   bigint       [not null, note: '禁止改类型；0=无 new-api PK']
+  model        varchar(100) [not null]
+  verdict      varchar(20)  [not null]
+  scores       json         [null, note: 'live 011 10 维探针得分']
+  latency_ms   int          [null, note: 'live 011 身份探针往返毫秒']
+  batch_id     varchar(64)  [not null]
+  created_at   datetime     [null, default: `CURRENT_TIMESTAMP`, note: '011 nullable']
+  // 本特征 ADD 接表尾
+  gateway_ref  varchar(191) [null]
+  // physical table has no updated_at column; do not ADD updated_at this feature (R-AUD grandfather)
+
+  indexes {
+    (channel_id, created_at) [name: 'ix_channel_probe_results_channel_created']
+    // 已有 011。本特征不删
+
+    (batch_id) [name: 'ix_channel_probe_results_batch_id']
+    // 已有 011。本特征不删
+
+    (gateway_ref, created_at) [name: 'idx_channel_probe_gateway_ref_created']
+    // 服务 P-G02
+  }
+
+  note: '已有探针结果 live 全列 ∪ gateway_ref。物理表无 updated_at 列，禁止本特征 ADD updated_at。伪装不熔断。禁止 stub。'
+}
+
+Table skill_jobs {
+  // live 014 全列
+  id          int          [pk, increment]
+  job_type    varchar(16)  [not null, note: '见 enum skill_job_type；不加宽']
+  status      skill_job_status [not null, note: '物理 VARCHAR(16)']
+  total       int          [null, note: 'live 014']
+  succeeded   int          [null, note: 'live 014']
+  failed      int          [null, note: 'live 014']
+  detail      json         [null, note: 'live 014 失败清单等']
+  started_at  datetime     [null, default: `CURRENT_TIMESTAMP`, note: '014 nullable；记录时间']
+  finished_at datetime     [null]
+  // 本特征 ADD 接表尾
+  source_id   int          [null, ref: > capability_sources.id, note: 'src_sync 才有；ON DELETE SET NULL']
+  // physical table has no created_at/updated_at; started_at is the record time; do not ADD columns for lint
+
+  indexes {
+    (source_id) [name: 'idx_skill_jobs_source']
+    // FK 支撑；P-M05 作业按源
+  }
+
+  note: '已有作业表 live 全列 ∪ source_id。物理无 created_at/updated_at；started_at 即记录时间。禁止为 lint 补列。禁止 stub。'
+}
+
+Table skills {
+  // live 014 全列（source_type 原位 16→32）；019 审计/软删接在 014 之后
+  id                 int           [pk, increment]
+  name               varchar(128)  [not null, note: '全局唯一；禁止本特征给 name 补 alive_flag']
+  title              varchar(256)  [null]
+  description        text          [null]
+  category           varchar(64)   [not null, default: 'uncategorized']
+  industries         json          [null]
+  status             asset_governance_status [not null, default: 'experimental', note: '物理 VARCHAR(16)']
+  source_type        varchar(32)   [not null, default: 'self_built', note: '本特征只加宽 16→32；与 assets 同 DDL 波']
+  source_url         varchar(512)  [null]
+  source_author      varchar(128)  [null]
+  imported_at        datetime      [null]
+  content_hash       varchar(64)   [null]
+  score              decimal(3,1)  [null]
+  ai_suggested_score decimal(3,1)  [null]
+  rubric_human       json          [null]
+  rubric_ai          json          [null]
+  tier               varchar(2)    [null]
+  reviewed_by        varchar(64)   [null]
+  reviewed_at        datetime      [null]
+  review_notes       text          [null]
+  similar_to         json          [null]
+  file_path          varchar(512)  [not null, note: '禁止本特征改可空']
+  sync_state         varchar(16)   [not null, default: 'ok']
+  tenant_id          int           [null, note: '平台级恒 NULL']
+  raw_meta           json          [null]
+  created_at         datetime      [null, default: `CURRENT_TIMESTAMP`]
+  updated_at         datetime      [null]
+  // live 019
+  deleted_at         datetime      [null, note: '026 已删 ix_skills_deleted_at；本特征不恢复']
+  created_by         varchar(64)   [null]
+  updated_by         varchar(64)   [null]
+
+  indexes {
+    (name) [unique, name: 'uq_skills_name']
+    // 已有 014 业务唯一。本特征不改、不补 alive
+
+    (name) [name: 'ix_skills_name']
+    // 已有 014 非唯一；与 uq 并存于真库。本特征不 drop
+
+    (category) [name: 'ix_skills_category']
+    // 已有 014。本特征不删
+
+    (status) [name: 'ix_skills_status']
+    // 已有 014。本特征不删
+
+    // 已评估不建：source_type 单列（db-spec 非 Top-N）
+  }
+
+  note: '已有技能细节表 live 全列。本特征只加宽 source_type。禁止其它列变更。禁止 stub。'
+}
+
+// ─────────────────────────────────────────────
+// 关系（级联默认 RESTRICT；细节表对自身 asset 可 CASCADE）
+// ─────────────────────────────────────────────
+
+Ref: capability_assets.source_id > capability_sources.id [delete: restrict, update: cascade]
+// N:1。源物理删前先卸 attach。NULL source_id=未挂源
+
+Ref: capability_commands.asset_id > capability_assets.id [delete: cascade, update: cascade]
+// 1:1 细节。CASCADE 仅细节行，不级联子资产
+
+Ref: capability_plugins.asset_id > capability_assets.id [delete: cascade, update: cascade]
+Ref: capability_experts.asset_id > capability_assets.id [delete: cascade, update: cascade]
+Ref: capability_teams.asset_id > capability_assets.id [delete: cascade, update: cascade]
+
+Ref: capability_components.parent_asset_id > capability_assets.id [delete: restrict, update: cascade]
+Ref: capability_components.child_asset_id > capability_assets.id [delete: restrict, update: cascade]
+// 删父/子资产前先删边。禁止 CASCADE 到 child 资产行
+
+Ref: capability_installs.asset_id > capability_assets.id [delete: restrict, update: cascade]
+// 订阅史不随物理删消失
+
+Ref: capability_aliases.asset_id > capability_assets.id [delete: restrict, update: cascade]
+
+Ref: skill_jobs.source_id > capability_sources.id [delete: set null, update: cascade]
+
+// product_events.tenant_id / actor_user_id：不加 FK（事件留存）
+// channel_*.gateway_ref：外部网关身份，不加 FK；禁止指向 LiteLLM PG
+// capability_installs.tenant_id → tenants.id RESTRICT（tenants 不在本 IR 重声明；ORM 跟仓）

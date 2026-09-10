@@ -1,109 +1,58 @@
-# Docker 部署模板
+# 部署约束
 
-## Backend Dockerfile
+权威文件：`Dockerfile`、`docker-compose.yml`、`.env.example`、`init_project.sh`。
 
-```dockerfile
-FROM python:3.11-slim
+## Contents
 
-WORKDIR /app
-RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+- 镜像
+- compose
+- 环境变量
+- 命令
 
-RUN useradd -m appuser && USER appuser
-EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"]
+## 镜像
+
+| 项 | 值 |
+|----|----|
+| 前端 | `FROM node:20`；`npm ci`；先 `npm run build -w @auto-agents/frontend-shared`，再 admin / official |
+| 后端 | `FROM python:3.13-slim` + `uv`；`uv sync --package auto-agents-backend --no-dev` |
+| 启动 | `uv run python -m scripts.runlib.backend --no-reload` |
+| 端口 | `EXPOSE 9111` |
+| 健康检查 | `http://127.0.0.1:9111/api/v1/health/deep` |
+| 依赖 | `pyproject.toml` + `uv.lock` |
+
+容器内 `AUTO_AGENTS_API__HOST=0.0.0.0`。
+
+## compose
+
+| 服务 | 构建 | 宿主端口 |
+|------|------|---------|
+| mysql | `mysql:8` | 3306 |
+| redis | `redis:7-alpine` | 6379 |
+| backend | `build: .` | 9111 |
+
+backend command：`uv run python -m scripts.runlib.backend --no-reload --env local`。开发默认密码对齐 `init_project.sh`。
+
+## 环境变量
+
+```
+APP_ENV=local
+AUTO_AGENTS_API__HOST=0.0.0.0
+AUTO_AGENTS_API__PORT=9111
+AUTO_AGENTS_MYSQL_DEFAULT_PASSWORD=...
+AUTO_AGENTS_REDIS_DEFAULT_PASSWORD=...
+AUTO_AGENTS_JWT__SECRET_KEY=...
+AUTO_AGENTS_WEBHOOK__SECRET_KEY=...
 ```
 
-## Frontend Dockerfile
+密钥写 `config/<env>/.env`。完整清单：根 `.env.example`。
 
-```dockerfile
-FROM node:18-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci && COPY . . && npm run build
-
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-## docker-compose.yml
-
-```yaml
-version: '3.8'
-
-services:
-  mysql:
-    image: mysql:8.0
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-    volumes:
-      - mysql_data:/var/lib/mysql
-    ports:
-      - "${DB_PORT:-3306}:3306"
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
-  backend:
-    build: ./backend
-    environment:
-      DB_HOST: mysql
-      REDIS_HOST: redis
-    depends_on:
-      - mysql
-      - redis
-    volumes:
-      - ./logs:/app/logs
-    restart: unless-stopped
-
-  frontend:
-    build: ./frontend
-    depends_on:
-      - backend
-    restart: unless-stopped
-
-volumes:
-  mysql_data:
-  redis_data:
-```
-
-## .env.example
+## 命令
 
 ```bash
-ENVIRONMENT=production
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_password_here
-DB_NAME=myapp
-REDIS_HOST=localhost
-REDIS_PORT=6379
-BACKEND_PORT=8000
-FRONTEND_PORT=3000
+docker compose config --quiet
+docker compose up --build
+docker compose logs -f backend
+docker compose down
 ```
 
-## 部署命令
-
-```bash
-# 1. 创建 .env 文件
-cp .env.example .env
-
-# 2. 构建并启动
-docker-compose up -d
-
-# 3. 查看日志
-docker-compose logs -f
-
-# 4. 重新构建
-docker-compose up -d --build
-```
+冻住不退出的 watchdog：`deploy/watchdog.sh`。

@@ -20,7 +20,15 @@
 | **MCP 工具桥**（MCP tool bridge） | 平台消费插件的运行时：MCP client（官方 Python SDK，stdio/HTTP）→ tools/list 登记 + tools/call 调用。双重用途：插件验证基座 + 平台 LLM 工具面。 |
 | **插件验证**（plugin verification） | 含 MCP 时：安装→连接→tools/list→抽样 tools/call→health 落库。无 MCP → `unknown`，允许上架，不代替 enable-host。 |
 | **候选**（candidate） | 市场采集产出的待审条目（spider_results.source=marketplace），人工闸门（approve/reject）后转正式资产。 |
-| **适配器**（adapter） | 入站：索引外部树。出站：把已治理资产投影到宿主（技能安装 / 插件 symlink / 智能体导出如 `~/.claude/agents/*.md`）。 |
+| **适配器**（adapter） | 入站：索引外部树。出站：把已治理资产投影到宿主（技能安装 / 插件 symlink / 智能体导出如 `~/.claude/agents/*.md`）。开发工作区里：`.grok/plugins` / `.claude/plugins` 是启用子集；`capability-library/plugins` 是整农场扫描入口。 |
+
+## 仓库协作层（开发者工作区，不是产品运行时）
+
+| 术语 | 含义 |
+|---|---|
+| **开发协作中枢** | `.agents/`：本仓库写代码时加载的项目 skill 与第三方插件指针。契约见 `.agents/README.md`。 |
+| **产品目录** | `capability-library/`：能力市场扫描/治理的内容树。与中枢分开，不要把产品目录当成 IDE 技能库。 |
+| **Grok/Claude 启用子集** | `sdlc-workflow` / `dev-team` / `drama-skills` / `oh-story`。`superpowers` / `mattpocock-skills` 只留在农场给扫描（已含于 `dev-team`）。 |
 
 ## 数据库设计域（D 线）
 
@@ -41,5 +49,5 @@
 | 渠道 | 用户文案可仍叫「渠道」；值班列表来自网关侧模型/部署，不是 new-api channel。 |
 | 令牌（平台路径） | 网关虚拟钥匙，**不发给租户**，直至租户中转 SKU 另开需求。 |
 | 租户（tenant） | SaaS 隔离单元；行级隔离经 tenant_context 事件钩子（tenant_scope / platform_scope）。 |
-| 配额（quota） | tenants.quota 三类：任务并发 / 结果存储 / LLM token 月度；超限 429 QUOTA_EXCEEDED。 |
+| 配额（quota） | tenants.quota 三类：任务并发 / 结果存储 / LLM token 月度。内部业务码可以是 `QUOTA_EXCEEDED`；**用户可见文案不得渲染该码或裸 429**。 |
 | 资产评分（asset scoring） | 四维 rubric（completeness/doc_quality/maintenance/real_world_effect）AI 建议 + 人工终评（人工权威）；tier S/A/B/C 派生。按资产类型可配维度集。 |

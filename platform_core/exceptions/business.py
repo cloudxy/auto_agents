@@ -47,6 +47,20 @@ class NotFoundException(AppException):
         )
 
 
+class MarketNotFoundException(AppException):
+    """商店订阅提交：未上架 / 黑名单 / 从不存在短名同一 JSON 信封。
+
+    不是商店不存在句（GET 详情走 HTML 404）。禁止「已下架」。
+    """
+
+    def __init__(self, message: str = "没有这个能力，不能订阅。"):
+        super().__init__(
+            message=message,
+            code="MARKET_NOT_FOUND",
+            status_code=404,
+        )
+
+
 class ValidationException(AppException):
     """参数验证异常（422）
     

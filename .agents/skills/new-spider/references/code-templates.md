@@ -1,99 +1,86 @@
 # 爬虫代码模板
 
-## Items
+## Contents
+
+- Item
+- Spider
+- 管道与 settings
+- 运行
+
+先读再改编：`scrapy/spiders/example.py`、`scrapy/spiders/zhihu_feed.py`。
+
+## Item
+
+新字段才加子类，否则 spider 直接用 `from items import BaseItem`。
+
+`scrapy/items/__init__.py`：
 
 ```python
-import scrapy
-
-class {SpiderName}Item(scrapy.Item):
-    """{爬虫中文名}数据项"""
-    id = scrapy.Field()
-    title = scrapy.Field()
-    content = scrapy.Field()
-    url = scrapy.Field()
+class {SpiderName}Item(BaseItem):
+    """{中文名}"""
+    extra_field = scrapy.Field()
 ```
 
-## Spider
+`BaseItem` 已声明 `id/title/url/content/source/task_id/_quality_score` 等。未声明字段写入会 `KeyError` 并卡住任务。
+
+## Spider（`scrapy/spiders/{name}.py`）
 
 ```python
-import scrapy
-import random
-import time
-from scrapy.utils.logger import logger
+from spiders.base import TaskAwareRedisSpider
+from items import BaseItem  # 或 {SpiderName}Item
+from platform_core.logger import get_logger
 
-class {SpiderName}Spider(scrapy.Spider):
-    name = "{spider_name}"
+logger = get_logger("spider")
+
+
+class {SpiderName}Spider(TaskAwareRedisSpider):
+    name = "{name}"
+    redis_key = "{name}:start_urls"
     allowed_domains = ["{domain}"]
     start_urls = ["{target_url}"]
-    
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    ]
-    
-    def start_requests(self):
-        for url in self.start_urls:
-            yield scrapy.Request(
-                url=url,
-                callback=self.parse,
-                headers={"User-Agent": random.choice(self.user_agents)}
-            )
-    
+
     def parse(self, response):
-        logger.info(f"解析页面: {response.url}")
-        items = response.css(".item-selector")
-        
-        for item in items:
-            data = {SpiderName}Item()
-            data["title"] = item.css(".title::text").get()
-            
-            if self._validate_data(data):
-                yield data
-            
-            time.sleep(random.uniform(1, 3))
-    
-    def _validate_data(self, data):
-        if not data.get("title"):
-            logger.warning(f"数据缺少标题")
-            return False
-        return True
+        logger.info(f"解析: {response.url} | Status: {response.status}")
+        for node in response.css(".item-selector"):
+            item = BaseItem()
+            item["url"] = response.url
+            item["title"] = node.css(".title::text").get()
+            item["source"] = "{name}"
+            yield item
 ```
 
-## Pipelines
+- 基类负责解析 Redis 队列 JSON（`url` + `task_id`）并注入 request meta。
+- 日志：`platform_core.logger.get_logger("spider")`。
+- 延迟与 UA：`scrapy/settings.py` 的 `DOWNLOAD_DELAY` + `middlewares.UserAgentMiddleware`。
 
-```python
-from scrapy.utils.logger import logger
+## 管道与 settings
 
-class {SpiderName}Pipeline:
-    def open_spider(self, spider):
-        logger.info(f"爬虫启动: {spider.name}")
-    
-    def process_item(self, item, spider):
-        logger.info(f"处理数据: {dict(item)}")
-        # 发送到消息队列或调用 Service
-        return item
-    
-    def close_spider(self, spider):
-        logger.info(f"爬虫关闭: {spider.name}")
+已有管道，默认不要新建、不要改 `ITEM_PIPELINES`：
+
+```
+pipelines.CleanPipeline
+pipelines.ValidatePipeline
+pipelines.quality.QualityCheckPipeline
+pipelines.StorePipeline          # Redis spider:item_queue，Backend 消费者落库
 ```
 
-## Settings
+`scrapy_redis.pipelines.RedisPipeline` 已禁用。禁止「调用 Service」或 SQLAlchemy Session。
 
-```python
-BOT_NAME = "{spider_name}"
-SPIDER_MODULES = ["scrapy.spiders"]
-NEWSPIDER_MODULE = "scrapy.spiders"
+确需站点级延迟：写 `config/scrapy/` 的 sites 段 `anti_crawl.download_delay`，由 `TaskAwareRedisSpider.from_crawler` 消费。
 
-CONCURRENT_REQUESTS = 4
-DOWNLOAD_DELAY = 2
+## 运行
 
-ITEM_PIPELINES = {
-    "scrapy.pipelines.{SpiderName}Pipeline": 300,
-}
+`{name}:start_urls` 队列条目（Backend 消费者投递，见 `scrapy/spiders/base.py`）：
+
+```json
+{"url": "https://example.com/page", "task_id": 123}
 ```
 
-## 运行命令
+纯 URL 字符串也能兜底。worker 不负责手写 LPUSH；本地冒烟用 `--list` 确认 name 已注册。
 
 ```bash
-scrapy crawl {spider_name}
+uv run python run.py --list
+uv run python run.py start spider
+# 或指定爬虫：
+uv run python -m scripts.runlib.spider --spider {name}
 ```

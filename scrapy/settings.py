@@ -103,8 +103,9 @@ EXTENSIONS = {
     "extensions.IdleAutoClose": 110,
 }
 
-# 空闲自动收尾（秒）：>0 时单次任务模式下连续空闲即以 finished 收尾；0=禁用（常驻 Worker）
-IDLE_CLOSE_SECONDS = project_settings.get("SPIDER_IDLE_CLOSE_SECONDS", 0)
+# 空闲自动收尾（秒）：连续空闲后 finished。默认 30；0 禁用。
+# 21600 是渠道探针锁，不是本窗。GWT-18.4 走 SPIDER_WORKER_OFFLINE_SECONDS。
+IDLE_CLOSE_SECONDS = project_settings.get("SPIDER_IDLE_CLOSE_SECONDS", 30)
 
 # === Playwright 动态渲染（可选依赖，默认关闭）===
 PLAYWRIGHT_ENABLED = project_settings.get("PLAYWRIGHT.ENABLED", False)

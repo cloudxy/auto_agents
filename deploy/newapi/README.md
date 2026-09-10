@@ -1,7 +1,10 @@
 # New API 多租户中转站 · 部署与租户管控指南（auto_agents 定制版）
 
+> **T-20 墓碑**：本目录 **不是运行时**。不要 `docker compose up` 当平台路径出口。
+> 现行说明见 [TOMBSTONE.md](./TOMBSTONE.md)。平台数据面 = LiteLLM（`deploy/litellm/`）。
+>
 > 基于 [new-api](https://github.com/QuantumNous/new-api)（One API 增强分支，**AGPLv3**），
-> 镜像 `calciumion/new-api:v0.10.7`（**锁定版本**，勿用 `:latest`）。
+> 镜像 `calciumion/new-api:v0.10.7`（**锁定版本**，勿用 `:latest`）。历史编排如下，仅作文物。
 > 能力：多用户分组 / 令牌限额 / 渠道负载均衡 + 故障转移 / 倍率计费 / 用量审计 /
 > OpenAI + Claude + Gemini 多协议互转。
 >

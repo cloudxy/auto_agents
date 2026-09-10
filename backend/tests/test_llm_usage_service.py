@@ -30,7 +30,8 @@ async def test_record_usage_increments_daily_and_monthly():
                            prompt_tokens=10, completion_tokens=5, total_tokens=15)
         await record_usage("provider:9", "gpt-4o-mini", total_tokens=7)
 
-    today = date.today()
+    from backend.services.quota_service import shanghai_today
+    today = shanghai_today()
     daily = _daily_key(today)
     fields = redis.hashes[daily]
     assert fields["default|provider:9|gpt-4o-mini|total"] == "22"      # 15 + 7
@@ -64,7 +65,8 @@ async def test_record_usage_swallows_redis_failure():
 @pytest.mark.asyncio
 async def test_get_month_used_returns_value_and_zero():
     redis = FakeRedis()
-    redis.hashes[_monthly_key(date.today())] = {"default|provider:9|total": "123"}
+    from backend.services.quota_service import shanghai_today
+    redis.hashes[_monthly_key(shanghai_today())] = {"default|provider:9|total": "123"}
     with patch.object(usage_mod, "_IN_PYTEST", False), \
          patch.object(usage_mod, "get_async_redis", lambda: redis):
         assert await get_month_used("provider:9") == 123
@@ -165,6 +167,27 @@ async def test_flush_once_persists_rows_and_deletes_claimed_keys():
     assert row["tenant_id"] == 1  # legacy 三段 → 默认租户解析
     # 认领键与原键都已删除（ack 语义）
     assert not redis.hashes
+
+
+def test_gwt_16_1_shanghai_month_not_utc_yesterday():
+    """上海 00:30 的本月是上海日历月，不是 UTC 昨天。"""
+    from datetime import date, datetime, timezone
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfo
+
+    from backend.services.quota_service import shanghai_today, shanghai_year_month
+
+    moment = datetime(2026, 9, 1, 0, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return moment if tz else moment.replace(tzinfo=None)
+
+    with patch("backend.services.quota_service.datetime", _Frozen):
+        assert shanghai_year_month() == "2026-09"
+        assert shanghai_today() == date(2026, 9, 1)
+        assert moment.astimezone(timezone.utc).date() == date(2026, 8, 31)
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_login, require_operator
+from backend.app.api.deps import CurrentUser, require_login, require_operator, task_actor_tenant_id
 from backend.app.api.v1.spiders.deps import _registry_service
 from backend.app.responses import ApiResponse, created, deleted, ok, updated
 from backend.services.spider_registry_service import SpiderRegistryService
@@ -40,7 +40,8 @@ async def create_template(
 ) -> ApiResponse[TaskTemplateResponse]:
     """创建任务模板（收藏当前任务配置）"""
     template = await service.create_template(
-        payload.model_dump(), created_by=user.username
+        payload.model_dump(), created_by=user.username,
+        tenant_id=task_actor_tenant_id(user),
     )
     await record_audit(session, user, "template.create", f"template#{template.id}",
                  {"name": payload.name, "spider": payload.spider_name})
@@ -84,7 +85,9 @@ async def run_from_template(
     user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[SpiderTaskResponse]:
     """从模板创建并运行任务"""
-    task = await service.create_task_from_template(template_id)
+    task = await service.create_task_from_template(
+        template_id, tenant_id=task_actor_tenant_id(user),
+    )
     await record_audit(session, user, "task.run_from_template", f"task#{task.id}",
                  {"template_id": template_id})
     return created(task)

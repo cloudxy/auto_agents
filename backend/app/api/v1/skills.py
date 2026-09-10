@@ -17,6 +17,7 @@ from backend.app.api.deps import (
     require_login,
     require_operator,
     require_platform_admin,
+    require_platform_admin_or_404,
 )
 from backend.app.responses import ok
 import backend.services.skill_import_service as _skill_import_service
@@ -113,7 +114,7 @@ async def sync_adapters(
 
 @router.post("/similar-suggest")
 async def similar_suggest(
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -141,17 +142,17 @@ async def similar_confirm(
 async def list_skill_candidates(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    user: CurrentUser = Depends(require_login),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
 ):
-    """市场采集候选（待人工审核转正）"""
+    """市场采集候选（待人工审核转正；仅超管，非超管 404 同形）"""
     return ok(data=await service.list_candidates(page, page_size))
 
 
 @router.post("/candidates/{result_id}/approve")
 async def approve_skill_candidate(
     result_id: int,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -171,7 +172,7 @@ async def approve_skill_candidate(
 @router.post("/candidates/{result_id}/reject")
 async def reject_skill_candidate(
     result_id: int,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):

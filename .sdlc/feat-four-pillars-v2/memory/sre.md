@@ -4,37 +4,32 @@
 
 ## Last
 
-- Date: 2026-09-08
-- Hat: 定义 / sre 诊断
-- Outputs: `.sdlc/feat-four-pillars-v2/01-define/diagnosis/sre.md`
+- Date: 2026-09-10
+- Hat: 交付 / 条件 A down 半格 PASS（rotation pending）
+- Outputs: `06-deliver/qc-cond-2-preprod.md`；`06-deliver/checklist.md`；`06-deliver/rotation-44e9446.md`
+- Gate: `check-sdlc.sh --require --hat deliver` exit 0
 
 ## Facts
 
-- HEAD `5d2e600`. Deploy/compose/Dockerfile/CI/litellm unchanged vs old diagnosis `44e9446`.
-- Root compose: mysql, redis, backend. No Worker. `run.py all` no spider. Redis no volume.
-- `docs/` gitignored; `docs/ops/deploy.md` 404. watchdog hint points there.
-- litellm `config.gen.yaml` tracked, not ignored, 7× `sk-` (do not paste keys).
-- `POWER_MARKET` runtime hits = 0. `/health/deep` = MySQL+Redis only. Notify = `[log]`.
-- new-api on `newapi-net`; missing `.env` → `SESSION_SECRET is required`. Backend not on that net; BASE_URL localhost:3000.
-- Dockerfile copies missing per-app lockfiles; only root `package-lock.json`. admin.json has no frontend-shared.
-- MySQL `_get_password` reads flat `MYSQL_DEFAULT_PASSWORD`; prod nested `__DEFAULT__PASSWORD` ignored.
-- `migrate.sh` upgrade only. `024`/`027` down not in CI.
-- Old contract deferred Worker compose to Wave 4. grok-files W0-9 wanted spider in compose. v2 must not copy deferral.
-- Did not edit deploy. Did not write `06-deliver/checklist.md`. Rollback unverified.
-- Root `docker compose config --quiet` exit 0. `docker build` not run.
+- 条件 2 **satisfied**：37.6 PASS；NFR-01 Chrome P95 1.444558s；GWT-18.1 Then **PASS** task#2 completed **+40.56s** result_count=1 export 200 rows 1。
+- 条件 1/3/4/5 **satisfied**。条件 6 **lock**。不是四柱 GA。
+- 条件 A 整体 **not PASS**。down 半格 **PASS**：本帽独立 2026-09-10T03:53:38Z `compose down --remove-orphans` **exit 0**；`docker info` 0 ServerVersion=29.4.0；sock `~/.docker/run/docker.sock`。先前 02:43:36Z exit 1（当时无 daemon）不作本半格。
+- `44e9446` 无 `rotated:` 行。本帽不自勾已轮换、不代写日期。证明前禁止 `LLM.ENABLED=true` / litellm compose up。
+- Then PASS ≠ 允许 LiteLLM/生产 动工。**动工 = NO**。本帽不改 coverage.md / release-opinion / rotation 勾选。
+- Alembic 039 仍 `??`。生产禁止 down past 037。默认 ENABLED=false。根 compose 无 litellm。
 
 ## Open (mine)
 
-- Prod shape: compose vs multi-host vs k8s.
-- On-call channel / who pages.
-- LiteLLM keep vs delete+rotate; filter-repo?
-- Redis persist? Password key canonical form?
-- Wave 0 Worker: compose vs `run.py all` vs empty-state (process or hard stop).
-- Tag policy; ARM images to prod?
+- 操作者机外轮换后写 `rotated: YYYY-MM-DD`。
+- 清理 `nfr01qc2-%`。
+- 039 + staged untrack `config.gen.yaml` 随 merge（本帽不 commit）。
+- coverage 18.1 翻格交 `/qa`。
 
 ## Do not re-litigate
 
-- new-api stays sidecar (do not merge into root compose).
-- Power Market in-process (ADR-0010) does not cancel Worker as a process.
-- Secrets never in git; no litellm key paste.
-- Alerts without runbooks do not ship. `docs/` is not runbook home.
+- FakeRedis ≠ 18.1。TestClient ≠ NFR-01。
+- 条件 2 satisfied ≠ 四柱 GA ≠ 动工。
+- 六问不代选。
+- 无 daemon 的 down exit 1 不得粉饰为 PASS。本轮 daemon 已起，down 0 是真 PASS。
+- 无 `rotated:` ≠ 已轮换。down PASS ≠ 条件 A PASS。
+- 生产禁止 down past 037。根 compose 无 litellm / new-api。

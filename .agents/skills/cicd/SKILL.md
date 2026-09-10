@@ -1,37 +1,45 @@
 ---
 name: cicd
-description: 配置 GitHub Actions CI/CD 流程
-trigger: >-
-  配置自动化部署、设置 CI/CD、添加持续集成、生成 GitHub Actions 工作流
+description: >-
+  Edits the five-stage GitHub Actions workflow at .github/workflows/ci.yml.
+  Use when 加 CI, 改 GitHub Actions, lint/test/arch/frontend 门禁.
 ---
 
-# 配置 CI/CD 流程
+# 配置 CI/CD
 
-当用户需要自动化部署时，使用此 Skill 生成 GitHub Actions 工作流。
+先读 `.github/workflows/ci.yml` 再改。约束：[references/workflow-templates.md](references/workflow-templates.md)。
 
-## 触发场景
+## Route
 
-- "配置自动化部署"
-- "设置 CI/CD"
-- "添加持续集成"
-
-## 执行流程
-
-### Step 1: 确认 CI/CD 需求
-
-1. 目标分支（main/test）
-2. 是否需要测试环境
-3. 部署方式（SSH/Docker/K8s）
-4. 是否需要人工审核
-
-### Step 2: 生成工作流
-
-根据需求确认结果，从 [references/workflow-templates.md](references/workflow-templates.md) 中选取并定制以下工作流：
-
-| 工作流 | 用途 |
+| 观察到 | 先做 |
 |--------|------|
-| 后端测试工作流 | pytest + MySQL/Redis services + uv workspace |
-| 前端测试工作流 | npm test + build，matrix 覆盖 admin/official |
-| 部署工作流 | SSH 部署 + 人工审核（Environment Protection） |
-| Secrets 配置 | DOCKER_USERNAME / PROD_SERVER_* 等 |
-| Environment Protection | production 需审核，test 无保护 |
+| Dockerfile / compose / 端口 / 卷 | `deploy` |
+| 改 CI job、门禁、Secrets | 本 skill |
+
+## Quick start
+
+Copy and check off:
+
+```
+cicd:
+- [ ] 五阶段仍在：python-lint-test / arch-check / db-migration-gate / frontend-build / docker-validate
+- [ ] 门禁用 tools/check/*，不手写第二套 grep
+- [ ] 前端：根 package-lock + 先 shared dist
+- [ ] bash tools/check/arch.sh
+- [ ] bash tools/check/frontend.sh
+- [ ] docker compose config --quiet
+```
+
+push 任意分支 + 向 main 的 PR 跑上述 job。发布另开 job，密钥用 GitHub Secrets。
+
+## 完成时回复
+
+1. `.github/workflows/ci.yml` 里改了哪个 job
+2. 本地跑过的 `tools/check/*` 原文
+3. 五阶段名字仍在（列出来）
+
+## Examples
+
+**Input:** 「CI 加上架构检查」
+
+**Then:** 在现有 `ci.yml` 加 `arch-check` job，`run: bash tools/check/arch.sh`，不新建第二份 workflow。

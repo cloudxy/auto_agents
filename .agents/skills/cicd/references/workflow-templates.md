@@ -1,141 +1,38 @@
-# CI/CD 工作流模板
+# CI 五阶段
 
-## 后端测试工作流
+权威文件：`.github/workflows/ci.yml`。改 CI 时对照现有 yaml。
 
-```yaml
-name: Backend Tests
+## Contents
 
-on:
-  push:
-    branches: [main, test]
-    paths:
-      - 'backend/**'
-      - 'scrapy/**'
-      - 'platform_core/**'
-      - 'config/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
+- 必须对齐的事实
+- MySQL 保真通道
+- 本地门禁
+- 部署
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
+## 必须对齐的事实
 
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: test_password
-          MYSQL_DATABASE: test_db
-        options: >-
-          --health-cmd="mysqladmin ping"
-          --health-interval=10s
-          --health-retries=3
-        ports:
-          - 3306:3306
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd="redis-cli ping"
-          --health-interval=10s
-          --health-retries=3
-        ports:
-          - 6379:6379
+| 项 | 值 |
+|----|----|
+| uv | `astral-sh/setup-uv@v6` + `uv python install 3.13` + `uv sync` |
+| 测试 | `uv run pytest -x -q --tb=short backend/tests` |
+| lint | `uv run ruff check backend platform_core scripts` |
+| 架构 | `bash tools/check/arch.sh` |
+| 前端 lock | 根 `package-lock.json` + `npm ci` |
+| 前端构建 | 先 `npm run build -w @auto-agents/frontend-shared`，再 `-w admin` / `-w official` |
+| OpenAPI | `uv run python tools/dump_openapi.py` + `npm run codegen:api -w @auto-agents/frontend-shared` |
+| 前端门禁 | `bash tools/check/frontend.sh` |
+| compose | `docker compose config --quiet` |
+| 镜像 | `docker build -t auto-agents-backend .` |
+| JWT（CI） | `AUTO_AGENTS_JWT__SECRET_KEY` |
 
-    steps:
-      - uses: actions/checkout@v4
+## MySQL 保真通道
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          enable-cache: true
+`python-lint-test` 挂 `mysql:8`。第二段 pytest 需要 `MYSQL_FIDELITY=1` 及 HOST/USER/PASSWORD。子集文件名单以 `ci.yml` 为准。
 
-      - name: Setup Python
-        run: uv python install 3.13
+## 本地门禁
 
-      - name: Install dependencies (uv workspace)
-        run: uv sync --frozen
+`.pre-commit-config.yaml`：提交跑 ruff + `tools/check/arch.sh` + db 脚本；推送再跑 pytest。
 
-      - name: Run tests
-        env:
-          APP_ENV: dev
-        run: uv run pytest backend/tests platform_core/tests -v --cov=backend --cov=platform_core --cov-report=xml
-```
+## 部署
 
-## 前端测试工作流
-
-```yaml
-name: Frontend Tests
-
-on:
-  push:
-    branches: [main, test]
-    paths: ['frontend/**']
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        app: [admin, official]
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/${{ matrix.app }}/package-lock.json
-
-      - name: Install & test
-        working-directory: frontend/${{ matrix.app }}
-        run: npm ci && npm test -- --watchAll=false && npm run build
-```
-
-## 部署工作流
-
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    environment: production
-    
-    steps:
-      - name: Wait for approval
-        if: github.ref == 'refs/heads/main'
-        uses: trstringer/manual-approval@v1
-      
-      - name: Deploy
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.PROD_SERVER_HOST }}
-          username: ${{ secrets.PROD_SERVER_USER }}
-          key: ${{ secrets.PROD_SERVER_SSH_KEY }}
-          script: |
-            cd /opt/myapp
-            docker-compose pull && docker-compose up -d
-```
-
-## Secrets 配置
-
-在 GitHub → Settings → Secrets and variables → Actions 中添加：
-
-```
-DOCKER_USERNAME
-DOCKER_PASSWORD
-PROD_SERVER_HOST
-PROD_SERVER_USER
-PROD_SERVER_SSH_KEY
-```
-
-## Environment Protection
-
-在 GitHub → Settings → Environments 中：
-
-- **production**：Required reviewers（至少 1 人审核）
-- **test**：无保护规则
+默认 CI 不含 SSH `docker compose up`。发布另开 job，密钥用 GitHub Secrets。

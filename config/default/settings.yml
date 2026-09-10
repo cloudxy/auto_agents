@@ -4,6 +4,11 @@
 APP_NAME: "Auto Agents"
 VERSION: "0.1.0"
 
+# === 启用闸（Q-OPS-DUTY 未关：不代填号码）===
+# LLM.ENABLED 或 POWER_MARKET.ENABLED 为 true 时必须非空，否则拒绝启动。
+OPS:
+  DUTY_CONTACT: ""
+
 # === 环境标识 ===
 ENVIRONMENT: "local"  # local, dev, prod
 
@@ -41,7 +46,7 @@ SPIDER_MAX_RETRIES: 2
 SPIDER_MAX_CONCURRENT_PER_SPIDER: 2
 
 # === Worker 节点心跳（2.2） ===
-# run_spider.py 进程级心跳写 Redis（spider:worker:{id}），Backend 扫描展示节点状态
+# Worker 心跳写 Redis（spider:worker:{id}），Backend 扫描展示节点状态
 # 引用方式：settings.get("WORKER_HEARTBEAT.INTERVAL_SECONDS", 10)
 WORKER_HEARTBEAT:
   INTERVAL_SECONDS: 10   # 续约间隔（秒）

@@ -1,30 +1,24 @@
 # architect memory · feat-four-pillars-v2
 
-> Facts this role learned (**what**). Procedures stay in SKILL.md (**how**).
-> Cap **2200 characters**. Frozen snapshot: next spawn sees this; do not treat it as live mid-turn.
+> Facts (**what**). Procedures in SKILL.md. Cap 2200. Frozen snapshot.
 
 ## Last
 
 - Date: 2026-09-08
-- Hat: 定义（诊断 + Q-LLM 替换方案；未写 contract）
-- Outputs: `01-define/diagnosis/architect.md`；`01-define/diagnosis/litellm-replace-newapi.md`
+- Hat: 票 r2 FAIL → **只关 TK-05…08**。TK-01…04 独立 closed。SH-01…18 closed。contract **v1.8**。不写实现。不代选六问。
+- Outputs: `tickets/T-16.md` `T-20.md` `T-01.md`；`contract.md` v1.8
 
 ## Facts
 
-- Q-LLM **已决**：LiteLLM = LLM 数据面；new-api **退出运行时**。禁止再标待确认。
-- 规划器零引用 `NewapiApiClient`。`llm_chat` 已是 OpenAI `/chat/completions`。套餐闸仍未接线。
-- LiteLLM 现网 ≠ 运行时：仅 `deploy/litellm/config.gen.yaml` git 跟踪明文 Key（7 处）；`services/litellm/` 仅 pyc；exporter 脚本不在树。
-- new-api：独立 compose；调度 **DSN+logs SQL**；探针打 `/v1/chat/completions`；值班 `/newapi` + `require_admin`。
-- 目标：独立 `deploy/litellm` + 自有 PG（禁并根 compose、禁网关 DSN）。BYOK 直连。短双跑后停 new-api。
-- Wave L 第一等（FR-70…建议），**禁止**塞 Wave 3 stub。Wave 0 只做 FR-14 离树 + 收权 + FR-12 闸。
-- 旧 ADR-0014「替换不进本特征」OVERTURN；KEEP：`llm_chat` 单入口、闸在前、mcp 仅验证、伪装不熔断。
+- TK-05 闸=分格 `::node`，禁 `or_cell_failure` 一名三格。规划：`::test_post_plan_outbound_gateway`（只 70.1）、`::test_post_plan_no_model_only_70_2`、`::test_post_plan_unreachable_only_74_1`；试采/评分同构。T-20 70.1 只钉成功格。SH-01 点名 `test_saas_byok.py::test_no_own_key_falls_back_to_platform`（outbound=网关 URL）。禁整文件 `test_saas_byok.py` 当绿闸。`test_saas_provider_semantics.py` `https://pub` 同 PR 作废/降级。
+- TK-06 闸加 `::test_operator_similar_suggest_no_model_envelope_only_70_10` / `::test_operator_similar_suggest_unreachable_envelope_only_74_6`。
+- TK-07 满额两格：`::test_post_plan_quota_full_gateway_reachable_only_12_3` / `::_unreachable_only_12_3` → Then 只 12.3 句，不是网关不可达句。未加不得勾 74.2。
+- TK-08 T-01 70.4 三 node：Home / FeaturesSection / Pricing `::test_no_direct_gateway_or_relay_token_copy`。未加不得勾 T-01 侧 70.4。禁只跑 Pricing.test。
 
 ## Open (mine)
 
-- 塑形：重写 ADR-0014；B4 扩 `litellm_*`/`relay_*`；`gateway_ref` expand 交 `/dba`；镜像 tag 交 `/sre`。
-- 值班 URL `/newapi` 保留一周期（b1c 锁信封）。
-- 不代选 Q-VOICE/PRICE/RELAY/MARKET-USER/BILL/AGPL。
+- `/sre` 钉 LiteLLM tag（禁 latest）。`/dba` `gateway_ref` 加列、禁改 `channel_id` 类型。不代选六问。
 
 ## Do not re-litigate
 
-- 拆市场微服务；LiteLLM 并进根 compose；网关 DB_DSN；resume litellm pyc；Q-CAND NULL；Q-LLM 再开放；Wave L=FR-60。
+市场微服务；LiteLLM 并根 compose；网关 DSN；resume pyc；Q-LLM 再开放；Wave L=FR-60；六问代选；重开 QA-01…37 / SH-01…18 / TK-01…04；新建聊天 UI；测试内 llm_chat 勾 70.7；入队 200 勾 Then；金标 `test_trigger_plan_endpoint` 当 70.1；只靠 `test_create_endpoint_rejects_operator` 勾 FR-73；T-16 单独勾 70.3/70.4/74.3「是」；T-13「相关 pytest」；`or_cell_failure` 一名三格；整文件 `test_saas_byok.py` 当 T-16 绿闸；T-20 用失败格勾 70.1；只跑 Pricing.test 勾 T-01 70.4。

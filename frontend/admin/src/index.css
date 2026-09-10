@@ -1,3 +1,13 @@
+:root {
+  /* semantic tokens ← design-tokens.json；Login 等消费，禁止业务页硬编码紫渐变 */
+  --color-surface: #ffffff;
+  --color-surface-sunken: #fafafa;
+  --color-text-primary: #141414;
+  --color-text-secondary: #595959;
+  --color-primary: #1677ff;
+  --shadow-card: 0 1px 2px rgba(0, 21, 41, 0.06);
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',

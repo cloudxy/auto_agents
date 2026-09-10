@@ -45,6 +45,7 @@ def _service() -> SpiderTaskService:
     svc.result_repo = MagicMock()
     svc.notifier = MagicMock()
     svc.notifier.notify_task_finished = AsyncMock()
+    svc._check_enqueue_quota = AsyncMock()
     return svc
 
 
@@ -102,7 +103,7 @@ class TestEnqueueConcurrency:
             fake_settings.get.return_value = 2
             from platform_core.exceptions import BusinessException
             with pytest.raises(BusinessException):
-                await svc.enqueue("example", priority="high")
+                await svc.enqueue("example", priority="high", tenant_id=1)
         svc.repo.create.assert_not_called()
 
     @pytest.mark.asyncio
@@ -118,7 +119,9 @@ class TestEnqueueConcurrency:
             patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
-            resp = await svc.enqueue("example", params='{"urls": ["https://a.b"]}', priority="high")
+            resp = await svc.enqueue(
+                "example", params='{"urls": ["https://a.b"]}', priority="high", tenant_id=1
+            )
         assert resp.id == 9
         kwargs = svc.repo.create.call_args.kwargs
         assert kwargs["priority"] == "high"
@@ -140,7 +143,7 @@ class TestEnqueueConcurrency:
             patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
-            resp = await svc.enqueue("example")
+            resp = await svc.enqueue("example", tenant_id=1)
         assert resp.id == 10  # Redis 抖动放行，失败兜底在投递路径
 
     @pytest.mark.asyncio

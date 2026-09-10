@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_admin, require_login, require_operator
+from backend.app.api.deps import CurrentUser, require_admin, require_login, require_operator, task_actor_tenant_id
 from backend.app.api.v1.spiders.deps import _schedule_service
 from backend.app.responses import ApiResponse, created, deleted, ok, updated
 from backend.services.schedule_service import ScheduleService
@@ -49,7 +49,7 @@ async def create_schedule(
     user: CurrentUser = Depends(require_admin),
 ) -> ApiResponse[SpiderScheduleResponse]:
     """创建调度计划（校验爬虫注册表 / cron 合法性 / 同爬虫唯一；仅管理员）"""
-    schedule = await service.create_schedule(payload)
+    schedule = await service.create_schedule(payload, tenant_id=task_actor_tenant_id(user))
     await record_audit(session, user, "schedule.create", payload.spider_name,
                  {"cron": payload.cron_expr, "enabled": payload.enabled})
     return created(schedule)

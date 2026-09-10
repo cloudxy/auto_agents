@@ -95,6 +95,8 @@ LOGIN_FAIL_PREFIX: Final[str] = "login_fail:"
 REGISTER_ATTEMPT_PREFIX: Final[str] = "register_fail:"
 # 租户自助注册限流（按 IP，无鉴权写面 fail-closed）
 SIGNUP_RATE_PREFIX: Final[str] = "tenant:signup:rl:"
+# 官网产品事件埋点限流（按 IP，fail-open，不挡浏览）
+EVENTS_PUBLIC_RATE_PREFIX: Final[str] = "product:events:rl:"
 # 配额检查计数缓存（B4：60s TTL，免逐行回流 COUNT 全表）
 QUOTA_COUNT_PREFIX: Final[str] = "quota:count:"
 # LLM 模型冷却（值=连续失败次数，TTL=冷却窗口）
@@ -106,6 +108,8 @@ LLM_USAGE_MONTHLY_PREFIX: Final[str] = "llm:usage:m:"
 LLM_USAGE_FLUSH_LOCK: Final[str] = "llm:usage:flush:lock"
 # new-api 渠道调度：渠道级配置 hash / 探针锁 / 调度器锁与状态
 NEWAPI_CHANNEL_CFG_PREFIX: Final[str] = "newapi:channel:cfg:"
+RELAY_CHANNEL_CFG_PREFIX: Final[str] = "relay:channel:cfg:"
+RELAY_CHANNEL_STATE_PREFIX: Final[str] = "relay:channel:state:"
 NEWAPI_PROBE_LOCK: Final[str] = "newapi:probe:lock"
 NEWAPI_SCHEDULER_LOCK: Final[str] = "newapi:scheduler:lock"
 NEWAPI_SCHEDULER_STATE: Final[str] = "newapi:scheduler:state"
@@ -263,12 +267,15 @@ __all__ = [
     "LOGIN_FAIL_PREFIX",
     "REGISTER_ATTEMPT_PREFIX",
     "SIGNUP_RATE_PREFIX",
+    "EVENTS_PUBLIC_RATE_PREFIX",
     "QUOTA_COUNT_PREFIX",
     "LLM_COOLDOWN_PREFIX",
     "LLM_USAGE_DAILY_PREFIX",
     "LLM_USAGE_MONTHLY_PREFIX",
     "LLM_USAGE_FLUSH_LOCK",
     "NEWAPI_CHANNEL_CFG_PREFIX",
+    "RELAY_CHANNEL_CFG_PREFIX",
+    "RELAY_CHANNEL_STATE_PREFIX",
     "NEWAPI_PROBE_LOCK",
     "NEWAPI_SCHEDULER_LOCK",
     "NEWAPI_SCHEDULER_STATE",

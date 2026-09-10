@@ -2,7 +2,7 @@
 
 覆盖路由（backend/app/api/v1/configs.py，此前零 HTTP 覆盖）：
 - GET /api/v1/configs/          全量配置（require_login；data 为 {key: value} 字典）
-- PUT /api/v1/configs/{key}     单项更新（require_admin；存在则改、缺省则建）
+- PUT /api/v1/configs/{key}     单项更新（require_platform_admin；存在则改、缺省则建）
 
 既有覆盖对照：test_config_service.py 仅 Service 单元（session 直查），HTTP 层零覆盖；
 test_t10_api_coverage.py 的 notify-config 是 /admin 域另一端点，不重复。
@@ -50,15 +50,15 @@ def test_get_configs_anonymous_401(client):
 # PUT /configs/{key}（require_admin）
 # ---------------------------------------------------------------------------
 
-def test_put_config_create_and_readback(db_client, admin_client, db_engine, db_session):
+def test_put_config_create_and_readback(db_client, platform_admin_client, db_engine, db_session):
     """新建配置 → UPDATED + GET 回读一致 + DB 一行（持久化与读取回显一致）"""
-    resp = admin_client.put(f"{BASE}/site.name", json={"value": "AutoAgents 平台"})
+    resp = platform_admin_client.put(f"{BASE}/site.name", json={"value": "AutoAgents 平台"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["code"] == "UPDATED"
     assert "site.name" in body["message"]
 
-    got = admin_client.get(f"{BASE}/").json()["data"]
+    got = platform_admin_client.get(f"{BASE}/").json()["data"]
     assert got["site.name"] == "AutoAgents 平台"  # 回显一致
 
     async def _check():
@@ -71,12 +71,12 @@ def test_put_config_create_and_readback(db_client, admin_client, db_engine, db_s
     asyncio.run(_check())
 
 
-def test_put_config_overwrite_no_duplicate(db_client, admin_client, db_engine, db_session):
+def test_put_config_overwrite_no_duplicate(db_client, platform_admin_client, db_engine, db_session):
     """同 key 二次 PUT → 覆盖旧值（更新分支），DB 不新增行"""
-    admin_client.put(f"{BASE}/site.name", json={"value": "v1"})
-    resp = admin_client.put(f"{BASE}/site.name", json={"value": "v2"})
+    platform_admin_client.put(f"{BASE}/site.name", json={"value": "v1"})
+    resp = platform_admin_client.put(f"{BASE}/site.name", json={"value": "v2"})
     assert resp.status_code == 200, resp.text
-    assert admin_client.get(f"{BASE}/").json()["data"]["site.name"] == "v2"
+    assert platform_admin_client.get(f"{BASE}/").json()["data"]["site.name"] == "v2"
 
     async def _check():
         async with db_session() as s:
@@ -88,17 +88,17 @@ def test_put_config_overwrite_no_duplicate(db_client, admin_client, db_engine, d
     asyncio.run(_check())
 
 
-def test_put_config_validation_422(db_client, admin_client):
+def test_put_config_validation_422(db_client, platform_admin_client):
     """缺 value 字段 → 422（ConfigUpdate 契约必填）"""
-    resp = admin_client.put(f"{BASE}/site.name", json={})
+    resp = platform_admin_client.put(f"{BASE}/site.name", json={})
     assert resp.status_code == 422, resp.text
     assert resp.json()["code"] == "VALIDATION_ERROR"
     assert "value" in resp.text
 
 
-def test_put_config_overlength_key_422(db_client, admin_client):
+def test_put_config_overlength_key_422(db_client, platform_admin_client):
     """51 字符 key（模型 String(50) 界外）→ 422（B5 修复 F-B1b-02：路由层 Path 校验）"""
-    resp = admin_client.put(f"{BASE}/{'k' * 51}", json={"value": "v"})
+    resp = platform_admin_client.put(f"{BASE}/{'k' * 51}", json={"value": "v"})
     assert resp.status_code == 422, resp.text
     assert resp.json()["code"] == "VALIDATION_ERROR"
 
@@ -109,9 +109,9 @@ def test_put_config_anonymous_401(client):
     assert resp.json()["code"] == "AUTH_FAILED"
 
 
-@pytest.mark.parametrize("low_client", ["operator_client", "viewer_client"])
+@pytest.mark.parametrize("low_client", ["operator_client", "viewer_client", "admin_client"])
 def test_put_config_low_role_403(request, low_client):
-    """operator / viewer 直调 admin 端点 → 403（角色矩阵逐格）"""
+    """operator / viewer / 租户 admin 直调 → 403（平台超管才可写系统配置）"""
     resp = request.getfixturevalue(low_client).put(f"{BASE}/site.name", json={"value": "x"})
     assert resp.status_code == 403
     assert resp.json()["code"] == "FORBIDDEN"

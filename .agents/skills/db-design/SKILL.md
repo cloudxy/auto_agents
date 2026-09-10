@@ -1,65 +1,97 @@
+---
+name: db-design
+description: >-
+  Produces db-spec.md, DBML, ORM, and Alembic revisions for new tables. Use
+  when 新表, 加列, 索引, 唯一键, 写 DBML, or running Alembic.
+---
+
 # 数据库设计流水线（S0→S5）
 
-> 强制流程：任何涉及数据库 schema 变更的工作必须走此流水线。
-> 三原则（ADR-0002）：AI 产出目标态与理由 / 先访问模式后索引 / 验收全机械可查。
-> SKILL.md 只引导流程，不承担执法——执法在 `check-db-*` 脚本 + CI。
+执法：`tools/check/db_ir.sh`、`tools/check/db_migrations.sh`。索引只能从 S0 访问模式推导。S2 用 `new-model`。
 
-## 何时使用
+## Route
 
-- 新建表 / 加列 / 加索引 / 改唯一键 / 数据模型评审
-- 触发词：数据库设计 / schema / 迁移 / alembic / 索引 / DBML
+| 观察到 | 先做 |
+|--------|------|
+| 只要 ORM+Schema、表已有且不改结构 | `new-model` |
+| 还要 API | 本流水线过完 S2 后走 `new-svc` |
 
-## 流程（顺序不可跳）
+## Quick start
 
-### S0 需求 → 数据契约 Spec
-产出 `db-spec.md`（放 `.scratch/<feature>/` 或工单附件）：
-- 实体清单 + 关系（ER 图意涵）
-- **业务唯一键**（人工评审点 A：只有人知道）
-- **访问模式**：Top-N 查询 + 频率 + 走哪列（这是索引的唯一合法输入）
-- 容量预估：行宽 / 日增长 / 索引大小
-- 一致性边界：事务范围
-- 保留与归档策略
+Copy and check off:
 
-### S1 Spec → DBML IR
-产出 `<domain>.dbml`（[DBML 标准](https://dbml.dbdiagram.io)）：
-- Table/Enum/Ref 声明式描述目标态
-- 过 `scripts/check-db-ir.sh` 静态 lint（命名/审计字段/类型/FK 环/孤儿）
-
-### S2 IR → ORM + Schema 配对
-用 `/new-model` skill（本仓范式）产出 ORM + Pydantic 配对。
-ORM 模型必须与 DBML 一致（check-db-ir 会对比）。
-
-### S3 Alembic autogenerate（AI 禁写迁移 SQL）
-```bash
-# 在 MYSQL_FIDELITY 环境下 autogenerate → 人工审查 → 微调
-MYSQL_FIDELITY=1 uv run alembic revision --autogenerate -m "<message>"
 ```
-- 微调过的迁移必须过 S4 行为验证环
-- 过 `scripts/check-db-migrations.sh`（破坏性变更检测 → 强制 expand-contract 拆分）
+db-design:
+- [ ] S0 .scratch/<feature>/db-spec.md（按下方模板，访问模式必须有行）
+- [ ] S1 <domain>.dbml + bash tools/check/db_ir.sh
+- [ ] S2 new-model（ORM 列与 DBML 一致）
+- [ ] S3 autogenerate + 人工审核 + bash tools/check/db_migrations.sh
+- [ ] S4 MYSQL_FIDELITY pytest backend/tests/test_db_behavior_loop.py
+- [ ] S5 PR 附 ER diff + 迁移 diff
+```
 
-### S4 行为验证环（demo 与工业的分水岭）
+访问模式表为空：停在 S0，不要进 S1。任一步 check 非 0：修完再跑同一条，不要跳步。
+
+### S0 模板（按这个写，缺块就还没做完）
+
+`mkdir -p .scratch/<feature>` 后写入 `db-spec.md`：
+
+```markdown
+# db-spec: <feature>
+
+## 实体
+| 实体 | 表名 | 说明 |
+|------|------|------|
+|      |      |      |
+
+## 业务唯一键（人工点 A）
+| 表 | 唯一键列 | 业务含义 |
+|----|----------|----------|
+|    |          |          |
+
+## 访问模式
+| 查询（一句话） | 频率 | 走哪列 | 预估 QPS |
+|----------------|------|--------|----------|
+|                |      |        |          |
+
+## 容量
+- 行数量级（12 个月）：
+- 单行大小：
+
+## 事务边界
+- 一次写入包含哪些表：
+- 失败回滚口径：
+
+## 归档
+- 热数据窗口：
+- 冷数据去向：
+```
+
+S3：
+
+```bash
+cd backend && MYSQL_FIDELITY=1 uv run alembic -c alembic.ini revision --autogenerate -m "<message>"
+```
+
+升级：`bash scripts/db/migrate.sh`。
+
+S4：
+
 ```bash
 MYSQL_FIDELITY=1 MYSQL_FIDELITY_HOST=127.0.0.1 MYSQL_FIDELITY_USER=root \
   MYSQL_FIDELITY_PASSWORD=<pwd> uv run pytest -q \
   backend/tests/test_db_behavior_loop.py -k "<your_migration>"
 ```
-- upgrade ↑ + downgrade ↓ 全跑通
-- FK 感知种子数据 + S0 声明的每条查询 EXPLAIN 断言 access type ≠ ALL
-- 约束注入：唯一键/FK/NOT NULL 真挡得住脏数据
 
-### S5 CI 门禁 + 人工评审点 B
-- `check-db-ir` / `check-db-migrations` 挂 pre-commit（*.dbml 或 alembic/versions 变更时触发）
-- PR 附 ER diff + 迁移 diff——人工审阅后合并
+## 完成时回复
 
-## 禁止事项
+1. S0 路径（并确认访问模式表有至少一行真实查询）
+2. S1：`db_ir.sh` 原文
+3. S2：ORM 路径；S3：迁移文件 + `db_migrations.sh` 原文
+4. 跑了 S4 则贴 pytest 末段
 
-- ❌ LLM 直接手写迁移 SQL（autogenerate 是唯一路径）
-- ❌ 索引由 LLM 脑补（必须从 S0 访问模式推导）
-- ❌ drop/rename/类型收窄不拆 expand-contract
-- ❌ 大表（>10 万行）ALTER 不标注 gh-ost/pt-osc
+## Examples
 
-## 参考规则源
+**Input:** 「给 announcement 加表，title 唯一，按 tenant 列表」
 
-- atlas（ariga/atlas）：lint 规则清单
-- strong_migrations（ankane/strong_migrations）：破坏性变更检查项
-- sqlcheck（jarulraj/sqlcheck）：SQL 反模式
+**Then:** S0 访问模式至少有「按 tenant_id 列表」一行，索引从该行推导；在 S0 写完之前不跑 autogenerate。

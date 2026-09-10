@@ -1,93 +1,51 @@
 ---
 name: new-spider
 description: >-
-  创建 Scrapy 爬虫模块。当用户需要从目标网站抓取数据、新建爬虫任务、
-  或为已有爬虫添加新的数据字段与管道时触发。
-  适用于从零搭建完整爬虫（Spider + Item + Pipeline + Settings），
-  以及需要配置反爬策略（延迟、UA 轮换）和数据存储方式（Redis 队列 / Service）的场景。
-trigger: >-
-  从目标网站抓取数据、新建爬虫任务、为已有爬虫添加字段与管道、
-  配置反爬策略（延迟/UA 轮换）、数据存储方式选择（Redis 队列/Service）
+  Adds a TaskAwareRedisSpider under scrapy/spiders/ that ships items through
+  StorePipeline to Redis. Use when 新建爬虫, 抓站, 加 item 字段, or anti-crawl delay/UA.
 ---
 
 # 创建 Scrapy 爬虫
 
-当用户需要创建新的爬虫任务时，使用此 Skill 生成完整的 Scrapy 爬虫代码。
+先读 `scrapy/spiders/example.py` 再改编。骨架：[references/code-templates.md](references/code-templates.md)。
 
-## 触发场景
+爬虫只采集和清洗。出口：已有 `StorePipeline` → Redis `spider:item_queue`。
 
-- "爬取某网站的用户信息"
-- "创建一个新闻爬虫"
-- "抓取商品数据"
+## Route
 
-## 执行流程
+| 观察到 | 先做 |
+|--------|------|
+| 要 FastAPI CRUD / 落主库的 API | `new-svc` |
+| 只要改后端消费 item 的表结构 | `db-design` / `new-model`，本 skill 只改 Item 字段 |
 
-### Step 1: 确认爬虫信息
+## Quick start
 
-1. 爬虫名称（英文，小写+下划线）
-2. 目标网站 URL
-3. 需要爬取的字段
-4. 反爬策略（延迟、User-Agent 轮换）
-5. 数据存储方式（直接传 Service / 消息队列）
+信息不足时先问：`name`、allowed_domains、字段。
 
-### Step 2: 代码结构
+Copy and check off:
 
 ```
-scrapy/
-├── spiders/{spider_name}_spider.py  # 爬虫主文件
-├── items.py                          # 数据项定义
-├── pipelines.py                      # 数据管道
-├── middlewares.py                    # 中间件
-└── settings.py                       # 爬虫配置
+new-spider:
+- [ ] name 小写+下划线，redis_key = {name}:start_urls
+- [ ] scrapy/spiders/{name}.py 继承 TaskAwareRedisSpider
+- [ ] item 至少写 url / title / source；能复用 BaseItem 就复用
+- [ ] 新字段才改 scrapy/items/__init__.py（未声明字段 → KeyError → 任务卡 running）
+- [ ] 用现有 Clean/Validate/Quality/Store 管道，不新建 Pipeline、不改 ITEM_PIPELINES
+- [ ] 延迟/UA 走 settings + UserAgentMiddleware（站点级延迟写 config/scrapy/）
+- [ ] uv run python run.py --list 含新 name
+- [ ] bash tools/check/arch.sh 退出码 0
 ```
 
-### Step 3: 代码模板
+队列条目是 JSON `{"url":"...","task_id":123}`（纯 URL 也能兜底）。Worker：`uv run python run.py start spider` 或 `uv run python -m scripts.runlib.spider --spider {name}`。`--list` 没有新 name：修文件后再跑 `--list`。
 
-完整模板见 [references/code-templates.md](references/code-templates.md)，包含：
+## 完成时回复
 
-| 组件 | 文件路径 | 说明 |
-|------|---------|------|
-| Items | `scrapy/items.py` | 数据字段定义 |
-| Spider | `scrapy/spiders/{name}_spider.py` | 爬虫主文件（含 UA 轮换 + 延迟） |
-| Pipelines | `scrapy/pipelines.py` | 数据管道（发送到队列/Service） |
-| Settings | `scrapy/settings.py` | 并发/延迟/管道配置 |
+1. spider 路径 + `name` / `redis_key` / `allowed_domains`
+2. 若加了 Item 子类，写出新字段名
+3. `--list` 与 arch.sh 原文（退出码 0）
 
-### Step 4: 运行命令
+## Examples
 
-```bash
-scrapy crawl {spider_name}
-```
+**Input:** 「抓 zhihu.com 推荐流」
 
-## 预期产出物
-
-完成后**必须**存在以下文件/变更，缺少任何一个 = 未完成：
-
-```
-✅ 文件清单
-scrapy/spiders/{spider_name}_spider.py   # 爬虫主文件（含 UA 轮换 + DOWNLOAD_DELAY）
-scrapy/items.py                          # 新增 {SpiderName}Item 数据字段
-scrapy/pipelines.py                      # 新增 {SpiderName}Pipeline 数据管道
-scrapy/settings.py                       # ITEM_PIPELINES 已注册新管道
-```
-
-## 验证步骤
-
-生成代码后，**必须**依次执行以下验证（调用 `/verify`）：
-
-```bash
-# 1. 爬虫可列出
-uv run python run_spider.py --list
-
-# 2. 爬虫合约检查
-uv run scrapy check {spider_name}
-
-# 3. 架构红线（爬虫不 import backend）
-grep -rnE "import backend|from backend" scrapy/spiders/{spider_name}_spider.py
-# 期望：输出为空
-
-# 4. 反爬配置检查
-grep -nE "DOWNLOAD_DELAY|USER_AGENT" scrapy/settings.py
-# 期望：两个配置项均存在
-```
-
-全部通过后调用 `/check-arch` 做完整架构扫描。
+**Then:** 对齐 `scrapy/spiders/zhihu_feed.py`；`--list` 出现该 name；未新建 pipeline。

@@ -1,4 +1,5 @@
-#!/bin/bash
-# 数据库迁移（统一根 venv；alembic.ini 的 script_location 相对 backend/ 目录）
-cd "$(dirname "$0")/../backend"
-APP_ENV="${APP_ENV:-local}" ../.venv/bin/alembic -c alembic.ini upgrade head
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=../lib/common.sh
+. "$(cd "$(dirname "$0")/../lib" && pwd)/common.sh"
+alembic upgrade head

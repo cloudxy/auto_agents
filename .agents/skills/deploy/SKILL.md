@@ -1,83 +1,46 @@
 ---
 name: deploy
 description: >-
-  生成 Docker 部署配置。当用户需要将项目部署到服务器、进行容器化打包、
-  生成或修改 Dockerfile / docker-compose.yml / .env 配置时触发。
-  适用于首次部署、环境迁移、新增服务的容器化，以及调整已有部署的端口映射、
-  环境变量、数据卷等配置的场景。
-trigger: >-
-  部署到服务器、生成 Docker 配置、容器化项目、环境迁移、
-  调整端口映射/环境变量/数据卷、首次部署或新增服务容器化
+  Edits the existing root Dockerfile and docker-compose.yml. Use when 部署,
+  容器化, 改端口, 环境变量, or volumes.
 ---
 
-# 生成 Docker 部署配置
+# Docker 部署配置
 
-当用户需要部署服务时，使用此 Skill 生成 Docker 配置文件。
+约束：[references/docker-templates.md](references/docker-templates.md)。生产步骤：`docs/ops/deploy.md`（本地私有，可能不在 git）。
 
-## 触发场景
+## Route
 
-- "帮我部署到服务器"
-- "生成 Docker 配置"
-- "容器化这个项目"
+| 观察到 | 先做 |
+|--------|------|
+| GitHub Actions / lint / 测试门禁 | `cicd` |
+| 本机 `run.py` 启停，不改镜像 | 不用本 skill |
 
-## 执行流程
+## Quick start
 
-### Step 1: 确认部署信息
-
-1. 部署环境（开发/测试/生产）
-2. 是否需要数据库（MySQL/Redis）
-3. 端口映射需求
-4. 环境变量配置
-
-### Step 2: 生成文件
-
-根据部署信息，从 [references/docker-templates.md](references/docker-templates.md) 中选取并定制以下模板：
-
-| 模板 | 用途 |
-|------|------|
-| Backend Dockerfile | Python 3.11-slim + uvicorn 启动 |
-| Frontend Dockerfile | Node 多阶段构建 + nginx 静态服务 |
-| docker-compose.yml | MySQL + Redis + Backend + Frontend 编排 |
-| .env.example | 环境变量模板（DB / Redis / 端口） |
-| 部署命令 | docker-compose up -d / logs / rebuild |
-
-## 预期产出物
-
-完成后**必须**存在以下文件，缺少任何一个 = 未完成：
+Copy and check off:
 
 ```
-✅ 文件清单
-Dockerfile                                    # 后端容器（或按需求生成多个）
-docker-compose.yml                            # 服务编排
-.env.example                                  # 环境变量模板（无真实密码/密钥）
+deploy:
+- [ ] 读根 Dockerfile 与 docker-compose.yml（先改现有文件，不新建第二份）
+- [ ] 容器 AUTO_AGENTS_API__HOST=0.0.0.0；端口与 api.yml / EXPOSE / health 一致
+- [ ] 密钥只写 config/<env>/.env，键名对齐 .env.example
+- [ ] docker compose config --quiet
+- [ ] 若改了 Dockerfile：docker build -t auto-agents-backend .
 ```
 
-如包含前端部署，额外产出：
+命令用 `docker compose`（v2）。本地联调：`docker compose up --build`。宿主机 API：`bash init_project.sh` 后 `uv run python run.py`。
 
-```
-frontend/{admin,official}/Dockerfile          # 前端多阶段构建容器
-nginx.conf                                    # 反向代理配置
-```
+`config --quiet` 非 0：修 YAML 再跑同一条。
 
-## 验证步骤
+## 完成时回复
 
-生成配置后，**必须**依次执行以下验证（调用 `/verify`）：
+1. 改动的文件路径（Dockerfile / compose / `.env.example`）
+2. `docker compose config --quiet` 的退出码
+3. 若 build 了：镜像 tag 与最后几行
 
-```bash
-# 1. Docker 构建检查
-docker build -t _verify . && docker run --rm _verify echo ok
-# 期望：build + run 退出码 0
+## Examples
 
-# 2. docker-compose 配置验证
-docker-compose config
-# 期望：输出有效 YAML，无报错
+**Input:** 「把 API 端口改成 9111」
 
-# 3. 环境变量安全检查（禁止硬编码密钥）
-grep -nE "password|secret|key" docker-compose.yml .env.example
-# 期望：.env.example 用占位符，docker-compose.yml 用 ${} 引用
-
-# 4. 服务启动验证
-docker-compose up -d
-sleep 5 && docker-compose ps
-# 期望：所有服务状态为 Up / running
-```
+**Then:** 同步 `config/default/api.yml`、`Dockerfile` 的 EXPOSE/HEALTHCHECK、`docker-compose.yml` 的 ports；再 `docker compose config --quiet`。

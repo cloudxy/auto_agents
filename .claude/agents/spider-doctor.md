@@ -37,8 +37,8 @@ tools: Bash, Read, Grep, Glob
    - 输出：队列状态 + 是否需要 push 新 seed
 
 4. **Pipeline 异常**
-   - 看 `scrapy/pipelines/__init__.py` —— 注意 `StorePipeline` 是 TODO 状态
-   - 看 logs/spider_*.log 末尾的 traceback
+   - 链：`CleanPipeline` → `ValidatePipeline` → `QualityCheckPipeline` → `StorePipeline`（推 Redis `spider:item_queue`，不是 TODO）
+   - 看 `logs/spider/spider.log` 末尾 traceback
    - 输出：pipeline 链断在哪一级 + 修复建议
 
 ## 红线（绝对不能违反）

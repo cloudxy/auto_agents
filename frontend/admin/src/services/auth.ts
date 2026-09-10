@@ -18,6 +18,8 @@ export interface LoginResponse {
   /** 租户维度（与 JWT 同源）：租户视角菜单可见性判定（NULL=纯平台超管） */
   tenant_id?: number | null
   tenant_role?: string | null
+  /** 平台超管；缺省/旧客户端当 false（T-05 投影） */
+  is_platform_admin?: boolean
 }
 
 

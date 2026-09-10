@@ -6,13 +6,14 @@
 - test 信封 data={ok, latency_ms, model, error}，不落库（探测结论 data.ok 与信封
   success 语义正交，ADR-001 刻意不白名单）
 响应契约：统一 ApiResponse 信封（ADR-001）。
-GET 类端点 require_login；写操作（POST/PUT/DELETE/activate/test）require_admin 并审计。
+GET 类端点 require_login；本企业写与测试连接 require_operator（admin+operator）；
+平台级行仍由 Service 守卫拒绝（GWT-06.6 / 73.3）。
 """
 from fastapi import APIRouter, Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_admin, require_login
+from backend.app.api.deps import CurrentUser, require_login, require_operator
 from backend.app.responses import ApiResponse, created, deleted, ok, updated
 from backend.services.llm_provider_service import LlmProviderService
 from platform_core.db import get_async_db
@@ -29,6 +30,15 @@ router = APIRouter()
 
 def _service(session: AsyncSession = Depends(get_async_db)) -> LlmProviderService:
     return LlmProviderService(session)
+
+
+def _actor(user: CurrentUser) -> dict:
+    """平台行写守卫入参（本企业写已 require_operator；平台行仍 73.3）"""
+    return {
+        "actor_is_platform_admin": user.is_platform_admin,
+        "actor_id": user.id,
+        "actor_name": user.username,
+    }
 
 
 @router.get("/providers", response_model=ApiResponse[list[LlmProviderResponse]])
@@ -61,7 +71,7 @@ async def get_platform_presets():
 @router.post("/providers/models/probe")
 async def probe_provider_models(
     body: dict,
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_operator),
 ):
     """保存前拉取平台模型列表（key 不落库不写日志不回显）"""
     result = await LlmProviderService.probe_models(
@@ -75,7 +85,7 @@ async def probe_provider_models(
 @router.post("/providers/models/probe-test")
 async def probe_provider_model_test(
     body: dict,
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_operator),
 ):
     """保存前 1-token 连通测试（用表单当前配置真发一次）"""
     result = await LlmProviderService.probe_test(
@@ -90,7 +100,7 @@ async def probe_provider_model_test(
 @router.post("/providers/{provider_id}/models/fetch", response_model=ApiResponse[dict])
 async def fetch_provider_models(
     provider_id: int = Path(..., gt=0),
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_operator),
     service: LlmProviderService = Depends(_service),
 ):
     """远端模型列表 vs 本地三分类 diff（new/existing/vanished，不直写）"""
@@ -101,7 +111,7 @@ async def fetch_provider_models(
 async def test_provider_model(
     provider_id: int = Path(..., gt=0),
     model_id: str = Path(..., min_length=1, max_length=128),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
     service: LlmProviderService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -115,7 +125,7 @@ async def test_provider_model(
 @router.get("/providers/{provider_id}/models", response_model=ApiResponse[list[dict]])
 async def get_provider_models(
     provider_id: int = Path(..., gt=0),
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_operator),
     service: LlmProviderService = Depends(_service),
 ):
     """列供应商全部模型（含 tier/priority/健康态）"""
@@ -126,12 +136,14 @@ async def get_provider_models(
 async def put_provider_models(
     body: ProviderModelsUpdate,
     provider_id: int = Path(..., gt=0),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
     service: LlmProviderService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
     """模型集全量替换（is_default 至多一行；默认变更同事务刷新父行冗余列）"""
-    result = await service.put_models(provider_id, [m.model_dump() for m in body.models])
+    result = await service.put_models(
+        provider_id, [m.model_dump() for m in body.models], **_actor(user),
+    )
     await record_audit(session, user, "llm.provider.models.update", f"llm_provider#{provider_id}",
                        detail={"count": len(result)})
     return ok(data=result)
@@ -142,9 +154,9 @@ async def create_provider(
     payload: LlmProviderCreate,
     service: LlmProviderService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[LlmProviderResponse]:
-    """创建 LLM 供应商（仅管理员；api_key 落库为 Fernet 密文，未配置主密钥时拒绝保存）"""
+    """创建 LLM 供应商（经办/负责人；api_key 落库为 Fernet 密文，未配置主密钥时拒绝保存）"""
     item = await service.create_provider(payload)
     await record_audit(session, user, "llm.provider.create", f"llm_provider#{item.id}",
                        {"name": item.name})
@@ -157,10 +169,10 @@ async def update_provider(
     provider_id: int = Path(..., ge=1),
     service: LlmProviderService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[LlmProviderResponse]:
-    """更新 LLM 供应商（仅管理员；PATCH 语义，api_key 留空不修改）"""
-    item = await service.update_provider(provider_id, payload)
+    """更新 LLM 供应商（经办/负责人；PATCH 语义，api_key 留空不修改）"""
+    item = await service.update_provider(provider_id, payload, **_actor(user))
     await record_audit(session, user, "llm.provider.update", f"llm_provider#{provider_id}")
     return updated(item)
 
@@ -170,10 +182,10 @@ async def delete_provider(
     provider_id: int = Path(..., ge=1),
     service: LlmProviderService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[dict]:
-    """删除 LLM 供应商（仅管理员；激活位随行删除，无激活行时运行时配置走 yml/env 兜底）"""
-    result = await service.delete_provider(provider_id)
+    """删除 LLM 供应商（经办/负责人；激活位随行删除，无激活行时运行时配置走 yml/env 兜底）"""
+    result = await service.delete_provider(provider_id, **_actor(user))
     await record_audit(session, user, "llm.provider.delete", f"llm_provider#{provider_id}")
     return deleted(data=result)
 
@@ -183,10 +195,10 @@ async def activate_provider(
     provider_id: int = Path(..., ge=1),
     service: LlmProviderService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[LlmProviderResponse]:
-    """激活热切换（仅管理员；单激活互斥，目标行置 active、其余清零）"""
-    item = await service.activate_provider(provider_id)
+    """激活热切换（经办/负责人；单激活互斥，目标行置 active、其余清零）"""
+    item = await service.activate_provider(provider_id, **_actor(user))
     await record_audit(session, user, "llm.provider.activate", f"llm_provider#{provider_id}")
     return updated(item)
 
@@ -196,10 +208,10 @@ async def deactivate_provider(
     provider_id: int = Path(..., ge=1),
     service: LlmProviderService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[LlmProviderResponse]:
     """取消激活（全部下线走 yml/env 兜底；行保留可再激活）"""
-    item = await service.deactivate_provider(provider_id)
+    item = await service.deactivate_provider(provider_id, **_actor(user))
     await record_audit(session, user, "llm.provider.deactivate", f"llm_provider#{provider_id}")
     return updated(item)
 
@@ -209,10 +221,10 @@ async def test_provider_connectivity(
     provider_id: int = Path(..., ge=1),
     service: LlmProviderService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[LlmProviderTestResponse]:
-    """连通性测试（仅管理员；一次性 10s client 发 1-token 请求，结果不落库）"""
-    result = await service.test_connectivity(provider_id)
+    """连通性测试（经办/负责人；测该行地址，不要求 LiteLLM 存活）"""
+    result = await service.test_connectivity(provider_id, **_actor(user))
     await record_audit(session, user, "llm.provider.test", f"llm_provider#{provider_id}",
                        {"ok": result.ok})
     return ok(result)

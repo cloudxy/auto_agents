@@ -20,7 +20,10 @@ from backend.app.responses import (
     paginated,
     paginated_from_offset,
 )
-from backend.services.spider_query_service import SpiderQueryService
+from backend.services.spider_query_service import (
+    EMPTY_DATACENTER_COPY,
+    SpiderQueryService,
+)
 from platform_core.db import get_async_db
 from platform_core.schemas.spider import SpiderResultResponse
 
@@ -48,7 +51,11 @@ async def search_results(
         keyword=keyword,
     )
     return paginated(
-        items=resp.items, total=resp.total, page=page, page_size=page_size
+        items=resp.items,
+        total=resp.total,
+        page=page,
+        page_size=page_size,
+        message=EMPTY_DATACENTER_COPY if resp.total == 0 else "查询成功",
     )
 
 
@@ -69,7 +76,7 @@ async def delete_result(
 async def list_results(
     task_id: int = Path(..., ge=1),
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=100),
     service: SpiderQueryService = Depends(_query_service),
     _user: CurrentUser = Depends(require_login),
 ) -> PaginatedResponse[SpiderResultResponse]:
@@ -85,7 +92,7 @@ async def export_results(
     service: SpiderQueryService = Depends(_query_service),
     _user: CurrentUser = Depends(require_login),
 ) -> StreamingResponse:
-    """导出指定任务的全部采集结果（下载附件，流式传输避免大任务内存峰值）"""
+    """导出指定任务的非候选结果（csv/json；单次最多 100 条；空窗不下载）"""
     stream, filename, media_type = await service.export_results(task_id, format)
     return StreamingResponse(
         stream,

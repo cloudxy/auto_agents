@@ -67,10 +67,6 @@ htmlcov/
 !.claude/MEMORY.md
 !.claude/settings.json
 .claude/settings.local.json
-
-# ZCode：工作区命令走 .zcode/commands → .agents/commands；其余本地态不入库
-.zcode/*
-!.zcode/commands
 .lingma/*
 .gemini/*
 ai_tool/*

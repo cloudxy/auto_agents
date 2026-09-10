@@ -49,7 +49,7 @@ trigger: always_on
 | 数据流向不可逆 | 禁止循环 import（A→B→A） | `python -c "import backend.app"` 能否成功加载 |
 | 日志即证据 | service 方法必须有入口 logger | code review：每个 public 方法第一行 `logger.info` |
 | 异步优先 | async 上下文禁止同步 `redis_client()` 链式直调（阻塞事件循环），统一走 `get_async_redis()` | `grep -rnE 'redis_client\([^)]*\)\.' backend/` |
-| 门面退役过渡 | 禁止白名单外 import 过渡门面 backend.services.spider_service | 白名单见 scripts/check-arch.sh |
+| 门面退役过渡 | 禁止白名单外 import 过渡门面 backend.services.spider_service | 白名单见 tools/check/arch.sh |
 
 ## 核心代码边界（模块依赖方向）
 

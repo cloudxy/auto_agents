@@ -58,6 +58,9 @@ class ExpertService:
         # ADR-0007 D2：快照先于 commit（job 属性 expire 后读取会抛 MissingGreenlet）
         result = {"total": len(dirs), "succeeded": succeeded, "failed": failed,
                   "failed_names": failed_names, "job_id": job.id}
+        if result["total"] == 0:
+            result["empty"] = True
+            result["message"] = "没有可同步的包"
         await self.session.commit()
         return result
 

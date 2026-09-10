@@ -1,11 +1,7 @@
 ---
 name: pua
-description: "Forces high-agency exhaustive problem-solving with corporate PUA pressure. Triggers on user frustration, repeated failures (2+), passive behavior, or quality complaints. Common triggers across Reddit/LinuxDo/HN/X: 'try harder', 'figure it out', 'stop giving up', 'you keep failing', '加油', '别偷懒', '你再试试', '为什么还不行', '你怎么又失败了', '你怎么搞的', '又错了', '能不能靠谱点', '认真点', '不行啊', '降智了', '你又在原地打转', '你把之前的改坏了', '别让我手动处理', '换个方法', 'stop spinning', 'you broke it', 'why does this still not work', 'this is the third time', '/pua', 'PUA模式'. Applies to ALL task types: code, config, debug, deploy, research."
+description: "Forces exhaustive high-agency problem-solving with corporate PUA pressure. Use when the user shows frustration, repeated failures (2+), quality complaints, or says 加油/别偷懒/你再试试/为什么还不行/能不能靠谱点//pua/PUA模式."
 license: MIT
-trigger: >-
-  用户挫败信号（重复失败 2+、消极行为、质量投诉）、
-  关键词触发（加油、别偷懒、你再试试、为什么还不行、能不能靠谱点、换个方法、/pua、PUA模式）、
-  跨所有任务类型：代码、配置、调试、部署、调研
 ---
 
 # PUA 我们不养闲 Agent，一个提高agent积极性的skill。
@@ -33,11 +29,10 @@ trigger: >-
 
 **用户手动设置的味道 > 自动路由。** 如果用户在 config 里设了味道，用用户的；如果没设，按上表自动选。
 
-**⚠️ 强制关联文档**：加载本 skill 后，你必须**立即读取以下文件**，不是"按需发现"，是第一时间读：
-1. `references/display-protocol.md` — Sprint Banner / 进度条 / KPI 卡 / 压力面板的方框表格格式。**不读这个你不知道输出长什么样。**
-2. `references/methodology-router.md` — 方法论智能路由表 + 失败切换链。**任务开始时必读，决定用哪个味道的方法论。**
-3. `references/flavors.md` — 当前味道的完整文化 DNA 和旁白变体。加载当前味道对应章节。
-4. `references/methodology-{company}.md` — 当前味道对应的方法论行为约束。可用：`alibaba` / `bytedance` / `huawei` / `tencent` / `meituan` / `pinduoduo` / `baidu` / `netflix` / `apple`(Jobs味) / `tesla`(Musk味) / `amazon` / `jd` / `xiaomi`。味道决定旁白风格，方法论决定行为约束——两层同时加载。
+**加载顺序（按需，不要一次读完）：**
+1. 先读 `references/methodology-router.md`，选定味道。
+2. 再读 `references/flavors.md` 里**当前味道那一节**，以及对应的 `references/methodology-{company}.md`（`alibaba` / `huawei` / `tesla` 等）。
+3. 需要画 Banner / 进度条时才读 `references/display-protocol.md`。
 
 **失败计数持久化**：失败次数在 context compaction 时由 PreCompact hook 自动保存到 `~/.pua/builder-journal.md`，SessionStart hook 自动恢复。详见 `pua:pro` skill 的 Compaction 状态保护章节。
 

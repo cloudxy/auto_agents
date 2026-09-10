@@ -19,28 +19,11 @@
 # 豁免：迁移文件内含 SM-EXEMPT 注释即整体跳过（须注明豁免理由）。
 
 set -u
+# shellcheck source=common.sh
+. "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
 VERSIONS_DIR="backend/alembic/versions"
-VIOLATIONS=0
 CHANGED=""
-RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
-
-report() {
-    local rule="$1" detail="$2"
-    echo -e "${RED}✗ [${rule}]${NC} ${detail}"
-    VIOLATIONS=$((VIOLATIONS + 1))
-}
-
-# report_lines <检测器多行输出>：在当前 shell 内逐行解析并计数。
-# 关键：heredoc 方式的 while 循环不进子 shell，VIOLATIONS 自增可传回主 shell。
-report_lines() {
-    while IFS='|' read -r rule detail; do
-        [ -n "$rule" ] || continue
-        report "$rule" "$detail"
-    done <<EOF
-$1
-EOF
-}
 
 if [ ! -d "$VERSIONS_DIR" ]; then
     echo "check-db-migrations: 迁移目录不存在，跳过"

@@ -35,7 +35,9 @@ from backend.services.spider_common import (
     _STORE_TARGET_ENUM,
     extract_flow,
     extract_store_targets,
+    require_enqueue_tenant,
 )
+from backend.services.spider_worker_gate import annotate_tasks, require_online_worker
 from config import settings
 from platform_core.db import get_manager
 from platform_core.exceptions import BusinessException, NotFoundException
@@ -110,18 +112,24 @@ class SpiderTaskService:
         spider_name: Optional[str] = None,
     ) -> SpiderTaskListResponse:
         """分页列表（Service 层负责把 ORM 实体转成响应契约）"""
+        logger.info(f"列出爬虫任务: skip={skip}, limit={limit}")
         items = await self.repo.list_tasks(
             skip=skip, limit=limit, status=status, priority=priority, spider_name=spider_name
         )
         total = await self.repo.count(status=status, priority=priority, spider_name=spider_name)
-        return SpiderTaskListResponse(
-            total=total,
-            items=[SpiderTaskResponse.model_validate(t) for t in items],
-        )
+        annotated = await annotate_tasks(items, get_async_redis())
+        return SpiderTaskListResponse(total=total, items=annotated)
 
     def _max_concurrent(self) -> int:
         """同爬虫并发任务上限（配置即代码，至少 1）"""
         return max(1, int(settings.get("SPIDER_MAX_CONCURRENT_PER_SPIDER", 2)))
+
+    async def _check_enqueue_quota(self, tenant_id: int) -> None:
+        """入队前本租户并发配额（显式 tenant_id，不靠 Mixin 回填）"""
+        logger.debug(f"入队配额检查: tenant_id={tenant_id}")
+        from backend.services.quota_service import QuotaService
+
+        await QuotaService(self.session).check_task_concurrency(tenant_id)
 
     async def _ensure_spider_available(self, spider_name: str) -> None:
         """入队前注册表校验：DB 优先（存在且 enabled），无记录回退 yml 种子
@@ -158,6 +166,7 @@ class SpiderTaskService:
     ) -> SpiderTaskResponse:
         """入队一个新任务：数据库登记 + 投递 Redis 优先级队列（数据闭环入口）"""
         logger.info(f"爬虫任务入队: spider={spider_name}, priority={priority}")
+        owner_id = require_enqueue_tenant(tenant_id)
 
         # 阶段 5.1：含流程段（分页/详情/过滤）的任务统一归入 flow_generic 执行
         if extract_flow(params) is not None:
@@ -166,11 +175,8 @@ class SpiderTaskService:
         # 阶段 6：注册表校验（DB 优先，yml 兜底；停用/未登记拒绝）
         await self._ensure_spider_available(spider_name)
 
-        # 租户配额·任务并发（S1 接线；平台/无租户跳过）
-        if tenant_id is not None:
-            from backend.services.quota_service import QuotaService
-
-            await QuotaService(self.session).check_task_concurrency(tenant_id)
+        await require_online_worker(get_async_redis())
+        await self._check_enqueue_quota(owner_id)
 
         # 并发槽位守卫
         active_key = ACTIVE_TASK_KEY.format(spider_name=spider_name)
@@ -193,15 +199,14 @@ class SpiderTaskService:
             status="pending",
             params=params,
             priority=priority,
-            tenant_id=tenant_id,
+            tenant_id=owner_id,
         )
         await self.session.commit()
         await self.session.refresh(task)
 
-        # 投递任务消息到对应优先级队列
+        # 投递任务消息到对应优先级队列（不含 tenant_id：工人不决定归属，LREM 与 update 对齐）
         message = json.dumps(
-            {"task_id": task.id, "spider_name": spider_name, "params": params,
-             "tenant_id": tenant_id},
+            {"task_id": task.id, "spider_name": spider_name, "params": params},
             ensure_ascii=False,
         )
         try:
@@ -215,7 +220,17 @@ class SpiderTaskService:
             raise BusinessException("任务投递失败，请检查 Redis 连接")
 
         logger.info(f"爬虫任务已投递: spider={spider_name}, task_id={task.id}")
+        await self._emit_submitted(task)
         return SpiderTaskResponse.model_validate(task)
+
+    async def _emit_submitted(self, task) -> None:
+        logger.info(f"入队事件 | task={task.id} spider={task.spider_name}")
+        from backend.services.product_event_service import emit_product_event
+        await emit_product_event(
+            self.session, "task_run_submitted",
+            tenant_id=getattr(task, "tenant_id", None),
+            props={"spider": task.spider_name},
+        )
 
     async def update_task(
         self,
@@ -481,10 +496,28 @@ class SpiderTaskService:
             "params": task.params,
             "started_at": task.started_at,
             "completed_at": task.completed_at,
+            "tenant_id": getattr(task, "tenant_id", None),
         }
+        if status == "completed":
+            await self._emit_completed(snapshot)
         _spawn_side_effect(self._run_finish_side_effects(snapshot))
-
         return SpiderTaskResponse.model_validate(task)
+
+    async def _emit_completed(self, snapshot: dict) -> None:
+        logger.info(f"完成事件 | task={snapshot['id']}")
+        from backend.services.product_event_service import emit_product_event
+        spider = snapshot["spider_name"]
+        is_mkt = spider == "skill_harvester"
+        await emit_product_event(
+            self.session, "task_completed",
+            tenant_id=snapshot.get("tenant_id"),
+            props={
+                "result_count": snapshot["result_count"],
+                "spider": spider,
+                "source": "marketplace" if is_mkt else "collect",
+                "is_marketplace_candidate": is_mkt,
+            },
+        )
 
     async def _run_finish_side_effects(self, snapshot: dict) -> None:
         """终态副作用后台协程（由 _spawn_side_effect 启动，不阻塞 webhook 主路径）

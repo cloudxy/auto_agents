@@ -103,22 +103,21 @@ const Dashboard: React.FC = () => {
       {/* UX2（工单 90）：新用户 onboarding——零任务时三步快速开始引导 */}
       {!loading && stats && (stats.total_tasks ?? 0) === 0 && (
         <Alert type="info" showIcon style={{ marginBottom: 16 }}
-               message="从这里开始你的第一次智能采集（三步）"
+               title="还没有采集任务。按下面三步开始。"
                description={
                  <ol style={{ margin: '8px 0 0', paddingLeft: 20, lineHeight: 2 }}>
                    <li>
-                     配置 LLM 供应商（AI 规划的"大脑"）：前往
+                     配置本企业模型：前往
                      <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/llm')}>LLM 配置</Button>
-                     添加 Key 并激活
                    </li>
                    <li>
-                     创建第一个采集任务：在
+                     创建采集任务：在
                      <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/spiders/tasks')}>采集任务</Button>
                      页选择爬虫并提交
                    </li>
                    <li>
-                     或直接体验 <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/ai')}>AI 采集规划</Button>
-                     ：粘贴链接，AI 自动生成方案、试采并上线
+                     AI 采集规划：
+                     <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/ai')}>AI 采集规划</Button>
                    </li>
                  </ol>
                }
@@ -212,7 +211,7 @@ const Dashboard: React.FC = () => {
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
-                  <Empty description="近 7 日暂无运行数据" />
+                  <Empty description="近 7 日还没有运行记录。" />
                 )}
               </Card>
             </Col>

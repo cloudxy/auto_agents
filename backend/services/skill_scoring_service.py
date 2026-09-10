@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.ai_planner.llm_client import llm_chat
+from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
 from platform_core.models.skill import Skill, SkillJob, SkillReview
 from platform_core.redis_async import get_async_redis
@@ -51,6 +52,19 @@ def _build_messages(skill_md: str, source_url: str) -> list[dict]:
     ]
 
 
+def _parse_score_payload(raw) -> tuple[str, int | None]:
+    """兼容历史纯技能名与 T-17 JSON {name, tenant_id}。"""
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    text = str(raw or "")
+    if not text.startswith("{"):
+        return text, None
+    data = json.loads(text)
+    name = str(data.get("name") or "")
+    tid = data.get("tenant_id")
+    return name, int(tid) if tid is not None else None
+
+
 def _parse_llm_json(text: str) -> dict:
     """容错解析 LLM 输出：剥 markdown 代码围栏后 json.loads；失败抛 ValueError"""
     cleaned = text.strip()
@@ -73,16 +87,34 @@ class SkillScoringService:
     @staticmethod
     async def enqueue_rescore(name: str) -> int:
         """入评分队列（导入成功/内容变更/手动触发共用入口）"""
+        logger.info(f"入评分队列 | skill={name}")
+        from platform_core.tenant_context import current_tenant_id
+
         redis = await get_async_redis()
-        return await redis.lpush(SKILL_SCORE_QUEUE, name)
+        tid = current_tenant_id()
+        payload = name if tid is None else json.dumps(
+            {"name": name, "tenant_id": int(tid)}, separators=(",", ":"),
+        )
+        return await redis.lpush(SKILL_SCORE_QUEUE, payload)
 
     async def consume_once(self) -> dict:
         """消费一条评分任务（rpop 一条；空队列返回 idle）"""
         redis = await get_async_redis()
-        name = await redis.rpop(SKILL_SCORE_QUEUE)
-        if not name:
+        raw = await redis.rpop(SKILL_SCORE_QUEUE)
+        if not raw:
             return {"status": "idle"}
-        return await self.score_skill(name)
+        return await self._score_payload(raw)
+
+    async def _score_payload(self, raw) -> dict:
+        """解析队列载荷；有 tenant_id 则进 tenant_scope 再评分（BYOK 四动作）。"""
+        name, tid = _parse_score_payload(raw)
+        logger.info(f"消费评分任务 | skill={name} tenant={tid}")
+        if tid is None:
+            return await self.score_skill(name)
+        from platform_core.tenant_context import tenant_scope
+
+        with tenant_scope(tid):
+            return await self.score_skill(name)
 
     async def score_skill(self, name: str) -> dict:
         """单个技能评分：LLM → 校验（失败重试 1 次）→ 落库（AI 字段与 reviews(ai)）"""
@@ -111,12 +143,23 @@ class SkillScoringService:
                 )
                 result = SkillScoringResult.model_validate(_parse_llm_json(text))
                 return await self._apply_result(row, result, attempt)
+            except BusinessException as exc:
+                if exc.code in (
+                    "LLM_GATEWAY_NO_MODEL", "LLM_GATEWAY_UNREACHABLE",
+                    "QUOTA_EXCEEDED", "LLM_PROVIDER_ERROR",
+                ):
+                    self._record_failure(name, exc.message)
+                    await self.session.flush()
+                    return {"status": "failed", "attempts": attempt, "error": exc.message}
+                last_error = exc
+                logger.warning(f"技能评分失败 | skill={name} attempt={attempt} err={exc}")
             except Exception as exc:  # noqa: BLE001 校验/解析/调用失败进入重试
                 last_error = exc
                 logger.warning(f"技能评分失败 | skill={name} attempt={attempt} err={exc}")
-        self._record_failure(name, str(last_error))
+        reason = getattr(last_error, "message", None) or str(last_error)
+        self._record_failure(name, reason)
         await self.session.flush()
-        return {"status": "failed", "attempts": 2, "error": str(last_error)}
+        return {"status": "failed", "attempts": 2, "error": reason}
 
     async def _apply_result(self, row: Skill, result: SkillScoringResult, attempts: int) -> dict:
         """落库：只写 AI 建议字段与 reviews(ai)——score/rubric_human 永不被 AI 写"""
@@ -218,7 +261,7 @@ class SkillScoringWorker:
                         continue
                     manager = get_manager()
                     async with AsyncSession(manager.async_engines["DEFAULT"]) as session:
-                        result = await SkillScoringService(session).score_skill(name)
+                        result = await SkillScoringService(session)._score_payload(name)
                         await session.commit()
                     logger.info(f"技能评分完成 | skill={name} result={result.get('status')}")
             except asyncio.CancelledError:

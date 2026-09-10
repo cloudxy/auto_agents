@@ -24,13 +24,28 @@ from urllib.parse import quote_plus  # noqa: E402
 
 mysql_conf = settings.MYSQL.DEFAULT
 _password = os.getenv('MYSQL_DEFAULT_PASSWORD') or str(settings.get('MYSQL_DEFAULT_PASSWORD', ''))
-_db_url = (
+_db_url = os.environ.get("ALEMBIC_URL") or (
     f"mysql+pymysql://{mysql_conf.USER}:{quote_plus(_password)}@{mysql_conf.HOST}:"
     f"{mysql_conf.PORT}/{mysql_conf.DB_NAME}?charset=utf8mb4"
 )
 config.set_main_option("sqlalchemy.url", _db_url)
 
 target_metadata = Base.metadata
+
+
+def include_object(object, name, type_, reflected, compare_to):
+    """ALEMBIC_INCLUDE_TABLES=a,b 时只 autogenerate 这些表（T-12/T-21 增量）。"""
+    allowed = os.environ.get("ALEMBIC_INCLUDE_TABLES", "").strip()
+    if not allowed:
+        return True
+    names = {n.strip() for n in allowed.split(",") if n.strip()}
+    if type_ == "table":
+        return getattr(object, "name", name) in names
+    table = getattr(object, "table", None)
+    if table is not None:
+        return table.name in names
+    return True
+
 
 def run_migrations_offline():
     url = config.get_main_option("sqlalchemy.url")
@@ -39,6 +54,7 @@ def run_migrations_offline():
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -52,7 +68,8 @@ def run_migrations_online():
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
-            target_metadata=target_metadata
+            target_metadata=target_metadata,
+            include_object=include_object,
         )
         with context.begin_transaction():
             context.run_migrations()

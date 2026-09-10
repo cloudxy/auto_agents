@@ -4,34 +4,28 @@
 
 ## Last
 
-- Date: 2026-09-08
-- Hat: 定义 / 并行诊断
-- Outputs: `.sdlc/feat-four-pillars-v2/01-define/diagnosis/qa.md`
+- Date: 2026-09-10
+- Hat: 验证
+- Outputs: `.sdlc/feat-four-pillars-v2/04-verify/coverage.md`
 
 ## Facts
 
-- Suite 2026-09-08: pytest 103/1050; Jest 7/16; e2e null.
-- grok-files qa-diagnosis == old sdlc qa.md (2026-09-07). Stale vs spec v1.4 on QA-02 (`GWT-15.1` has `is_marketplace_candidate`).
-- Findings: round 3 fail QA-29; no round 4. v1.4 self-close ≠ gate.
-- Conflicts still in code:
-  - `test_scan_plugins_ok` locks viewer 200 (`viewer_client` override + `db_client.post`); `capabilities.py` all `require_login`; scan has no audit.
-  - `admin_client` = `role=admin, is_platform_admin=False` → `require_platform_admin` 403. Pattern: `test_create_tenant_plain_admin_403`.
-  - `/public/capabilities` SQL `status=stable`; `/public/skills` includes recommended. `only_stable` seed has no recommended row.
-  - `test_plugin_verify_no_mcp_degraded` locks `degraded`; CONTEXT/ADR-0018 say `unknown`.
-  - No `btn:market:*`. Admin scan/verify no `usePermission`.
-  - `listing_state`/installs/sources: 0 backend hits. `ALL_ORM_TABLES`=40; fidelity comment “14 tables”. MYSQL_FIDELITY 8 files exclude b1c/public.
-- XSS only in `SkillsSquare.test.tsx`. Migrate before deleting page.
-- Hollow: `or True` wiring/byok; harvester empty-tuple; EXPLAIN on dict.
-- Did not write `04-verify/coverage.md`. Did not edit tests.
+- Frozen set: FR-01…20 + 70…75 + 30…45 + NFR-01…10. Stub FR-50/51/60/61 = N/A Wave 2/3. Six Qs N/A 不代选.
+- GWT-18.1 / TC-18.1 **✅** live Then（非 FakeRedis）：`run.py restart spider`；tenant `qc181-1789008085`；task #2 example+httpbin；+6.1s running count=1；**+40.6s completed count=1**；export JSON 200 rows 1；elapsed **40.56s ≤ 120s**. Idle close **30 ≠** 18.4 窗 **120**. 旧 +129s（idle 当时 120）作废.
+- C35-QA-03 Register **已关**：`Register.test.tsx:177` 钉 FREE_TIER_FEATURE_COPY、禁 10000.
+- NFR-07 **✅**：Home:76 / Pricing:70 / Register:192 ≥44px；Jest 4 passed exit 0.
+- wiring/byok `or True` **已关**；pytest 两文件 14 passed exit 0.
+- 01.1 / 06.1 / NFR-01 / 37.6 保持 ✅. 未发明 FR-50 覆盖. 未改 GWT/产品.
+- Dialect: pytest SQLite / prod MySQL 8. ESC-2 NULLS LAST 仍有效.
+- 未写 test-report.md / release-opinion.md.
 
 ## Open (mine)
 
-- v2 spec must pin diagnosis §8 (identity, public formula, `/public/skills` fate, no-MCP enum, host_compat NULL vs [], pairwise, MYSQL_FIDELITY on new uniques) or cases stay pending GWT.
-- Q-VOICE/Q-PRICE block positive CTA asserts.
+- 16.1 时区 / IM-02/03/18/26 / 一次性 live 未入库 CI → sre 或实现债，本帽不改产品.
+- MYSQL_FIDELITY 预发已过，未进仓库 CI.
 
 ## Do not re-litigate
 
-- Suite counts (re-collected 2026-09-08).
-- `admin_client` ≠ platform admin.
-- Old qa.md QA-02 blocker vs v1.4 text.
-- No full FR↔TC matrix until v2 spec frozen.
+- 六问答案。Wave 2/3 施工。GWT 正文。T-33 implement PASS ≠ 覆盖完成.
+- 18.4 标注窗保持 120s，不得写成 idle 30.
+- 01.1 / 06.1 保持 ✅.

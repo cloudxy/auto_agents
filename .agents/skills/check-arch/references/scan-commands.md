@@ -1,93 +1,58 @@
-# 架构红线 + 核心代码边界扫描命令
+# 架构扫描地图
 
-按信条分组，一次 Bash 批量执行。路径相对项目根目录。
-
-## 配置即代码
+执法入口：
 
 ```bash
-# R1: 硬编码连接串
-echo "=== R1: 硬编码连接串 ==="
-grep -rnE "(mysql|postgres|redis)://[^\$\{]" backend/ scrapy/ 2>/dev/null | grep -vE "\.env\.example|README"
-
-# R2: 明文 password
-echo "=== R2: 明文 password ==="
-grep -rnE 'password\s*=\s*"[^$]' backend/ scrapy/ 2>/dev/null | grep -vE "example|test_"
+bash tools/check/arch.sh
 ```
 
-## 爬取与存储分离
+本页解释脚本在查什么。正则、排除目录、R12 白名单、R13 豁免以脚本为准。
 
-```bash
-# R3: scrapy 禁止 import backend 内部
-echo "=== R3: scrapy → backend 反向依赖 ==="
-grep -rnE "^(from|import) (backend|app)\." scrapy/ 2>/dev/null
+## Contents
 
-# R4: scrapy 禁止使用 SQLAlchemy Session（platform_core.models 仅作只读契约，禁止配 Session 写入）
-echo "=== R4: scrapy 使用 SQLAlchemy ==="
-grep -rnE "from sqlalchemy|SessionLocal|mysql_session|get_async_db" scrapy/ 2>/dev/null
-```
+- R1–R13 红线
+- B1–B3 边界
+- 修复路由
 
-## 反爬是底线
+## 红线（R1–R13）
 
-```bash
-# R5: DOWNLOAD_DELAY 必配
-echo "=== R5: DOWNLOAD_DELAY ==="
-grep -E "DOWNLOAD_DELAY" scrapy/settings.py 2>/dev/null || echo "❌ 缺失 DOWNLOAD_DELAY"
+| 规则 | 信条 | 脚本在查什么 |
+|------|------|----------------|
+| R1 | 配置即代码 | `backend/` `scrapy/` 硬编码 `mysql://` `postgres://` `redis://` |
+| R2 | 配置即代码 | 明文 `password="..."` |
+| R3 | 爬取与存储分离 | scrapy import `backend` / `app` |
+| R4 | 爬取与存储分离 | scrapy 使用 SQLAlchemy Session |
+| R5 | 反爬 | `scrapy/settings.py` 含 `DOWNLOAD_DELAY` |
+| R6 | 反爬 | `scrapy/` 含 `USER_AGENT` 或 `UserAgentMiddleware` |
+| R7 | 模型即契约 | API 层 import ORM（含 `platform_core.models.<sub>` 与 `external_api/`） |
+| R8 | 模型即契约 | `platform_core/models/` import schemas |
+| R9 | 数据流向不可逆 | `uv run python -c 'import backend.app'` 循环 import |
+| R10 | 日志即证据 | `backend/services/*.py` 公开方法下一行无 `logger.` |
+| R11 | 异步优先 | `redis_client(...).` 链式直调 |
+| R12 | 门面退役 | 白名单外 import `backend.services.spider_service` |
+| R13 | 租户过滤 | 隔离安装点 + `backend/app/tenant_isolation.py` 同步 |
 
-# R6: USER_AGENT 轮换
-echo "=== R6: USER_AGENT 轮换 ==="
-grep -rnE "USER_AGENT|UserAgentMiddleware" scrapy/ 2>/dev/null | head -5 || echo "❌ 缺失 USER_AGENT 配置"
-```
+## 边界（B1–B3）
 
-## 模型即契约
+| 边界 | 禁止 |
+|------|------|
+| B1 | `platform_core/` import `backend` / `scrapy` |
+| B2 | `backend/` import `scrapy` |
+| B3 | `config/` import `backend` / `scrapy` / `platform_core` |
 
-```bash
-# R7: API 层禁止 import ORM 模型
-echo "=== R7: API 层 import models ==="
-grep -rnE "from.*\.models import" backend/app/api/ 2>/dev/null
+## 修法
 
-# R8: ORM 模型禁止 import Pydantic schema
-echo "=== R8: models 反向 import schemas ==="
-grep -rnE "from.*\.schemas import" platform_core/models/ 2>/dev/null
-```
+| 违规 | 修法 |
+|------|------|
+| R1 / R2 | 读 `settings.*`，密钥进 `config/<env>/.env`（AGENTS.md 配置） |
+| R3 / R4 | Redis 队列 |
+| R5 / R6 | `new-spider`：延迟和 UA 在 settings / middleware |
+| R7 / R8 | `new-model`：转换只在 Service |
+| R9 | 拆环或延迟 import |
+| R10 | service 公开方法入口有 `logger.`（AGENTS.md 日志） |
+| R11 | `get_async_redis()` |
+| R12 | 直连子 Service；白名单只在脚本里 |
+| R13 | `backend/app/tenant_isolation.py` |
+| B1–B3 | `platform_core` → `config`；backend 不 import scrapy；config 无上层依赖 |
 
-## 数据流向不可逆
-
-```bash
-# R9: 循环 import 检测
-echo "=== R9: 循环 import ==="
-python -c "import backend.app" 2>&1 | grep -iE "circular|cannot import name" || echo "✓ 无循环 import"
-```
-
-## 日志即证据
-
-```bash
-# R10: service 公共方法入口必须有 logger（启发式扫描）
-echo "=== R10: service 方法入口缺 logger ==="
-for f in backend/services/*.py; do
-  awk '/^(async )?def [a-z]/ {name=$0; getline; if ($0 !~ /logger\./) print FILENAME":"NR-1": "name}' "$f"
-done 2>/dev/null
-```
-
-## 异步优先
-
-```bash
-# R11: async 上下文禁止同步 redis_client() 链式直调（阻塞事件循环，统一走 get_async_redis）
-echo "=== R11: 同步 redis_client() 直调 ==="
-grep -rnE 'redis_client\([^)]*\)\.' backend/ 2>/dev/null
-```
-
-## 核心代码边界（模块依赖方向）
-
-```bash
-# B1: platform_core 只依赖 config，禁止反向依赖 backend / scrapy
-echo "=== B1: platform_core → backend/scrapy 反向依赖 ==="
-grep -rnE "^(from|import) (backend|scrapy)" platform_core/ 2>/dev/null
-
-# B2: backend 禁止直接 import scrapy（应通过 Redis 队列 / API 解耦）
-echo "=== B2: backend → scrapy 直接依赖 ==="
-grep -rnE "^(from|import) scrapy" backend/ 2>/dev/null
-
-# B3: config 是最底层，禁止 import 任何业务模块
-echo "=== B3: config → 业务模块反向依赖 ==="
-grep -rnE "^(from|import) (backend|scrapy|platform_core)" config/ 2>/dev/null
-```
+改完再跑 `bash tools/check/arch.sh`，以退出码为准。

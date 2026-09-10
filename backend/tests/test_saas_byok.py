@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from backend.services.llm_provider_service import LlmProviderService
-from backend.services.quota_service import QuotaExceededException, QuotaService
+from backend.services.quota_service import QuotaExceededException
 from platform_core.models.llm_provider import LlmProvider
 from platform_core.models.tenant import Tenant
 from platform_core.tenant_context import tenant_scope
@@ -42,47 +42,155 @@ async def test_tenant_isolated_keys_and_metering(db_session, monkeypatch):
         async with db_session() as s:
             cfg = await LlmProviderService(s).resolve_runtime_config()
             visible = set((await s.execute(select(LlmProvider.name))).scalars())
-    assert cfg.source.startswith("provider:") and "a-key" in cfg.source or True
-    assert cfg.base_url == "https://a"
+            a_id = (await s.execute(
+                select(LlmProvider.id).where(LlmProvider.name == "a-key")
+            )).scalar_one()
+    assert (
+        cfg.source.startswith("provider:")
+        and cfg.source == f"provider:{a_id}"
+        and cfg.provider_id == a_id
+        and cfg.base_url == "https://a"
+        and "a-key" in visible
+        and "b-key" not in visible
+    )
     assert visible == {"a-key", "platform"}  # 本租户 + 平台公共
 
     with tenant_scope(t2):
         async with db_session() as s:
             cfg2 = await LlmProviderService(s).resolve_runtime_config()
-    assert cfg2.base_url == "https://b"
+            visible2 = set((await s.execute(select(LlmProvider.name))).scalars())
+            b_id = (await s.execute(
+                select(LlmProvider.id).where(LlmProvider.name == "b-key")
+            )).scalar_one()
+    assert (
+        cfg2.source.startswith("provider:")
+        and cfg2.source == f"provider:{b_id}"
+        and cfg2.provider_id == b_id
+        and cfg2.base_url == "https://b"
+        and "b-key" in visible2
+        and "a-key" not in visible2
+    )
+    assert cfg.provider_id != cfg2.provider_id
 
 
 @pytest.mark.asyncio
 async def test_no_own_key_falls_back_to_platform(db_session, monkeypatch):
-    """租户无自有行 → 平台公共行兜底（免费档语义）"""
+    """T-16 SH-01：无自有行 outbound=网关 URL，不是 https://pub。"""
+    import backend.services.ai_planner.llm_client as lc
+    import backend.services.ai_planner_service as aps
+    from config import settings
+
     t1, t2 = await _seed(db_session, monkeypatch)
     async with db_session() as s:
         a_row = (await s.execute(select(LlmProvider).where(LlmProvider.name == "a-key"))).scalar_one()
         a_row.is_active = False
         a_row.enabled = False
         await s.commit()
-    with tenant_scope(t1):
-        async with db_session() as s:
-            cfg = await LlmProviderService(s).resolve_runtime_config()
-    assert cfg.base_url == "https://pub"  # 平台兜底
+
+    prev_plane = settings.get("LLM.DATA_PLANE")
+    prev_base = settings.get("LITELLM.BASE_URL")
+    settings.set("LLM.DATA_PLANE", "litellm")
+    settings.set("LITELLM.BASE_URL", "http://gw.test")
+    settings.set("LITELLM.MASTER_KEY", "sk-virt")
+    settings.set("LLM.MAX_RETRIES", 1)
+    outbound: list[str] = []
+
+    async def _http(method, path, **_kw):
+        url = f"http://gw.test{path}"
+        if method == "GET" and path == "/v1/models":
+            return {"data": [{"id": "m"}]}
+        if method == "POST" and path == "/v1/chat/completions":
+            outbound.append(url)
+            return {
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {"total_tokens": 1, "prompt_tokens": 1, "completion_tokens": 0},
+            }
+        raise AssertionError(path)
+
+    async def _month(*_a, **_k):
+        return 0
+
+    async def _sleep(*_a, **_k):
+        return None
+
+    def _boom():
+        raise AssertionError("SH-16: except 禁止 resolve_config_from_settings")
+
+    monkeypatch.setattr("backend.services.llm_gateway._settings._http_json", _http)
+    monkeypatch.setattr("backend.services.llm_gateway.chat._http_json", _http)
+    monkeypatch.setattr(aps, "quota_session_factory", db_session, raising=False)
+    monkeypatch.setattr(lc, "get_month_used", _month)
+    monkeypatch.setattr(lc.asyncio, "sleep", _sleep)
+    monkeypatch.setattr(lc, "resolve_config_from_settings", _boom)
+    try:
+        with tenant_scope(t1):
+            content = await lc.llm_chat([{"role": "user", "content": "hi"}])
+        assert content == "ok"
+        assert outbound == ["http://gw.test/v1/chat/completions"]
+        assert all("https://pub" not in u for u in outbound)
+        assert t2
+    finally:
+        if prev_plane is not None:
+            settings.set("LLM.DATA_PLANE", prev_plane)
+        if prev_base is not None:
+            settings.set("LITELLM.BASE_URL", prev_base)
 
 
 @pytest.mark.asyncio
 async def test_platform_fallback_subject_to_token_quota(db_session, monkeypatch):
-    """平台兜底 + token 配额联动：超配额的租户用平台行也被拒（免费档约束）"""
+    """平台兜底 + token 配额联动：满额拒绝发生在真正 HTTP 出站前。"""
     from datetime import date
 
+    import backend.services.ai_planner_service as aps
+    import backend.services.ai_planner.llm_client as lc
+    from backend.services.llm_common import LlmRuntimeConfig
+    from backend.services.quota_service import PLAN_FULL_CTA, PLAN_FULL_USER
     from platform_core.models.llm_token_usage import LlmTokenUsage
 
     t1, t2 = await _seed(db_session, monkeypatch)
     async with db_session() as s:
         tenant_row = (await s.execute(select(Tenant).where(Tenant.slug == "byok1"))).scalar_one()
         tenant_row.quota = {"llm_tokens_month": 100}
+        a_row = (await s.execute(select(LlmProvider).where(LlmProvider.name == "a-key"))).scalar_one()
+        a_row.is_active = False
+        a_row.enabled = False
         s.add(LlmTokenUsage(tenant_id=t1, provider_name="provider:plat", model="m",
                             stat_date=date(2026, 9, 1), total_tokens=150))
         await s.commit()
 
+    outbound: list = []
+
+    async def _resolve():
+        return LlmRuntimeConfig(
+            base_url="https://pub", api_key="sk-pub", model="m",
+            temperature=0.2, timeout=5, max_retries=1, enabled=True,
+            source="provider:platform", provider_id=None, protocol="openai_compatible",
+        )
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            outbound.append({"url": url})
+            raise AssertionError("套餐闸必须在出站 HTTP 前拒绝")
+
+    monkeypatch.setattr(
+        "backend.services.ai_planner_service._resolve_llm_runtime_config", _resolve,
+    )
+    monkeypatch.setattr(aps, "quota_session_factory", db_session, raising=False)
+    monkeypatch.setattr(lc.httpx, "AsyncClient", _Client)
+
     with tenant_scope(t1):
-        async with db_session() as s:
-            with pytest.raises(QuotaExceededException, match="LLM token"):
-                await QuotaService(s).check_llm_tokens_month(t1, "2026-09")
+        with pytest.raises(QuotaExceededException, match="LLM token") as ei:
+            await lc.llm_chat([{"role": "user", "content": "hi"}])
+    assert PLAN_FULL_USER in ei.value.message
+    assert PLAN_FULL_CTA in ei.value.message
+    assert outbound == []
+    assert t2  # 对照租户已种子，本夹具只闸 t1

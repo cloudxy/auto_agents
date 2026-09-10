@@ -6,7 +6,7 @@ create_app().openapi() 离线生成（不起服务、不连 DB/Redis——路由
 frontend/shared/src/api/schema.d.ts。后端改字段 → 重跑本脚本 + codegen
 即前端类型同步。
 
-用法：uv run python scripts/dump_openapi.py [输出路径]
+用法：uv run python tools/dump_openapi.py [输出路径]
 """
 import json
 import sys

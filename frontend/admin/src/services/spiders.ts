@@ -43,6 +43,7 @@ export interface Task {
   result_count: number
   retry_count?: number
   error_message?: string | null
+  worker_offline?: boolean
   params?: string | null
   created_at?: string | null
   started_at?: string | null
@@ -198,11 +199,30 @@ export const updateDefinition = (name: string, enabled: boolean): Promise<Spider
 
 /** 结果导出（blob 下载，自动携带鉴权 Token；二进制流白名单，不解信封） */
 export const exportResults = async (taskId: number, format: 'csv' | 'json'): Promise<Blob> => {
-  const res = await api.get(`/spiders/results/${taskId}/export`, {
-    params: { format },
-    responseType: 'blob',
-  })
-  return res as unknown as Blob
+  try {
+    const res = await api.get(`/spiders/results/${taskId}/export`, {
+      params: { format },
+      responseType: 'blob',
+    })
+    return res as unknown as Blob
+  } catch (error) {
+    const data = (error as { response?: { data?: unknown } })?.response?.data
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+      const text = await data.text()
+      let msg: string | undefined
+      try {
+        msg = (JSON.parse(text) as { message?: string }).message
+      } catch {
+        msg = undefined
+      }
+      if (msg) {
+        const wrapped = new Error(msg) as Error & { response: { data: { message: string } } }
+        wrapped.response = { data: { message: msg } }
+        throw wrapped
+      }
+    }
+    throw error
+  }
 }
 
 // ---------------- 待执行任务编辑（阶段一）----------------

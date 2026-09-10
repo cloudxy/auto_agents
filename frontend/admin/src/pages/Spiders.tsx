@@ -10,16 +10,18 @@
  * - 定时任务：Cron 调度计划管理（创建/启停/删除）
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Card, Tabs, message } from 'antd'
+import { Alert, Card, Tabs, message } from 'antd'
 import { ClockCircleOutlined, AlertOutlined, BookOutlined } from '@ant-design/icons'
 import {
   fetchRegistry, fetchTasks, deleteTask, controlTask,
   fetchTemplates,
 } from '../services/spiders'
+import { fetchNodesPage } from '../services/admin'
 import { usePermission } from '../hooks/usePermission'
 import { apiErrorMessage } from '../utils/errorMessage'
 import type { SpiderMap, Task, SpiderRegistry, TaskTemplate } from '../components/spider/types'
 import type { TaskPreset } from '../components/spider/TaskModal'
+import { SPIDER_WORKER_OFFLINE_COPY } from '../components/spider/copy'
 
 import { TaskList } from '../components/spider/TaskList'
 import { TaskModal } from '../components/spider/TaskModal'
@@ -76,6 +78,13 @@ const Spiders: React.FC = () => {
   }, [registry])
 
   // 工单 78：任务列表交 react-query（U1-1 服务端真分页；存在未终态任务时 3s 轮询）
+  const { data: nodesRes, isFetched: nodesFetched } = useQuery({
+    queryKey: ['spider-nodes'],
+    queryFn: () => fetchNodesPage<{ worker_id: string }>(),
+    refetchInterval: 15000,
+  })
+  const workerOffline = nodesFetched && (nodesRes?.total ?? 0) === 0
+
   const { data: tasksRes, isLoading: loading, refetch: refetchTasks } = useQuery({
     queryKey: ['spider-tasks', page, priorityFilter, statusFilter, spiderFilter],
     queryFn: () => fetchTasks((page - 1) * PAGE_SIZE, PAGE_SIZE, {
@@ -170,6 +179,14 @@ const Spiders: React.FC = () => {
 
   return (
     <Card title="采集任务">
+      {workerOffline && (
+        <Alert
+          type="warning"
+          showIcon
+          title={SPIDER_WORKER_OFFLINE_COPY}
+          style={{ marginBottom: 12 }}
+        />
+      )}
       <Tabs
         items={[
           {

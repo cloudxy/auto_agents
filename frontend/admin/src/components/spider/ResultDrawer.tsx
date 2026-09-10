@@ -3,6 +3,7 @@
  */
 import React, { useEffect, useState } from 'react'
 import { Drawer, Table, Button, Space, Tag, Tooltip, Typography, message } from 'antd'
+import { STILL_RUNNING_COPY, ZERO_ITEMS_DONE_COPY } from './copy'
 import { DownloadOutlined } from '@ant-design/icons'
 import { fetchResults, exportResults, fetchTaskStore } from '../../services/spiders'
 import type { Task, SpiderResult, TaskStoreStatus, SpiderMap } from './types'
@@ -22,6 +23,7 @@ export const ResultDrawer: React.FC<ResultDrawerProps> = ({ task, spiderMap, onC
   const [resultPage, setResultPage] = useState(1)
   const [resultLoading, setResultLoading] = useState(false)
   const [storeInfo, setStoreInfo] = useState<TaskStoreStatus | null>(null)
+  const [exporting, setExporting] = useState(false)
   // 已同步重置过列表态的任务 ID（渲染期调整 state：打开/切换抽屉首帧即进入 loading，避免闪现「No data」空态）
   const [loadedTaskId, setLoadedTaskId] = useState<number | null>(null)
   const activeTaskId = task?.id ?? null
@@ -55,18 +57,30 @@ export const ResultDrawer: React.FC<ResultDrawerProps> = ({ task, spiderMap, onC
   }, [task])
 
   const onExport = async (format: 'csv' | 'json') => {
-    if (!task) return
+    if (!task || resultLoading) return
+    if (resultTotal === 0) {
+      message.warning('没有可导出的结果')
+      return
+    }
+    setExporting(true)
     try {
       const blob = await exportResults(task.id, format)
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `task_${task.id}.${format}`
+      link.download = `task_${task.id}_results.${format}`
       link.click()
       URL.revokeObjectURL(url)
       message.success(`已导出任务 #${task.id} 的结果（${format.toUpperCase()}）`)
     } catch (error) {
-      message.error(apiErrorMessage(error, '导出失败'))
+      const msg = apiErrorMessage(error, '导出失败。检查网络后重试。')
+      if (msg === '没有可导出的结果') {
+        message.warning(msg)
+        return
+      }
+      message.error(msg)
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -132,8 +146,21 @@ export const ResultDrawer: React.FC<ResultDrawerProps> = ({ task, spiderMap, onC
       width={860}
       footer={
         <Space style={{ float: 'right' }}>
-          <Button icon={<DownloadOutlined />} onClick={() => onExport('csv')}>导出 CSV</Button>
-          <Button icon={<DownloadOutlined />} onClick={() => onExport('json')}>导出 JSON</Button>
+          <Text type="secondary">单次最多 100 条</Text>
+          <Button
+            icon={<DownloadOutlined />}
+            loading={exporting}
+            onClick={() => onExport('csv')}
+          >
+            {exporting ? '导出中…' : '导出 CSV'}
+          </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            loading={exporting}
+            onClick={() => onExport('json')}
+          >
+            {exporting ? '导出中…' : '导出 JSON'}
+          </Button>
         </Space>
       }
     >
@@ -156,6 +183,11 @@ export const ResultDrawer: React.FC<ResultDrawerProps> = ({ task, spiderMap, onC
         rowKey="id"
         loading={resultLoading}
         size="small"
+        locale={{
+          emptyText: (task?.status === 'pending' || task?.status === 'running')
+            ? STILL_RUNNING_COPY
+            : ZERO_ITEMS_DONE_COPY,
+        }}
         pagination={{
           current: resultPage,
           pageSize: 20,

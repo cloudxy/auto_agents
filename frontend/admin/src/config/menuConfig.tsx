@@ -2,8 +2,7 @@
  * 菜单配置 - 信息架构 5 组（工单 73：14 项一级菜单 → 5 组，Miller 7±2 内）
  *
  * 组结构：概览 / 数据工厂 / 能力资产 / 运营管理 / 系统管理
- * 能力资产单入口：四类资产（技能/插件/专家/专家团）在 /capabilities 页内 Tab 切换，
- * 原 /skills 独立入口已并入（技能 Tab 即 Skills 组件）。
+ * 能力资产单入口：治理台七叶在 /capabilities（能力市场）；我的安装为租户叶。
  *
  * pageTitleFor：路由 → 顶部标题 的唯一派生源（消除 AdminLayout 内的 PAGE_TITLES 双源）。
  */
@@ -23,8 +22,16 @@ export interface MenuItem {
   permission?: string // 访问该菜单所需的权限代码
   /** 租户视角页：端点要求租户 owner/admin（纯平台超管 tenant_id=NULL 不可入，菜单隐藏） */
   tenantOnly?: boolean
+  /** 平台写叶：仅 is_platform_admin 可见；租户直打走 404 同形 */
+  platformOnly?: boolean
   children?: MenuItem[]
 }
+
+/** 平台写面路由（导航隐藏 + 直打 404；与 /llm 无关） */
+export const PLATFORM_WRITE_KEYS = ['/newapi', '/platform-ops', '/users'] as const
+
+export const isPlatformWritePath = (pathname: string): boolean =>
+  PLATFORM_WRITE_KEYS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 
 /**
  * 完整菜单树定义（组 key 非路由，仅作折叠容器；叶子 key = 路由）
@@ -56,7 +63,8 @@ export const menuConfig: MenuItem[] = [
     label: '能力资产',
     icon: React.createElement(AppstoreOutlined),
     children: [
-      { key: '/capabilities', label: '资产目录', permission: 'menu:skills' },
+      { key: '/capabilities', label: '能力市场', permission: 'menu:skills' },
+      { key: '/capabilities/installs', label: '我的安装', permission: 'menu:skills', tenantOnly: true },
     ],
   },
   {
@@ -65,7 +73,7 @@ export const menuConfig: MenuItem[] = [
     icon: React.createElement(TeamOutlined),
     children: [
       { key: '/members', label: '成员管理', permission: 'menu:members', tenantOnly: true },
-      { key: '/platform-ops', label: '平台运营台', permission: 'menu:platform-ops' },
+      { key: '/platform-ops', label: '平台运营台', permission: 'menu:platform-ops', platformOnly: true },
       { key: '/logs', label: '日志中心', permission: 'menu:logs' },
     ],
   },
@@ -75,8 +83,8 @@ export const menuConfig: MenuItem[] = [
     icon: React.createElement(ToolOutlined),
     children: [
       { key: '/llm', label: 'LLM 配置', permission: 'menu:llm' },
-      { key: '/newapi', label: '中转站管控', permission: 'menu:newapi' },
-      { key: '/users', label: '用户管理', permission: 'menu:users' },
+      { key: '/newapi', label: '中转站管控', permission: 'menu:newapi', platformOnly: true },
+      { key: '/users', label: '用户管理', permission: 'menu:users', platformOnly: true },
       { key: '/settings', label: '系统设置', permission: 'menu:settings' },
     ],
   },

@@ -79,6 +79,7 @@ def _service() -> SpiderTaskService:
     svc.repo = MagicMock()
     svc.result_repo = MagicMock()
     svc.notifier = MagicMock()
+    svc._check_enqueue_quota = AsyncMock()
     return svc
 
 
@@ -144,7 +145,7 @@ class TestEnqueueFlowNormalization:
             patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
-            await svc.enqueue("generic", params=params)
+            await svc.enqueue("generic", params=params, tenant_id=1)
 
         assert svc.repo.create.call_args.kwargs["spider_name"] == FLOW_SPIDER_NAME
         # 并发槽位检查也走 flow_generic 的活跃键
@@ -162,7 +163,9 @@ class TestEnqueueFlowNormalization:
             patch("backend.services.spider_task_service.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 2
-            await svc.enqueue("generic", params=json.dumps({"urls": ["https://a.b"]}))
+            await svc.enqueue(
+                "generic", params=json.dumps({"urls": ["https://a.b"]}), tenant_id=1
+            )
         assert svc.repo.create.call_args.kwargs["spider_name"] == "generic"
 
 

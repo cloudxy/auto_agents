@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { Input, message, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchNewapiProbeResults, type ChannelProbeResultItem, type ProbeVerdict } from '../../services/newapi'
-import { DEFAULT_PAGE_SIZE, VERDICT_TAG, fmtLatency, fmtTime, parseChannelId } from './newapiShared'
+import { DEFAULT_PAGE_SIZE, DUTY_LOCAL_PROBE_EMPTY, VERDICT_TAG, fmtLatency, fmtTime, parseChannelId } from './newapiShared'
 
 const { Text } = Typography
 
@@ -93,6 +93,7 @@ const ProbeResults: React.FC<{ refreshSignal?: number }> = ({ refreshSignal = 0 
             </pre>
           ),
         }}
+        locale={{ emptyText: DUTY_LOCAL_PROBE_EMPTY }}
         pagination={{
           current: probesPage,
           pageSize: probesPageSize,
