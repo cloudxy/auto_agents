@@ -1,41 +1,37 @@
 # 验证命令参考
 
-仓库没有 `platform_core/tests/`。数据契约测试在 `backend/tests`。覆盖率红线在 `pyproject.toml`：`fail_under = 70`（omit `*/tests/*`），CI 带 `--cov` 时生效。
+启停：`uv run python run.py start|stop|restart|status`。测试：`uv run pytest -x -q backend/tests`。
 
-## 验证命令矩阵
+## 命令矩阵
 
-| 改动路径 | 类型 | 必跑命令 | 通过标准 |
-|---------|------|---------|---------|
-| `backend/services/**`、`backend/utils/**`、`backend/repositories/**` | 后端代码 | `uv run pytest -x -q backend/tests` | 退出码 0 |
-| `backend/app/api/**`、`backend/app/external_api/**` | API 层 | 上条 pytest + 若增删路由则 `uv run pytest -x -q backend/tests/test_openapi_routes_golden.py`；需要活进程时 `uv run python run_backend.py --no-reload` + `curl -sS localhost:9111/api/v1/health` | pytest 0；health HTTP 200 |
-| `platform_core/models/**`、`platform_core/schemas/**`、`backend/alembic/**` | 数据契约 / 迁移 | `uv run pytest -x -q backend/tests` + `bash scripts/check-arch.sh`；schema 变更走 `/db-design` | 测试 0 且红线 0 违规 |
-| `platform_core/{logger,db,storage,exceptions,repository,tenant_context}.py` | 基建层 | `uv run python -c "from platform_core import init_log, init_db, init_storage; init_log(); init_db(); init_storage()"` + `bash scripts/check-arch.sh` | 无异常；红线 0 |
-| `scrapy/**` | 爬虫 | `uv run python run_spider.py --list` | 列表含目标爬虫名 |
-| `config/**`、`.env*`、`scrapy/settings.py` | 配置 | 重启对应服务 + `curl -sS localhost:9111/api/v1/health` | 服务启动 + 健康 OK |
-| `Dockerfile`、`docker-compose.yml` | 容器 | `docker compose config --quiet`；镜像变更再 `docker build -t auto-agents-backend .` | 退出码 0 |
-| `.github/workflows/**` | CI | 改的是现有 `.github/workflows/ci.yml`，推分支看 Actions | job 变绿 |
-| `frontend/{admin,official,shared}/**` | 前端 | `bash scripts/check-frontend.sh` + `CI= npm run build -w {admin\|official\|@auto-agents/frontend-shared}` + `npm test -w {admin\|official}` | 退出码 0 |
-| `frontend/admin/src/pages/{Login,Dashboard,Usage,Members}*` 或 e2e 夹具 | admin E2E | 先 `CI= npm run build -w admin`，再 `CI=1 npm run e2e -w admin`（`NO_PROXY=127.0.0.1,localhost,::1`，端口 `E2E_PORT` 默认 46112） | 1 passed |
-| `pyproject.toml`、`uv.lock` | 依赖 / workspace | `uv lock --check` + `uv run ruff check backend platform_core scripts` | 锁一致；ruff 0 |
-| `scripts/check-arch.sh`、`scripts/check-frontend.sh` | 门禁脚本 | 直接跑该脚本 | 退出码 0 |
+| 改动路径 | 必跑 | 通过 |
+|---------|------|------|
+| `backend/services/**`、`backend/repositories/**`、`backend/utils/**` | `uv run pytest -x -q backend/tests` | 退出码 0 |
+| `backend/app/api/**`、`backend/app/external_api/**` | 同上；`uv run python run.py start backend`；`curl -sS localhost:9111/api/v1/health` | 测试绿 + HTTP 200 |
+| `platform_core/models/**`、`platform_core/schemas/**` | pytest + `bash tools/check/arch.sh` | 测试绿 + 红线 0 |
+| `platform_core/{logger,db,storage,exceptions,repository}.py` | `uv run python -c "from platform_core import init_log, init_db, init_storage; init_log(); init_db(); init_storage()"` + pytest | 无异常 + 测试绿 |
+| `scrapy/**` | `uv run python run.py --list` + `bash tools/check/arch.sh` | 列表含目标爬虫 |
+| `config/**`、`scrapy/settings.py` | `uv run python run.py restart <服务>` + health | 启动且 health OK |
+| `Dockerfile`、`docker-compose.yml` | `docker compose config --quiet`；Dockerfile 有改再 `docker build -t _verify .` | 退出码 0 |
+| `.github/workflows/**` | 对照 `.github/workflows/ci.yml` 五阶段 | job 绿 |
+| `frontend/**` | `npm run build:shared`；`bash tools/check/frontend.sh`；`CI= npm run build -w admin`；`CI= npm run build -w official`（依赖变则先 `npm ci`）。改了 UI/布局/路由/状态：构建之外按真实路径点一遍（点击/输入/提交/跳转）；只截图不算。无浏览器则写明哪条路径没点到 | 退出码 0；UI 改动要行为一致 |
+| `pyproject.toml`、`uv.lock` | `uv lock --check` + pytest | 锁一致 + 测试绿 |
+| `init_project.sh`、`scripts/**`、`run.py` | `uv run pytest -x -q backend/tests/test_run_orchestrator.py` | 退出码 0 |
+| `tools/check/**` | 跑被改的脚本 | 退出码符合预期 |
 
-## 生成类 Skill 产出物检查
+前端从仓库根走 npm workspaces。`run.py start` 已在跑则跳过。
 
-| 触发 Skill | 产出物检查 | 附加验证命令 |
-|------------|---------|----------|
-| `/new-svc` | ORM / Schema / Service / Repository / Router 都在 + `v1/__init__.py` 已 `include_router` + `backend/tests/openapi_routes_golden.txt` 已更新 | `uv run pytest -x -q backend/tests/test_openapi_routes_golden.py` + `bash scripts/check-arch.sh` |
-| `/new-spider` | `scrapy/spiders/{name}.py` 存在且 `run_spider.py --list` 含该 name；新字段在 `scrapy/items/` | `uv run python run_spider.py --list` + `bash scripts/check-arch.sh` |
-| `/new-model` | ORM + Schema 配对 + `__init__.py` 已注册；租户表带 `TenantMixin` | `bash scripts/check-arch.sh` + `uv run python -c "from platform_core.models.{m} import {M}; from platform_core.schemas.{m} import {M}Out"` |
-| `/db-design` | `db-spec.md` + DBML + 迁移走 autogenerate | `bash scripts/check-db-ir.sh` + `bash scripts/check-db-migrations.sh` |
-| `/deploy` | 改的是仓库已有 `Dockerfile` / `docker-compose.yml`，不是另起一套 | `docker compose config --quiet` |
+## 生成类产出物
 
-**判定规则**：产出物缺一个 = 未完成，禁止说"已完成"。
+| Skill | 检查 |
+|-------|------|
+| `/new-svc` | ORM / Schema / Service / Repository / Router + `v1/__init__.py` 已 include + `backend/tests/test_{module}_service.py` |
+| `/new-spider` | `scrapy/spiders/{name}.py`；新字段才改 `scrapy/items/__init__.py`；`run.py --list` 含 name |
+| `/new-model` | ORM + Schema + models/schemas 两处 `__init__.py` 导出；`bash tools/check/arch.sh` |
+| `/db-design` | `.scratch/<feature>/db-spec.md` 访问模式有行；`db_ir.sh` / `db_migrations.sh` |
+| `/deploy` | 改根 `Dockerfile` / `docker-compose.yml` / `.env.example`；`docker compose config --quiet` |
 
-**并行原则**：独立命令在一次 Bash 里 `&` 并行或者一条消息里多个 tool call，禁止串行空等。
-
-## 输出格式示例
-
-把**实际 stdout/stderr 最后 20-50 行**贴回对话，禁止总结、禁止"大致通过"：
+## 输出格式
 
 ```
 === pytest -x -q ===
@@ -44,17 +40,8 @@
 === curl /api/v1/health ===
 {"status":"healthy"}
 
-=== uv run python run_spider.py --list ===
-🕷️  可用爬虫列表
+=== uv run python run.py --list ===
+可用爬虫:
   • example
   • zhihu_feed
 ```
-
-## 反模式自检
-
-- ❌ "应该没问题" / "大概能跑" / "可能通过"
-- ❌ "测试了，通过了"（不贴输出）
-- ❌ "本地没装环境，跳过"
-- ❌ "功能代码写完了，测试后面补"
-- ❌ 跑不存在的 `platform_core/tests`
-- ❌ 前端只 `cd frontend/admin && npm run build`（应用已是 npm workspaces：`npm run build -w admin`）

@@ -31,6 +31,7 @@ _SEED_ROLES = [
     ("operator", "操作员", "业务执行：创建/运行任务与技能矫正", [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
         'menu:data', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
+        'menu:llm',
         'btn:create', 'btn:skill:edit',
     ]),
     ("viewer", "只读", "查看业务数据，无写操作", [

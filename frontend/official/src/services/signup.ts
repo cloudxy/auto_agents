@@ -8,5 +8,12 @@ export interface SignupResult {
   owner: { username: string }
 }
 
-export const tenantSignup = (payload: Record<string, unknown>): Promise<SignupResult> =>
+export interface SignupPayload {
+  company: string
+  admin_email: string
+  admin_password: string
+  anonymous_id?: string
+}
+
+export const tenantSignup = (payload: SignupPayload): Promise<SignupResult> =>
   api.post('/public/tenant/signup', payload).then((r) => unwrap<SignupResult>(r))

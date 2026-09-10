@@ -1,16 +1,26 @@
-# sdlc.config.yaml — auto_agents 适配层（SDLC workflow 唯一项目侧配置）
+# sdlc.config.yaml — 项目适配层（闸门与宪法；不进插件）
 gates:
-  test:      "uv run pytest -q backend/tests"
-  lint:      "bash scripts/check-arch.sh && bash scripts/check-frontend.sh"
-  build:     "npm run build -w @auto-agents/frontend-shared && CI= npm run build -w admin && CI= npm run build -w official"
-  migration: "bash scripts/check-db-ir.sh && bash scripts/check-db-migrations.sh"
-  e2e:       "CI=1 npm run e2e -w admin"
-  sdlc:      "bash ~/.zcode/local-plugins/sdlc-workflow/scripts/check-sdlc.sh"
-
+  test: "uv run pytest -x -q backend/tests"
+  lint: "bash tools/check/arch.sh"
+  build: "npm run build --prefix frontend/admin && npm run build --prefix frontend/official"
+  migration: "bash tools/check/db_migrations.sh"
+  e2e: null
+  e2e_reason: "仓库无独立 E2E 套件；L2+ 用 pytest + 架构红线 + 前端 build 补位，verify 帽补 curl/浏览器路径"
 constitution: ".claude/rules/project_rule.md"
-artifact_root: "."
+artifact_root: .
 lane_rules:
-  file_count_threshold: 20        # 实测：常规 feat 动 17-36 文件
-  subproject_dirs: [backend, frontend/admin, frontend/official, frontend/shared, scrapy, platform_core]
-  schema_paths: [backend/alembic, platform_core/models]
-  auth_paths: [backend/app/api/v1/auth.py, backend/app/api/v1/rbac.py, backend/app/api/v1/api_keys.py, backend/app/middleware/tenant_context.py, platform_core/tenant_context.py]
+  file_count_threshold: 20
+  subproject_dirs:
+    - backend
+    - scrapy
+    - frontend/admin
+    - frontend/official
+    - platform_core
+    - capability-library
+  schema_paths:
+    - platform_core/models
+    - platform_core/schemas
+  auth_paths:
+    - backend/app/tenant_isolation.py
+    - backend/app/api/v1/auth.py
+    - backend/app/deps.py

@@ -1,7 +1,7 @@
 """api_keys 租户密钥表 + spider_results.fetched_at
 
 Revision ID: 028
-Revises: 027
+Revises: 039
 """
 from typing import Sequence, Union
 
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "028"
-down_revision: Union[str, Sequence[str], None] = "027"
+down_revision: Union[str, Sequence[str], None] = "039"
 branch_labels = None
 depends_on = None
 

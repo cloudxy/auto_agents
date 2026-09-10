@@ -138,7 +138,7 @@ async def test_tier_degrade_alert_fires_only_on_downgrade(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_all_candidates_exhausted_raises_summary(monkeypatch):
-    """全候选耗尽：结构化失败（含各候选错误摘要；脱敏——只含异常类名/网络错误文本）"""
+    """全候选耗尽：用户句为本企业供应商失败；候选摘要只进 warning，不混 74.1/70.2"""
     notes: list = []
     _patch(
         monkeypatch,
@@ -150,7 +150,9 @@ async def test_all_candidates_exhausted_raises_summary(monkeypatch):
     with pytest.raises(BusinessException) as ei:
         await lc.llm_chat(MESSAGES)
     message = str(ei.value)
-    assert "候选" in message and "m-a" in message and "m-b" in message
+    assert "本企业供应商调用失败" in message
+    assert "平台 LLM 网关不可达" not in message
+    assert "还没有平台模型" not in message
 
 
 @pytest.mark.asyncio

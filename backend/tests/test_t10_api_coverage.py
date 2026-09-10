@@ -32,27 +32,35 @@ from platform_core.models.spider_task import SpiderTask
 RUN_URL = "/api/v1/spiders/run"
 
 
-def _fake_redis(monkeypatch):
+def _fake_redis(monkeypatch, *, worker: bool = True):
     """queue Redis 桩（rpush 成功、scard=0）——enqueue 的投递/并发槽位依赖"""
-    from stubs import FakeRedis
+    from stubs import FakeRedis, seed_worker_heartbeat
 
     fake = FakeRedis()
+    if worker:
+        seed_worker_heartbeat(fake)
 
     def _get(key=None):  # get_async_redis 为同步工厂（platform_core/redis_async.py）
         return fake
 
+    import backend.services.quota_service as quota_mod
     import backend.services.spider_task_service as svc_mod
     monkeypatch.setattr(svc_mod, "get_async_redis", _get)
+    monkeypatch.setattr(quota_mod, "get_async_redis", _get)
     return fake
 
 
-def test_run_spider_operator_enqueues(db_client, operator_client, db_engine, db_session, monkeypatch):
+def test_run_spider_operator_enqueues(db_client, db_engine, db_session, monkeypatch):
     """operator 入队：201 信封 CREATED + 落库 pending + 消息投递队列（副作用断言）"""
+    from conftest import make_tenant_owner_headers
+
     _fake_redis(monkeypatch)
-    resp = operator_client.post(
+    headers, _tid = make_tenant_owner_headers(db_session, slug="t10run")
+    resp = db_client.post(
         RUN_URL,
         json={"spider_name": "example", "params": '{"urls": ["https://example.com"]}',
               "priority": "high"},
+        headers=headers,
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -105,11 +113,14 @@ def test_run_spider_validation_422(db_client, operator_client, db_engine, db_ses
     asyncio.run(_check())
 
 
-def test_run_spider_unregistered_rejected_400(db_client, operator_client, db_engine, db_session, monkeypatch):
+def test_run_spider_unregistered_rejected_400(db_client, db_engine, db_session, monkeypatch):
     """未登记爬虫 → 400 BUSINESS_ERROR（契约注记：注册表拒绝映射 400 而非 404——
     「资源不存在」语义由 GET /tasks/{id}/store 的 404 分支另行覆盖）"""
+    from conftest import make_tenant_owner_headers
+
     _fake_redis(monkeypatch)
-    resp = operator_client.post(RUN_URL, json={"spider_name": "no-such-spider-t10"})
+    headers, _tid = make_tenant_owner_headers(db_session, slug="t10ghost")
+    resp = db_client.post(RUN_URL, json={"spider_name": "no-such-spider-t10"}, headers=headers)
     assert resp.status_code == 400, resp.text
     body = resp.json()
     assert body["code"] == "BUSINESS_ERROR"

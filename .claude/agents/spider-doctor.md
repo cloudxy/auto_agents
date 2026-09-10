@@ -25,22 +25,21 @@ tools: Bash, Read, Grep, Glob
    - 输出：失效的 selector 行号 + 当前真实 DOM 路径建议
 
 2. **反爬被触发**
-   - 看 `scrapy/settings.py` 的 `DOWNLOAD_DELAY` / `RANDOMIZE_DOWNLOAD_DELAY` / `USER_AGENT`（从 config 注入）
-   - 看 `DOWNLOADER_MIDDLEWARES` 是否挂了 `middlewares.UserAgentMiddleware`
-   - 看 `logs/spider/spider.log` 最近的响应状态码分布
+   - 看 `scrapy/settings.py` 的 `DOWNLOAD_DELAY` / `RANDOMIZE_DOWNLOAD_DELAY` / `ROBOTSTXT_OBEY` / `USER_AGENT`
+   - 看 `scrapy/middlewares/__init__.py` 是否启用了 UserAgentMiddleware / ProxyMiddleware
+   - 看 logs/ 最近的响应状态码分布
    - 输出：触发的反爬类型 + middleware 配置缺口
 
 3. **Redis 队列断流**
-   - 用 `settings.REDIS.DEFAULT.URL` ping（本地 Redis 有密码，不要假设无认证）
-   - 检查 spider 的 `redis_key`（惯例 `{name}:start_urls`）队列长度
-   - 检查 dupefilter 是否把 URL 全过滤掉
-   - 入口是 `uv run python run_spider.py --list` / `--spider {name}`，不是 `scrapy crawl`
-   - 输出：队列状态 + 是否需要让 Backend 再投 seed
+   - 检查 `REDIS_URL = settings.REDIS.DEFAULT.URL` 是否能连通（`redis-cli -u $url ping`）
+   - 检查 `<spider_name>:start_urls` 队列长度（`llen`）
+   - 检查 dupefilter 是否把 URL 全过滤掉了（`scard <spider>:dupefilter`）
+   - 输出：队列状态 + 是否需要 push 新 seed
 
 4. **Pipeline 异常**
-   - 链在 `scrapy/settings.py` `ITEM_PIPELINES`：Clean → Validate → QualityCheck → **StorePipeline（已实现，推 `platform_core.queues.ITEM_QUEUE`）**
-   - 看 `logs/spider/spider.log` 末尾 traceback；推送连续失败会 `CloseSpider`
-   - 输出：管道断在哪一级 + Backend 消费者是否在拉队列
+   - 链：`CleanPipeline` → `ValidatePipeline` → `QualityCheckPipeline` → `StorePipeline`（推 Redis `spider:item_queue`，不是 TODO）
+   - 看 `logs/spider/spider.log` 末尾 traceback
+   - 输出：pipeline 链断在哪一级 + 修复建议
 
 ## 红线（绝对不能违反）
 

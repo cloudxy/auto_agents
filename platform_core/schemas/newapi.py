@@ -83,6 +83,35 @@ class ChannelProbeResultListResponse(BaseModel):
     items: list[ChannelProbeResultResponse]
 
 
+class GatewayModelResponse(BaseModel):
+    """平台 LLM 网关模型/部署快照（无完整上游 Key）"""
+
+    gateway_ref: str = Field(..., description="稳定字符串引用（模型名或 deployment id）")
+    model_name: str = ""
+    deployment_id: Optional[str] = Field(None, description="LiteLLM model_info.id")
+    mode: Optional[str] = Field(None, description="chat/embedding 等")
+    api_base: Optional[str] = Field(None, description="上游地址（非密钥）")
+    api_key_masked: Optional[str] = Field(None, description="仅掩码；完整 Key 不回传")
+    extra: dict = Field(default_factory=dict, description="未知字段（敏感字段已剔除）")
+
+
+class GatewayModelWriteRequest(BaseModel):
+    """改平台网关模型（超管写面）"""
+
+    model_name: str = Field(..., min_length=1)
+    gateway_ref: Optional[str] = None
+    litellm_params: dict = Field(default_factory=dict)
+
+
+class GatewayUpstreamWriteRequest(BaseModel):
+    """登记平台上游（超管写面）"""
+
+    gateway_ref: str = Field(..., min_length=1)
+    api_base: str = Field(..., min_length=1)
+    model_name: Optional[str] = None
+    litellm_params: dict = Field(default_factory=dict)
+
+
 class NewapiChannelResponse(BaseModel):
     """new-api 渠道快照（管理 API 宽松映射）
 
@@ -110,16 +139,25 @@ class NewapiChannelResponse(BaseModel):
 
 
 class NewapiOverviewResponse(BaseModel):
-    """中转站总览（远程渠道 + 本地统计）
+    """值班总览（网关模型/部署 + 本地统计）
 
-    远程不可达/开关关闭时 available=false 并附 reason（HTTP 仍 200，页面降级展示），
-    本地统计（events_24h / latest_batch_*）始终返回（本地表，不依赖 new-api 可达）。
+    管理面不可达时 available=false（HTTP 仍 200，不 500）。
+    空态 71.2 / 降级 71.3 冻结句在 empty_state / degrade_state。
+    本地统计始终返回。channels 一周期保留为空（不再映射 new-api 渠道）。
     """
 
-    available: bool = Field(True, description="new-api 管理面是否可达")
+    available: bool = Field(True, description="LLM 网关管理面是否可达")
     reason: Optional[str] = Field(None, description="不可达原因（available=false 时给出）")
-    channels: list[NewapiChannelResponse] = Field(default_factory=list, description="渠道列表")
-    total: int = Field(0, description="渠道总数")
+    empty_state: Optional[str] = Field(None, description="71.2 空态句")
+    degrade_state: Optional[str] = Field(None, description="71.3 降级句")
+    models: list[GatewayModelResponse] = Field(default_factory=list, description="网关模型列表")
+    deployments: list[GatewayModelResponse] = Field(
+        default_factory=list, description="网关部署列表",
+    )
+    channels: list[NewapiChannelResponse] = Field(
+        default_factory=list, description="expand：不再填充 new-api 渠道",
+    )
+    total: int = Field(0, description="模型/部署条数")
     events_24h: int = Field(0, description="近 24h 渠道事件数（本地表）")
     latest_batch_id: Optional[str] = Field(None, description="最近一次探针批次（无记录时 null）")
     latest_batch_verdicts: dict[str, int] = Field(
@@ -140,7 +178,7 @@ class ChannelConfigInfo(BaseModel):
 
 
 class ChannelWithConfigResponse(NewapiChannelResponse):
-    """渠道快照 + 调度配置合并视图（GET /newapi/channels）"""
+    """渠道快照 + 调度配置合并视图（GET /newapi/channels 旧形；T-18 列表改网关模型）"""
 
     config: Optional[ChannelConfigInfo] = Field(
         None, description="渠道级配置（Redis hash，未配置为 null）"
@@ -153,9 +191,31 @@ class ChannelWithConfigResponse(NewapiChannelResponse):
     )
 
 
+class GatewayModelWithConfigResponse(GatewayModelResponse):
+    """网关模型 + 调度配置合并视图（GET /newapi/channels）"""
+
+    config: Optional[ChannelConfigInfo] = Field(
+        None, description="模型级配置（Redis hash，未配置为 null）"
+    )
+    effective: ChannelConfigInfo = Field(
+        ..., description="生效配置（模型级 > 全局默认）"
+    )
+    effective_source: str = Field(
+        "none", description="生效来源：channel（模型级）/ global（全局默认）/ none（未纳管）"
+    )
+
+
 class ChannelConfigUpdateResult(BaseModel):
     """配置写入/清除结果"""
 
     channel_id: int = Field(..., description="new-api 渠道 ID")
     cleared: bool = Field(False, description="true = 已清除渠道级配置（回退全局默认）")
     config: Optional[ChannelConfigInfo] = Field(None, description="清除前/写入后的配置")
+
+
+class GatewayConfigUpdateResult(BaseModel):
+    """按 gateway_ref 写入/清除窗口配置"""
+
+    gateway_ref: str
+    cleared: bool = False
+    config: Optional[ChannelConfigInfo] = None

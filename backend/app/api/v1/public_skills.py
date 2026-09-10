@@ -1,68 +1,48 @@
-"""官网技能广场公开 API（方案 A · A-P4-1）——无鉴权，三道闸缺一不可
+"""官网公开能力市场 API——无鉴权读；订阅需登录。
 
-1. 仅发布态：status ∈ {stable, recommended}；
-2. 字段白名单：PublicSkillResponse 只含展示字段（评审笔记/同步状态/文件路径等内部字段不出协议）；
-3. 按 IP 限流：Redis 原子计数（键契约见 queues.SKILL_PUBLIC_RATE_PREFIX），超限 429。
-
-不复用 external_api 的 X-API-Key 体系（Key 不能嵌进官网前端）。
+闸：查询侧 FR-33 再分页；字段白名单；按 IP 限流。
+GET 未上架/黑名单详情 = 商店不存在句 HTML。POST 订阅 = MARKET_NOT_FOUND JSON。
+静态段（aliases）必须注册在动态 /{type}/{name} 之前（PIT-1）。
+公开详情接受目录短名或 alias（T-33）。
 """
 from typing import Optional
-from backend.config_consts import (SKILLS_LIBRARY_ROOT)
-from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import HTMLResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.api.deps import CurrentUser, require_login
 from backend.app.responses import ok
-from backend.services.skill_service import SkillService
+from backend.services.market_events import (
+    emit_public_detail, emit_public_list, run_subscribe,
+)
+from backend.services.power_market import (
+    PAGE_SIZE_DEFAULT,
+    PAGE_SIZE_MAX,
+    PUBLIC_ASSET_TYPES,
+    STORE_NOT_FOUND_HTML,
+    PowerMarketService,
+)
+from backend.services.power_market.types import SubscribeRequest
 from platform_core.db import get_async_db
-from platform_core.exceptions import NotFoundException, RateLimitException
+from platform_core.exceptions import RateLimitException
 from platform_core.logger import get_logger
 from platform_core.queues import SKILL_PUBLIC_RATE_PREFIX
 from platform_core.redis_async import get_async_redis
-from platform_core.schemas.skill import SkillQuery
-from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import Depends
 
 logger = get_logger("api.public_skills")
 
-PUBLISHED_STATUSES = ("stable", "recommended")
+# 双公开端同一五类枚举（禁止一边修一边留 bogus→skill）
+assert PUBLIC_ASSET_TYPES == ("skill", "plugin", "command", "agent", "team")
 
 router = APIRouter()
 
 
-class PublicSkillResponse(BaseModel):
-    """字段白名单（第二道闸）：仅展示字段——新增内部字段不会经此泄漏"""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    name: str
-    title: str = ""
-    description: Optional[str] = None
-    category: str
-    industries: Optional[list[str]] = None
-    tier: Optional[str] = None
-    score: Optional[float] = None
-    download_count: int = 0
-    status: str
-    source_url: str = ""
-    source_author: str = ""
-    updated_at: Optional[datetime] = None
-    skill_md: Optional[str] = None
-
-
-class PublicSkillListResponse(BaseModel):
-    total: int
-    items: list[PublicSkillResponse]
-
-
-def _service(session: AsyncSession = Depends(get_async_db)) -> SkillService:
-    """T7 跳层收口：公开面数据访问改道 SkillService（不再直连 repository）"""
-    return SkillService(session)
+def _market(session: AsyncSession = Depends(get_async_db)) -> PowerMarketService:
+    return PowerMarketService(session)
 
 
 def _client_ip(request: Request) -> str:
-    """直连取 client.host；反代后取 X-Forwarded-For 首跳（部署侧保证头可信）"""
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -70,7 +50,6 @@ def _client_ip(request: Request) -> str:
 
 
 async def _enforce_rate_limit(request: Request) -> None:
-    """第三道闸：按 IP 每分钟计数（Redis INCR + EXPIRE 原子窗口）"""
     from config import settings
 
     limit = int(settings.get("SKILLS.PUBLIC_API.RATE_LIMIT_PER_MIN", 60) or 60)
@@ -90,97 +69,132 @@ async def _enforce_rate_limit(request: Request) -> None:
         logger.warning(f"公开 API 限流检查失败（放行）: {exc}")
 
 
-def _read_skill_md(row) -> str:
-    """读技能 SKILL.md 正文（row 为 repo 返回的技能资产行，duck-typed 只读 file_path）"""
-    from pathlib import Path
-
-    from config import settings
-
-    md = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT))) / row.file_path / "SKILL.md"
-    try:
-        return md.read_text(encoding="utf-8") if md.exists() else ""
-    except OSError:
-        return ""
+def _store_not_found() -> HTMLResponse:
+    return HTMLResponse(content=STORE_NOT_FOUND_HTML, status_code=404)
 
 
-def _to_public(row, include_body: bool = False) -> PublicSkillResponse:
-    # T1 收口（R7）：API 层不再 import ORM 类型做注解——行对象经 repo 返回，
-    # 字段白名单投影由 PublicSkillResponse（from_attributes）在运行时校验。
-    item = PublicSkillResponse.model_validate(row)
-    if include_body:
-        item.skill_md = _read_skill_md(row)
-    return item
+# ---------- 能力市场：静态段必须先于 /{type}/{name}（PIT-1） ----------
 
 
-@router.get("/skills")
-async def public_list_skills(
-    request: Request,
-    q: SkillQuery = Depends(),
-    service: SkillService = Depends(_service),
-):
-    """公开列表：仅发布态 + 白名单投影 + 按 IP 限流"""
+@router.get("/capabilities/aliases")
+async def public_reserved_aliases(request: Request):
+    """PIT-1 静态段：不得被 /{type}/{name} 吞掉。解析走动态详情。"""
     await _enforce_rate_limit(request)
-    rows, total = await service.list_skills(
-        q=q.q, category=q.category, industry=q.industry, sort=q.sort,
-        offset=(q.page - 1) * q.page_size, limit=q.page_size,
-        status=list(PUBLISHED_STATUSES),
+    return _store_not_found()
+
+
+@router.get("/capabilities")
+async def public_list_capabilities(
+    request: Request,
+    type: Optional[str] = Query(None),
+    category: Optional[str] = None,
+    q: Optional[str] = Query(None, max_length=100),
+    host: Optional[str] = Query(None, max_length=16),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
+    market: PowerMarketService = Depends(_market),
+):
+    """官网能力市场：FR-33 查询侧闸再分页（非法 type 失败；未选=全部）。"""
+    await _enforce_rate_limit(request)
+    data = await market.list_public(
+        asset_type=type, category=category, q=q, host=host,
+        page=page, page_size=page_size,
     )
-    return ok(
-        data=PublicSkillListResponse(
-            total=total, items=[_to_public(r) for r in rows]
-        ).model_dump(mode="json")
+    await emit_public_list(
+        market.session, asset_type=type, host=host, category=category,
+        q=q, total=data["total"],
     )
+    return ok(data=data)
+
+
+@router.post("/capabilities/{asset_type}/{name}/subscribe")
+async def public_subscribe_capability(
+    asset_type: str,
+    name: str,
+    request: Request,
+    payload: SubscribeRequest | None = None,
+    user: CurrentUser = Depends(require_login),
+    market: PowerMarketService = Depends(_market),
+):
+    """订阅提交：未上架/黑名单/从不存在短名 → MARKET_NOT_FOUND JSON（非 HTML 404）。"""
+    await _enforce_rate_limit(request)
+    host = payload.host if payload else None
+    data = await run_subscribe(
+        market.session, market, asset_type=asset_type, name=name, host=host, user=user,
+    )
+    return ok(data=data)
+
+
+@router.get("/capabilities/{asset_type}/{name}")
+async def public_get_capability(
+    asset_type: str,
+    name: str,
+    request: Request,
+    market: PowerMarketService = Depends(_market),
+):
+    """公开详情：非 FR-33 可见 → 商店不存在句 HTML。"""
+    await _enforce_rate_limit(request)
+    data = await market.get_public(asset_type, name)
+    if data is None:
+        return _store_not_found()
+    await emit_public_detail(market.session, data)
+    return ok(data=data)
+
+
+# ---------- 技能筛（同一 FR-33 读模型；禁止 LIMIT 后再内存滤） ----------
+
+
+@router.post("/skills/{name}/subscribe")
+async def public_subscribe_skill(
+    name: str,
+    request: Request,
+    payload: SubscribeRequest | None = None,
+    user: CurrentUser = Depends(require_login),
+    market: PowerMarketService = Depends(_market),
+):
+    await _enforce_rate_limit(request)
+    host = payload.host if payload else None
+    data = await run_subscribe(
+        market.session, market, asset_type="skill", name=name, host=host,
+        user=user, default="skill",
+    )
+    return ok(data=data)
 
 
 @router.get("/skills/{name}")
 async def public_get_skill(
     name: str,
     request: Request,
-    service: SkillService = Depends(_service),
+    market: PowerMarketService = Depends(_market),
 ):
-    """公开详情：未发布一律 404（不泄露存在性差异）"""
     await _enforce_rate_limit(request)
-    row = await service.get_by_name(name)
-    if row is None or row.status not in PUBLISHED_STATUSES:
-        raise NotFoundException(resource="技能")
-    await service.record_public_view(name)
-    row = await service.get_by_name(name) or row
-    return ok(data=_to_public(row, include_body=True).model_dump())
+    data = await market.get_public("skill", name, default="skill")
+    if data is None:
+        return _store_not_found()
+    await emit_public_detail(market.session, data)
+    return ok(data=data)
 
 
-# ---------- P6 C9：公开能力广场（四类资产白名单投影） ----------
-
-_PUBLIC_ASSET_FIELDS = {
-    "name", "title", "description", "category", "tier", "score",
-    "status", "source_url", "source_author", "updated_at", "asset_type",
-}
-
-
-@router.get("/capabilities")
-async def public_list_capabilities(
+@router.get("/skills")
+async def public_list_skills(
     request: Request,
-    type: str = "skill",
-    category: str = None,
-    page: int = 1,
-    page_size: int = 20,
-    session: AsyncSession = Depends(get_async_db),
+    q: Optional[str] = Query(None, max_length=100),
+    category: Optional[str] = None,
+    type: Optional[str] = Query(None),
+    host: Optional[str] = Query(None, max_length=16),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
+    market: PowerMarketService = Depends(_market),
 ):
-    """官网能力广场：四类资产公开列表（仅发布态 + 白名单投影 + IP 限流）"""
-    from backend.services.capability_service import CapabilityService
-
+    """公开技能列表：默认 type=skill；与 /public/capabilities 同一五类枚举。"""
     await _enforce_rate_limit(request)
-    if type not in ("skill", "plugin", "expert", "expert_team"):
-        type = "skill"
-    svc = CapabilityService(session)
-    rows, total = await svc.list_assets(
-        asset_type=type, category=category, status="stable",
-        offset=(page - 1) * page_size, limit=page_size,
+    assert PUBLIC_ASSET_TYPES  # 与 /public/capabilities 同一五类
+    data = await market.list_public(
+        asset_type=type, default="skill", category=category, q=q, host=host,
+        page=page, page_size=page_size,
     )
-
-    items = []
-    for r in rows:
-        item = {f: getattr(r, f) for f in _PUBLIC_ASSET_FIELDS if hasattr(r, f)}
-        item["updated_at"] = r.updated_at.isoformat() if r.updated_at else None
-        item["score"] = float(r.score) if r.score is not None else None
-        items.append(item)
-    return ok(data={"total": total, "items": items})
+    await emit_public_list(
+        market.session, asset_type=type or "skill", host=host, category=category,
+        q=q, total=data["total"],
+    )
+    return ok(data=data)

@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
-from backend.config_consts import (NEWAPI_ENABLED)
+from backend.config_consts import (RELAY_PROBE_ENABLED, RELAY_SCHEDULER_ENABLED)
 from platform_core.logger import get_logger
 
 # Webhook 签名密钥的默认占位符（config/default/webhook.yml）——已随仓库公开，
@@ -69,6 +69,22 @@ def _validate_runtime_secrets() -> None:
             raise RuntimeError(f"LLM_ENCRYPTION_KEY 非法 Fernet 密钥，拒绝启动: {exc}")
 
 
+def _validate_enablement_duty_contact() -> None:
+    """LLM/能力市场启用前必须有 OPS.DUTY_CONTACT；不代填号码（Q-OPS-DUTY 仍开放）。"""
+    llm_on = bool(settings.get("LLM.ENABLED", False))
+    market_on = bool(settings.get("POWER_MARKET.ENABLED", False))
+    if not llm_on and not market_on:
+        return
+    contact = str(settings.get("OPS.DUTY_CONTACT", "") or "").strip()
+    if contact:
+        return
+    raise RuntimeError(
+        "LLM.ENABLED 或 POWER_MARKET.ENABLED 已打开，但 OPS.DUTY_CONTACT 为空，拒绝启动。"
+        "请填写值班联系方式后再启用（不代填号码；Q-OPS-DUTY 仍由操作者指定）。"
+        "配置键：OPS.DUTY_CONTACT / AUTO_AGENTS_OPS__DUTY_CONTACT"
+    )
+
+
 def create_app():
     """创建 FastAPI 应用实例（不含初始化逻辑）"""
     # T8：业务豁免表注册（唯一事实源 backend/app/tenant_isolation.py；
@@ -80,6 +96,7 @@ def create_app():
     async def lifespan(app: FastAPI):
         """应用生命周期：密钥守卫 + Redis 队列消费者 + 定时调度器 + 代理健康管理 + LLM 用量聚合"""
         _validate_runtime_secrets()
+        _validate_enablement_duty_contact()
         import os as _os
         _run_bg = (_os.environ.get("APP_ROLE") or "all").strip().lower() in ("all", "worker")
         consumer = None
@@ -140,27 +157,25 @@ def create_app():
                 await llm_health_patrol.start()
             except Exception as e:  # noqa: BLE001
                 get_logger("global").warning(f"LLM 健康巡检启动失败（忽略）: {e}")
-        # new-api 渠道集成（阶段三）：三层开关 ENABLED → SCHEDULER_ENABLED / PROBE_ENABLED，
-        # 失败仅告警不阻断启动（外部系统依赖故障不影响主平台可用性）
+        # T-20：窗口/探针只读 RELAY.*；失败仅告警不阻断启动
         newapi_scheduler = None
         newapi_probe = None
-        if _run_bg and settings.get("NEWAPI.ENABLED", NEWAPI_ENABLED):
-            if settings.get("NEWAPI.SCHEDULER_ENABLED", False):
-                from backend.services.channel_scheduler_service import ChannelSchedulerService
+        if _run_bg and settings.get("RELAY.SCHEDULER_ENABLED", RELAY_SCHEDULER_ENABLED):
+            from backend.services.channel_scheduler_service import ChannelSchedulerService
 
-                newapi_scheduler = ChannelSchedulerService()
-                try:
-                    await newapi_scheduler.start()
-                except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
-                    get_logger("global").warning(f"渠道调度器启动失败（忽略）: {e}")
-            if settings.get("NEWAPI.PROBE_ENABLED", False):
-                from backend.services.channel_probe_service import ChannelProbeService
+            newapi_scheduler = ChannelSchedulerService()
+            try:
+                await newapi_scheduler.start()
+            except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
+                get_logger("global").warning(f"渠道调度器启动失败（忽略）: {e}")
+        if _run_bg and settings.get("RELAY.PROBE_ENABLED", RELAY_PROBE_ENABLED):
+            from backend.services.channel_probe_service import ChannelProbeService
 
-                newapi_probe = ChannelProbeService()
-                try:
-                    await newapi_probe.start()
-                except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
-                    get_logger("global").warning(f"渠道探针启动失败（忽略）: {e}")
+            newapi_probe = ChannelProbeService()
+            try:
+                await newapi_probe.start()
+            except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
+                get_logger("global").warning(f"渠道探针启动失败（忽略）: {e}")
         retention = None
         if _run_bg and settings.get("RETENTION.ENABLED", True):
             from backend.services.retention_service import RetentionService

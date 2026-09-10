@@ -65,3 +65,23 @@ async def test_api_helper_is_pure_delegation():
         await record_audit(MagicMock(), user, "role.create", "role:viewer", {"k": "v"})
 
     standalone.assert_awaited_once_with(7, "op", "role.create", "role:viewer", {"k": "v"})
+
+
+@pytest.mark.asyncio
+async def test_api_helper_does_not_commit_request_session_when_standalone_false():
+    """C35-QA-02：standalone 失败不得把请求 session 当降级提交（ADR-0007 D4）"""
+    import backend.app.api._helpers as helpers
+
+    user = CurrentUser(id=1, username="test-platform-admin", role="admin")
+    session = MagicMock()
+    session.commit = AsyncMock()
+    with patch.object(
+        helpers, "record_audit_standalone", AsyncMock(return_value=False),
+    ) as standalone:
+        await record_audit(session, user, "plugin.scan", "plugins", {"total": 1})
+
+    standalone.assert_awaited_once_with(
+        1, "test-platform-admin", "plugin.scan", "plugins", {"total": 1},
+    )
+    session.commit.assert_not_awaited()
+    session.commit.assert_not_called()

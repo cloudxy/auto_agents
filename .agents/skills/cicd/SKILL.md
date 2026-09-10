@@ -1,36 +1,45 @@
 ---
 name: cicd
-description: 配置 GitHub Actions CI/CD 流程
-trigger: >-
-  配置自动化部署、设置 CI/CD、添加持续集成、生成 GitHub Actions 工作流
+description: >-
+  Edits the five-stage GitHub Actions workflow at .github/workflows/ci.yml.
+  Use when 加 CI, 改 GitHub Actions, lint/test/arch/frontend 门禁.
 ---
 
-# 配置 CI/CD 流程
+# 配置 CI/CD
 
-权威文件：`.github/workflows/ci.yml`。本 skill 是往这份工作流加 job / 改步骤，不是再生成 `Backend Tests.yml` + `Frontend Tests.yml` + SSH Deploy。
+先读 `.github/workflows/ci.yml` 再改。约束：[references/workflow-templates.md](references/workflow-templates.md)。
 
-现有 job 与改法见 [references/workflow-templates.md](references/workflow-templates.md)。
+## Route
 
-## 触发场景
+| 观察到 | 先做 |
+|--------|------|
+| Dockerfile / compose / 端口 / 卷 | `deploy` |
+| 改 CI job、门禁、Secrets | 本 skill |
 
-- "配置自动化部署"
-- "设置 CI/CD"
-- "添加持续集成"
+## Quick start
 
-## 执行流程
+Copy and check off:
 
-### Step 1: 确认缺口
+```
+cicd:
+- [ ] 五阶段仍在：python-lint-test / arch-check / db-migration-gate / frontend-build / docker-validate
+- [ ] 门禁用 tools/check/*，不手写第二套 grep
+- [ ] 前端：根 package-lock + 先 shared dist
+- [ ] bash tools/check/arch.sh
+- [ ] bash tools/check/frontend.sh
+- [ ] docker compose config --quiet
+```
 
-现有流水线已经覆盖：ruff + pytest（`fail_under=70`）+ MySQL 保真子集、`check-arch.sh`、`check-db-ir` / `check-db-migrations`、`check-frontend.sh` + admin/official build/test + Playwright e2e、`docker compose config` + `docker build`、main/tag 推 GHCR。
+push 任意分支 + 向 main 的 PR 跑上述 job。发布另开 job，密钥用 GitHub Secrets。
 
-先问要补的是哪一段，而不是脚手架一套并行 workflow。
+## 完成时回复
 
-### Step 2: 改 `ci.yml`
+1. `.github/workflows/ci.yml` 里改了哪个 job
+2. 本地跑过的 `tools/check/*` 原文
+3. 五阶段名字仍在（列出来）
 
-Python **3.13** + `astral-sh/setup-uv` + `uv sync`。前端根 `npm ci`（workspaces lock 在仓库根 `package-lock.json`）。密钥用 `AUTO_AGENTS_JWT__SECRET_KEY` 这类，不要 `OPENAI_API_KEY`。
+## Examples
 
-镜像发布已在 `ghcr-publish` job（push main / tag）。不要再加 appleboy/ssh-action 除非用户明确要 SSH 部署。
+**Input:** 「CI 加上架构检查」
 
-## 验证
-
-推当前分支，看 GitHub Actions 五段 + 可选 GHCR。本地对应命令见 `/verify`。
+**Then:** 在现有 `ci.yml` 加 `arch-check` job，`run: bash tools/check/arch.sh`，不新建第二份 workflow。

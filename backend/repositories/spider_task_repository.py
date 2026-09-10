@@ -72,9 +72,11 @@ class SpiderTaskRepository(BaseRepository[SpiderTask]):
         result = await self.session.execute(stmt)
         return int(result.scalar() or 0)
 
-    async def count_by_status(self) -> dict:
-        """一次性返回各状态的计数（用于 /admin/stats）"""
+    async def count_by_status(self, since: datetime | None = None) -> dict:
+        """一次性返回各状态的计数（用于 /admin/stats；since 与近 7 日窗同一套）"""
         stmt = select(SpiderTask.status, func.count(SpiderTask.id)).group_by(SpiderTask.status)
+        if since is not None:
+            stmt = stmt.where(SpiderTask.created_at >= since)
         result = await self.session.execute(stmt)
         counts = {"pending": 0, "running": 0, "completed": 0, "failed": 0}
         for status, num in result.all():

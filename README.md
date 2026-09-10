@@ -1,7 +1,7 @@
 # Auto Agents
 
-> 综合数据智能平台：**智能爬虫 + 大模型管理（cc-switch 式）+ new-api token 智能调度 + 官网与后台**。
-> 技术底座：FastAPI 后端 + Scrapy 分布式爬虫（scrapy-redis）+ React 19 双前端，统一配置、统一基础设施（uv workspace）。
+> 综合数据智能平台：**智能采集 + SaaS 租户 + 能力市场 + 平台 LLM 网关 + 官网与后台**。
+> 技术底座：FastAPI 后端 + Scrapy 分布式爬虫（scrapy-redis）+ React 19 双前端（admin / official，经 `frontend/shared`），uv workspace + npm workspaces。
 
 ---
 
@@ -30,12 +30,14 @@
 
 | 模块 | 入口 | 说明 |
 |------|------|------|
-| **智能爬虫** | 后台「爬虫管理」 | 免代码采集：通用选择器爬虫（generic）与流程爬虫（列表/翻页/详情/条件过滤，flow_generic）；任务队列、定时调度、失败自动重试、增量去重、质量评分、AI 自动生成采集方案 |
-| **大模型管理** | 后台「LLM 配置」 | cc-switch 式多供应商注册表：API Key Fernet 加密存储、单激活热切换、连通性测试（延迟+模型回显）；为 AI 采集规划提供 LLM 能力 |
-| **token 智能调度** | 后台「中转站」 | 对外部 [new-api](https://github.com/QuantumNous/new-api) 网关的管控侧：渠道额度巡检熔断（超限自动下线/冷却恢复）、渠道真伪探针（10 维行为指纹）、事件时间线 |
-| **官网与后台** | 9113 / 9112 | 官网（产品展示）+ 管理后台（仪表盘/爬虫/AI 采集/LLM/中转站/日志/用户/数据中心/设置） |
+| **智能采集** | 后台「数据工厂」 | 免代码采集：generic / flow_generic；任务队列、定时调度、失败重试、增量去重、质量评分、AI 规划试采 |
+| **SaaS** | 注册 / 成员 / 用量 | 租户空间、成员、配额；公司管理员与平台超管写面分离 |
+| **能力市场** | 后台「资产目录」+ 官网能力/技能 | 技能 / 插件 / 命令 / 智能体 / 专家团 五类平级；治理走 `v1/skills` 与 `v1/capabilities` |
+| **大模型管理** | 后台「LLM 配置」 | 多供应商注册表：API Key Fernet 加密、激活切换、连通性测试；租户 BYOK 直连 |
+| **中转站** | 后台「中转站管控」 | 平台 LLM 网关目标为 **LiteLLM Proxy**（`deploy/litellm/`）。new-api 为**已退役运行时**：`/api/v1/newapi` 与 `deploy/newapi` 仍在树里，默认关闭，不与 LiteLLM 长期双通道并存 |
+| **官网与后台** | 9113 / 9112 | 官网 + 管理后台（五组 IA：概览 / 数据工厂 / 能力资产 / 运营管理 / 系统管理） |
 
-> 定位说明：token 调度模块是 new-api 实例的**外挂巡检器**（额度熔断 + 真伪探针 + 只读总览），请求转发/计费由 new-api 本体承担；生产部署编排见 [deploy/newapi/](deploy/newapi/)。
+> 平台路径的规划/评分应走 LiteLLM；不要再把 new-api 写成当前可卖的网关产品。
 
 ---
 
@@ -49,7 +51,7 @@
 │  admin (9112) │  FastAPI (9111)  │  scrapy-redis │   公共基建层    │
 │  official     │  api/v1 + v2     │  独立 Worker  │  db/log/queue   │
 │  (9113)       │  external_api/v1 │  (禁 import   │  repo/exception │
-│               │  + 后台消费者    │   backend)    │  models/schemas │
+│  + shared     │  + 后台消费者    │   backend)    │  models/schemas │
 └───────┬───────┴────────┬─────────┴───────┬───────┴────────┬────────┘
         │                │                 │                │
         └──────── config/ (Dynaconf：default → <env> → .env → 环境变量) ┘
@@ -76,7 +78,7 @@ backend consumer 批量取回 → 增量去重 → bulk insert spider_results
                                     └─ 失败自动重试（1s/5s/15s 退避，最多 3 次）
 ```
 
-> **双进程心智模型**：backend（含任务分发消费者）与 scrapy Worker 是两个进程。**Worker 不启动，任务会一直停在 pending**——用 `uv run python run.py spider --list` 查看/启动，后台「爬虫管理→节点」可看 Worker 心跳。
+> **双进程心智模型**：backend（含任务分发消费者）与 scrapy Worker 是两个进程。**Worker 不启动，任务会一直停在 pending**。`uv run python run.py` 默认会把 Worker 一起拉起；`uv run python run.py spider --list` 只列爬虫。后台「数据工厂 → 节点监控」可看 Worker 心跳。
 
 ### 核心原则
 
@@ -94,37 +96,35 @@ backend consumer 批量取回 → 增量去重 → bulk insert spider_results
 
 ```
 auto_agents/
-├── run.py / run_backend.py / run_spider.py / run_frontend.py
-│                                 # 全栈编排入口（all / backend / spider / frontend）
+├── init_project.sh               # 新人一键初始化
+├── run.py                        # 统一启停入口（实现在 scripts/runlib/）
 ├── backend/                      # FastAPI 后端（workspace member）
-│   ├── app/api/v1/               # 内部 API 域（见「API 设计」）
+│   ├── app/api/v1/               # 业务域（auth/spiders/ai/llm/skills/capabilities/…）
 │   ├── app/api/v2/               # 增强版健康检查
 │   ├── app/external_api/v1/      # 外部 API：API Key 数据查询 + Webhook 回调
-│   ├── services/                 # 业务服务（spider 三域拆分 / ai_planner / llm_provider /
-│   │                             #   channel_scheduler / channel_probe / auth / notify ...）
-│   ├── repositories/             # 数据访问（继承 BaseRepository）
+│   ├── services/                 # spider / ai_planner / llm / skills / capabilities / tenant ...
+│   ├── repositories/
 │   ├── tasks/consumer.py         # Redis 三循环消费者（分发/回流/重试）
-│   ├── alembic/                  # 数据库迁移
-│   └── scripts/set_admin_account.py   # 初始管理员脚本
+│   ├── alembic/
+│   └── scripts/set_admin_account.py
 ├── scrapy/                       # Scrapy 分布式爬虫（workspace member）
-│   ├── spiders/                  # base / generic（通用选择器）/ flow_generic（流程）
-│   │                             #   + example / zhihu_feed / dianping_home / openweather
-│   ├── middlewares/              # UA 轮换 / 代理评分 / 账号会话 / 任务控制 / 重试 / Playwright
+│   ├── spiders/                  # base / generic / flow_generic + example / zhihu_feed / ...
+│   ├── middlewares/              # UA 轮换 / 代理 / 账号会话 / 任务控制 / 重试
 │   ├── pipelines/                # Clean → Validate → QualityCheck → Store（Redis 队列）
-│   └── extensions/               # 关闭 Webhook（HMAC 签名）/ 空闲自动收尾
-├── platform_core/                # 共享基建：db / redis_async / queues(分布式锁) /
-│                                 #   logger / storage / repository / models / schemas /
-│                                 #   exceptions / tenant_context
-├── config/                       # Dynaconf 多层合并（backend & scrapy 共用）
-├── frontend/admin/               # 管理后台（React 19 + antd 6 + Zustand + axios）
-├── frontend/official/            # 官网（React 19 + antd + Framer Motion）
-├── frontend/shared/              # @auto-agents/frontend-shared（tsc 编译产物，禁源码直引）
-├── deploy/newapi/                # new-api 网关独立部署编排
-├── deploy/litellm/               # LiteLLM L1 影子 sidecar（profiles 隔离，默认不启动）
-├── scripts/                      # bootstrap-db / check-arch / migrate / start ...
-├── capability-library/           # 跨工具内容库（SKILL.md/adapters；治理并入主 API v1/skills）
-├── .agents/skills/               # 工具中立 AI 资产（/new-svc /new-spider /check-arch ...）
-└── .claude/                      # Claude Code 协作层（IDENTITY/SOUL/MEMORY/agents/hooks）
+│   └── extensions/
+├── platform_core/                # 共享基建
+├── config/                       # Dynaconf 多层合并
+├── frontend/
+│   ├── admin/                    # 后台（React 19 + antd 6 + Zustand）
+│   ├── official/                 # 官网（React 19 + antd + Framer Motion）
+│   └── shared/                   # 双应用共享层（先 build dist）
+├── deploy/                       # litellm / watchdog / newapi（历史）
+├── scripts/                      # 只做初始化辅助 + 启停（lib / runlib / db）
+├── tools/                        # 质量门禁与 OpenAPI 导出
+├── capability-library/           # 产品能力目录；plugins/ → .agents/plugins
+├── .agents/                      # 开发协作中枢（skills/ + plugins/ 指针农场）
+├── .claude/                      # 规则 / hooks / agents；skills、plugins 为适配器
+└── .grok/                        # Grok 项目配置；plugins/ 为启用子集
 ```
 
 ---
@@ -136,46 +136,32 @@ auto_agents/
 | 工具 | 版本 | 用途 |
 |------|------|------|
 | Python | 3.13+ | 后端 / 爬虫 |
-| Node.js | 18+ | 前端 |
+| Node.js | 20 | 前端（CI 与 Dockerfile 均为 20；根 npm workspaces） |
 | MySQL | 8.0+ | 主数据存储 |
-| Redis | 6+ | 队列调度 / 缓存 / 分布式锁 |
+| Redis | 6+ | 队列调度 / 缓存 / 分布式锁（compose 用 Redis 7） |
 | uv | 最新 | Python 依赖管理 |
 
-### 1. 安装依赖
+### 1. 一键初始化（推荐）
 
 ```bash
-uv sync                                            # Python 一把梭（backend + scrapy 全部装入根 .venv）
-npm install                                        # 根 workspaces：admin + official + shared
+bash init_project.sh
+# 或：uv run python run.py setup
 ```
 
-### 2. 配置敏感信息
+会检查 uv / Node，安装 Python 与前端依赖，生成 `config/local/.env`（已有则不覆盖），本机没有 MySQL/Redis 时用 docker compose 拉起，然后建库迁移并创建管理员 `admin / 123456`。
 
-复制 `.env.example` 为 `config/local/.env`，填入 MySQL/Redis 密码与 JWT 密钥（**JWT 不允许使用默认占位符，否则启动即拒绝**）：
+分步等价于：`uv sync` → `npm ci && npm run build:shared` → 写 `.env` → `scripts/db/bootstrap.sh` → `set_admin_account.py`。
 
-```env
-AUTO_AGENTS_MYSQL__DEFAULT__PASSWORD=xxx
-AUTO_AGENTS_REDIS__DEFAULT__PASSWORD=xxx
-AUTO_AGENTS_JWT__SECRET_KEY=<32位以上随机串>
-```
-
-### 3. 初始化数据库
+### 2. 启动
 
 ```bash
-bash scripts/bootstrap-db.sh     # 新环境唯一推荐入口：建库 → 基线表 → 迁移链 head（幂等）
+uv run python run.py                # 默认启动全部：后端 + Worker + 双前端（已运行则提示跳过）
+uv run python run.py stop           # 停止全部
+uv run python run.py restart        # 强制重启
+uv run python run.py status         # 查看状态
 ```
 
-> 直接 `alembic upgrade head` 在空库上会因基线表缺失失败（已知遗留项，见脚本头注释），务必走 bootstrap-db.sh。
-
-### 4. 创建管理员并启动
-
-```bash
-uv run python backend/scripts/set_admin_account.py   # 创建/重置 admin（默认 123456，务必登录后修改）
-
-uv run python run.py all            # 后端(9111) + 后台(9112) + 官网(9113)
-uv run python run.py spider         # 另开终端：启动爬虫 Worker（不启动则任务一直 pending）
-```
-
-### 5. 访问入口
+### 3. 访问入口
 
 | 服务 | 地址 |
 |------|------|
@@ -184,22 +170,22 @@ uv run python run.py spider         # 另开终端：启动爬虫 Worker（不�
 | 后端健康检查 | http://127.0.0.1:9111/api/v1/health |
 | 官网 | http://127.0.0.1:9113 |
 
-本地联调也可 `docker compose up --build`（backend + MySQL + Redis；注意需为容器覆盖 `AUTO_AGENTS_API__HOST=0.0.0.0`）。
+本地联调也可 `docker compose up --build`（backend + MySQL 8 + Redis 7；compose 已注入 `AUTO_AGENTS_API__HOST=0.0.0.0`）。
 
 ---
 
 ## 第一个采集任务
 
 1. 浏览器打开 http://127.0.0.1:9112 ，用管理员账号登录；
-2. 左侧「爬虫管理 → 任务列表」→「新增任务」；
+2. 左侧「数据工厂 → 采集任务」→「新增任务」；
 3. 选择爬虫（如 **generic 通用采集**）→ 填写目标 URL 与要提取的字段（选择器支持 css / xpath / regex）；
 4. 「提交任务」——系统自动打开日志抽屉实时观察执行；
 5. 任务完成后点该行「结果」查看数据，可导出 CSV / JSON。
 
 进阶玩法：
 
-- **AI 自动生成采集方案**：「AI 采集 → 采集向导」，输入目标页 URL，LLM 自动规划选择器并试采验证，通过后一键注册为新爬虫（需先在「LLM 配置」激活一个供应商）；
-- **周期采集**：「爬虫管理 → 定时任务」，按 cron 定时执行；
+- **AI 自动生成采集方案**：「数据工厂 → AI 采集规划」，输入目标页 URL，LLM 自动规划选择器并试采验证，通过后一键注册为新爬虫（需先在「LLM 配置」激活一个供应商）；
+- **周期采集**：采集任务里配 cron / 调度（以当前后台「数据工厂」为准）；
 - **收藏复用**：任务行「收藏」存为模板，后续一键再跑。
 
 ---
@@ -270,15 +256,17 @@ uv run python run.py spider         # 另开终端：启动爬虫 Worker（不�
 
 ### AI 采集规划
 
-「AI 采集 → 采集向导」：输入目标 URL → LLM 规划选择器方案（可人工微调）→ 自动试采与质量评判（失败自动修复迭代，最多 2 轮）→ 一键上线注册为 flow_generic 爬虫。前置条件：LLM 配置页已激活供应商。
+「数据工厂 → AI 采集规划」：输入目标 URL → LLM 规划选择器方案（可人工微调）→ 自动试采与质量评判（失败自动修复迭代，最多 2 轮）→ 一键上线注册为 flow_generic 爬虫。前置条件：LLM 配置页已激活供应商。
 
 ### 大模型管理（LLM 配置）
 
-多供应商注册，协议走自研适配器（`openai_compatible` / `anthropic` / `google_gemini`），不引入 openai/anthropic/langchain Python SDK。API Key Fernet 加密落库、接口出参掩码；行内「测试连通性」回显延迟与模型；未配置时回退 `config/default/llm.yml` + 环境变量兜底。LiteLLM L1 影子 sidecar 见 [deploy/litellm/README.md](deploy/litellm/README.md)（默认不启动，不接生产流量）。
+多供应商注册（openai_compatible 协议）；API Key Fernet 加密落库、接口出参掩码；行内「测试连通性」回显延迟与模型；「激活」热切换（全表至多一个激活；未激活时回退 `config/default/llm.yml` + 环境变量兜底）。
 
-### new-api 中转站管控
+### 中转站 / 平台 LLM 网关
 
-三个只读视图：渠道总览（额度窗口用量）/ 探针结果（渠道真伪判定）/ 事件时间线（熔断与恢复动作）。渠道额度巡检器随 backend 启动，超限渠道自动下线（status=3）、冷却到期复核恢复；渠道级额度配置经 Redis hash `newapi:channel:cfg:{id}` 下发。部署见 [deploy/newapi/README.md](deploy/newapi/README.md)。
+目标运行时是 **LiteLLM Proxy**（`deploy/litellm/`），平台路径规划/评分走网关，租户自己配的供应商仍直连。
+
+T-20：`deploy/newapi` 已墓碑（进程停止，`NEWAPI.ENABLED` 恒 false 且读路径已删）。值班 URL `/api/v1/newapi` 一周期保留，列表来自 LiteLLM。不要把 new-api 写回根 compose，也不要与 LiteLLM 长期双通道并存。
 
 ---
 
@@ -300,14 +288,13 @@ uv run python run.py spider         # 另开终端：启动爬虫 Worker（不�
 | `/spiders` | spiders（5 子域） | 任务运行/控制/日志、结果查询/导出、注册表/定义、定时调度、模板（+告警规则） |
 | `/ai` | ai | AI 采集计划（创建/规划/试采/上线注册） |
 | `/llm` | llm_providers | LLM 供应商 CRUD / 激活 / 连通性测试 |
-| `/newapi` | newapi | 中转站总览 / 渠道事件 / 探针结果 |
-| `/admin` | admin | 统计、用户列表、审计日志、租户运营 |
-| `/rbac` | rbac | 角色 / 权限 / 菜单 |
+| `/newapi` | newapi | 遗留中转站管控面（默认关闭） |
+| `/skills` | skills | 技能治理（扫描/评分/矫正）；公开面见 `/public` |
+| `/capabilities` | capabilities | 插件/智能体/专家团等能力资产 |
 | `/members` | members | 租户成员 |
 | `/tenants/me` | tenant_usage | 当前租户用量 |
-| `/skills` | skills | 技能治理（扫描/评分/候选/适配器） |
-| `/capabilities` | capabilities | 能力资产目录（技能/插件/专家/专家团） |
-| `/public` | public_skills / tenant_signup | 公开技能与企业自助注册 |
+| `/rbac` | rbac | 权限 |
+| `/admin` | admin | 统计、用户列表、审计日志 |
 | `/configs` | configs | 系统配置读写 |
 | `/health` | health | 存活 / db / storage / redis 探针 |
 | `/` | root | 版本信息 |
@@ -381,37 +368,39 @@ API Routes → Services → Repositories → Models(ORM)
  请求校验     业务编排      数据访问      数据契约（与 Schemas 互不 import）
 ```
 
-### 架构红线（13 条 + 3 边界，机械可检查）
+### 架构红线（R1–R13 + B1–B3，机械可检查）
 
 ```bash
-bash scripts/check-arch.sh      # 退出码 = 违规数（pre-commit 与 CI 自动执行）
+bash tools/check/arch.sh      # 退出码 = 违规数（pre-commit 与 CI 自动执行）
 ```
 
-核心：禁止硬编码连接串/密钥；爬虫禁止 import backend、禁止直写主库；爬虫必须配反爬（DOWNLOAD_DELAY + UA 轮换）；API 层禁止 import ORM；async 上下文禁止同步 Redis 链式直调（统一 `get_async_redis()`）；业务查询经租户过滤收口（R13）；完整清单见 `.claude/rules/project_rule.md`。
+核心：禁止硬编码连接串/密钥；爬虫禁止 import backend、禁止直写主库；爬虫必须配反爬（DOWNLOAD_DELAY + UA 轮换）；API 层禁止 import ORM；async 上下文禁止同步 Redis 链式直调（统一 `get_async_redis()`）。条数以 `tools/check/arch.sh` 为准（R1–R13 + B1–B3）；规则正文 `.claude/rules/project_rule.md`。
 
 ### 质量门禁
 
 ```bash
 uv run pytest -x -q backend/tests   # 后端测试必须退出码 0
-bash scripts/check-arch.sh          # 数据契约改动必跑
+bash tools/check/arch.sh          # 数据契约改动必跑
 uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
-CI 关卡：Python lint+test → 架构红线（13+3）→ 迁移 IR → 前端构建（含 shared）→ Docker 校验。
+CI 五阶段：Python lint+test → 架构红线 → DB 迁移门禁 → 前端构建 → Docker 校验。
 
 ---
 
 ## 运维脚本
 
+初始化：`init_project.sh`。启停：`run.py`（`scripts/`）。门禁：`tools/`。看门狗：`deploy/watchdog.sh`。
+
 | 脚本 | 用途 |
 |------|------|
-| `scripts/bootstrap-db.sh` | **新环境唯一推荐入口**：建库 → 基线表 → 迁移（幂等） |
-| `scripts/migrate.sh` | 执行 Alembic 迁移到最新 |
-| `scripts/init_db_sync.py` | create_all 基线建表（bootstrap-db.sh 的内部依赖，勿单独使用） |
-| `scripts/check-arch.sh` | 架构红线扫描（退出码 = 违规数；pre-commit 与 CI 自动执行） |
-| `backend/scripts/set_admin_account.py` | 创建/重置管理员账号（默认 admin/123456，登录后请修改） |
-
-> 旧脚本（init-db.sh / init-database.sh / start.sh / start_frontend.sh / run-spider.sh / init_worktree.sh）已于 2026-08-31 清理：初始化统一走 bootstrap-db.sh，启停统一走 `run.py` 编排器（诊断报告第 9 章决策）。
+| `init_project.sh` | 新人一键初始化 |
+| `run.py` | 启停 |
+| `scripts/db/bootstrap.sh` | 建库 → 基线表 → 迁移 |
+| `scripts/db/migrate.sh` | alembic upgrade head |
+| `tools/check/arch.sh` | 架构红线 |
+| `tools/check/frontend.sh` | 前端门禁 |
+| `backend/scripts/set_admin_account.py` | 管理员账号（init_project.sh 已调用） |
 
 ---
 
@@ -419,10 +408,10 @@ CI 关卡：Python lint+test → 架构红线（13+3）→ 迁移 IR → 前端�
 
 | 现象 | 原因与处理 |
 |------|-----------|
-| 任务一直 `pending` | 爬虫 Worker 未启动：另开终端 `uv run python run.py spider`；后台「爬虫管理→节点」确认心跳 |
+| 任务一直 `pending` | 爬虫 Worker 未启动：`uv run python run.py start spider`；后台「数据工厂 → 节点监控」确认心跳 |
 | 任务日志抽屉为空 | 任务日志读取共享日志文件（backend 与 Worker 需同一文件系统）；跨机部署时需共享 `logs/spider/` 或检查 `config/default/log.yml` 路径 |
 | 任务失败，错误是 "params 缺少 urls" | 多为 params JSON 写错（引号/逗号）；对照「爬虫参数契约」检查 |
-| 提交任务报"请先登记" | 目标爬虫未在注册表登记或已停用：后台「爬虫管理→爬虫定义」登记/启用 |
+| 提交任务报"请先登记" | 目标爬虫未在注册表登记或已停用：采集任务相关登记/启用入口（以当前后台为准） |
 | 登录 401 频繁 | Token 30 分钟过期，重新登录即可 |
 | 429 / 403 被风控 | 提高 `DOWNLOAD_DELAY`、启用 UA 轮换与代理（站点级策略 `config/scrapy/default/sites.yml`） |
 | `git push` 报 `Failed to connect to 127.0.0.1 port 7897` | 本机代理软件未启动但 shell 设了 `HTTP_PROXY/HTTPS_PROXY`：启动代理，或 `unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy`（详见诊断报告附录 8.3） |
@@ -434,25 +423,25 @@ CI 关卡：Python lint+test → 架构红线（13+3）→ 迁移 IR → 前端�
 
 | 模块 | 技术 |
 |------|------|
-| 后端 | FastAPI / SQLAlchemy 2 / PyMySQL + aiomysql / redis-py(async) / Pydantic 2 / PyJWT / Loguru / Alembic |
+| 后端 | FastAPI ≥0.135 / SQLAlchemy 2 / PyMySQL + aiomysql / redis-py(async) / Pydantic 2 / PyJWT / Loguru / Alembic |
 | 爬虫 | Scrapy ≥2.15 / scrapy-redis / DrissionPage / Selenium / httpx |
-| 前端 | React 19 / TypeScript / Ant Design 6 / React Router v7 / Zustand / axios / React Query / Framer Motion(official)；npm workspaces + `frontend/shared` |
+| 前端 | React 19 / TypeScript / Ant Design 6 / React Router v7 / Zustand / axios / React Query / Framer Motion(official) / `frontend/shared` |
 | 配置 | Dynaconf ≥3.2 |
-| 数据 | MySQL 8 / Redis 6+ |
-| 包管理 | uv（Python workspace）/ npm |
-| AI 协作 | Claude Code（`.claude/` 协作层：IDENTITY / SOUL / MEMORY / agents / hooks / skills） |
+| 数据 | MySQL 8 / Redis 6+（compose：Redis 7） |
+| 包管理 | uv（Python workspace）/ npm workspaces |
+| 平台 LLM 网关 | LiteLLM Proxy（目标）；new-api 遗留管控面默认关闭 |
+| AI 协作 | `.agents/` 中枢；`.claude/` 规则与 hooks；`.grok/` 启用子集 |
 
-> AI 协作层不是运行时依赖；项目名 `auto_agents` 中的 "agents" 指自动化爬虫工人。项目协作 skills 位于 `.agents/skills/`（工具中立），`.claude/skills` 为 symlink。跨工具共享的内容库在 [`capability-library/`](capability-library/README.md)（内容文件与适配器；**治理走主 API `v1/skills`**）。
+> AI 协作层不是运行时依赖；项目名 `auto_agents` 中的 "agents" 也指采集工人。开发协作中枢在 `.agents/`（契约：`.agents/README.md`）。技能治理在主 API `v1/skills` 与 `v1/capabilities`。
 
 ---
 
 ## 相关文档
 
-- 平台方案 / ADR / 部署 / 复盘：[`docs/`](docs/)（`adr/` `claims.md` `ops/` `agents/`）
-- 项目规则（13 红线 + 3 边界）：`.claude/rules/project_rule.md`；扫描器 `scripts/check-arch.sh`
-- new-api 网关部署：[deploy/newapi/README.md](deploy/newapi/README.md)
-- LiteLLM L1 影子接入：[deploy/litellm/README.md](deploy/litellm/README.md)
-- 宣称对账：[docs/claims.md](docs/claims.md)
-- AI 协作层：`.claude/IDENTITY.md` / `SOUL.md` / `MEMORY.md`、子代理 `spider-doctor / arch-warden / memory-curator`
-- 常用 Skill：`/new-svc` `/new-spider` `/new-model` `/db-design` `/check-arch` `/verify` `/coding-style` `/logging` `/config` `/deploy` `/cicd`
-- 跨工具内容库：[capability-library/README.md](capability-library/README.md)
+- 平台方案 / ADR / 诊断档案：`docs/` 为本地私有内容不入库
+- 项目规则：`.claude/rules/project_rule.md`；机械检查：`tools/check/arch.sh`（R1–R13 + B1–B3）
+- 词汇：`CONTEXT.md`
+- 平台 LLM 网关：`deploy/litellm/`（new-api 历史编排：`deploy/newapi/`，默认不启）
+- 开发协作中枢：`.agents/README.md`
+- Claude 子代理：`.claude/agents/`（`arch-warden` / `spider-doctor` / `memory-curator`）
+- 常用 Skill：`/new-svc` `/new-spider` `/new-model` `/db-design` `/check-arch` `/verify` `/deploy` `/cicd`

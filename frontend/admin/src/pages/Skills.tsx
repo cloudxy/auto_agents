@@ -35,11 +35,11 @@ const SYNC_COLORS: Record<string, string> = {
 }
 const RUBRIC_DIMS = ['completeness', 'doc_quality', 'maintenance', 'real_world_effect'] as const
 
-const Skills: React.FC = () => {
+const Skills: React.FC<{ onSubscribe?: (name: string) => void }> = ({ onSubscribe }) => {
   // 工单 69：按钮级权限单源（R5）——移除调用方硬编码 props，组件内读 usePermission
-  const { hasPermission } = usePermission()
+  const { hasPermission, isPlatformAdmin } = usePermission()
   const canEdit = hasPermission('btn:skill:edit')
-  const canAdmin = hasPermission('btn:skill:admin')
+  const canMarketWrite = isPlatformAdmin
   const [filters, setFilters] = useState<{ q?: string; category?: string; status?: string; tier?: string; sort: string }>({ sort: 'updated_at' })
   const [page, setPage] = useState(1)
   const [detail, setDetail] = useState<SkillDetail | null>(null)
@@ -114,11 +114,14 @@ const Skills: React.FC = () => {
       <Tag color={SYNC_COLORS[s] || 'default'}>{s}</Tag>
     )},
     { title: '更新时间', dataIndex: 'updated_at', width: 170, render: (v?: string | null) => v ? new Date(v).toLocaleString('zh-CN') : '—' },
-    ...(canEdit ? [{
-      title: '操作', width: 90, render: (_: unknown, r: SkillItem) => (
-        <Button size="small" onClick={() => { setCorrectTarget(r); form.resetFields() }}>矫正</Button>
-      ),
-    }] : []),
+    { title: '操作', width: 140, render: (_: unknown, r: SkillItem) => (
+      <Space>
+        {onSubscribe ? <Button size="small" onClick={() => onSubscribe(r.name)}>订阅</Button> : null}
+        {canEdit ? (
+          <Button size="small" onClick={() => { setCorrectTarget(r); form.resetFields() }}>矫正</Button>
+        ) : null}
+      </Space>
+    )},
   ]
 
   return (
@@ -164,7 +167,7 @@ const Skills: React.FC = () => {
           onChange={(sort) => setFilters((f) => ({ ...f, sort }))}
         />
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
-        {canAdmin && <Button type="primary" icon={<SyncOutlined />} onClick={runScan}>扫描入库</Button>}
+        {canMarketWrite && <Button type="primary" icon={<SyncOutlined />} onClick={runScan}>扫描入库</Button>}
       </Space>
 
       <Table
@@ -231,13 +234,13 @@ const Skills: React.FC = () => {
           {
             key: 'matrix',
             label: '适配器矩阵',
-            children: <SkillsMatrix skillNames={items.map((i) => i.name)} canAdmin={canAdmin} />,
+            children: <SkillsMatrix skillNames={items.map((i) => i.name)} canAdmin={canMarketWrite} />,
           },
-          {
+          ...(canMarketWrite ? [{
             key: 'candidates',
             label: '候选审核',
-            children: <SkillsCandidates canAdmin={canAdmin} />,
-          },
+            children: <SkillsCandidates canAdmin={canMarketWrite} />,
+          }] : []),
         ]}
       />
     </div>

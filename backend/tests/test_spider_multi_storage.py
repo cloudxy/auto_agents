@@ -65,8 +65,8 @@ def _task(**overrides) -> MagicMock:
     defaults = dict(
         id=9, spider_name="example", status="running", priority="normal",
         result_count=0, retry_count=2, error_message=None, params=None,
-        tenant_id=None,
         created_at=None, updated_at=None, started_at=None, completed_at=None,
+        tenant_id=1,
     )
     defaults.update(overrides)
     return MagicMock(**defaults)

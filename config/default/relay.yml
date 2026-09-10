@@ -1,0 +1,23 @@
+# 平台 LLM 网关值班产品规则（窗口 / 探针）。T-20 起只读 RELAY.*，不再读 NEWAPI.*。
+#
+# 嵌套读取：
+#   settings.get("RELAY.SCHEDULER_ENABLED", False)
+# 环境变量覆盖（Dynaconf 双下划线嵌套，前缀 AUTO_AGENTS_）：
+#   AUTO_AGENTS_RELAY__SCHEDULER_ENABLED=true
+#   AUTO_AGENTS_RELAY__PROBE_ENABLED=true
+#
+# 网关 HTTP 连接仍是 LITELLM.*（BASE_URL / MASTER_KEY / TIMEOUT）。
+# 禁止第三套前缀。禁止 NEWAPI.* 当运行时。禁止 backend 持网关 DSN。
+RELAY:
+  SCHEDULER_ENABLED: false          # 窗口调度（spend→budget）；默认不启动
+  PROBE_ENABLED: false              # 真伪探针；默认不启动
+  INTERVAL_SECONDS: 300             # 调度巡检间隔（秒）
+  PROBE_INTERVAL_SECONDS: 86400     # 探针巡检间隔（秒）
+  PROBE_REFERENCE_CHANNEL: null     # 参考模型 gateway_ref / model_name；null=无参考对比
+  PROBE_QUESTIONS_FILE: null        # 可选自定义探针问题 JSON；null=内置集
+  LOCK_TTL_SECONDS: 120             # 调度锁 TTL（秒）
+  PROBE_LOCK_TTL_SECONDS: 21600     # 探针锁 TTL（秒）；与爬虫 IdleAutoClose 120s 分家
+  PROBE_LOCK_RENEWAL_SECONDS: 600   # 探针锁续期（秒）
+  DEFAULT_WINDOW_QUOTA: 0           # 全局默认窗口用量上限（0=仅调度 Redis 配过的模型）
+  DEFAULT_COOLDOWN_SECONDS: 3600    # 全局默认冷却（秒）
+  DEFAULT_WINDOW_HOURS: 24          # 全局默认用量窗口（小时）

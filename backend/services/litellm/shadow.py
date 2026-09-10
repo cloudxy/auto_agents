@@ -95,6 +95,7 @@ def load_deployments_from_config(config: dict) -> list[LitellmDeployment]:
     litellm_params.model 形如 "openai/<model_id>"（协议前缀由 exporter 附加），
     此处剥离前缀还原实际模型名，与自研侧 model_id 同键对照。
     """
+    logger.debug("从 LiteLLM config 解析 deployment 列表")
     deployments: list[LitellmDeployment] = []
     for entry in (config or {}).get("model_list") or []:
         name = str(entry.get("model_name") or "")
@@ -210,6 +211,7 @@ async def capture_self_side_choice(
     ai_planner 延迟 import——本模块加载不拉动业务编排域（子包边界，见 __init__）。
     兜底路径（provider_id=None，yml/env）返回 source="config" 的空链快照。
     """
+    logger.debug("采集自研侧 LLM 路由快照")
     if resolve is None:
         from backend.services.llm_common import resolve_runtime_config as resolve
     if chain is None:

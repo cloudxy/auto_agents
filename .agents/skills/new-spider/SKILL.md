@@ -1,75 +1,51 @@
 ---
 name: new-spider
 description: >-
-  创建 Scrapy 爬虫模块。当用户需要从目标网站抓取数据、新建爬虫任务、
-  或为已有爬虫添加新的数据字段与管道时触发。
-  适用于从零搭建完整爬虫（Spider + Item + 反爬 + Redis 队列），
-  以及需要配置反爬策略（延迟、UA 轮换）和数据存储方式（Redis 队列）的场景。
-trigger: >-
-  从目标网站抓取数据、新建爬虫任务、为已有爬虫添加字段、
-  配置反爬策略（延迟/UA 轮换）、数据存储方式（Redis 队列）
+  Adds a TaskAwareRedisSpider under scrapy/spiders/ that ships items through
+  StorePipeline to Redis. Use when 新建爬虫, 抓站, 加 item 字段, or anti-crawl delay/UA.
 ---
 
 # 创建 Scrapy 爬虫
 
-对齐现行布局：`scrapy-redis` + `TaskAwareRedisSpider`，数据出口只有 Redis 队列。
-禁止 `scrapy crawl` 当主入口，禁止新建单体 `items.py` / `pipelines.py`。
+先读 `scrapy/spiders/example.py` 再改编。骨架：[references/code-templates.md](references/code-templates.md)。
 
-## 触发场景
+爬虫只采集和清洗。出口：已有 `StorePipeline` → Redis `spider:item_queue`。
 
-- "爬取某网站的用户信息"
-- "创建一个新闻爬虫"
-- "抓取商品数据"
+## Route
 
-## 执行流程
+| 观察到 | 先做 |
+|--------|------|
+| 要 FastAPI CRUD / 落主库的 API | `new-svc` |
+| 只要改后端消费 item 的表结构 | `db-design` / `new-model`，本 skill 只改 Item 字段 |
 
-### Step 1: 确认爬虫信息
+## Quick start
 
-1. 爬虫名称（英文，小写+下划线，等于 `Spider.name`）
-2. 目标网站 URL / `allowed_domains`
-3. 字段：优先复用 `items.BaseItem`；新字段再加子类
-4. 反爬：全局在 `scrapy/settings.py`（`DOWNLOAD_DELAY` 从 config 注入）。站点级 delay 见 `TaskAwareRedisSpider` 对 `sites.yml` 的消费
-5. 存储：只能走现有 `pipelines.StorePipeline` → Redis（`platform_core.queues.ITEM_QUEUE`），Backend 消费者落库
+信息不足时先问：`name`、allowed_domains、字段。
 
-### Step 2: 代码结构（现行）
+Copy and check off:
 
 ```
-scrapy/
-├── spiders/{spider_name}.py     # 继承 TaskAwareRedisSpider
-├── spiders/base.py              # 基类，不要改 unless 队列协议变了
-├── items/__init__.py            # Item 定义（继承 BaseItem）
-├── pipelines/                   # Clean / Validate / quality / Store —— 不要为单个爬虫新建管道
-├── middlewares/
-└── settings.py                  # 全局；不要改 BOT_NAME，不要给每个爬虫再注册 ITEM_PIPELINES
+new-spider:
+- [ ] name 小写+下划线，redis_key = {name}:start_urls
+- [ ] scrapy/spiders/{name}.py 继承 TaskAwareRedisSpider
+- [ ] item 至少写 url / title / source；能复用 BaseItem 就复用
+- [ ] 新字段才改 scrapy/items/__init__.py（未声明字段 → KeyError → 任务卡 running）
+- [ ] 用现有 Clean/Validate/Quality/Store 管道，不新建 Pipeline、不改 ITEM_PIPELINES
+- [ ] 延迟/UA 走 settings + UserAgentMiddleware（站点级延迟写 config/scrapy/）
+- [ ] uv run python run.py --list 含新 name
+- [ ] bash tools/check/arch.sh 退出码 0
 ```
 
-对照实现：`scrapy/spiders/example.py`、`scrapy/spiders/openweather.py`。
+队列条目是 JSON `{"url":"...","task_id":123}`（纯 URL 也能兜底）。Worker：`uv run python run.py start spider` 或 `uv run python -m scripts.runlib.spider --spider {name}`。`--list` 没有新 name：修文件后再跑 `--list`。
 
-### Step 3: 代码模板
+## 完成时回复
 
-完整模板见 [references/code-templates.md](references/code-templates.md)。
+1. spider 路径 + `name` / `redis_key` / `allowed_domains`
+2. 若加了 Item 子类，写出新字段名
+3. `--list` 与 arch.sh 原文（退出码 0）
 
-### Step 4: 运行命令
+## Examples
 
-```bash
-uv run python run_spider.py --list
-uv run python run_spider.py --spider {spider_name}
-```
+**Input:** 「抓 zhihu.com 推荐流」
 
-## 预期产出物
-
-```
-scrapy/spiders/{spider_name}.py          # TaskAwareRedisSpider，name / redis_key 已设
-scrapy/items/__init__.py                 # 仅当有新字段：新增 {SpiderName}Item(BaseItem)
-```
-
-不要产出：`scrapy/items.py`、`scrapy/pipelines.py`、每爬虫一条 `ITEM_PIPELINES`。
-
-## 验证步骤
-
-```bash
-uv run python run_spider.py --list
-bash scripts/check-arch.sh
-```
-
-`--list` 必须出现新 name。R3/R4/R5/R6 以脚本为准，不要另 grep。
+**Then:** 对齐 `scrapy/spiders/zhihu_feed.py`；`--list` 出现该 name；未新建 pipeline。

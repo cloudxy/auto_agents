@@ -1,0 +1,180 @@
+# state.yaml — feat-four-pillars 进度唯一事实源
+feature: feat-four-pillars
+lane: L4
+appetite: "program; Wave0 3.5pw; Wave1 11pw (architect); Wave2-4 blocked on operator Qs"
+current_hat: 定义
+hats_done: []
+status: superseded
+superseded_by: feat-four-pillars-v2
+superseded_at: "2026-09-08"
+resume_note: >
+  2026-09-08 操作者 /sdlc 要求全角色复审 + 结合既有方案生成全新方案。
+  本 feature 定义帽 G-fresh 未过（hats_done 空），不再 resume。
+  现行程序：.sdlc/feat-four-pillars-v2/ 。本目录工件只作输入。
+  ---
+  2026-09-07 内核清理：删早期合成稿 diagnosis/four-pillars-diagnosis-and-plan.md；
+  state.yaml tickets 与 02-shape/tickets 票号对齐（此前编排器票名与文件不一致）。
+  方案书：02-shape/contract.md v2.1（上游 spec v1.4 / D22–D29）。
+  PRD v1.4 已同步五类平级；G-fresh 仍须对 v1.4 再跑（producer 自批不算过闸）。
+  current_hat 保持定义（G-fresh 未过不得推塑形；check-sdlc HATADVANCE）。
+
+tickets:
+  - {id: T-01, title: "平台目录豁免登记（capability_*）", status: todo, evidence: "02-shape/tickets/T-01.md"}
+  - {id: T-02, title: "能力/技能目录写面收权", status: todo, evidence: "02-shape/tickets/T-02.md"}
+  - {id: T-03, title: "中转站与平台 LLM 写面收权", status: todo, evidence: "02-shape/tickets/T-03.md"}
+  - {id: T-04, title: "Admin 平台页按 is_platform_admin；渠道页对租户同 404", status: todo, evidence: "02-shape/tickets/T-04.md"}
+  - {id: T-05, title: "定时/模板/AI 试采入队带租户", status: todo, evidence: "02-shape/tickets/T-05.md"}
+  - {id: T-06, title: "真实 LLM 调用走租户月度配额", status: todo, evidence: "02-shape/tickets/T-06.md"}
+  - {id: T-07, title: "市场候选排除配额与租户结果", status: todo, evidence: "02-shape/tickets/T-07.md"}
+  - {id: T-08, title: "用量将满文案 + 上海业务日", status: todo, evidence: "02-shape/tickets/T-08.md"}
+  - {id: T-09, title: "官网诚实与注册去登录", status: todo, evidence: "02-shape/tickets/T-09.md"}
+  - {id: T-10, title: "导出格式/100 条上限可见", status: todo, evidence: "02-shape/tickets/T-10.md"}
+  - {id: T-11, title: "管理详情去路径、未发布当 404", status: todo, evidence: "02-shape/tickets/T-11.md"}
+  - {id: T-12, title: "明文密钥离树与掩码", status: todo, evidence: "02-shape/tickets/T-12.md"}
+  - {id: T-13, title: "产品事件存储与查询面", status: todo, evidence: "02-shape/tickets/T-13.md"}
+  - {id: T-14, title: "获客/激活漏斗埋点", status: todo, evidence: "02-shape/tickets/T-14.md"}
+  - {id: T-15, title: "B4 域 import 闸 + R10 扫子包", status: todo, evidence: "02-shape/tickets/T-15.md"}
+  - {id: T-16, title: "出站 Key 无租户绑定则拒绝", status: todo, evidence: "02-shape/tickets/T-16.md"}
+
+gates:
+  - name: sdlc
+    kind: script
+    result: pass
+    cmd: "bash /Users/xuyun/.zcode/local-plugins/sdlc-workflow/scripts/check-sdlc.sh --require .sdlc/feat-four-pillars"
+    exit_code: 0
+    at: "2026-09-07T16:40:00"
+  - name: test
+    kind: script
+    result: null
+    reason: 塑形帽无运行时代码；pytest 留到实现帽
+  - name: lint
+    kind: script
+    result: null
+    reason: 塑形帽未改运行时代码；check-arch 留到实现帽
+  - name: build
+    kind: script
+    result: null
+    reason: 塑形帽无前端实现
+  - name: migration
+    kind: script
+    result: null
+    reason: 塑形已写 ADR-0010…0018；表落地等 /dba 与实现帽
+  - name: e2e
+    kind: script
+    result: null
+    reason: 仓库无独立 E2E 套件；verify 帽补 curl/浏览器路径
+  - name: fresh-context
+    kind: fresh-context
+    result: fail
+    findings_total: 9
+    blocker: 0
+    major: 5
+    minor: 4
+    at: "2026-09-07T16:50:00"
+    evidence: .sdlc/feat-four-pillars/05-review/findings.md
+    reviewer_session: 01a07af7-fcc1-7721-95f3-552152138118
+    note: "round 2 on PM v1.1; QA-01..QA-19 independently verified fixed; new QA-20..QA-28"
+  - name: fresh-context-r3
+    kind: fresh-context
+    result: fail
+    findings_total: 2
+    blocker: 0
+    major: 1
+    minor: 1
+    at: "2026-09-07T17:00:00"
+    evidence: .sdlc/feat-four-pillars/05-review/findings.md
+    reviewer_session: 01a07b08-f255-7093-9245-4fce49ee12df
+    note: "round 3 on PM v1.2; QA-20..28 independently fixed; QA-29 major / QA-30 minor. PM v1.3 claims both closed; G-fresh not re-run on v1.3"
+
+review_findings:
+  - {id: QA-01, severity: blocker, status: fixed, note: "state.yaml appetite 已改为按波"}
+  - {id: QA-02, severity: blocker, status: fixed, note: "FR-15 GWT-15.1/15.4 含 is_marketplace_candidate、spider/source、login_failed 与企业关联"}
+  - {id: QA-03, severity: major, status: fixed, note: "GWT-20.4/20.6 不兼容宿主灰掉+拒绝，≠启用到宿主"}
+  - {id: QA-04, severity: major, status: fixed, note: "删任意已登录可订；GWT-20.5 只读拒绝"}
+  - {id: QA-05, severity: major, status: fixed, note: "FR-32 公开详情纯文本 XSS"}
+  - {id: QA-06, severity: major, status: fixed, note: "可见性矩阵补测试中；GWT-18.2 含测试中/已弃用"}
+  - {id: QA-07, severity: major, status: fixed, note: "FR-07 租户读默认关闭；写权仅超管"}
+  - {id: QA-08, severity: major, status: fixed, note: "§9.1 增 Q-AGPL；Q-RELAY 对外收费须先关 AGPL"}
+  - {id: QA-09, severity: major, status: fixed, note: "GWT-01.4 首页精选失败不得装空"}
+  - {id: QA-10, severity: major, status: fixed, note: "§9.2 分发=上架 ≠ 验证/启用到宿主；CONTEXT/ADR-0001 该行 superseded"}
+  - {id: QA-11, severity: major, status: fixed, note: "spec§6 与蓝图护栏对齐；蓝图为 analyst 唯一口径"}
+  - {id: QA-12, severity: major, status: fixed, note: "GWT-08.4 出站 Key 无租户绑定则拒绝"}
+  - {id: QA-13, severity: major, status: fixed, note: "state.yaml 已写入七问（原六问 + Q-AGPL）"}
+  - {id: QA-14, severity: minor, status: fixed, note: "spec§2 以 user-story.md 为准"}
+  - {id: QA-15, severity: minor, status: fixed, note: "GWT-01.3 改为边界；GWT-01.5/05.3 为授权副作用"}
+  - {id: QA-16, severity: minor, status: fixed, note: "GWT-12.4 ≥90% 接近上限"}
+  - {id: QA-17, severity: minor, status: fixed, note: "T-31 + §5 本程序不改菜单分组"}
+  - {id: QA-18, severity: minor, status: fixed, note: "GWT-26 Wave 1 无启用到宿主按钮"}
+  - {id: QA-19, severity: minor, status: fixed, note: "GWT-19.4 别名与存活目录名冲突失败"}
+  - {id: QA-20, severity: major, status: fixed, note: "NFR-05 经办或负责人；只读拒绝"}
+  - {id: QA-21, severity: major, status: fixed, note: "GWT-21.4 只读改安装拒绝"}
+  - {id: QA-22, severity: major, status: fixed, note: "spec§6 护栏复制蓝图第4节"}
+  - {id: QA-23, severity: major, status: fixed, note: "host_compat NULL=四宿主可订；空数组不可订"}
+  - {id: QA-24, severity: major, status: fixed, note: "FR-29 启用/信任/卸载；GWT-29.4"}
+  - {id: QA-25, severity: minor, status: fixed}
+  - {id: QA-26, severity: minor, status: fixed, note: "TTFV 排除市场候选"}
+  - {id: QA-27, severity: minor, status: fixed, note: "GWT-20.9 多宿主多行"}
+  - {id: QA-28, severity: minor, status: fixed, note: "渠道页对租户隐藏+404"}
+  - {id: QA-29, severity: major, status: fixed, note: "PM v1.3 GWT-14.3/14.4；未经第4轮独立审查"}
+  - {id: QA-30, severity: minor, status: fixed, note: "PM v1.3 §1.1 排除候选；未经第4轮独立审查"}
+stale_artifacts: []
+open_questions:
+  - Q-VOICE
+  - Q-PRICE
+  - Q-RELAY
+  - Q-MARKET-USER
+  - Q-BILL
+  - Q-LLM
+  - Q-AGPL
+lane_changes:
+  - from: "appetite 8h"
+    to: "program waves (Wave0 2-4pw, Wave1 8-16pw)"
+    reason: "PM define: 8h 只够诊断，不能覆盖四柱可卖产品"
+    at: "2026-09-07T15:36:00"
+
+lane_judge:
+  Q1_schema: true
+  Q2_auth_tenant: true
+  Q3_external_contract: true
+  Q4_irreversible: true
+  Q5_new_dependency: true
+  Q6_files_or_subprojects: true
+  reason: >
+    智能采集 + SaaS 多租户 + 中转站外部契约 + Power Market schema；
+    决策不可逆（listing/租户安装/源注册表）；backend/scrapy/双前端/capability-library
+    多子项目。用户点名全角色诊断后出改进方案。
+
+roles_invited_beyond_default:
+  - ops
+  - designer
+  - architect
+  - dba
+  - frontend
+  - backend
+  - sre
+  - data-collector
+  - data-warehouse-engineer
+  - miner
+  - analyst
+  - qa
+  - algo
+  - pm
+  - qc
+
+roles_skipped: []
+
+host_spawn:
+  requested: "sdlc-workflow:<role>"
+  available: [arch-warden, explore, general-purpose, memory-curator, plan, spider-doctor]
+  fallback: general-purpose
+  reason: >
+    本宿主未注册插件 agents/ 的 sdlc-workflow:<role> 类型（ZCode 才会把
+    pluginName:bareName 挂进 spawn 表）。回退为每角色一个独立 general-purpose
+    子代理，强制先读 agents/<role>.md + skills/<role>/SKILL.md，编排器本窗口
+    不写诊断正文。这不是双派发（原生类型不存在，只派一次）。
+
+signals:
+  - /Users/xuyun/Documents/grok-files/power-market-design.md
+  - /Users/xuyun/Documents/grok-files/power-market-design-review.md
+  - CONTEXT.md
+  - README.md

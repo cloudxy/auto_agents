@@ -56,7 +56,7 @@ async def _seed(db_session, library_root: Path) -> None:
         await s.commit()
 
 
-def test_scan_endpoint_returns_job_summary(db_client, admin_client, db_engine, db_session, skill_library):
+def test_scan_endpoint_returns_job_summary(db_client, platform_admin_client, db_engine, db_session, skill_library):
     import asyncio
 
     asyncio.run(_seed(db_session, skill_library))

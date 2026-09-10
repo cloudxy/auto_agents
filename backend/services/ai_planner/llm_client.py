@@ -22,11 +22,14 @@ from typing import Optional
 import httpx
 from sqlalchemy import select
 
+from backend.config_consts import LLM_DATA_PLANE
 from backend.services.llm_common import (
     LlmRuntimeConfig,
     resolve_config_from_settings,
+    resolve_own_tenant_config,
     resolve_runtime_config,
 )
+from backend.services.llm_gateway.chat import chat_completions, list_v1_models
 from backend.services.llm_common.seam import seam as _seam
 from backend.services.llm_usage_service import get_month_used, record_usage
 from platform_core.exceptions import BusinessException
@@ -116,12 +119,72 @@ async def invalidate_client_cache(provider_id: Optional[int] = None) -> None:
 # ----------------------------------------------------------------------
 # 运行时配置解析（provider 优先 / yml+env 兜底；实现下沉 llm_common，T6）
 # ----------------------------------------------------------------------
-async def _resolve_llm_runtime_config() -> LlmRuntimeConfig:
-    """独立短事务 session 解析 LLM 运行时配置（激活供应商优先）
+def _is_litellm_plane() -> bool:
+    plane = str(_seam().settings.get("LLM.DATA_PLANE", LLM_DATA_PLANE) or LLM_DATA_PLANE)
+    return plane == "litellm"
 
-    短事务模式同 _read_task_snapshot（每轮新建、查完即关）；任何异常
-    （DB 不可用/表未建/单测无库）都降级为 yml/env 兜底，不阻断 LLM 调用。
+
+def _gateway_unreachable(cause: Exception | None = None) -> BusinessException:
+    from backend.services.quota_service import GATEWAY_UNREACHABLE_USER
+
+    logger.warning(f"平台 LLM 网关不可达: {cause}")
+    return BusinessException(GATEWAY_UNREACHABLE_USER, code="LLM_GATEWAY_UNREACHABLE")
+
+
+def _no_platform_model() -> BusinessException:
+    from backend.services.quota_service import NO_MODEL_USER
+
+    logger.warning("平台网关未登记任何模型")
+    return BusinessException(NO_MODEL_USER, code="LLM_GATEWAY_NO_MODEL")
+
+
+def _provider_error(cause: Exception | None = None) -> BusinessException:
+    from backend.services.quota_service import PROVIDER_ERROR_USER
+
+    logger.warning(f"本企业供应商调用失败: {cause}")
+    return BusinessException(PROVIDER_ERROR_USER, code="LLM_PROVIDER_ERROR")
+
+
+def _gateway_runtime_config() -> LlmRuntimeConfig:
+    from backend.services.llm_gateway._settings import _base_url, _timeout_sec, _virtual_key
+
+    logger.debug("组装平台网关运行时配置")
+    return LlmRuntimeConfig(
+        base_url=_base_url(),
+        api_key=_virtual_key(),
+        model="",
+        temperature=float(_seam().settings.get("LLM.TEMPERATURE", 0.2)),
+        timeout=_timeout_sec(),
+        max_retries=max(1, int(_seam().settings.get("LLM.MAX_RETRIES", 3))),
+        enabled=True,
+        source="gateway",
+        provider_id=None,
+        protocol="openai_compatible",
+    )
+
+
+async def _resolve_litellm_runtime_config() -> LlmRuntimeConfig:
+    """本企业激活行直连；否则只网关。except 禁止 resolve_config_from_settings。"""
+    logger.debug("DATA_PLANE=litellm 解析运行时配置")
+    try:
+        manager = _seam().get_manager()
+        async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
+            own = await resolve_own_tenant_config(session)
+        if own is not None:
+            return own
+    except Exception as e:  # noqa: BLE001 SH-16：禁止落到 yml/env
+        logger.warning(f"本企业供应商解析失败，改走平台网关: {e}")
+    return _gateway_runtime_config()
+
+
+async def _resolve_llm_runtime_config() -> LlmRuntimeConfig:
+    """独立短事务 session 解析 LLM 运行时配置。
+
+    DATA_PLANE=litellm：本企业激活行，否则只网关（except 禁止 yml/env）。
+    DATA_PLANE=providers：激活供应商优先，异常回退 yml/env（expand 回滚窗）。
     """
+    if _is_litellm_plane():
+        return await _resolve_litellm_runtime_config()
     try:
         manager = _seam().get_manager()
         async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
@@ -129,6 +192,86 @@ async def _resolve_llm_runtime_config() -> LlmRuntimeConfig:
     except Exception as e:  # noqa: BLE001 无库/异常场景一律回退兜底路径
         logger.warning(f"LLM 供应商配置解析失败，回退 yml/env 兜底: {e}")
         return resolve_config_from_settings()
+
+
+async def _probe_gateway_models(timeout: float) -> list[str]:
+    logger.info("探测平台网关模型列表")
+    try:
+        models = await list_v1_models(timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 预检失败 = 网关不可达，禁止 chat outbound
+        raise _gateway_unreachable(exc) from exc
+    if not models:
+        raise _no_platform_model()
+    return models
+
+
+async def _llm_chat_gateway(
+    messages: list[dict],
+    cfg: LlmRuntimeConfig,
+    *,
+    usage_dim: Optional[str],
+    budget_override: Optional[int],
+    model_override: Optional[str],
+) -> str:
+    """平台路径：只经 llm_gateway.chat POST /v1/chat/completions。"""
+    logger.info("平台网关 llm_chat")
+    if not cfg.base_url:
+        raise _gateway_unreachable(None)
+    models = await _probe_gateway_models(cfg.timeout)
+    model = model_override or (cfg.model if cfg.model in models else models[0])
+    payload = {"model": model, "messages": messages, "temperature": cfg.temperature}
+    budget = budget_override if budget_override is not None else int(
+        _seam().settings.get("LLM.MAX_TOKENS_BUDGET", 200000)
+    )
+    dim = usage_dim or "config"
+    last_error: Exception | None = None
+    from platform_core.tenant_context import current_tenant_id as _cur_tid
+
+    _tid = _cur_tid()
+    for attempt in range(cfg.max_retries):
+        month_used = await get_month_used(dim, tenant_id=_tid)
+        if month_used is None:
+            month_used = _seam()._TOKEN_USAGE.get(dim, 0)
+        if month_used >= budget:
+            raise BusinessException(
+                f"平台 LLM 成本熔断：token 预算已耗尽（{dim} 本月累计 {month_used} >= {budget}）",
+                code="LLM_COST_FUSE",
+            )
+        try:
+            data = await chat_completions(payload, timeout=cfg.timeout)
+            content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+            if not content:
+                raise ValueError("LLM 响应缺少 content")
+            norm = _normalize_usage("openai_compatible", data)
+            used = norm["total"]
+            if used:
+                _seam()._TOKEN_USAGE[dim] = _seam()._TOKEN_USAGE.get(dim, 0) + used
+                logger.info(
+                    f"LLM token 用量: +{used}（{dim} 累计 "
+                    f"{_seam()._TOKEN_USAGE[dim]}/{budget}）"
+                )
+                await record_usage(
+                    dim=dim, model=model, tenant_id=_tid,
+                    prompt_tokens=norm["prompt"], completion_tokens=norm["completion"],
+                    total_tokens=used,
+                )
+            return content
+        except BusinessException:
+            raise
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            if 400 <= status < 500 and status != 429:
+                raise BusinessException(f"LLM 请求被拒绝（HTTP {status}），不重试: {e}")
+            last_error = e
+        except Exception as e:  # noqa: BLE001 超时/网络/解析失败均进入重试
+            last_error = e
+        delay = _RETRY_BASE_DELAY * (2 ** attempt)
+        logger.warning(
+            f"平台网关调用失败（第 {attempt + 1}/{cfg.max_retries} 次），"
+            f"{delay:.1f}s 后重试: {last_error}"
+        )
+        await asyncio.sleep(delay)
+    raise _gateway_unreachable(last_error)
 
 
 
@@ -208,7 +351,7 @@ async def _failover(messages, *, usage_dim, budget_override, cfg, primary_error)
         if model_id != cfg.model
     ]
     if not chain:
-        raise _BizErr(f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {primary_error}")
+        raise _provider_error(primary_error)
 
     # 当前模型 tier（默认行；缺省按 basic 保守处理，跨级判定宁缺勿滥告警）
     current_tier = "basic"
@@ -233,10 +376,8 @@ async def _failover(messages, *, usage_dim, budget_override, cfg, primary_error)
             from backend.services.ai_planner._cooldown import record_failure as _rec_fail
 
             await _rec_fail(cfg.provider_id, model_id)
-    raise _BizErr(
-        f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {primary_error}；"
-        f"候选链 {len(failures)} 个模型均失败: " + "; ".join(failures)
-    )
+    logger.warning(f"本企业供应商候选链耗尽 | n={len(failures)}")
+    raise _provider_error(primary_error)
 
 
 async def _notify_degrade(cfg, fallback_model: str) -> None:
@@ -251,6 +392,27 @@ async def _notify_degrade(cfg, fallback_model: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001 告警通道故障不影响业务
         logger.warning(f"降质告警发送失败（忽略）: {exc}")
+
+
+async def _enforce_tenant_token_quota() -> None:
+    """企业月度 token 闸：真正打模型 / 出站 HTTP 之前。无租户上下文跳过。"""
+    from backend.services.quota_service import QuotaService, shanghai_year_month
+    from platform_core.tenant_context import current_tenant_id as _cur_tid
+
+    tid = _cur_tid()
+    if tid is None:
+        logger.debug("无租户上下文，跳过企业月度 token 闸")
+        return
+    year_month = shanghai_year_month()
+    logger.info(f"套餐闸检查企业月度 token | tenant={tid} month={year_month}")
+    factory = getattr(_seam(), "quota_session_factory", None)
+    if factory is not None:
+        async with factory() as session:
+            await QuotaService(session).check_llm_tokens_month(int(tid), year_month)
+        return
+    manager = _seam().get_manager()
+    async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
+        await QuotaService(session).check_llm_tokens_month(int(tid), year_month)
 
 
 async def llm_chat(
@@ -272,11 +434,19 @@ async def llm_chat(
     - budget_override：该维度独立预算（如 SKILLS.SCORING.MAX_TOKENS_BUDGET），
       替代全局 LLM.MAX_TOKENS_BUDGET 的熔断阈值。
     """
+    logger.info("LLM chat 调用入口")
     cfg = await _seam()._resolve_llm_runtime_config()
+    # ENABLED=false 须在网关探测前返回，避免与 74.1「平台 LLM 网关不可达」混句
     if not cfg.enabled:
         raise BusinessException(
             "LLM 功能未启用（无激活供应商且 LLM.ENABLED=false）："
             "请在 LLM 供应商管理中配置并激活，或开启 LLM.ENABLED 并配置 LLM_API_KEY"
+        )
+    if _is_litellm_plane() and cfg.source == "gateway":
+        await _enforce_tenant_token_quota()
+        return await _llm_chat_gateway(
+            messages, cfg, usage_dim=usage_dim,
+            budget_override=budget_override, model_override=model_override,
         )
     if not cfg.base_url or not cfg.model:
         raise BusinessException(
@@ -286,6 +456,9 @@ async def llm_chat(
         raise BusinessException(
             "缺少 LLM API Key：请在 .env 配置 LLM_API_KEY（或为激活的供应商配置密钥）"
         )
+
+    # FR-12：套餐闸接到真正打模型的成功路径前、出站 HTTP 前（不切 LiteLLM）
+    await _enforce_tenant_token_quota()
 
     # token 预算：调用方独立预算优先，否则沿用全局 LLM.MAX_TOKENS_BUDGET
     budget = budget_override if budget_override is not None else int(
@@ -333,7 +506,8 @@ async def llm_chat(
         used_total = month_used
         if used_total >= budget:
             raise BusinessException(
-                f"LLM token 预算已耗尽（{usage_dim} 本月累计 {used_total} >= {budget}），已熔断"
+                f"平台 LLM 成本熔断：token 预算已耗尽（{usage_dim} 本月累计 {used_total} >= {budget}）",
+                code="LLM_COST_FUSE",
             )
         if isinstance(_tid, int):
             try:
@@ -400,6 +574,8 @@ async def llm_chat(
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
             if 400 <= status < 500 and status != 429:
+                if cfg.provider_id is not None:
+                    raise _provider_error(e)
                 raise BusinessException(f"LLM 请求被拒绝（HTTP {status}），不重试: {e}")
             last_error = e
         except Exception as e:  # noqa: BLE001 超时/网络/解析失败均进入重试
@@ -418,5 +594,7 @@ async def llm_chat(
     if not _no_failover:
         return await _failover(messages, usage_dim=usage_dim, budget_override=budget_override,
                                cfg=cfg, primary_error=last_error)
+    if cfg.provider_id is not None:
+        raise _provider_error(last_error)
     raise BusinessException(f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {last_error}")
 

@@ -37,6 +37,8 @@ services:
       retries: 20
     volumes:
       - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"   # 宿主机 run.py / setup.sh 走 127.0.0.1
 
   redis:
     image: redis:7-alpine
@@ -47,14 +49,14 @@ services:
           memory: 256m
           cpus: "0.5"
     logging: *default-logging
-    command: redis-server --requirepass 123456 --appendonly yes --appendfsync everysec --maxmemory 200mb --maxmemory-policy noeviction
-    volumes:
-      - redis_data:/data
+    command: redis-server --requirepass 123456
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "123456", "ping"]
       interval: 5s
       timeout: 3s
       retries: 20
+    ports:
+      - "6379:6379"   # 宿主机 run.py / setup.sh 走 127.0.0.1
 
   backend:
     build: .
@@ -65,7 +67,7 @@ services:
           memory: 1g
           cpus: "1.0"
     logging: *default-logging
-    command: ["uv", "run", "python", "run_backend.py", "--no-reload", "--env", "local"]
+    command: ["uv", "run", "python", "-m", "scripts.runlib.backend", "--no-reload", "--env", "local"]
     ports:
       - "9111:9111"
     environment:
@@ -100,82 +102,15 @@ services:
       redis:
         condition: service_healthy
 
-  # 后台循环独立进程（APP_ROLE=worker）。默认不启动以免与 backend(all) 双消费者。
-  # 启用：APP_ROLE=api 给 backend 后 `docker compose --profile worker up`
-  worker:
-    profiles: ["worker"]
-    build: .
-    restart: unless-stopped
-    command: ["uv", "run", "python", "run_backend.py", "--no-reload", "--env", "local"]
-    environment:
-      APP_ENV: "local"
-      APP_ROLE: "worker"
-      AUTO_AGENTS_API__HOST: "0.0.0.0"
-      AUTO_AGENTS_MYSQL__DEFAULT__HOST: "mysql"
-      AUTO_AGENTS_REDIS__DEFAULT__HOST: "redis"
-      AUTO_AGENTS_MYSQL_DEFAULT_PASSWORD: "123456"
-      AUTO_AGENTS_REDIS_DEFAULT_PASSWORD: "123456"
-      AUTO_AGENTS_JWT__SECRET_KEY: "auto-agents-dev-secret-key-2026"
-      AUTO_AGENTS_WEBHOOK__SECRET_KEY: "auto-agents-dev-webhook-secret-2026"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # Scrapy worker（G2）：写 Redis 心跳，节点页可见。默认不随 up 启动。
-  # 启用：docker compose --profile spider up
-  spider:
-    profiles: ["spider"]
-    build: .
-    restart: unless-stopped
-    command: ["uv", "run", "python", "run_spider.py", "--env", "local"]
-    environment:
-      APP_ENV: "local"
-      SPIDER_WORKER_ID: "compose-1"
-      AUTO_AGENTS_MYSQL__DEFAULT__HOST: "mysql"
-      AUTO_AGENTS_REDIS__DEFAULT__HOST: "redis"
-      AUTO_AGENTS_MYSQL_DEFAULT_PASSWORD: "123456"
-      AUTO_AGENTS_REDIS_DEFAULT_PASSWORD: "123456"
-      AUTO_AGENTS_WEBHOOK__SECRET_KEY: "auto-agents-dev-webhook-secret-2026"
-    depends_on:
-      redis:
-        condition: service_healthy
-      backend:
-        condition: service_healthy
-
-  # LiteLLM Proxy sidecar（L1 影子接入：默认 up 不启动，显式 --profile litellm 开启）
-  # - 影子模式只读对比，不改任何现有请求路径；回滚 = 移除本服务（零生产流量变更）
-  # - 无 DB 静态模式：不配 DATABASE_URL，仅挂载导出器生成的 config（含明文 key，
-  #   .gitignore 已登记 deploy/litellm/config.gen.yaml；生成命令见 deploy/litellm/README.md）
-  # - 供应链红线：镜像 pin 精确版本 tag（v1.99.1 = 官方 main-stable 同 digest，
-  #   查证记录见 deploy/litellm/README.md）；恶意版本黑名单 {1.82.7, 1.82.8} 由
-  #   backend/tests/test_litellm_version_guard.py 守卫——改本行 tag 必须先过守卫
-  # - 端口与 config/default/litellm.yml LITELLM.PROXY.PORT 对齐（改端口两处同步）；
-  #   影子阶段仅绑定 127.0.0.1（不对外暴露，L2 接治理层时再引入 master key）
-  litellm:
-    image: litellm/litellm-database:v1.99.1
-    profiles: ["litellm"]
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: "1.0"
-    logging: *default-logging
-    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
-    ports:
-      - "127.0.0.1:4000:4000"
-    volumes:
-      - ./deploy/litellm/config.gen.yaml:/app/config.yaml:ro
-    healthcheck:
-      # /health/liveliness = 进程存活浅探测（LiteLLM 内置端点，无需鉴权）
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)\""]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
 volumes:
   mysql_data:
-  redis_data:
+
+# T-14: LiteLLM Proxy is an independent fault domain (deploy/litellm).
+# Root must not declare a litellm service (ADR-0010 / SH-01).
+# This network is created by deploy/litellm (name: litellm-net).
+# Backend may join later; do not attach it in this file yet.
+# If the root stack starts first: docker network create litellm-net
+networks:
+  litellm-net:
+    name: litellm-net
+    external: true

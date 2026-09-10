@@ -10,4 +10,34 @@
   --site-danger: #ff4d4f;
   --site-deep-space: #001529;
   --site-text-secondary: rgba(0, 0, 0, 0.45);
+  /* semantic.color ← design-tokens.json primitive.gray */
+  --color-surface: #ffffff;
+  --color-surface-sunken: #fafafa;
+  --color-text-primary: #141414;
+  --color-text-secondary: #595959;
+  --color-text-inverse: #ffffff;
+  --color-primary: #0958d9;
+  --color-listing-coming-soon-bg: #e6f4ff;
+  --color-listing-coming-soon-fg: #003eb3;
+  --color-focus-ring: #0958d9;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-size-sm: 13px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --line-height-base: 1.5;
+  --space-inset-xs: 4px;
+  --space-inset-sm: 8px;
+  --space-inset-md: 16px;
+  --space-inset-lg: 24px;
+  --space-stack-md: 16px;
+  --radius-card: 6px;
+  --radius-pill: 9999px;
+  --radius-control: 4px;
+  --size-touch: 44px;
+  --size-focus-ring: 2px;
+}
+
+.site-touch-target {
+  min-height: var(--size-touch);
+  min-width: var(--size-touch);
 }

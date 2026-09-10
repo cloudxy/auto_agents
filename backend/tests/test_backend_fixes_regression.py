@@ -417,8 +417,8 @@ class TestFlushBatchCountsRecompute:
         ]
         counts = {1: 2, 2: 1}  # 调用方累计值（旧实现会被失败轮次的去重扣减污染）
 
-        task1 = MagicMock(params='{"incremental": true}')
-        task2 = MagicMock(params=None)
+        task1 = MagicMock(params='{"incremental": true}', tenant_id=1)
+        task2 = MagicMock(params=None, tenant_id=1)
         dup_hash = self._hash_of(items[0]["item"])
 
         repo = MagicMock()
@@ -435,11 +435,14 @@ class TestFlushBatchCountsRecompute:
         ctx.__aenter__ = AsyncMock(return_value=session)
         ctx.__aexit__ = AsyncMock(return_value=False)
 
+        qs = MagicMock()
+        qs.check_result_storage = AsyncMock()
         with patch("backend.tasks.consumer.AsyncSession", return_value=ctx), \
              patch("backend.tasks.consumer.SpiderTaskRepository", return_value=repo), \
              patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo), \
              patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
-                   staticmethod(lambda: object())):
+                   staticmethod(lambda: object())), \
+             patch("backend.services.quota_service.QuotaService", return_value=qs):
             # 第一轮 flush：去重扣减后 commit 失败（批次原样重试场景）
             with pytest.raises(RuntimeError):
                 await consumer._flush_batch(items, counts)

@@ -30,18 +30,13 @@ from backend.repositories.newapi_repository import (
 )
 from backend.services import channel_probe_service as probe_mod
 from backend.services import channel_scheduler_service as sched_mod
-from backend.services import newapi_api as newapi_api_mod
 from backend.services.channel_probe_service import (
     DEFAULT_PROBE_QUESTIONS,
     ChannelProbeService,
     _load_questions,
     _score_probe_batch,
 )
-from backend.services.channel_scheduler_service import (
-    ChannelSchedulerService,
-    _build_usage_window,
-    _is_type_mismatch_error,
-)
+from backend.services.channel_scheduler_service import ChannelSchedulerService
 from backend.services.newapi_api import (
     CHANNEL_STATUS_AUTO_DISABLED,
     CHANNEL_STATUS_ENABLED,
@@ -158,6 +153,8 @@ def _cfg_hash(redis: _FakeRedis, cid: int, limit: int = 1000,
 
 
 # ---------------- 用量聚合 SQL（unix/datetime 两分支） ----------------
+# T-19：DSN/SQL 已删除；窗口改为 spend HTTP → budget。旧 SQL 用例跳过。
+@pytest.mark.skip(reason="T-19 removed NEWAPI.DB_DSN usage SQL; see test_llm_cooldown.py")
 class TestUsageSql:
     def test_unix_mode_binds_int(self):
         now = datetime(2026, 8, 30, 12, 0, 0)
@@ -247,9 +244,10 @@ class TestUsageSql:
 
 
 # ---------------- 调度器：超限禁用 / 冷却恢复 / 隔离 ----------------
-GLOBAL_OFF = {"NEWAPI.DEFAULT_WINDOW_QUOTA": 0}
+GLOBAL_OFF = {"RELAY.DEFAULT_WINDOW_QUOTA": 0}
 
 
+@pytest.mark.skip(reason="T-19 window is spend→budget HTTP; see test_llm_cooldown.py")
 class TestSchedulerFlow:
     @pytest.mark.asyncio
     async def test_over_limit_disables_channel_and_records_event(self):
@@ -294,9 +292,9 @@ class TestSchedulerFlow:
         events: list = []
         svc._record_event = AsyncMock(side_effect=lambda **kw: events.append(kw))
         with patch.object(sched_mod, "settings", _fake_settings(**{
-                "NEWAPI.DEFAULT_WINDOW_QUOTA": 2000,
-                "NEWAPI.DEFAULT_WINDOW_HOURS": 24,
-                "NEWAPI.DEFAULT_COOLDOWN_SECONDS": 600})):
+                "RELAY.DEFAULT_WINDOW_QUOTA": 2000,
+                "RELAY.DEFAULT_WINDOW_HOURS": 24,
+                "RELAY.DEFAULT_COOLDOWN_SECONDS": 600})):
             await svc._tick_once()
         assert api.status_calls == [(5, CHANNEL_STATUS_AUTO_DISABLED)]
         assert events[0]["limit_quota"] == 2000 and events[0]["window_hours"] == 24
@@ -394,6 +392,7 @@ class TestSchedulerFlow:
 
 
 # ---------------- 调度器：锁释放 / 状态重建 / 禁用前复核 ----------------
+@pytest.mark.skip(reason="T-19 scheduler no longer disables via new-api status PUT")
 class TestSchedulerLockAndGuards:
     @pytest.mark.asyncio
     async def test_lock_released_after_tick(self):
@@ -509,25 +508,17 @@ class TestSwitches:
     @pytest.mark.asyncio
     async def test_scheduler_disabled_when_switch_off(self):
         svc = _scheduler(_FakeRedis(), _FakeApiClient(), mode=None)
-        with patch.object(sched_mod, "settings", _fake_settings(**{"NEWAPI.ENABLED": False})):
-            await svc.start()
-        assert not svc._running and svc._loop_task is None
         with patch.object(sched_mod, "settings", _fake_settings(
-                **{"NEWAPI.ENABLED": True, "NEWAPI.SCHEDULER_ENABLED": False})):
+                **{"RELAY.SCHEDULER_ENABLED": False})):
             await svc.start()
         assert not svc._running and svc._loop_task is None
 
     @pytest.mark.asyncio
     async def test_scheduler_start_and_stop(self):
-        fake_client = _FakeApiClient(channels=[])
         with patch.object(sched_mod, "settings", _fake_settings(**{
-                "NEWAPI.ENABLED": True, "NEWAPI.SCHEDULER_ENABLED": True,
-                "NEWAPI.DB_DSN": "async+driver://user:pass@newapi-db.internal:3306/new_api_db",
-                "NEWAPI.INTERVAL_SECONDS": 3600})), \
-             patch.object(sched_mod, "aioredis") as fake_aioredis, \
-             patch.object(sched_mod, "create_async_engine", return_value=AsyncMock()), \
-             patch.object(sched_mod, "NewapiApiClient", return_value=fake_client):
-            fake_aioredis.from_url.return_value = _FakeRedis()
+                "RELAY.SCHEDULER_ENABLED": True,
+                "RELAY.INTERVAL_SECONDS": 3600})), \
+             patch("platform_core.redis_async.get_async_redis", return_value=_FakeRedis()):
             svc = ChannelSchedulerService()
             await svc.start()
             assert svc._running is True
@@ -536,33 +527,30 @@ class TestSwitches:
         assert svc._running is False and svc._loop_task is None
 
     @pytest.mark.asyncio
-    async def test_scheduler_requires_db_dsn(self):
-        svc = _scheduler(_FakeRedis(), _FakeApiClient(), mode=None)
+    async def test_scheduler_starts_without_db_dsn(self):
         with patch.object(sched_mod, "settings", _fake_settings(
-                **{"NEWAPI.ENABLED": True, "NEWAPI.SCHEDULER_ENABLED": True})):
+                **{"RELAY.SCHEDULER_ENABLED": True,
+                   "RELAY.INTERVAL_SECONDS": 3600})), \
+             patch("platform_core.redis_async.get_async_redis", return_value=_FakeRedis()):
+            svc = ChannelSchedulerService()
             await svc.start()
-        assert not svc._running
+            assert svc._running is True
+            await svc.stop()
 
     @pytest.mark.asyncio
     async def test_probe_disabled_when_switch_off(self):
         svc = _probe(_FakeRedis(), _FakeApiClient())
-        with patch.object(probe_mod, "settings", _fake_settings(**{"NEWAPI.ENABLED": False})):
-            await svc.start()
-        assert not svc._running and svc._loop_task is None
         with patch.object(probe_mod, "settings", _fake_settings(
-                **{"NEWAPI.ENABLED": True, "NEWAPI.PROBE_ENABLED": False})):
+                **{"RELAY.PROBE_ENABLED": False})):
             await svc.start()
         assert not svc._running and svc._loop_task is None
 
     @pytest.mark.asyncio
     async def test_probe_start_and_stop(self):
-        fake_client = _FakeApiClient(channels=[])
         with patch.object(probe_mod, "settings", _fake_settings(**{
-                "NEWAPI.ENABLED": True, "NEWAPI.PROBE_ENABLED": True,
-                "NEWAPI.PROBE_INTERVAL_SECONDS": 3600})), \
-             patch.object(probe_mod, "aioredis") as fake_aioredis, \
-             patch.object(probe_mod, "NewapiApiClient", return_value=fake_client):
-            fake_aioredis.from_url.return_value = _FakeRedis()
+                "RELAY.PROBE_ENABLED": True,
+                "RELAY.PROBE_INTERVAL_SECONDS": 3600})), \
+             patch("platform_core.redis_async.get_async_redis", return_value=_FakeRedis()):
             svc = ChannelProbeService()
             await svc.start()
             assert svc._running is True
@@ -696,47 +684,58 @@ def _fake_chat(model, prompt, timeout=None) -> dict:
     return _resp("好的。", model=model)
 
 
+async def _fake_chat_completions(body, **kwargs) -> dict:
+    model = str((body or {}).get("model") or "")
+    prompt = str((((body or {}).get("messages") or [{}])[0].get("content") or ""))
+    row = _fake_chat(model, prompt)
+    return {
+        "choices": [{"message": {"content": row["content"]}}],
+        "usage": row.get("usage") or {"total_tokens": 20},
+        "model": model,
+    }
+
+
 class TestProbeFlow:
     @pytest.mark.asyncio
     async def test_tick_once_probes_enabled_targets_excluding_reference(self):
         _chat_calls.clear()
         redis = _FakeRedis()
-        api = _FakeApiClient(channels=[
-            {"id": 1, "name": "ref-ch", "status": CHANNEL_STATUS_ENABLED, "models": "gpt-4o"},
-            {"id": 2, "name": "target-a", "status": CHANNEL_STATUS_ENABLED, "models": "gpt-4o-mini"},
-            {"id": 3, "name": "disabled", "status": CHANNEL_STATUS_MANUALLY_DISABLED, "models": "qwen-max"},
-        ])
-        svc = _probe(redis, api)
-        svc._api.chat_completion = AsyncMock(side_effect=_fake_chat)
+        redis.hashes["relay:channel:cfg:3"] = {"manual_disabled": "1"}
+        svc = _probe(redis, None)
         recorded: list = []
         svc._record_probe_result = AsyncMock(side_effect=lambda **kw: recorded.append(kw))
+        payload = {"data": [
+            {"model_name": "gpt-4o", "model_info": {"id": "1"}},
+            {"model_name": "gpt-4o-mini", "model_info": {"id": "2"}},
+            {"model_name": "qwen-max", "model_info": {"id": "3"}},
+        ]}
         with patch.object(probe_mod, "settings", _fake_settings(
-                **{"NEWAPI.PROBE_REFERENCE_CHANNEL": "ref-ch"})):
+                **{"RELAY.PROBE_REFERENCE_CHANNEL": "1"})), \
+             patch.object(probe_mod.gw_admin, "list_models", AsyncMock(return_value=payload)), \
+             patch.object(probe_mod, "chat_completions", _fake_chat_completions):
             await svc._tick_once()
         assert [r["channel_id"] for r in recorded] == [2]
         assert recorded[0]["model"] == "gpt-4o-mini"
         assert recorded[0]["verdict"] == "original"
         assert len(recorded[0]["batch_id"]) == 32  # uuid hex
-        # 锁已在本批结束时主动释放（评审 m-1，不再残留等待 TTL 过期）
         assert probe_mod.NEWAPI_PROBE_LOCK_KEY not in redis.strings
-        # 参考渠道基线已采集（每题 + 复测共 9 次）
-        assert svc._api.chat_completion.await_count >= 9
+        assert sum(_chat_calls.values()) >= 9
 
     @pytest.mark.asyncio
     async def test_probe_channel_records_result(self):
         _chat_calls.clear()
         svc = _probe(_FakeRedis(), MagicMock())
-        svc._api.chat_completion = AsyncMock(side_effect=_fake_chat)
         recorded: list = []
         svc._record_probe_result = AsyncMock(side_effect=lambda **kw: recorded.append(kw))
-        await svc._probe_channel(
-            {"id": 9, "name": "prov", "models": "gpt-4o,gpt-4o-mini"},
-            None, DEFAULT_PROBE_QUESTIONS, "batch-xyz")
+        with patch.object(probe_mod, "chat_completions", _fake_chat_completions):
+            await svc._probe_channel(
+                {"gateway_ref": "9", "model_name": "gpt-4o", "name": "prov"},
+                None, DEFAULT_PROBE_QUESTIONS, "batch-xyz")
         assert recorded[0]["channel_id"] == 9
-        assert recorded[0]["model"] == "gpt-4o"  # models 串首个
+        assert recorded[0]["model"] == "gpt-4o"
         assert recorded[0]["verdict"] == "original"
         assert recorded[0]["batch_id"] == "batch-xyz"
-        assert recorded[0]["latency_ms"] == 800
+        assert recorded[0]["latency_ms"] is not None and recorded[0]["latency_ms"] >= 0
         assert recorded[0]["scores"]["identity"] == 1.0
 
     @pytest.mark.asyncio
@@ -744,12 +743,12 @@ class TestProbeFlow:
         """评审 m-5：问题集缺失 identity 题时不 KeyError，latency 为 None"""
         questions = [q for q in DEFAULT_PROBE_QUESTIONS if q["category"] != "identity"]
         svc = _probe(_FakeRedis(), MagicMock())
-        svc._api.chat_completion = AsyncMock(side_effect=_fake_chat)
         recorded: list = []
         svc._record_probe_result = AsyncMock(side_effect=lambda **kw: recorded.append(kw))
-        await svc._probe_channel(
-            {"id": 9, "name": "prov", "models": "gpt-4o"},
-            None, questions, "batch-no-identity")
+        with patch.object(probe_mod, "chat_completions", _fake_chat_completions):
+            await svc._probe_channel(
+                {"gateway_ref": "9", "model_name": "gpt-4o", "name": "prov"},
+                None, questions, "batch-no-identity")
         assert len(recorded) == 1
         assert recorded[0]["latency_ms"] is None
 
@@ -929,11 +928,12 @@ class TestNewapiApiClient:
                           "completion_tokens_details": {"reasoning_tokens": 7}},
             })
 
-        with patch.object(newapi_api_mod, "settings",
-                          _fake_settings(**{"NEWAPI.PROBE_API_KEY": "sk-probe"})):
-            client = NewapiApiClient(base_url="http://newapi.test", token="tok",
-                                     transport=httpx.MockTransport(handler))
-            r = await client.chat_completion("gpt-4o", "你是什么模型")
+        client = NewapiApiClient(
+            base_url="http://newapi.test", token="tok",
+            probe_api_key="sk-probe",
+            transport=httpx.MockTransport(handler),
+        )
+        r = await client.chat_completion("gpt-4o", "你是什么模型")
         assert r["ok"] is True
         assert r["content"] == "我是 gpt-4o"
         assert r["reasoning_tokens"] == 7

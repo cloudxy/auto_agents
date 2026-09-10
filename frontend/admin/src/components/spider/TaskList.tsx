@@ -11,6 +11,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { STATUS_META, PRIORITY_META } from './types'
 import type { Task, SpiderMap } from './types'
+import { SPIDER_WORKER_OFFLINE_COPY, STILL_RUNNING_COPY, ZERO_ITEMS_DONE_COPY } from './copy'
 
 const { Text } = Typography
 
@@ -102,11 +103,15 @@ export const TaskList: React.FC<TaskListProps> = ({
       width: 150,
       render: (status: string, record: Task) => {
         const meta = STATUS_META[status] || { label: status, color: 'default' }
-        const spinning = status === 'running'
-          ? <LoadingOutlined spin style={{ marginRight: 6 }} />
-          : status === 'pending'
-            ? <SyncOutlined spin style={{ marginRight: 6 }} />
-            : null
+        const offline = Boolean(record.worker_offline)
+          || record.error_message === SPIDER_WORKER_OFFLINE_COPY
+        const spinning = offline
+          ? null
+          : status === 'running'
+            ? <LoadingOutlined spin style={{ marginRight: 6 }} />
+            : status === 'pending'
+              ? <SyncOutlined spin style={{ marginRight: 6 }} />
+              : null
         const tag = (
           <Tag color={meta.color} icon={spinning}>
             {meta.label}
@@ -124,7 +129,19 @@ export const TaskList: React.FC<TaskListProps> = ({
         ) : tag
       },
     },
-    { title: '采集结果', dataIndex: 'result_count', key: 'result_count', width: 90 },
+    {
+      title: '采集结果',
+      dataIndex: 'result_count',
+      key: 'result_count',
+      width: 110,
+      render: (count: number, record: Task) => {
+        if (!count && (record.status === 'pending' || record.status === 'running')) {
+          return STILL_RUNNING_COPY
+        }
+        if (!count) return ZERO_ITEMS_DONE_COPY
+        return count
+      },
+    },
     { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
     {
       title: '操作',
@@ -186,7 +203,6 @@ export const TaskList: React.FC<TaskListProps> = ({
             type="link"
             size="small"
             icon={<EyeOutlined />}
-            disabled={!record.result_count}
             onClick={() => onViewResult(record)}
           >
             结果

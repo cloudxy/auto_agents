@@ -1,91 +1,64 @@
 ---
 name: new-svc
 description: >-
-  创建 FastAPI 服务模块。当用户需要新增业务模块、创建 CRUD 接口、
-  或为后端添加新的 API 路由与数据模型时触发。
-  适用于从零搭建完整服务层（Router + Service + Repository + ORM + Schema），
-  以及需要配对生成数据模型与接口契约、并正确注册到 API 版本路由的场景。
-trigger: >-
-  新增业务模块、创建 CRUD 接口、添加 API 路由与数据模型、
-  从零搭建完整服务层（Router + Service + Repository + ORM + Schema）、
-  注册到 API 版本路由
+  Scaffolds a FastAPI Router, Service, and Repository, then registers the v1
+  route. Use when 新增业务模块, CRUD, 新 API 路由, or adding a backend module.
 ---
 
 # 创建 FastAPI 服务模块
 
-对照实现：`backend/app/api/v1/api_keys.py` + `backend/services/api_key_service.py`。
+先读 `backend/app/api/v1/members.py` 再改编。Router/Service/Repository：[references/code-templates.md](references/code-templates.md)。ORM+Schema 用 `new-model`。
 
-## 触发场景
+## Route
 
-- "创建一个用户管理服务"
-- "添加订单模块"
-- "新建商品服务"
+| 观察到 | 先做 |
+|--------|------|
+| 新表 / 列 / 索引 / 唯一键 | `db-design`（从 S0 起），做完再回来 |
+| 只要 ORM+Schema，不要 API | `new-model` |
+| 抓站 / 爬虫 | `new-spider` |
 
-## 执行流程
+缺模块名 / 是否租户表 / 是否鉴权：先问，再动手。
 
-### Step 1: 确认模块信息
+## Quick start
 
-1. 模块名称（英文，小写+下划线）
-2. 租户表还是平台表（租户表 → `TenantMixin`；平台豁免表只改 `backend/app/tenant_isolation.py`）
-3. 鉴权：租户接口 `require_operator` / `require_admin` / `get_current_user`；平台接口 `require_platform_admin`（不要混用）
-4. 是否需要表 / Redis
-
-底层数据契约交给 `/new-model`（含 mixin 与 converter）。schema 变更走 `/db-design`。
-
-### Step 2: 生成代码
+Copy and check off:
 
 ```
-backend/app/api/v1/{module}.py
-backend/services/{module}_service.py
-backend/repositories/{module}_repository.py   # 可先用 BaseRepository，复杂查询再拆
-
-platform_core/models/{module}.py
-platform_core/schemas/{module}.py
+new-svc:
+- [ ] new-model：ORM + Schema + models/schemas 的 __init__.py 导出
+- [ ] Repository 继承 BaseRepository
+- [ ] Service：公开方法入口 logger. + model_validate；get_logger("api")
+- [ ] Router：ok/created + Depends(get_async_db)
+- [ ] 租户表或要鉴权：Depends(get_current_user)，tenant_id 从 CurrentUser 传入 Service
+- [ ] v1/__init__.py：from . import 追加模块，并 include_router(prefix="/{module}")
+- [ ] backend/tests/test_{module}_service.py（改编 test_auth_service.py；get/create 各一条）
+- [ ] uv run pytest -x -q backend/tests
+- [ ] bash tools/check/arch.sh
+- [ ] uv run python run.py start backend && curl -sS localhost:9111/api/v1/health
 ```
-
-模板：[references/code-templates.md](references/code-templates.md)。
-
-硬约束：
-
-- Router **禁止** import ORM（R7）。入参/出参只用 Schema；响应走 `ApiResponse` + `ok`/`created`
-- Service public 方法第一行 `logger.info`（R10）
-- HTTP 请求已由中间件进入 `tenant_scope` / `platform_scope`。后台任务 / 消费者必须显式 `with tenant_scope(tid):` 或 `platform_scope()`（R13）
-- 异步 Redis 用 `get_async_redis()`，禁止 `redis_client().x`（R11）
-- 不要新增 `from backend.services.spider_service import ...`（R12）
-
-### Step 3: 注册路由
-
-在 `backend/app/api/v1/__init__.py`：
-
-```python
-from . import {module}
-router.include_router({module}.router, prefix="/{module}", tags=["{模块中文名}"])
-```
-
-最终路径 `/api/v1/{module}/...`。
-
-然后更新 `backend/tests/openapi_routes_golden.txt`（`METHOD /api/v1/{module}` 每条一行，与 `test_openapi_routes_golden.py` 一致）。
-
-## 预期产出物
 
 ```
 platform_core/models/{module}.py
 platform_core/schemas/{module}.py
+backend/repositories/{module}_repository.py
 backend/services/{module}_service.py
-backend/repositories/{module}_repository.py   # 或 Service 内直接 BaseRepository
 backend/app/api/v1/{module}.py
-backend/app/api/v1/__init__.py                # include_router
-backend/tests/openapi_routes_golden.txt       # 新路由已登记
+backend/tests/test_{module}_service.py
+backend/app/api/v1/__init__.py
 ```
 
-表结构变更另走 `/db-design` 产出迁移。
+路径 `/api/v1/{module}/...`。任一步命令非 0：修完再跑同一条。
 
-## 验证步骤
+## 完成时回复
 
-```bash
-uv run pytest -x -q backend/tests/test_openapi_routes_golden.py
-uv run pytest -x -q backend/tests
-bash scripts/check-arch.sh
-```
+按这个顺序贴：
 
-不要跑不存在的 `platform_core/tests`。不要在 Router 里手搓 `from.*models import` 自检当唯一关卡——R7 正则以 `check-arch.sh` 为准。
+1. 上面 7 个路径（`__init__.py` 写出 prefix）
+2. pytest 与 arch.sh 的 stdout 末段（退出码 0）
+3. health curl 的 HTTP 与 body
+
+## Examples
+
+**Input:** 「加一个公告模块 announcement，租户表，要鉴权」
+
+**Then:** 三项已齐，不再问。`new-model` 出 `Announcement` + `TenantMixin`；Router `Depends(get_current_user)`；`include_router(..., prefix="/announcement")`；测试文件在；三条命令退出码 0。

@@ -12,6 +12,9 @@ from typing import Optional
 from backend.services.llm_protocol.base import (
     ChatRequest, ModelInfo, ModelList, execute_json,
 )
+from platform_core.logger import get_logger
+
+logger = get_logger("api")
 
 # 非对话模型关键字表（可由调用方覆盖；总方案 §6.1 默认集）
 CHAT_MODEL_EXCLUDE_KEYWORDS = (
@@ -174,4 +177,5 @@ _ADAPTERS = {
 
 def get_adapter(provider_type: str):
     """按协议类型取适配器（未注册类型 KeyError）"""
+    logger.debug(f"取协议适配器 type={provider_type}")
     return _ADAPTERS[provider_type]

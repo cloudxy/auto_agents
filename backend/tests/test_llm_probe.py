@@ -123,3 +123,107 @@ def test_create_provider_accepts_anthropic_type(db_client, admin_client, db_engi
               "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini"},
     )
     assert resp2.status_code == 200
+
+
+# ---- T-19 GWT-07.6：伪装不熔断；探针走网关 chat 适配叶 ----
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from backend.services import channel_probe_service as probe_mod
+from backend.services.channel_probe_service import (
+    DEFAULT_PROBE_QUESTIONS,
+    ChannelProbeService,
+)
+from backend.services.newapi_api import RELAY_CHANNEL_CFG_PREFIX, RELAY_CHANNEL_STATE_PREFIX
+from stubs import FakeRedis
+
+
+def _probe_svc(redis=None) -> ChannelProbeService:
+    svc = ChannelProbeService.__new__(ChannelProbeService)
+    svc._running = False
+    svc._loop_task = None
+    svc._redis = redis if redis is not None else FakeRedis()
+    return svc
+
+
+def test_t19_probe_source_no_dsn_uses_gateway_chat():
+    """探针走适配叶 /v1/chat/completions；无网关 DSN；阈值仍 0.15。"""
+    root = Path(__file__).resolve().parents[2]
+    probe_src = (root / "backend/services/channel_probe_service.py").read_text(encoding="utf-8")
+    score_src = (root / "backend/services/channel_probe_score.py").read_text(encoding="utf-8")
+    sched_src = (root / "backend/services/channel_scheduler_service.py").read_text(encoding="utf-8")
+    assert "DB_DSN" not in probe_src
+    assert "create_async_engine" not in probe_src
+    assert "NewapiApiClient" not in probe_src
+    assert "llm_gateway.chat" in probe_src
+    assert "chat_completions" in probe_src
+    assert "DB_DSN" not in sched_src
+    assert "create_async_engine" not in sched_src
+    assert "_USAGE_SQL" not in sched_src
+    assert "LITELLM.DB_DSN" not in probe_src + sched_src
+    assert "_REF_SIMILARITY_SPOOF_THRESHOLD = 0.15" in score_src
+
+
+@pytest.mark.asyncio
+async def test_gwt_07_6_spoofed_keeps_channel_usable_window_quota_unchanged():
+    """GWT-07.6：spoofed 后渠道仍可用；不自动关闭；窗口与额度不变。"""
+    redis = FakeRedis()
+    cfg_key = f"{RELAY_CHANNEL_CFG_PREFIX}2"
+    redis.hashes[cfg_key] = {
+        "limit_quota": "500", "window_hours": "12", "cooldown_seconds": "1800",
+    }
+    snapshot = dict(redis.hashes[cfg_key])
+    svc = _probe_svc(redis)
+    recorded: list = []
+    budget_calls: list = []
+
+    async def _spoof_chat(body, **kwargs):
+        return {
+            "choices": [{"message": {"content": "我是 GLM-4"}}],
+            "usage": {"total_tokens": 20},
+            "model": body.get("model"),
+        }
+
+    async def _budget(*_a, **_k):
+        budget_calls.append("budget")
+        return {}
+
+    svc._record_probe_result = AsyncMock(side_effect=lambda **kw: recorded.append(kw))
+    with patch.object(probe_mod, "chat_completions", _spoof_chat), \
+         patch.object(probe_mod.gw_admin, "create_budget", _budget), \
+         patch.object(probe_mod.gw_admin, "update_budget", _budget), \
+         patch.object(probe_mod.gw_admin, "update_model", _budget), \
+         patch.object(probe_mod, "NotifyService") as notify_cls:
+        notify_cls.return_value.notify_text = AsyncMock()
+        await svc._probe_channel(
+            {"gateway_ref": "2", "model_name": "gpt-4o", "name": "gpt-4o"},
+            None, DEFAULT_PROBE_QUESTIONS, "batch-spoof",
+        )
+    assert recorded[0]["verdict"] == "spoofed"
+    assert recorded[0]["channel_id"] == 2
+    assert recorded[0]["scores"]["_gateway_ref"] == "2"
+    assert redis.hashes[cfg_key] == snapshot
+    assert budget_calls == []
+    assert f"{RELAY_CHANNEL_STATE_PREFIX}2" not in redis.strings
+    notify_cls.return_value.notify_text.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_probe_collects_via_gateway_chat_completions_not_newapi():
+    seen: list[dict] = []
+
+    async def _chat(body, **kwargs):
+        seen.append(body)
+        return {
+            "choices": [{"message": {"content": "我是 gpt-4o 模型"}}],
+            "usage": {"total_tokens": 8},
+            "model": body.get("model"),
+        }
+
+    svc = _probe_svc()
+    with patch.object(probe_mod, "chat_completions", _chat):
+        row = await svc._probe_chat("gpt-4o", "你是什么模型？请只回答你的模型名称。")
+    assert row["ok"] is True
+    assert seen[0]["model"] == "gpt-4o"
+    assert seen[0]["stream"] is False
+    assert seen[0]["messages"][0]["role"] == "user"

@@ -12,25 +12,20 @@ if (typeof (global as any).TextDecoder === 'undefined') {
   (global as any).TextDecoder = TextDecoder;
 }
 
-// @rc-component/form 的调度依赖 MessageChannel（jsdom 未实现）。
-// 不能用 worker_threads 实现——打开的端口句柄会吊住 jest。
-// 同步投递（onmessage 已挂上时）避免 act() 等不到 validateFields；
-// 尚未挂上时退回 microtask，仍可被 act flush，且不留悬挂 timer。
+// @rc-component/form 的宏任务调度依赖 MessageChannel（jsdom 未实现）。
+// 不能用 worker_threads：句柄会吊住 jest。也不能 setTimeout(0)：antd 6
+// Form/Modal 会灌满宏任务队列，waitFor/Jest 超时器饿死（CI 上 Members 挂死）。
 if (typeof (global as any).MessageChannel === 'undefined') {
   (global as any).MessageChannel = class SimpleMessageChannel {
-    port1: { onmessage: ((ev: { data: unknown }) => void) | null; postMessage: (data: unknown) => void }
-    port2: { onmessage: ((ev: { data: unknown }) => void) | null; postMessage: (data: unknown) => void }
+    port1 = { onmessage: null as any, postMessage: (_data: any) => undefined as void };
+    port2 = { onmessage: null as any, postMessage: (_data: any) => undefined as void };
     constructor() {
-      const makePort = (getPeer: () => { onmessage: ((ev: { data: unknown }) => void) | null }) => ({
-        onmessage: null as ((ev: { data: unknown }) => void) | null,
-        postMessage(data: unknown) {
-          const deliver = () => getPeer().onmessage?.({ data })
-          if (getPeer().onmessage) deliver()
-          else queueMicrotask(deliver)
-        },
-      })
-      this.port1 = makePort(() => this.port2)
-      this.port2 = makePort(() => this.port1)
+      // queueMicrotask：不占 macrotask（waitFor/Jest 超时靠 setTimeout），
+      // 也不同步重入 React scheduler（同步 postMessage 会打挂 App/Login）。
+      this.port1.postMessage = (data: any) =>
+        queueMicrotask(() => this.port2.onmessage?.({ data }))
+      this.port2.postMessage = (data: any) =>
+        queueMicrotask(() => this.port1.onmessage?.({ data }))
     }
   };
 }

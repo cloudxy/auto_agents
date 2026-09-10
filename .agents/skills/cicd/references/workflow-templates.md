@@ -1,22 +1,38 @@
-# CI 现行结构（权威：`.github/workflows/ci.yml`）
+# CI 五阶段
 
-不要把下面复制成新文件。加步骤时对号入座。
+权威文件：`.github/workflows/ci.yml`。改 CI 时对照现有 yaml。
 
-| job | 做什么 |
-|-----|--------|
-| `python-lint-test` | `uv python install 3.13`；`uv run ruff check backend platform_core scripts`；`uv run pytest -x -q --cov=backend --cov=platform_core --cov-fail-under=70 backend/tests`；`MYSQL_FIDELITY=1 pytest -m mysql_fidelity` |
-| `arch-check` | `bash scripts/check-arch.sh`（13 红线 + 3 边界） |
-| `db-migration-gate` | `scripts/check-db-ir.sh` + `scripts/check-db-migrations.sh` |
-| `frontend-build` | 根 `npm ci`；shared codegen/build；`bash scripts/check-frontend.sh`；`CI= npm run build -w admin` / `official`；`npm test -w admin` / `official`；`npm run e2e -w admin`（`CI=true`，`NO_PROXY=127.0.0.1,localhost,::1`） |
-| `docker-validate` | `docker compose config --quiet` + `docker build -t auto-agents-backend .` |
-| `ghcr-publish` | 仅 push `main` 或 tag：`ghcr.io/<repo>:git-$SHA` |
+## Contents
 
-本地门禁（`.pre-commit-config.yaml`）：提交跑 ruff + `check-arch` + db 脚本；`pre-push` 跑 `pytest backend/tests`。
+- 必须对齐的事实
+- MySQL 保真通道
+- 本地门禁
+- 部署
 
-加新检查时：
+## 必须对齐的事实
 
-1. 能进现有 job 的不要新 job
-2. 架构类进 `scripts/check-arch.sh` 或 `check-frontend.sh`，不要在 YAML 里再写一套 grep
-3. `pip-audit` / `npm audit` 目前 `continue-on-error: true`，改强制红之前先确认噪声
+| 项 | 值 |
+|----|----|
+| uv | `astral-sh/setup-uv@v6` + `uv python install 3.13` + `uv sync` |
+| 测试 | `uv run pytest -x -q --tb=short backend/tests` |
+| lint | `uv run ruff check backend platform_core scripts` |
+| 架构 | `bash tools/check/arch.sh` |
+| 前端 lock | 根 `package-lock.json` + `npm ci` |
+| 前端构建 | 先 `npm run build -w @auto-agents/frontend-shared`，再 `-w admin` / `-w official` |
+| OpenAPI | `uv run python tools/dump_openapi.py` + `npm run codegen:api -w @auto-agents/frontend-shared` |
+| 前端门禁 | `bash tools/check/frontend.sh` |
+| compose | `docker compose config --quiet` |
+| 镜像 | `docker build -t auto-agents-backend .` |
+| JWT（CI） | `AUTO_AGENTS_JWT__SECRET_KEY` |
 
-禁止再引入：`uv python install 3.11`、`pytest platform_core/tests`、`setup-uv@v3` 当新标准、按 `frontend/${{ matrix.app }}` 各自 `npm ci`（lock 已在仓库根）。
+## MySQL 保真通道
+
+`python-lint-test` 挂 `mysql:8`。第二段 pytest 需要 `MYSQL_FIDELITY=1` 及 HOST/USER/PASSWORD。子集文件名单以 `ci.yml` 为准。
+
+## 本地门禁
+
+`.pre-commit-config.yaml`：提交跑 ruff + `tools/check/arch.sh` + db 脚本；推送再跑 pytest。
+
+## 部署
+
+默认 CI 不含 SSH `docker compose up`。发布另开 job，密钥用 GitHub Secrets。

@@ -8,7 +8,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.deps import CurrentUser, require_admin, require_login, require_platform_admin
+from backend.app.api.deps import (
+    CurrentUser, require_admin, require_login, require_platform_admin_or_404,
+)
 from platform_core.schemas.auth import AdminUserCreateRequest, AdminUserUpdateRequest
 from backend.app.responses import ok, created
 from backend.app.api._helpers import record_audit
@@ -137,17 +139,17 @@ async def list_audit_logs(
 
 @router.get("/tenants")
 async def list_tenants(
-    _user: CurrentUser = Depends(require_platform_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
     service: TenantAdminService = Depends(_tenant_service),
 ):
-    """租户列表（平台超管）"""
+    """租户列表（平台超管；非超管 404 同形）"""
     return ok(data=await service.list_tenants())
 
 
 @router.post("/tenants", status_code=201)
 async def create_tenant_minimal(
     body: dict,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: TenantAdminService = Depends(_tenant_service),
 ):
@@ -163,7 +165,7 @@ async def create_tenant_minimal(
 async def patch_tenant(
     tenant_id: int,
     body: dict,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: TenantAdminService = Depends(_tenant_service),
 ):

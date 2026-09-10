@@ -157,11 +157,12 @@ class IdleAutoClose:
     """空闲自动收尾扩展（单次任务模式）
 
     RedisSpider 常驻等待新任务，不会自然走到 finished；当
-    IDLE_CLOSE_SECONDS > 0 且本轮已产出过 Item 时，连续空闲超过阈值
-    即以 finished 收尾 → 触发 SpiderCloseWebhook 回调任务终态。
+    IDLE_CLOSE_SECONDS > 0 时，连续空闲超过阈值即以 finished 收尾
+    （含 0 条，FR-19）→ 触发 SpiderCloseWebhook 回调任务终态。
 
-    常驻分布式 Worker 场景（run_spider.py 重生模式）：保持启用，
-    收尾触发终态回调后由 run_forever 重生爬虫继续待命。
+    默认 30 秒；21600 是渠道探针锁，禁止当本窗。
+    GWT-18.4 离线标注走 SPIDER_WORKER_OFFLINE_SECONDS（默认 120），不是本窗。
+    常驻 Worker（scripts.runlib.spider 重生）：收尾回调后 run_forever 重生。
     """
 
     def __init__(self, idle_seconds: int):
@@ -193,15 +194,14 @@ class IdleAutoClose:
         self._idle_since = None  # 有产出即重置空闲计时
 
     def spider_idle(self, spider):
-        if not self._has_items:
-            return
         now = time.monotonic()
         if self._idle_since is None:
             self._idle_since = now
             return
         if now - self._idle_since >= self.idle_seconds:
             logger.info(
-                f"连续空闲 {self.idle_seconds}s 且本轮已有产出，自动收尾: {spider.name}"
+                f"连续空闲 {self.idle_seconds}s，自动收尾: {spider.name} "
+                f"items={int(self._has_items)}"
             )
             # 新版 scrapy 用协程版 close_spider_async(reason=...)，旧版回退 Deferred 版
             import asyncio

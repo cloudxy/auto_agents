@@ -1,14 +1,7 @@
-"""new-api 中转站总览服务（阶段三：admin 渠道健康页只读聚合）
+"""值班总览：LiteLLM 模型/部署 + 本地事件/探针（T-18）
 
-职责：
-- overview：调共享 NewapiApiClient.list_channels 拉取渠道（宽松映射 + 敏感字段剔除），
-  附本地统计（近 24h 事件数 / 最近探针批次 verdict 分布）；
-  远程异常/超时/开关关闭一律降级 available=false（HTTP 200，页面可读，不 500）
-- events / probe-results：分页透出本地 channel_events / channel_probe_results（始终可用）
-
-边界：
-- 只读服务，无写代理（渠道启停由调度器/人工在 new-api 侧操作，本服务不写）
-- 远程渠道数据不落库；本地表查询走 Repository，事务边界不动
+远程异常一律降级 available=false（HTTP 200，不 500）。
+空态 71.2 / 降级 71.3 冻结句。页上无完整上游 Key。
 """
 import asyncio
 from datetime import datetime, timedelta
@@ -20,60 +13,40 @@ from backend.repositories.newapi_repository import (
     ChannelEventRepository,
     ChannelProbeResultRepository,
 )
-from backend.services.newapi_api import NewapiApiClient
-from config import settings
-from backend.config_consts import (NEWAPI_ENABLED)
+from backend.services.gateway_models import (
+    DUTY_DEGRADE_71_3,
+    DUTY_EMPTY_71_2,
+    items_from_payload,
+    map_gateway_model,
+)
+from backend.services.llm_gateway import admin as gw_admin
 from platform_core.logger import get_logger
 from platform_core.schemas.newapi import (
     ChannelEventListResponse,
     ChannelEventResponse,
     ChannelProbeResultListResponse,
     ChannelProbeResultResponse,
-    NewapiChannelResponse,
+    GatewayModelResponse,
+    GatewayModelWriteRequest,
+    GatewayUpstreamWriteRequest,
     NewapiOverviewResponse,
 )
 
 logger = get_logger("api")
 
-# overview 拉取渠道的超时（秒）：同时约束单请求（client timeout）与整体 wait_for
 OVERVIEW_TIMEOUT_SECONDS: float = 5.0
-
-# 本地事件统计窗口（小时）
 EVENTS_WINDOW_HOURS: int = 24
 
-# 渠道对象敏感字段：宽松映射时强制剔除，绝不透传给前端（红线 R1 精神：密钥不出后端）
-_CHANNEL_SENSITIVE_FIELDS: frozenset = frozenset({"key"})
 
-# 渠道已知字段（对齐 new-api 管理面 GET /api/channel/ 返回；宽松容忍缺失）
-_CHANNEL_KNOWN_FIELDS: tuple = (
-    "id", "name", "status", "type", "used_quota", "balance", "response_time",
-    "test_time", "models", "group", "base_url", "priority", "weight", "created_time",
-)
-
-
-class _ChannelFetchResult(NamedTuple):
-    """渠道拉取结果（available=false 时 items 恒为空）"""
-
+class _ModelFetchResult(NamedTuple):
     available: bool
     reason: Optional[str]
-    items: list[NewapiChannelResponse]
-
-
-def _map_channel(raw: dict) -> Optional[NewapiChannelResponse]:
-    """new-api 渠道原始 dict → 响应模型（宽松映射：已知字段归一，未知字段收 extra）"""
-    if raw.get("id") is None:
-        logger.warning(f"渠道条目缺 id，跳过: keys={sorted(raw.keys())}")
-        return None
-    known = {k: raw[k] for k in _CHANNEL_KNOWN_FIELDS if k in raw}
-    extra = {
-        k: v for k, v in raw.items()
-        if k not in _CHANNEL_KNOWN_FIELDS and k not in _CHANNEL_SENSITIVE_FIELDS
-    }
-    return NewapiChannelResponse(**known, extra=extra)
+    models: list[GatewayModelResponse]
+    deployments: list[GatewayModelResponse]
 
 
 class NewapiOverviewService:
-    """中转站总览聚合（渠道列表 + 本地事件/探针统计；只读）"""
+    """值班聚合（网关模型 + 本地事件/探针；写面仅超管）"""
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -81,9 +54,9 @@ class NewapiOverviewService:
         self.probe_repo = ChannelProbeResultRepository(session)
 
     async def get_overview(self) -> NewapiOverviewResponse:
-        """总览聚合：远程渠道（降级安全）+ 近 24h 事件数 + 最近批次 verdict 分布"""
-        logger.info("聚合 new-api 中转站总览")
-        fetched = await self._fetch_channels()
+        """总览：网关模型（降级安全）+ 近 24h 事件 + 最近探针分布"""
+        logger.info("聚合 LLM 网关值班总览")
+        fetched = await self._fetch_models()
         events_24h = await self.event_repo.count_events_since(
             datetime.now() - timedelta(hours=EVENTS_WINDOW_HOURS)
         )
@@ -91,11 +64,18 @@ class NewapiOverviewService:
         verdicts = (
             await self.probe_repo.count_results_by_verdict(batch_id) if batch_id else {}
         )
+        total = len(fetched.models)
+        empty = DUTY_EMPTY_71_2 if fetched.available and total == 0 else None
+        degrade = DUTY_DEGRADE_71_3 if not fetched.available else None
         return NewapiOverviewResponse(
             available=fetched.available,
             reason=fetched.reason,
-            channels=fetched.items,
-            total=len(fetched.items),
+            empty_state=empty,
+            degrade_state=degrade,
+            models=fetched.models,
+            deployments=fetched.deployments,
+            channels=[],
+            total=total,
             events_24h=events_24h,
             latest_batch_id=batch_id,
             latest_batch_verdicts=verdicts,
@@ -131,26 +111,83 @@ class NewapiOverviewService:
             items=[ChannelProbeResultResponse.model_validate(item) for item in items],
         )
 
-    async def _fetch_channels(self) -> _ChannelFetchResult:
-        """拉取远程渠道列表；开关关闭/不可达/超时统一降级，不向上抛"""
-        if not bool(settings.get("NEWAPI.ENABLED", NEWAPI_ENABLED)):
-            return _ChannelFetchResult(False, "newapi disabled", [])
-        base_url = str(settings.get("NEWAPI.BASE_URL", "") or "")
-        if not base_url:
-            return _ChannelFetchResult(False, "newapi base_url not configured", [])
-        client = NewapiApiClient(timeout=OVERVIEW_TIMEOUT_SECONDS)
+    async def register_model(
+        self, payload: GatewayModelWriteRequest,
+    ) -> GatewayModelResponse:
+        """超管登记/改平台网关模型（租户写面由守卫拒绝）"""
+        logger.info(f"登记平台网关模型: model_name={payload.model_name}")
+        body: dict = {
+            "model_name": payload.model_name,
+            "litellm_params": dict(payload.litellm_params or {}),
+        }
+        if payload.gateway_ref:
+            body["model_info"] = {"id": payload.gateway_ref}
+        raw = await gw_admin.create_model(body)
+        mapped = _mapped_or_name(raw, payload.model_name, payload.gateway_ref)
+        return mapped
+
+    async def register_upstream(
+        self, payload: GatewayUpstreamWriteRequest,
+    ) -> GatewayModelResponse:
+        """超管登记平台上游（api_base）；不记完整 Key"""
+        logger.info(f"登记平台上游: gateway_ref={payload.gateway_ref}")
+        params = dict(payload.litellm_params or {})
+        params["api_base"] = payload.api_base
+        name = payload.model_name or payload.gateway_ref
+        raw = await gw_admin.create_model({
+            "model_name": name,
+            "litellm_params": params,
+            "model_info": {"id": payload.gateway_ref},
+        })
+        return _mapped_or_name(raw, name, payload.gateway_ref)
+
+    async def _fetch_models(self) -> _ModelFetchResult:
+        """拉取网关模型；不可达统一降级，不向上抛"""
         try:
-            raw_list = await asyncio.wait_for(
-                client.list_channels(), timeout=OVERVIEW_TIMEOUT_SECONDS
+            payload = await asyncio.wait_for(
+                gw_admin.list_models(), timeout=OVERVIEW_TIMEOUT_SECONDS,
             )
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 —— 超时/网络/解析异常统一降级（不 500）
-            logger.warning(f"拉取中转站渠道失败（降级）: base_url={base_url}, error={e}")
-            return _ChannelFetchResult(False, f"newapi unreachable: {e}", [])
-        items = [
-            channel
-            for channel in (_map_channel(raw) for raw in raw_list if isinstance(raw, dict))
-            if channel is not None
+            logger.warning(f"拉取网关模型失败（降级）: error={e}")
+            return _ModelFetchResult(False, DUTY_DEGRADE_71_3, [], [])
+        models = [
+            item for item in (
+                map_gateway_model(raw) for raw in items_from_payload(payload)
+            ) if item is not None
         ]
-        return _ChannelFetchResult(True, None, items)
+        deployments = await self._fetch_deployments()
+        return _ModelFetchResult(True, None, models, deployments)
+
+    async def _fetch_deployments(self) -> list[GatewayModelResponse]:
+        """部署列表尽力而为；失败不影响 available"""
+        try:
+            payload = await asyncio.wait_for(
+                gw_admin.list_deployments(), timeout=OVERVIEW_TIMEOUT_SECONDS,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"拉取网关部署失败（忽略）: error={e}")
+            return []
+        return [
+            item for item in (
+                map_gateway_model(raw) for raw in items_from_payload(payload)
+            ) if item is not None
+        ]
+
+
+def _mapped_or_name(
+    raw: object, name: str, gateway_ref: Optional[str],
+) -> GatewayModelResponse:
+    """写回执映射；上游异常结构时仍回模型名（不含 Key）"""
+    if isinstance(raw, dict):
+        data = raw.get("data") if isinstance(raw.get("data"), dict) else raw
+        if isinstance(data, dict):
+            mapped = map_gateway_model(data)
+            if mapped is not None:
+                return mapped
+    return GatewayModelResponse(
+        gateway_ref=gateway_ref or name, model_name=name,
+    )

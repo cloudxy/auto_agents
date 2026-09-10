@@ -31,27 +31,25 @@ trigger: always_on
 | 爬取与存储分离 | 爬虫只负责采集和清洗，不负责持久化 |
 | 反爬是生存底线 | 没有反爬策略的爬虫是 DDoS |
 | 数据质量先于数量 | 100 条干净数据 > 10000 条脏数据 |
-| 租户隔离不可旁路 | 业务查询必须经 tenant_context 收口，豁免清单只有一份事实源 |
 
 ## 架构红线（可机械检查）
 
-本表只定义**规则含义**。检查命令的唯一实现是 `bash scripts/check-arch.sh`（pre-commit + CI + `/check-arch` 共用）。不要在本文件、对话或 skill 里再维护一套 grep：R7 正则、R10 logger 启发式、R12 白名单、R13 豁免同步都以脚本为准。
+上述价值观违规时，用 grep / 代码审查立即定位：
 
-| 信条 | 红线 | 编号 |
-|------|------|------|
-| 配置即代码 | 禁止硬编码连接串、密钥、端口 | R1 |
-| 配置即代码 | 禁止在代码里写明文 password | R2 |
-| 爬取与存储分离 | scrapy 禁止 import backend 内部 | R3 |
-| 爬虫不能直写主库 | scrapy 禁止使用 SQLAlchemy Session | R4 |
-| 反爬是底线 | 爬虫必须配 DOWNLOAD_DELAY | R5 |
-| 反爬是底线 | 爬虫必须配 USER_AGENT 轮换或中间件 | R6 |
-| 模型即契约 | API 层禁止直接 import ORM 模型 | R7 |
-| 模型即契约 | ORM 模型禁止 import Pydantic schema | R8 |
-| 数据流向不可逆 | 禁止循环 import（A→B→A） | R9 |
-| 日志即证据 | service 方法必须有入口 logger | R10 |
-| 异步优先 | async 上下文禁止同步 `redis_client()` 链式直调（阻塞事件循环），统一走 `get_async_redis()` | R11 |
-| 门面退役过渡 | 禁止白名单外 import 过渡门面 backend.services.spider_service | R12 |
-| 租户隔离不可旁路 | 业务查询必须经租户过滤收口；豁免清单不得在 platform_core 硬编码业务表名 | R13 |
+| 信条 | 红线 | 检查命令 |
+|------|------|---------|
+| 配置即代码 | 禁止硬编码连接串、密钥、端口 | `grep -rE "(mysql\|postgres\|redis)://[^$\{]" backend/ scrapy/` |
+| 配置即代码 | 禁止在代码里写明文 password | `grep -rE 'password\s*=\s*"[^$]' backend/ scrapy/` |
+| 爬取与存储分离 | scrapy 禁止 import backend 内部 | `grep -rE "from (backend\|app)\." scrapy/` |
+| 爬虫不能直写主库 | scrapy 禁止使用 SQLAlchemy Session | `grep -rE "from sqlalchemy\|SessionLocal\|get_db" scrapy/` |
+| 反爬是底线 | 爬虫必须配 DOWNLOAD_DELAY | `grep -rE "DOWNLOAD_DELAY" scrapy/settings.py` |
+| 反爬是底线 | 爬虫必须配 USER_AGENT 轮换或中间件 | `grep -rE "USER_AGENT\|UserAgentMiddleware" scrapy/` |
+| 模型即契约 | API 层禁止直接 import ORM 模型 | `grep -rE "from.*\.models import" backend/app/api/` |
+| 模型即契约 | ORM 模型禁止 import Pydantic schema | `grep -rE "from.*\.schemas import" platform_core/models/` |
+| 数据流向不可逆 | 禁止循环 import（A→B→A） | `python -c "import backend.app"` 能否成功加载 |
+| 日志即证据 | service 方法必须有入口 logger | code review：每个 public 方法第一行 `logger.info` |
+| 异步优先 | async 上下文禁止同步 `redis_client()` 链式直调（阻塞事件循环），统一走 `get_async_redis()` | `grep -rnE 'redis_client\([^)]*\)\.' backend/` |
+| 门面退役过渡 | 禁止白名单外 import 过渡门面 backend.services.spider_service | 白名单见 tools/check/arch.sh |
 
 ## 核心代码边界（模块依赖方向）
 
@@ -131,11 +129,10 @@ backend/ ──┘
 | 层 | 路径 | 职责 |
 |----|------|------|
 | 配置 | `config/` | Dynaconf 多层合并（default → scrapy/default → `<env>` → scrapy/`<env>` → `.env` → 环境变量） |
-| 共享基建 | `platform_core/` | logger / db / storage / exceptions / repository / **models** / **schemas** / tenant_context |
+| 共享基建 | `platform_core/` | logger / db / storage / exceptions / repository / **models** / **schemas** |
 | 后端 | `backend/` | API（`app/api/v1+v2`）+ 外部 API（`app/external_api`）+ services + repositories |
 | 爬虫 | `scrapy/` | spiders / middlewares / pipelines / items（禁止 import backend） |
-| 前端 | `frontend/{admin,official,shared}/` | React 19 + TS（npm workspaces；shared 为编译产物，禁源码直引） |
-| 能力资产 | `capability-library/` | 跨工具内容库（SKILL.md / adapters）；治理走主 API `v1/skills` |
+| 前端 | `frontend/{admin,official}/` | React 19 + TS（独立 npm 包） |
 
 **注意**：ORM 模型已从 `backend/models/` 迁移到 `platform_core/models/`；Pydantic schema 已从 `backend/app/schemas/` 迁移到 `platform_core/schemas/`。这两个目录是 backend 与 scrapy 的共享数据契约。
 
@@ -155,12 +152,10 @@ backend/ ──┘
 | 创建服务模块 | `/new-svc` |
 | 创建爬虫 | `/new-spider` |
 | 创建数据模型 | `/new-model` |
-| 数据库设计（S0→S5 / 迁移） | `/db-design` |
-| 架构合规检查（13 条红线 + 3 边界） | `/check-arch` |
+| 架构合规检查（12 条红线） | `/check-arch` |
 | 交付自检 | `/verify` |
 | 编码规范 | `/coding-style` |
 | 日志规范 | `/logging` |
 | 配置规范 | `/config` |
 | 部署配置 | `/deploy` |
 | CI/CD 配置 | `/cicd` |
-| 穷尽式问题解决 | `/pua` |

@@ -97,6 +97,7 @@ async def resolve_runtime_config(
     存量单测对 svc.repo / svc.decrypt_api_key 的实例级 patch 语义不变。
     无租户上下文（legacy/后台）保持原语义：任一激活行优先。
     """
+    logger.debug("解析 LLM 运行时配置")
     if repo is None:
         repo = LlmProviderRepository(session)
     if decrypt is None:
@@ -145,3 +146,52 @@ async def resolve_runtime_config(
             f"回退 yml/env 兜底: provider_id={getattr(active, 'id', None)}"
         )
     return resolve_config_from_settings()
+
+
+async def resolve_own_tenant_config(
+    session: AsyncSession,
+    *,
+    repo: Optional[LlmProviderRepository] = None,
+    decrypt: Optional[Callable[[Optional[str]], str]] = None,
+) -> Optional[LlmRuntimeConfig]:
+    """仅本企业激活行。无行 / 不完整 → None。不打平台公共行、不打 yml。"""
+    logger.debug("解析本企业激活 LLM 供应商（不含平台公共行）")
+    if decrypt is None:
+        decrypt = LlmSecretVault.decrypt_api_key
+    if repo is None:
+        repo = LlmProviderRepository(session)
+    _ = repo
+    tenant_id = current_tenant_id()
+    if tenant_id is None:
+        return None
+    active = (await session.execute(
+        select(LlmProvider).where(
+            LlmProvider.is_active == True,  # noqa: E712
+            LlmProvider.enabled == True,  # noqa: E712
+            LlmProvider.tenant_id == tenant_id,
+            LlmProvider.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if active is None or not bool(active.enabled):
+        return None
+    api_key = decrypt(getattr(active, "api_key_encrypted", None))
+    base_url = str(active.base_url or "").rstrip("/")
+    model = str(active.model or "")
+    if not (api_key and base_url and model):
+        logger.warning(
+            "本企业激活供应商配置不完整，改走平台网关: "
+            f"provider_id={getattr(active, 'id', None)}"
+        )
+        return None
+    return LlmRuntimeConfig(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        temperature=float(active.temperature),
+        timeout=float(active.timeout),
+        max_retries=max(1, int(active.max_retries)),
+        enabled=True,
+        source=f"provider:{active.id}",
+        provider_id=int(active.id),
+        protocol=str(active.provider_type or "openai_compatible"),
+    )

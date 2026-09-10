@@ -16,12 +16,24 @@ export const CHANNEL_TYPE_NAMES: Record<number, string> = {
   24: 'Gemini',
 }
 
-/** verdict Tag 映射（original 绿 / spoofed 红 / offline 灰） */
+/** verdict Tag：禁止「original 正品」中英叠词 */
 export const VERDICT_TAG: Record<ProbeVerdict, { color: string; text: string }> = {
-  original: { color: 'green', text: 'original 正品' },
-  spoofed: { color: 'red', text: 'spoofed 伪装' },
-  offline: { color: 'default', text: 'offline 不可用' },
+  original: { color: 'green', text: '正品' },
+  spoofed: { color: 'red', text: '伪装' },
+  offline: { color: 'default', text: '不可用' },
 }
+
+/** GWT-71.2 / 71.3 冻结句 */
+export const DUTY_EMPTY_71_2 = '还没有平台模型，去网关登记'
+export const DUTY_EMPTY_71_2_HINT =
+  '平台 LLM 网关已连通，但还没有登记任何模型。登记后再刷新本页。'
+export const DUTY_DEGRADE_71_3 = 'LLM 网关管理面不可达，仅本地事件/探针'
+export const DUTY_DEGRADE_71_3_HINT =
+  '现在读不到网关侧模型/部署。下方仍显示本库已有事件与探针。恢复后点刷新。'
+export const DUTY_TABLE_UNAVAILABLE = '网关列表暂不可用'
+export const DUTY_LOCAL_PROBE_EMPTY = '还没有本地探针记录。下次探针批次会显示在这里。'
+export const DUTY_LOAD_FAILED = '值班页加载失败。检查网络后重试。'
+export const FORBIDDEN_CHANNEL_EMPTY = '暂无渠道'
 
 /** 动作 Tag 映射 */
 export const ACTION_TAG: Record<string, { color: string; text: string }> = {

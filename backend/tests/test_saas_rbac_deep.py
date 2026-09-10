@@ -61,7 +61,7 @@ def test_dynamic_menus_filtered_by_role(db_client, admin_client, _seed):
     assert all(k.startswith("grp-") or k.startswith("/") for k in grp_keys)
 
 
-def test_menu_crud_roundtrip(db_client, admin_client, _seed):
+def test_menu_crud_roundtrip(db_client, platform_admin_client, _seed):
     """菜单 CRUD：建（挂父）→ 改 → 级联守卫 → 删"""
     created = db_client.post("/api/v1/rbac/menus", json={
         "parent_id": _seed["group_id"], "name": "子页", "path": "/x-child", "sort_order": 5})
@@ -77,7 +77,7 @@ def test_menu_crud_roundtrip(db_client, admin_client, _seed):
     assert db_client.delete(f"/api/v1/rbac/menus/{cid}").status_code == 200
 
 
-def test_permission_resource_crud_with_reference_guard(db_client, admin_client, _seed):
+def test_permission_resource_crud_with_reference_guard(db_client, platform_admin_client, _seed):
     """权限资源：注册 → 改 → 被角色引用禁删 → 解除后可删"""
     created = db_client.post("/api/v1/rbac/permissions", json={
         "code": "btn:tmp:demo", "name": "临时权限", "group_name": "测试", "ptype": "btn"})
@@ -96,7 +96,22 @@ def test_permission_resource_crud_with_reference_guard(db_client, admin_client, 
     assert db_client.delete(f"/api/v1/rbac/permissions/{pid}").status_code == 200
 
 
-def test_custom_role_crud(db_client, admin_client, _seed):
+def test_tenant_admin_cannot_update_platform_role(db_client, admin_client, _seed):
+    """GWT-06.3：租户公司管理员改平台角色权限 → 403；权限集合不变"""
+    before = db_client.get("/api/v1/rbac/roles").json()["data"]["roles"]
+    admin = next(r for r in before if r["role_key"] == "admin")
+    perms = list(admin["permissions"])
+    resp = admin_client.put(
+        "/api/v1/rbac/roles/admin",
+        json={"permissions": [*perms, "btn:tmp:denied"]},
+    )
+    assert resp.status_code == 403
+    after = db_client.get("/api/v1/rbac/roles").json()["data"]["roles"]
+    admin_after = next(r for r in after if r["role_key"] == "admin")
+    assert admin_after["permissions"] == perms
+
+
+def test_custom_role_crud(db_client, platform_admin_client, _seed):
     """自定义角色：建 → 内置禁删 → 无引用可删"""
     created = db_client.post("/api/v1/rbac/roles", json={
         "role_key": "auditor", "name": "审计员", "permissions": ["menu:logs"]})

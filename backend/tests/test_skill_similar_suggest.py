@@ -62,6 +62,155 @@ async def test_similar_confirm_merges_mutually(db_session):
         assert rows["web-scrape"].similar_to in (None, [])
 
 
+def test_similar_suggest_viewer_403(db_client, viewer_client, db_engine, db_session):
+    """只读 403（SH-07：守卫 require_operator）。"""
+    resp = viewer_client.post("/api/v1/skills/similar-suggest")
+    assert resp.status_code == 403
+
+
+def test_operator_similar_suggest_success_outbound_is_gateway_url(
+    db_client, operator_client, db_engine, db_session, monkeypatch,
+):
+    """GWT-70.7：经办 HTTP 等到 outbound=网关 URL。禁止仅 HTTP 200 勾。"""
+    import asyncio
+
+    from config import settings
+
+    from backend.tests.test_llm_four_actions_http import (
+        GATEWAY_URL,
+        _forbid_yml,
+        _install_engines,
+        _install_gateway,
+    )
+
+    prev = settings.get("LLM.DATA_PLANE")
+    settings.set("LLM.DATA_PLANE", "litellm")
+    settings.set("LITELLM.BASE_URL", GATEWAY_URL)
+    settings.set("LITELLM.MASTER_KEY", "sk-virt")
+    settings.set("LLM.MAX_RETRIES", 1)
+    outbound: list[str] = []
+    _forbid_yml(monkeypatch)
+    _install_engines(monkeypatch, db_engine, db_session)
+    from backend.tests.test_llm_four_actions_http import _install_llm_seams
+    _install_llm_seams(monkeypatch)
+    _install_gateway(
+        monkeypatch, "ok", outbound,
+        json.dumps({"clusters": [["pdf-extract-a", "pdf-extract-b"]]}),
+    )
+    asyncio.run(_seed(db_session))
+    try:
+        resp = operator_client.post("/api/v1/skills/similar-suggest")
+        assert outbound == [f"{GATEWAY_URL}/v1/chat/completions"]
+        assert "https://pub" not in outbound[0]
+        assert resp.status_code == 200
+        assert resp.json()["data"]["clusters"] == [["pdf-extract-a", "pdf-extract-b"]]
+    finally:
+        if prev is not None:
+            settings.set("LLM.DATA_PLANE", prev)
+
+
+def test_operator_similar_suggest_no_model_envelope_only_70_10(
+    db_client, operator_client, db_engine, db_session, monkeypatch,
+):
+    """GWT-70.10：经办 HTTP 响应（及 Job）只「还没有平台模型」。"""
+    import asyncio
+
+    from config import settings
+    from sqlalchemy import select
+
+    from backend.services.quota_service import GATEWAY_UNREACHABLE_USER, NO_MODEL_USER
+    from backend.tests.test_llm_four_actions_http import (
+        GATEWAY_URL,
+        _assert_only_sentence,
+        _forbid_yml,
+        _install_engines,
+        _install_gateway,
+    )
+
+    prev = settings.get("LLM.DATA_PLANE")
+    settings.set("LLM.DATA_PLANE", "litellm")
+    settings.set("LITELLM.BASE_URL", GATEWAY_URL)
+    settings.set("LITELLM.MASTER_KEY", "sk-virt")
+    settings.set("LLM.MAX_RETRIES", 1)
+    outbound: list[str] = []
+    _forbid_yml(monkeypatch)
+    _install_engines(monkeypatch, db_engine, db_session)
+    from backend.tests.test_llm_four_actions_http import _install_llm_seams
+    _install_llm_seams(monkeypatch)
+    _install_gateway(monkeypatch, "no_model", outbound, "{}")
+    asyncio.run(_seed(db_session))
+    try:
+        resp = operator_client.post("/api/v1/skills/similar-suggest")
+        assert resp.status_code != 200
+        body = resp.json()
+        _assert_only_sentence(body["message"], NO_MODEL_USER, GATEWAY_UNREACHABLE_USER)
+        assert not (resp.status_code == 200 and (body.get("data") or {}).get("clusters") == [])
+        assert outbound == []
+    finally:
+        if prev is not None:
+            settings.set("LLM.DATA_PLANE", prev)
+
+    async def _job():
+        async with db_session() as s:
+            return (await s.execute(select(SkillJob).order_by(SkillJob.id.desc()))).scalars().first()
+
+    job = asyncio.run(_job())
+    assert job is not None and job.status == "failed"
+    _assert_only_sentence(str(job.detail.get("reason")), NO_MODEL_USER, GATEWAY_UNREACHABLE_USER)
+
+
+def test_operator_similar_suggest_unreachable_envelope_only_74_6(
+    db_client, operator_client, db_engine, db_session, monkeypatch,
+):
+    """GWT-74.6：经办 HTTP 响应（及 Job）只「平台 LLM 网关不可达」。"""
+    import asyncio
+
+    from config import settings
+    from sqlalchemy import select
+
+    from backend.services.quota_service import GATEWAY_UNREACHABLE_USER, NO_MODEL_USER
+    from backend.tests.test_llm_four_actions_http import (
+        GATEWAY_URL,
+        _assert_only_sentence,
+        _forbid_yml,
+        _install_engines,
+        _install_gateway,
+    )
+
+    prev = settings.get("LLM.DATA_PLANE")
+    settings.set("LLM.DATA_PLANE", "litellm")
+    settings.set("LITELLM.BASE_URL", GATEWAY_URL)
+    settings.set("LITELLM.MASTER_KEY", "sk-virt")
+    settings.set("LLM.MAX_RETRIES", 1)
+    outbound: list[str] = []
+    _forbid_yml(monkeypatch)
+    _install_engines(monkeypatch, db_engine, db_session)
+    from backend.tests.test_llm_four_actions_http import _install_llm_seams
+    _install_llm_seams(monkeypatch)
+    _install_gateway(monkeypatch, "unreachable", outbound, "{}")
+    asyncio.run(_seed(db_session))
+    try:
+        resp = operator_client.post("/api/v1/skills/similar-suggest")
+        assert resp.status_code != 200
+        body = resp.json()
+        _assert_only_sentence(body["message"], GATEWAY_UNREACHABLE_USER, NO_MODEL_USER)
+        assert not (resp.status_code == 200 and (body.get("data") or {}).get("clusters") == [])
+        assert outbound == []
+    finally:
+        if prev is not None:
+            settings.set("LLM.DATA_PLANE", prev)
+
+    async def _job():
+        async with db_session() as s:
+            return (await s.execute(select(SkillJob).order_by(SkillJob.id.desc()))).scalars().first()
+
+    job = asyncio.run(_job())
+    assert job is not None and job.status == "failed"
+    _assert_only_sentence(
+        str(job.detail.get("reason")), GATEWAY_UNREACHABLE_USER, NO_MODEL_USER,
+    )
+
+
 def test_similar_endpoints(db_client, admin_client, db_engine, db_session, monkeypatch):
     import asyncio
 

@@ -353,6 +353,36 @@ class SpiderTaskConsumer:
             logger.error(f"死信队列写入失败: {e}")
         return False
 
+    @staticmethod
+    def _task_owner_id(task) -> Optional[int]:
+        """入队企业：只认任务行 tenant_id。工人消息里的 tenant 不是归属。"""
+        if task is None:
+            return None
+        raw = getattr(task, "tenant_id", None)
+        if raw is None:
+            return None
+        try:
+            tid = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return tid if tid > 0 else None
+
+    async def _reject_orphan_item(self, msg: dict, task_id, reason: str) -> None:
+        """无主回流：不写入「我的结果」；死信留档；任务侧可查失败。"""
+        logger.warning(
+            f"回流无入队企业，不落结果: task_id={task_id}, reason={reason}"
+        )
+        dead = dict(msg)
+        dead["_reject_reason"] = reason
+        try:
+            await self._redis.rpush(
+                DEAD_ITEM_QUEUE, json.dumps(dead, ensure_ascii=False, default=str)
+            )
+        except Exception as e:  # noqa: BLE001 死信失败不阻断主路径
+            logger.error(f"无主回流死信写入失败: task_id={task_id}, error={e}")
+        if task_id:
+            await self._fail_task(task_id, reason)
+
     # ------------------------------------------------------------------
     # 失败重试延迟扫描（期 3）：ZSET 到期成员重新入主队列
     # ------------------------------------------------------------------
@@ -613,6 +643,9 @@ class SpiderTaskConsumer:
         if not messages:
             return
 
+        orphans: list[dict] = []
+        instances: list[SpiderResult] = []
+
         # ── 0. 按本批 messages 一次性重算计数（m-5 评审修复）──
         # 调用方的 counts 在 flush 失败重试场景下会被上一轮的去重扣减污染
         # （失败 → 同一批次连同已扣减的 counts 原样重试），继续在其上扣减
@@ -628,6 +661,7 @@ class SpiderTaskConsumer:
             task_params_cache: dict[int, dict] = {}
             task_store_cache: dict[int, list[str]] = {}
             task_row_cache: dict[int, object] = {}
+            task_owner_cache: dict[int, Optional[int]] = {}
             for tid in counts:
                 task = await SpiderTaskRepository(session).get_by_id(tid)
                 task_row_cache[tid] = task
@@ -641,22 +675,24 @@ class SpiderTaskConsumer:
                 task_store_cache[tid] = extract_store_targets(
                     task.params if task else None
                 )
+                task_owner_cache[tid] = self._task_owner_id(task)
 
             # ── 2. 构建 SpiderResult 实例（跳过增量去重命中项）──
             result_repo = SpiderResultRepository(session)
-            instances: list[SpiderResult] = []
             mirror_msgs: list[tuple[int, dict]] = []  # (task_id, msg)
 
             for msg in messages:
                 task_id = msg["task_id"]
+                owner_id = task_owner_cache.get(task_id)
+                if owner_id is None:
+                    orphans.append(msg)
+                    counts[task_id] = max(0, counts.get(task_id, 0) - 1)
+                    continue
                 spider_name = msg.get("spider_name", "")
                 item = msg.get("item") or {}
                 item_type = msg.get("item_type", "BaseItem")
                 task_row = task_row_cache.get(task_id)
-                tenant_id = getattr(task_row, "tenant_id", None)
-                if not isinstance(tenant_id, int):
-                    raw_tid = msg.get("tenant_id")
-                    tenant_id = raw_tid if isinstance(raw_tid, int) else None
+                _ = task_row  # 保留行缓存：去重/归属仍以 owner_id 为准
 
                 # B1：数据质量评分（与 _ingest 一致，pop 避免进 extra）
                 quality_score = item.pop("_quality_score", None)
@@ -673,7 +709,7 @@ class SpiderTaskConsumer:
                 params = task_params_cache.get(task_id, {})
                 if params.get("incremental") and content_hash:
                     existing = await result_repo.find_by_content_hash(
-                        content_hash, tenant_id=tenant_id, spider_name=spider_name
+                        content_hash, tenant_id=owner_id, spider_name=spider_name
                     )
                     if existing:
                         logger.debug(
@@ -691,7 +727,7 @@ class SpiderTaskConsumer:
                     SpiderResult(
                         task_id=task_id,
                         spider_name=spider_name,
-                        tenant_id=tenant_id,
+                        tenant_id=owner_id,
                         item_type=item_type,
                         url=url_val or None,
                         title=item.get("title"),
@@ -708,7 +744,7 @@ class SpiderTaskConsumer:
                 )
                 mirror_msgs.append((task_id, msg))
 
-            # ── 3. 配额按租户旁路，禁止单租户超额冻结全平台批次 ──
+            # ── 3. 配额按租户旁路，禁止单租户超额冻结全平台批次（归属=入队企业）──
             if instances:
                 from backend.services.quota_service import QuotaExceededException, QuotaService
 
@@ -752,6 +788,11 @@ class SpiderTaskConsumer:
 
             # ── 6. 单次 commit ──
             await session.commit()
+
+        for orphan in orphans:
+            await self._reject_orphan_item(
+                orphan, orphan.get("task_id"), "回流找不到入队企业",
+            )
 
         logger.debug(
             f"批量落库完成: {len(messages)} 条消息, "
@@ -818,44 +859,52 @@ class SpiderTaskConsumer:
 
         mapped = {"url", "title", "content", "source"}
         extra = {k: v for k, v in item.items() if k not in mapped}
+        owner_id: Optional[int] = None
         async with AsyncSession(self._engine()) as session:
             # B5：增量模式去重——任务 params.incremental=true 时跳过重复内容
             task_repo = SpiderTaskRepository(session)
             task = await task_repo.get_by_id(task_id)
-            params = {}
-            if task and task.params:
-                try:
-                    params = json.loads(task.params)
-                except (TypeError, ValueError):
-                    pass
-            if params.get("incremental") and content_hash:
-                tid = getattr(task, "tenant_id", None) if task else None
-                existing = await SpiderResultRepository(session).find_by_content_hash(
-                    content_hash,
-                    tenant_id=tid if isinstance(tid, int) else None,
-                    spider_name=spider_name or None,
-                )
-                if existing:
-                    logger.debug(f"增量去重：重复内容已跳过: hash={content_hash}, url={url_val}")
-                    return
+            owner_id = self._task_owner_id(task)
+            if owner_id is None:
+                pass
+            else:
+                params = {}
+                if task and task.params:
+                    try:
+                        params = json.loads(task.params)
+                    except (TypeError, ValueError):
+                        pass
+                if params.get("incremental") and content_hash:
+                    existing = await SpiderResultRepository(session).find_by_content_hash(
+                        content_hash,
+                        tenant_id=owner_id,
+                        spider_name=spider_name or None,
+                    )
+                    if existing:
+                        logger.debug(f"增量去重：重复内容已跳过: hash={content_hash}, url={url_val}")
+                        return
 
-            repo = SpiderResultRepository(session)
-            await repo.create_for_task(
-                task_id=task_id,
-                spider_name=spider_name,
-                item_type=item_type,
-                url=url_val or None,
-                title=item.get("title"),
-                content=item.get("content"),
-                source=item.get("source"),
-                extra=json.dumps(extra, ensure_ascii=False, default=str) if extra else None,
-                quality_score=quality_score,
-                content_hash=content_hash,
-            )
-            await session.commit()
-            # 数据源多存储（4.2）：store_to 命中 redis/csv 时追加任务级结果缓存列表，
-            # redis 目标供直读，csv 目标终态后由 Service 落盘（失败不影响落库主路径）
-            await self._mirror_result(session, task_id, msg)
+                repo = SpiderResultRepository(session)
+                await repo.create_for_task(
+                    task_id=task_id,
+                    spider_name=spider_name,
+                    tenant_id=owner_id,
+                    item_type=item_type,
+                    url=url_val or None,
+                    title=item.get("title"),
+                    content=item.get("content"),
+                    source=item.get("source"),
+                    extra=json.dumps(extra, ensure_ascii=False, default=str) if extra else None,
+                    quality_score=quality_score,
+                    content_hash=content_hash,
+                )
+                await session.commit()
+                # 数据源多存储（4.2）：store_to 命中 redis/csv 时追加任务级结果缓存列表，
+                # redis 目标供直读，csv 目标终态后由 Service 落盘（失败不影响落库主路径）
+                await self._mirror_result(session, task_id, msg)
+        if owner_id is None:
+            await self._reject_orphan_item(msg, task_id, "回流找不到入队企业")
+            return
         logger.info(
             f"结果已落库: task_id={task_id}, spider={spider_name}, item={item_type}"
         )

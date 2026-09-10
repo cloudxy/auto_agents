@@ -148,3 +148,23 @@ class TestIterByTask:
 
         sql = _compiled(session.execute.call_args_list[0].args[0])
         assert "ORDER BY spider_results.id ASC" in sql
+
+    @pytest.mark.asyncio
+    async def test_exclude_source_keeps_null_and_limits_window(self):
+        """导出窗：SQL 排除 marketplace，NULL source 可导出；limit 截断批次"""
+        repo, session = _repo()
+        session.execute.side_effect = [
+            _rows_result([SimpleNamespace(id=1), SimpleNamespace(id=2)]),
+        ]
+
+        collected = [
+            r async for r in repo.iter_by_task(
+                7, batch_size=50, exclude_source="marketplace", limit=2
+            )
+        ]
+
+        assert [r.id for r in collected] == [1, 2]
+        sql = _compiled(session.execute.call_args_list[0].args[0])
+        assert "marketplace" in sql
+        assert "IS NULL" in sql
+        assert "LIMIT 2" in sql

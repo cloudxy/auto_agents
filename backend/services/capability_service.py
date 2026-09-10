@@ -32,6 +32,7 @@ class CapabilityService:
     async def list_assets(
         self, asset_type: Optional[str] = None, category: Optional[str] = None,
         status: Optional[str] = None, q: Optional[str] = None,
+        listing_state: Optional[str] = None,
         offset: int = 0, limit: int = 20,
     ) -> tuple[list[CapabilityAsset], int]:
         stmt = select(CapabilityAsset)
@@ -41,6 +42,8 @@ class CapabilityService:
             stmt = stmt.where(CapabilityAsset.category == category)
         if status:
             stmt = stmt.where(CapabilityAsset.status == status)
+        if listing_state:
+            stmt = stmt.where(CapabilityAsset.listing_state == listing_state)
         if q:
             like = f"%{q}%"
             stmt = stmt.where(CapabilityAsset.name.like(like))

@@ -1,41 +1,58 @@
 # 服务模块代码模板
 
-ORM / Schema 的完整 mixin 模板见 `/new-model`。这里只放 Router + Service 的现行写法。
+## Contents
 
-## Service（`backend/services/{module}_service.py`）
+- Repository / Service / Router
+- 路由注册
+- 测试
+
+ORM+Schema 用 `new-model`（本文件不重复）。先读再改编：`backend/app/api/v1/members.py`、`backend/repositories/user_repository.py`、`backend/tests/test_auth_service.py`。Router 不 import ORM。
+
+## Repository（`backend/repositories/{module}_repository.py`）
 
 ```python
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from platform_core.logger import get_logger
 from platform_core.models.{module} import {Module}
 from platform_core.repository import BaseRepository
-from platform_core.schemas.{module} import {Module}Out
 
-logger = get_logger("service.{module}")
+
+class {Module}Repository(BaseRepository[{Module}]):
+    def __init__(self, session: AsyncSession):
+        super().__init__(model={Module}, session=session)
+```
+
+## Service（`backend/services/{module}_service.py`）
+
+Service 是**唯一**允许同时 import ORM 与 Schema 的层。ORM 实体不出 API。`get_logger("api")`（对齐 `LOGGERS`）。
+
+```python
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.repositories.{module}_repository import {Module}Repository
+from platform_core.logger import get_logger
+from platform_core.schemas.{module} import {Module}Create, {Module}Out
+
+logger = get_logger("api")
 
 
 class {Module}Service:
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.repo = BaseRepository({Module}, session)
+        self.repo = {Module}Repository(session)
 
-    async def list_for_tenant(self, tenant_id: int) -> list[{Module}Out]:
-        logger.info(f"列出{模块中文名} | tenant={tenant_id}")
-        rows = await self.repo.get_all()
-        return [{Module}Out.model_validate(r) for r in rows]
+    async def get_by_id(self, id: int) -> {Module}Out | None:
+        logger.info(f"查询{模块中文名}, id={id}")
+        obj = await self.repo.get_by_id(id)
+        return {Module}Out.model_validate(obj) if obj else None
+
+    async def create(self, data: {Module}Create) -> {Module}Out:
+        logger.info(f"创建{模块中文名}")
+        obj = await self.repo.create(**data.model_dump())
+        return {Module}Out.model_validate(obj)
 ```
 
-`backend/services/` 是唯一允许同时 import ORM 和 Schema 的目录。转换可内联 `model_validate`，不必强行拆 `{module}_converter.py`。
-
-后台 / 消费者路径：
-
-```python
-from platform_core.tenant_context import tenant_scope, platform_scope
-
-with tenant_scope(tenant_id):
-    ...
-```
+租户表：方法签名加 `tenant_id: int`，查询带该过滤，对齐 `backend/services/member_service.py`。
 
 ## Router（`backend/app/api/v1/{module}.py`）
 
@@ -43,38 +60,67 @@ with tenant_scope(tenant_id):
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.deps import CurrentUser, require_operator
-from backend.app.responses import ApiResponse, ok
+from backend.app.responses import created, ok
 from backend.services.{module}_service import {Module}Service
 from platform_core.db import get_async_db
-from platform_core.schemas.{module} import {Module}Out
+from platform_core.logger import get_logger
+from platform_core.schemas.{module} import {Module}Create
 
+logger = get_logger("api")
 router = APIRouter()
 
 
-def _svc(session: AsyncSession = Depends(get_async_db)) -> {Module}Service:
+def _service(session: AsyncSession = Depends(get_async_db)) -> {Module}Service:
     return {Module}Service(session)
 
 
-@router.get("", response_model=ApiResponse[list[{Module}Out]])
-async def list_{module}s(
-    user: CurrentUser = Depends(require_operator),
-    service: {Module}Service = Depends(_svc),
-) -> ApiResponse[list[{Module}Out]]:
-    return ok(await service.list_for_tenant(user.tenant_id))
+@router.get("/{id}")
+async def get_{module}(id: int, service: {Module}Service = Depends(_service)):
+    return ok(data=await service.get_by_id(id))
+
+
+@router.post("")
+async def create_{module}(
+    body: {Module}Create,
+    service: {Module}Service = Depends(_service),
+):
+    return created(data=await service.create(body))
 ```
 
-- 禁止 `from platform_core.models...`（R7）
-- 平台接口改 `require_platform_admin`，不要用租户 `require_admin` 冒充超管
-- 写操作需要审计时调 `backend.app.api._helpers.record_audit`
+租户表或要鉴权时，对齐 `members.py`：
+
+```python
+from backend.app.api.deps import CurrentUser, get_current_user
+
+@router.get("/{id}")
+async def get_{module}(
+    id: int,
+    user: CurrentUser = Depends(get_current_user),
+    service: {Module}Service = Depends(_service),
+):
+    return ok(data=await service.get_by_id(id, tenant_id=user.tenant_id))
+```
 
 ## 路由注册
 
-`backend/app/api/v1/__init__.py`：
+`backend/app/api/v1/__init__.py`：在现有 `from . import ...` 行追加 `{module}`，并增加一行：
 
 ```python
-from . import {module}
 router.include_router({module}.router, prefix="/{module}", tags=["{模块中文名}"])
 ```
 
-随后把新 `METHOD /api/v1/{module}` 写入 `backend/tests/openapi_routes_golden.txt`。
+只写 `include_router`、漏改 import，运行时 `NameError`。
+
+## 测试（`backend/tests/test_{module}_service.py`）
+
+改编 `backend/tests/test_auth_service.py`（mock session，不连真库）。至少：
+
+```python
+@pytest.mark.asyncio
+async def test_create_returns_out():
+    ...
+
+@pytest.mark.asyncio
+async def test_get_by_id_returns_out_or_none():
+    ...
+```

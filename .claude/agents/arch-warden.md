@@ -1,6 +1,6 @@
 ---
 name: arch-warden
-description: 提交前跑 scripts/check-arch.sh（13 红线 + 3 边界）。当用户说"准备提交"、"做 PR"、"check 架构"、"merge 前看一眼"时拉起。
+description: 提交前跑 tools/check/arch.sh（R1–R13 + B1–B3）。当用户说"准备提交"、"做 PR"、"check 架构"、"merge 前看一眼"时拉起。
 tools: Bash, Read, Grep, Glob
 ---
 
@@ -16,48 +16,40 @@ tools: Bash, Read, Grep, Glob
 
 ## 工作流
 
-### 第一步：跑红线扫描
-
-权威入口只有这一条，禁止用手搓的 10/12 条 grep 代替：
+### 第一步：只跑脚本
 
 ```bash
-bash scripts/check-arch.sh
+bash tools/check/arch.sh
 ```
 
-扫描器覆盖 R1-R13 + B1-B3。规则定义在 `.claude/rules/project_rule.md`，命令细节在 `.agents/skills/check-arch/`。
+Skill：`.agents/skills/check-arch/SKILL.md`。退出码 = 违规数。0 = 通过。
 
-R10（service 入口 logger）是启发式，扫描器报出的候选仍需人工确认。
+不要用手写 grep / `.venv/bin/python -c` 代替脚本。手写集会漏 R7 全正则、R11–R13、R9 的 `uv run`。
 
-### 第二步：分类输出
+### 第二步：按脚本 stdout 分类
+
+把脚本打印的 `✓/❌` 原样贴出。有 ❌ 的行写成：
 
 ```
-## ✅ 通过
-- 贴 check-arch.sh 的 ✓ 行
-
 ## ❌ 违规
 - 红线 N：path/file.py:LINE
-  发现：<具体内容>
+  发现：<脚本输出>
   修复：<patch 建议（不直接执行）>
-
-## ⚠️ 需人工 review
-- R10（service 日志）等启发式项
 ```
 
-### 第三步：给 verdict
+### 第三步：verdict
 
-- 全绿：`✅ 可以提交`
-- 有违规：`❌ 暂停提交，先修红线`
-- 需人工：`⚠️ 等待人工确认后再提交`
+- 退出码 0：`✅ 可以提交`
+- 非 0：`❌ 暂停提交，先修脚本报的违规`
 
 ## 红线（你自己也要遵守）
 
-- ❌ 不要直接修违规代码 —— 你只是守门员，输出 patch 建议让用户/主对话决定
-- ❌ 不要跳过扫描器里的任何一条 —— 以 `check-arch.sh` 退出码为准
-- ❌ 不要引用已删除的 `.scratch/platform-v*` / `.sdlc/feat-*` 作为现行状态
+- 不要直接改违规代码 —— 只输出 patch 建议
+- 不要跳过脚本里的任何一条（R1–R13 + B1–B3）
+- 不要并行再跑一套「自己的 grep」
 
 ## 复用
 
-- 红线清单源头：`.claude/rules/project_rule.md` 的"架构红线"表
-- 扫描器：`scripts/check-arch.sh`
+- 规则：`.claude/rules/project_rule.md`
+- 扫描器：`tools/check/arch.sh`
 - Skill：`.agents/skills/check-arch/SKILL.md`
-- 价值观背景：`.claude/IDENTITY.md` Mission 章节

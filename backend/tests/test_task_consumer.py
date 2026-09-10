@@ -9,6 +9,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -123,3 +125,144 @@ def test_non_flow_payload_unchanged():
     payload = json.loads(build_start_payload(
         "https://example.com/1", task_id=8, flow=None, selectors=[], render_params={}))
     assert payload == {"url": "https://example.com/1", "task_id": 8}
+
+
+# ---------------- T-07：回流归属=入队企业；无主不写「我的结果」 ----------------
+from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
+
+from backend.tasks.consumer import SpiderTaskConsumer  # noqa: E402
+from platform_core.queues import DEAD_ITEM_QUEUE  # noqa: E402
+
+
+def _flush_session():
+    session = AsyncMock()
+    session.commit = AsyncMock()
+    session.add_all = MagicMock()
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=session)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    return session, ctx
+
+
+@pytest.mark.asyncio
+async def test_flush_result_tenant_is_task_owner_not_message():
+    """GWT-10.1 / 10.2：工人消息不带企业（或带错企业）→ 结果归属=入队任务企业"""
+    consumer = SpiderTaskConsumer()
+    consumer._redis = AsyncMock()
+    consumer._fail_task = AsyncMock()
+    task = MagicMock(params=None, tenant_id=11)
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(return_value=task)
+    repo.batch_increment_result_counts = AsyncMock()
+    repo.find_by_content_hash = AsyncMock(return_value=None)
+    session, ctx = _flush_session()
+    qs = MagicMock()
+    qs.check_result_storage = AsyncMock()
+
+    msg = {
+        "task_id": 7, "spider_name": "flow_generic",
+        "item": {"url": "https://wiz.example", "title": "wiz"},
+        "tenant_id": 99,
+    }
+    with patch("backend.tasks.consumer.AsyncSession", return_value=ctx), \
+         patch("backend.tasks.consumer.SpiderTaskRepository", return_value=repo), \
+         patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo), \
+         patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
+               staticmethod(lambda: object())), \
+         patch("backend.services.quota_service.QuotaService", return_value=qs):
+        await consumer._flush_batch([msg], {7: 1})
+
+    session.add_all.assert_called_once()
+    written = session.add_all.call_args.args[0]
+    assert len(written) == 1
+    assert written[0].tenant_id == 11
+    assert written[0].task_id == 7
+    consumer._fail_task.assert_not_awaited()
+    consumer._redis.rpush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_flush_orphan_not_written_dead_letter_and_fail_task():
+    """GWT-10.4：回流找不到入队企业 → 不写「我的结果」；死信 + 任务失败；不丢给别的企业"""
+    consumer = SpiderTaskConsumer()
+    consumer._redis = AsyncMock()
+    consumer._fail_task = AsyncMock()
+    task = MagicMock(params=None, tenant_id=None)
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(return_value=task)
+    repo.batch_increment_result_counts = AsyncMock()
+    session, ctx = _flush_session()
+
+    msg = {
+        "task_id": 8, "spider_name": "s1",
+        "item": {"url": "https://orphan.example", "title": "no-owner"},
+        "tenant_id": 3,
+    }
+    with patch("backend.tasks.consumer.AsyncSession", return_value=ctx), \
+         patch("backend.tasks.consumer.SpiderTaskRepository", return_value=repo), \
+         patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo), \
+         patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
+               staticmethod(lambda: object())):
+        await consumer._flush_batch([msg], {8: 1})
+
+    session.add_all.assert_not_called()
+    consumer._fail_task.assert_awaited()
+    assert consumer._fail_task.await_args.args[0] == 8
+    assert "入队企业" in consumer._fail_task.await_args.args[1]
+    consumer._redis.rpush.assert_awaited()
+    dead_key, dead_raw = consumer._redis.rpush.await_args.args
+    assert dead_key == DEAD_ITEM_QUEUE
+    dead = json.loads(dead_raw)
+    assert dead["task_id"] == 8
+    assert "入队企业" in dead["_reject_reason"]
+    # 计数被扣成 0，不给别的企业加 result_count
+    repo.batch_increment_result_counts.assert_awaited()
+    assert repo.batch_increment_result_counts.await_args.args[0].get(8, 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_flush_missing_task_not_written():
+    """GWT-10.4：任务行不存在 → 不落结果"""
+    consumer = SpiderTaskConsumer()
+    consumer._redis = AsyncMock()
+    consumer._fail_task = AsyncMock()
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(return_value=None)
+    repo.batch_increment_result_counts = AsyncMock()
+    session, ctx = _flush_session()
+    msg = {"task_id": 9, "spider_name": "s1", "item": {"url": "https://x"}}
+    with patch("backend.tasks.consumer.AsyncSession", return_value=ctx), \
+         patch("backend.tasks.consumer.SpiderTaskRepository", return_value=repo), \
+         patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo), \
+         patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
+               staticmethod(lambda: object())):
+        await consumer._flush_batch([msg], {9: 1})
+    session.add_all.assert_not_called()
+    consumer._redis.rpush.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ingest_single_orphan_skips_create():
+    """单条 _ingest 无入队企业也不写结果"""
+    consumer = SpiderTaskConsumer()
+    consumer._redis = AsyncMock()
+    consumer._fail_task = AsyncMock()
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    result_repo = MagicMock()
+    result_repo.create_for_task = AsyncMock()
+    task_repo = MagicMock()
+    task_repo.get_by_id = AsyncMock(return_value=MagicMock(params=None, tenant_id=None))
+    msg = {"task_id": 4, "spider_name": "example", "item": {"url": "https://a.b"}}
+    with (
+        patch("backend.tasks.consumer.AsyncSession", return_value=session),
+        patch("backend.tasks.consumer.SpiderResultRepository", return_value=result_repo),
+        patch("backend.tasks.consumer.SpiderTaskRepository", return_value=task_repo),
+        patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
+              staticmethod(lambda: object())),
+    ):
+        await consumer._ingest(msg)
+    result_repo.create_for_task.assert_not_awaited()
+    consumer._fail_task.assert_awaited()

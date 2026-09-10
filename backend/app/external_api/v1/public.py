@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.external_api.v1.webhooks import validate_api_key
+from backend.app.external_api.v1.webhooks import bound_tenant_id, validate_api_key
 from backend.services.api_key_service import ApiKeyService
 from backend.services.spider_query_service import SpiderQueryService
 from platform_core.db import get_async_db
@@ -21,6 +21,10 @@ from platform_core.schemas.spider import SpiderTaskResponse
 router = APIRouter()
 _log = get_logger("external.api")
 
+
+# ---------------------------------------------------------------------------
+# 公开数据查询端点（API Key 认证）
+# ---------------------------------------------------------------------------
 
 async def _resolve_tenant_key(request: Request, session: AsyncSession) -> Optional[int]:
     """租户 Key 优先；旧平台静态 Key 仅作运维过渡（无租户过滤，记警告）。"""
@@ -34,6 +38,24 @@ async def _resolve_tenant_key(request: Request, session: AsyncSession) -> Option
     raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
+def _require_bound_tenant(request: Request) -> int:
+    """出站拉数：钥匙必须绑恰好一家企业，否则 401 且不查库（0 行）。"""
+    tenant_id = bound_tenant_id(request.headers.get("X-API-Key", ""))
+    if tenant_id is None:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    return tenant_id
+
+
+def _clamp_page(page: int, page_size: int, default_size: int = 20) -> tuple[int, int]:
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = default_size
+    if page_size > 100:
+        page_size = 100
+    return page, page_size
+
+
 @router.get("/data/{spider_name}")
 async def get_spider_data(
     spider_name: str,
@@ -45,26 +67,18 @@ async def get_spider_data(
     fields: Optional[str] = None,
     session: AsyncSession = Depends(get_async_db),
 ):
-    """公开数据查询端点 — 按爬虫名称分页查询采集结果
+    """公开数据查询 — 按爬虫名分页拉本企业非候选结果
 
-    认证：X-API-Key Header，统一走 _require_api_key（与 status/results/stats
-    同一鉴权逻辑）；未配置 API Key 或密钥不匹配时一律 401。
-    可选参数：
-      - page / page_size：分页
-      - start_time / end_time：时间范围过滤（ISO 8601）
-      - fields：逗号分隔的字段名，如 "url,title,content"（响应字段裁剪）
+    认证：X-API-Key 须在 KEY_BINDINGS 绑恰好一个 tenant_id（FR-13）。
+    未绑定 / 旧字符串列表钥匙 → 401，响应不含结果行。
+    可选参数：page / page_size / start_time / end_time / fields。
     """
-    tenant_id = await _resolve_tenant_key(request, session)
+    api_key = request.headers.get("X-API-Key", "")
+    tenant_id = await ApiKeyService(session).authenticate(api_key)
+    if tenant_id is None:
+        tenant_id = _require_bound_tenant(request)
+    page, page_size = _clamp_page(page, page_size)
 
-    # 2. 参数约束
-    if page < 1:
-        page = 1
-    if page_size < 1:
-        page_size = 20
-    if page_size > 100:
-        page_size = 100
-
-    # 3. 查询结果（T7 跳层收口：经 SpiderQueryService，不再直连 repository）
     items, total = await SpiderQueryService(session).query_public_results(
         spider_name=spider_name,
         page=page,
@@ -115,12 +129,7 @@ async def get_spider_results(
     """获取任务采集结果（公开接口，API Key 认证；分页；任务不存在返回 404）"""
     tenant_id = await _resolve_tenant_key(request, session)
     await SpiderQueryService(session).get_task(task_id, tenant_id=tenant_id)
-    if page < 1:
-        page = 1
-    if page_size < 1:
-        page_size = 50
-    if page_size > 100:
-        page_size = 100
+    page, page_size = _clamp_page(page, page_size, default_size=50)
 
     resp = await SpiderQueryService(session).list_results(
         task_id=task_id, skip=(page - 1) * page_size, limit=page_size

@@ -1,58 +1,86 @@
 # 爬虫代码模板
 
-对齐 `scrapy/spiders/example.py`。启动入口是 `uv run python run_spider.py`，不是 `scrapy crawl`。
+## Contents
 
-## Item（仅新字段时）
+- Item
+- Spider
+- 管道与 settings
+- 运行
 
-加在 `scrapy/items/__init__.py`，继承 `BaseItem`（已含 url/title/content/source/task_id）：
+先读再改编：`scrapy/spiders/example.py`、`scrapy/spiders/zhihu_feed.py`。
+
+## Item
+
+新字段才加子类，否则 spider 直接用 `from items import BaseItem`。
+
+`scrapy/items/__init__.py`：
 
 ```python
 class {SpiderName}Item(BaseItem):
-    """{爬虫中文名}"""
+    """{中文名}"""
     extra_field = scrapy.Field()
 ```
 
-## Spider（`scrapy/spiders/{spider_name}.py`）
+`BaseItem` 已声明 `id/title/url/content/source/task_id/_quality_score` 等。未声明字段写入会 `KeyError` 并卡住任务。
+
+## Spider（`scrapy/spiders/{name}.py`）
 
 ```python
 from spiders.base import TaskAwareRedisSpider
-from items import BaseItem
+from items import BaseItem  # 或 {SpiderName}Item
 from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 
 
 class {SpiderName}Spider(TaskAwareRedisSpider):
-    name = "{spider_name}"
-    redis_key = "{spider_name}:start_urls"
+    name = "{name}"
+    redis_key = "{name}:start_urls"
     allowed_domains = ["{domain}"]
+    start_urls = ["{target_url}"]
 
     def parse(self, response):
-        logger.info(f"解析页面: {response.url} | Status: {response.status}")
-        item = BaseItem()
-        item["url"] = response.url
-        item["title"] = response.css("title::text").get()
-        item["content"] = "".join(response.css("p::text").getall())
-        item["source"] = "web"
-        yield item
+        logger.info(f"解析: {response.url} | Status: {response.status}")
+        for node in response.css(".item-selector"):
+            item = BaseItem()
+            item["url"] = response.url
+            item["title"] = node.css(".title::text").get()
+            item["source"] = "{name}"
+            yield item
 ```
 
-- 队列条目由 Backend 投递，基类解析 JSON `{url, task_id}`。不要覆盖 `start_requests` 把 Redis 消费循环吃掉（见 `openweather.py` 注释）。
-- 需要站点密钥时从 `sites.yml` 读，禁止把 API Key 写入 item / 日志。
+- 基类负责解析 Redis 队列 JSON（`url` + `task_id`）并注入 request meta。
+- 日志：`platform_core.logger.get_logger("spider")`。
+- 延迟与 UA：`scrapy/settings.py` 的 `DOWNLOAD_DELAY` + `middlewares.UserAgentMiddleware`。
 
-## Pipeline / Settings
+## 管道与 settings
 
-不要新建。全局管道已在 `scrapy/settings.py`：
+已有管道，默认不要新建、不要改 `ITEM_PIPELINES`：
 
-`CleanPipeline` → `ValidatePipeline` → `QualityCheckPipeline` → `StorePipeline`
+```
+pipelines.CleanPipeline
+pipelines.ValidatePipeline
+pipelines.quality.QualityCheckPipeline
+pipelines.StorePipeline          # Redis spider:item_queue，Backend 消费者落库
+```
 
-`StorePipeline` 只推 Redis。禁止在爬虫里 `import sqlalchemy` / `get_async_db` / `import backend`。
+`scrapy_redis.pipelines.RedisPipeline` 已禁用。禁止「调用 Service」或 SQLAlchemy Session。
 
-反爬（R5/R6）在 `scrapy/settings.py`，由 config 的 `DOWNLOAD_DELAY` 与 UA 中间件提供，不要在 spider 里 `time.sleep`。
+确需站点级延迟：写 `config/scrapy/` 的 sites 段 `anti_crawl.download_delay`，由 `TaskAwareRedisSpider.from_crawler` 消费。
 
 ## 运行
 
+`{name}:start_urls` 队列条目（Backend 消费者投递，见 `scrapy/spiders/base.py`）：
+
+```json
+{"url": "https://example.com/page", "task_id": 123}
+```
+
+纯 URL 字符串也能兜底。worker 不负责手写 LPUSH；本地冒烟用 `--list` 确认 name 已注册。
+
 ```bash
-uv run python run_spider.py --list
-uv run python run_spider.py --spider {spider_name}
+uv run python run.py --list
+uv run python run.py start spider
+# 或指定爬虫：
+uv run python -m scripts.runlib.spider --spider {name}
 ```

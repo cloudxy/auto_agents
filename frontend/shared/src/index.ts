@@ -1,6 +1,8 @@
 export { ApiEnvelope, unwrap, PaginatedData } from './api/envelope'
 export { createApiClient, ApiClientOptions } from './api/client'
 export { TIER_COLORS, TIER_LABELS, ASSET_TYPE_LABELS } from './constants/tiers'
+export { DEFAULT_QUOTA, FREE_TIER_FEATURE_COPY } from './constants/quota'
+export type { DefaultQuota } from './constants/quota'
 export { SkillBase, PublicSkill, PublicAsset } from './types/skills'
 export { apiErrorMessage, isFormValidateError } from './utils/errors'
 export { queryViewState } from './query/state'

@@ -28,6 +28,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.llm_common.seam import seam as _seam
+from backend.services.spider_common import require_enqueue_tenant
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
 from platform_core.schemas.ai_plan import (
@@ -55,14 +56,16 @@ class AiPlannerService:
     # CRUD（同步返回，规划/试采走后台任务）
     # ------------------------------------------------------------------
     async def create_plan(
-        self, payload: AiPlanCreate, created_by: Optional[str] = None
+        self, payload: AiPlanCreate, created_by: Optional[str] = None,
+        tenant_id: int | None = None,
     ) -> AiPlanResponse:
         """创建计划（draft；html_snippet 预置后规划阶段跳过在线抓取）"""
         logger.info(f"创建 AI 采集计划: target_url={payload.target_url}, by={created_by}")
+        owner_id = require_enqueue_tenant(tenant_id)
         plan_json = {"html_snippet": payload.html_snippet} if payload.html_snippet else None
         item = await self.repo.create(
             target_url=payload.target_url, status="draft", plan_json=plan_json,
-            created_by=created_by,
+            created_by=created_by, tenant_id=owner_id,
         )
         await self.session.commit()
         await self.session.refresh(item)
@@ -207,12 +210,14 @@ class AiPlannerService:
         flow_dict = dict(plan_json.get("flow") or {})
         max_iterations = max(0, int(_seam().settings.get("LLM.MAX_ITERATIONS", 2)))
         spider_svc = _seam().SpiderService(self.session)
+        owner_id = require_enqueue_tenant(getattr(plan, "tenant_id", None))
 
         try:
             while True:
                 params_str = json.dumps(params_dict, ensure_ascii=False)
                 task = await spider_svc.enqueue(
-                    spider_name="flow_generic", params=params_str, priority="low"
+                    spider_name="flow_generic", params=params_str, priority="low",
+                    tenant_id=owner_id,
                 )
                 await self.repo.update(plan_id, test_task_id=task.id)
                 await self.repo.update_status(plan_id, "testing", error_message=None,

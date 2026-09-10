@@ -3,6 +3,10 @@ import httpx
 
 from typing import Optional, Protocol, runtime_checkable
 
+from platform_core.logger import get_logger
+
+logger = get_logger("api")
+
 PROBE_TIMEOUT = 10.0
 
 
@@ -60,6 +64,7 @@ async def execute_json(
     json_payload: Optional[dict] = None,
 ) -> dict:
     """统一外呼：trust_env=False（防本机代理劫持）；非 2xx 抛脱敏 ProtocolError"""
+    logger.debug(f"协议外呼 {method}")
     own = client is None
     if client is None:
         client = httpx.AsyncClient(timeout=PROBE_TIMEOUT, trust_env=False)
