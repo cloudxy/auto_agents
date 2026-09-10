@@ -20,8 +20,10 @@ if (typeof (global as any).MessageChannel === 'undefined') {
     port1 = { onmessage: null as any, postMessage: (_data: any) => undefined as void };
     port2 = { onmessage: null as any, postMessage: (_data: any) => undefined as void };
     constructor() {
-      this.port1.postMessage = (data: any) => this.port2.onmessage?.({ data })
-      this.port2.postMessage = (data: any) => this.port1.onmessage?.({ data })
+      this.port1.postMessage = (data: any) =>
+        queueMicrotask(() => this.port2.onmessage?.({ data }))
+      this.port2.postMessage = (data: any) =>
+        queueMicrotask(() => this.port1.onmessage?.({ data }))
     }
   };
 }
