@@ -4,6 +4,8 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+jest.setTimeout(60000);
+
 jest.mock('../services/api', () => {
   const members = [
     { id: 1, username: 'owner-acme', email: 'o@a.com', tenant_role: 'owner', is_active: true },

@@ -171,7 +171,7 @@ const Members: React.FC = () => {
   return (
     <div>
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
-             message="成员管理是租户内部事务（owner/admin 可操作）；平台级用户管理请用「用户管理」页（平台超管）" />
+             title="成员管理是租户内部事务（owner/admin 可操作）；平台级用户管理请用「用户管理」页（平台超管）" />
       <Space style={{ marginBottom: 12 }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>添加成员</Button>
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
