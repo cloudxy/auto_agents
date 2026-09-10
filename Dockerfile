@@ -7,7 +7,7 @@
 FROM node:20 AS frontend-builder
 
 WORKDIR /build
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 COPY frontend/shared/package.json frontend/shared/package.json
 COPY frontend/admin/package.json frontend/admin/package.json
 COPY frontend/official/package.json frontend/official/package.json
