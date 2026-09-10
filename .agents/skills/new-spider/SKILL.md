@@ -1,135 +1,51 @@
 ---
 name: new-spider
-description: 创建 Scrapy 爬虫模块
+description: >-
+  Adds a TaskAwareRedisSpider under scrapy/spiders/ that ships items through
+  StorePipeline to Redis. Use when 新建爬虫, 抓站, 加 item 字段, or anti-crawl delay/UA.
 ---
 
 # 创建 Scrapy 爬虫
 
-当用户需要创建新的爬虫任务时，使用此 Skill 生成完整的 Scrapy 爬虫代码。
+先读 `scrapy/spiders/example.py` 再改编。骨架：[references/code-templates.md](references/code-templates.md)。
 
-## 触发场景
+爬虫只采集和清洗。出口：已有 `StorePipeline` → Redis `spider:item_queue`。
 
-- "爬取某网站的用户信息"
-- "创建一个新闻爬虫"
-- "抓取商品数据"
+## Route
 
-## 执行流程
+| 观察到 | 先做 |
+|--------|------|
+| 要 FastAPI CRUD / 落主库的 API | `new-svc` |
+| 只要改后端消费 item 的表结构 | `db-design` / `new-model`，本 skill 只改 Item 字段 |
 
-### Step 1: 确认爬虫信息
+## Quick start
 
-1. 爬虫名称（英文，小写+下划线）
-2. 目标网站 URL
-3. 需要爬取的字段
-4. 反爬策略（延迟、User-Agent 轮换）
-5. 数据存储方式（直接传 Service / 消息队列）
+信息不足时先问：`name`、allowed_domains、字段。
 
-### Step 2: 代码结构
+Copy and check off:
 
 ```
-scrapy/
-├── spiders/{spider_name}_spider.py  # 爬虫主文件
-├── items.py                          # 数据项定义
-├── pipelines.py                      # 数据管道
-├── middlewares.py                    # 中间件
-└── settings.py                       # 爬虫配置
+new-spider:
+- [ ] name 小写+下划线，redis_key = {name}:start_urls
+- [ ] scrapy/spiders/{name}.py 继承 TaskAwareRedisSpider
+- [ ] item 至少写 url / title / source；能复用 BaseItem 就复用
+- [ ] 新字段才改 scrapy/items/__init__.py（未声明字段 → KeyError → 任务卡 running）
+- [ ] 用现有 Clean/Validate/Quality/Store 管道，不新建 Pipeline、不改 ITEM_PIPELINES
+- [ ] 延迟/UA 走 settings + UserAgentMiddleware（站点级延迟写 config/scrapy/）
+- [ ] uv run python run.py --list 含新 name
+- [ ] bash tools/check/arch.sh 退出码 0
 ```
 
-### Step 3: 代码模板
+队列条目是 JSON `{"url":"...","task_id":123}`（纯 URL 也能兜底）。Worker：`uv run python run.py start spider` 或 `uv run python -m scripts.runlib.spider --spider {name}`。`--list` 没有新 name：修文件后再跑 `--list`。
 
-#### Items
+## 完成时回复
 
-```python
-import scrapy
+1. spider 路径 + `name` / `redis_key` / `allowed_domains`
+2. 若加了 Item 子类，写出新字段名
+3. `--list` 与 arch.sh 原文（退出码 0）
 
-class {SpiderName}Item(scrapy.Item):
-    """{爬虫中文名}数据项"""
-    id = scrapy.Field()
-    title = scrapy.Field()
-    content = scrapy.Field()
-    url = scrapy.Field()
-```
+## Examples
 
-#### Spider
+**Input:** 「抓 zhihu.com 推荐流」
 
-```python
-import scrapy
-import random
-import time
-from scrapy.utils.logger import logger
-
-class {SpiderName}Spider(scrapy.Spider):
-    name = "{spider_name}"
-    allowed_domains = ["{domain}"]
-    start_urls = ["{target_url}"]
-    
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    ]
-    
-    def start_requests(self):
-        for url in self.start_urls:
-            yield scrapy.Request(
-                url=url,
-                callback=self.parse,
-                headers={"User-Agent": random.choice(self.user_agents)}
-            )
-    
-    def parse(self, response):
-        logger.info(f"解析页面: {response.url}")
-        items = response.css(".item-selector")
-        
-        for item in items:
-            data = {SpiderName}Item()
-            data["title"] = item.css(".title::text").get()
-            
-            if self._validate_data(data):
-                yield data
-            
-            time.sleep(random.uniform(1, 3))
-    
-    def _validate_data(self, data):
-        if not data.get("title"):
-            logger.warning(f"数据缺少标题")
-            return False
-        return True
-```
-
-#### Pipelines
-
-```python
-from scrapy.utils.logger import logger
-
-class {SpiderName}Pipeline:
-    def open_spider(self, spider):
-        logger.info(f"爬虫启动: {spider.name}")
-    
-    def process_item(self, item, spider):
-        logger.info(f"处理数据: {dict(item)}")
-        # 发送到消息队列或调用 Service
-        return item
-    
-    def close_spider(self, spider):
-        logger.info(f"爬虫关闭: {spider.name}")
-```
-
-#### Settings
-
-```python
-BOT_NAME = "{spider_name}"
-SPIDER_MODULES = ["scrapy.spiders"]
-NEWSPIDER_MODULE = "scrapy.spiders"
-
-CONCURRENT_REQUESTS = 4
-DOWNLOAD_DELAY = 2
-
-ITEM_PIPELINES = {
-    "scrapy.pipelines.{SpiderName}Pipeline": 300,
-}
-```
-
-### Step 4: 运行命令
-
-```bash
-scrapy crawl {spider_name}
-```
+**Then:** 对齐 `scrapy/spiders/zhihu_feed.py`；`--list` 出现该 name；未新建 pipeline。

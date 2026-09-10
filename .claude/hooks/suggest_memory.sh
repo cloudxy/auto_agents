@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
-# Stop hook: 检测会话是否触及"踩坑/约定"信号，提示用户归档为 memory
+# Stop hook: 检测会话是否触及“踩坑/约定”信号，提示用户归档为 memory
 # 失败兜底：任何异常 exit 0；绝不阻塞 stop
+#
+# 运行时依赖：bash >= 3.2, grep, tail, jq（可选，缺失时 fallback 到 grep）
+
+# --- bash 版本检查（最低 3.2）---
+if [ -z "$BASH_VERSION" ]; then
+    echo "[hook:suggest_memory] 错误：此脚本必须在 bash 下运行，当前 shell 为 $(ps -p $$ -o comm= 2>/dev/null || echo 'unknown')。" >&2
+    echo "[hook:suggest_memory] 请使用 'bash .claude/hooks/suggest_memory.sh' 执行。" >&2
+    exit 1
+fi
+_BASH_MAJOR="${BASH_VERSINFO[0]:-0}"
+_BASH_MINOR="${BASH_VERSINFO[1]:-0}"
+if (( _BASH_MAJOR < 3 )) || { (( _BASH_MAJOR == 3 )) && (( _BASH_MINOR < 2 )); }; then
+    echo "[hook:suggest_memory] 错误：需要 bash >= 3.2，当前版本为 ${BASH_VERSION}。" >&2
+    echo "[hook:suggest_memory] 请通过 'brew install bash' 升级 bash。" >&2
+    exit 1
+fi
+unset _BASH_MAJOR _BASH_MINOR
 
 set +e
 trap 'exit 0' ERR

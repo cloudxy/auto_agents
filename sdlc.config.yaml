@@ -1,0 +1,26 @@
+# sdlc.config.yaml — 项目适配层（闸门与宪法；不进插件）
+gates:
+  test: "uv run pytest -x -q backend/tests"
+  lint: "bash tools/check/arch.sh"
+  build: "npm run build --prefix frontend/admin && npm run build --prefix frontend/official"
+  migration: "bash tools/check/db_migrations.sh"
+  e2e: null
+  e2e_reason: "仓库无独立 E2E 套件；L2+ 用 pytest + 架构红线 + 前端 build 补位，verify 帽补 curl/浏览器路径"
+constitution: ".claude/rules/project_rule.md"
+artifact_root: .
+lane_rules:
+  file_count_threshold: 20
+  subproject_dirs:
+    - backend
+    - scrapy
+    - frontend/admin
+    - frontend/official
+    - platform_core
+    - capability-library
+  schema_paths:
+    - platform_core/models
+    - platform_core/schemas
+  auth_paths:
+    - backend/app/tenant_isolation.py
+    - backend/app/api/v1/auth.py
+    - backend/app/deps.py

@@ -1,0 +1,92 @@
+# ============================================================
+# LiteLLM Proxy — independent data-plane compose
+# ------------------------------------------------------------
+# Fault domain: this directory + litellm-net + own Postgres.
+# Not in the root docker-compose.yml service table (ADR-0010 / SH-01).
+# Root may only declare `networks.litellm-net.external: true`.
+#
+# Usage:
+#   1. cp .env.example .env and replace every placeholder
+#   2. Optional: cp config.yaml.example config.gen.yaml
+#      (gitignored). Keep api_key: os.environ/<NAME> — no plaintext keys.
+#   3. docker compose -f deploy/litellm/docker-compose.yml up -d
+#
+# Image pins (looked up 2026-09-09; do not float):
+#   - ghcr.io/berriai/litellm:v1.100.0
+#     GitHub Release v1.100.0 (2026-09-06). Docker Hub
+#     litellm/litellm:v1.100.0 is the same published tag (active).
+#     Forbidden: :latest, main-latest, main-stable (moving tags).
+#   - postgres:16.10-alpine  Docker Hub library/postgres tag active.
+#
+# Redis: omitted. Single replica. Add a private Redis only when
+# running multiple LiteLLM replicas (rate-limit / router state).
+#
+# Postgres is the gateway's Prisma store (virtual keys / spend /
+# model rows). It is not the platform MySQL. Not in app Alembic.
+# Backend must not receive LITELLM.DB_DSN.
+# ============================================================
+
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.100.0
+    container_name: litellm-proxy
+    restart: unless-stopped
+    ports:
+      # Default loopback. Admin UI is operator-only, not a tenant product.
+      - "${LITELLM_BIND:-127.0.0.1}:${LITELLM_PORT:-4000}:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-litellm}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-CHANGE_ME_MASTER}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-sk-CHANGE_ME_SALT}
+      STORE_MODEL_IN_DB: "True"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    volumes:
+      - ${LITELLM_CONFIG:-./config.yaml.example}:/app/config.yaml:ro
+    healthcheck:
+      # Gateway liveness only. Do not wire this to backend /health/deep.
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  postgres:
+    image: postgres:16.10-alpine
+    container_name: litellm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+networks:
+  default:
+    name: litellm-net

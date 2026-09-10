@@ -10,8 +10,3 @@ async def root():
     logger = get_logger("api")
     logger.info("Root endpoint accessed")
     return {"message": "Auto Agents API is running"}
-
-@router.get("/health")
-async def health():
-    """基础健康检查"""
-    return {"status": "healthy"}

@@ -1,0 +1,3 @@
+# Claude Code 启用的 skill 列表，每行一个 skill 名（对应 skills/<name>/ 目录）
+# 跑 sync.sh 后，adapters/claude-code.sh 会为每个名字在 ~/.claude/skills/ 建 symlink
+- example-pdf-extractor

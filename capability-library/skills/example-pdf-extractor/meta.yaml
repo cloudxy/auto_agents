@@ -1,0 +1,23 @@
+name: example-pdf-extractor
+category: document-processing
+industries:
+- software-dev
+- legal-compliance
+capability:
+  score: 6
+  rubric:
+    completeness: 5
+    doc_quality: 6
+    maintenance: 6
+    real_world_effect: 6
+  ai_suggested_score: null
+  reviewed_by: xuyun
+  reviewed_at: 2026-08-31
+  notes: "骨架搭建阶段的占位示例，评分为占位值，非真实评审结果。"
+similar_to: []
+status: experimental
+source:
+  url: ''
+  author: xuyun (占位示例，非外部引入)
+  imported_at: 2026-08-31
+  content_hash: ''

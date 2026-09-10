@@ -52,12 +52,19 @@ settings = Dynaconf(
 )
 
 # 动态注入 Redis URL（供 scrapy-redis、aioredis 等直接用）
+# 密码取法与 platform_core.db.DBManager._get_password 对齐：
+# 环境变量 REDIS_<KEY>_PASSWORD > .env 扁平键（AUTO_AGENTS_ 前缀剥离后）> yml 嵌套占位值
+# 注入后每个 Redis 实例可通过 REDIS.<instance>.URL 直接获取完整连接串
 for instance_key in settings.get("REDIS", {}).keys():
     cfg = settings.get(f"REDIS.{instance_key}", {})
     host = cfg.get("HOST", "127.0.0.1")
     port = cfg.get("PORT", 6379)
     db = cfg.get("DB", 0)
-    password = cfg.get("PASSWORD", "")
+    password = (
+        os.getenv(f"REDIS_{instance_key}_PASSWORD")
+        or str(settings.get(f"REDIS_{instance_key}_PASSWORD", ""))
+        or cfg.get("PASSWORD", "")
+    )
 
     auth = f":{password}@" if password else ""
     settings.set(f"REDIS.{instance_key}.URL", f"redis://{auth}{host}:{port}/{db}")

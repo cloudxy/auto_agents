@@ -41,3 +41,34 @@ class ConfigService:
         """获取所有配置并转为字典"""
         result = await self.repo.get_all(limit=1000)
         return {c.config_key: c.config_value for c in result}
+
+    async def get_configs(self, keys: list[str]) -> dict[str, str]:
+        """按键集合批量读取配置项（miss 的键不出现在返回值中）
+
+        T1 收口（R7）：backend/app/api/v1/admin.py 此前函数内延迟 import
+        SystemConfig 直查；通知渠道配置读取收口至本方法。
+        """
+        from sqlalchemy import select
+
+        logger.info(f"批量读取配置 | keys={keys}")
+        rows = (await self.session.execute(
+            select(SystemConfig.config_key, SystemConfig.config_value)
+            .where(SystemConfig.config_key.in_(keys))
+        )).all()
+        return dict(rows)
+
+    async def upsert_configs(self, updates: dict[str, str], description: str = "") -> None:
+        """批量写入配置项（存在则改、缺省则建；ADR-0007：service 自持事务提交）"""
+        from sqlalchemy import select
+
+        logger.info(f"批量写入配置 | keys={sorted(updates.keys())}")
+        for key, value in updates.items():
+            row = (await self.session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == key)
+            )).scalar_one_or_none()
+            if row is None:
+                self.session.add(SystemConfig(config_key=key, config_value=value,
+                                              description=description))
+            else:
+                row.config_value = value
+        await self.session.commit()

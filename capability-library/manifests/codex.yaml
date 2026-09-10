@@ -1,0 +1,4 @@
+# Codex 启用的 skill 列表，每行一个 skill 名（对应 skills/<name>/ 目录）
+# Codex 的 skill/规则加载机制尚未最终确认，暂按"拼接生成单一规则文件"处理，
+# 见 adapters/codex.sh。若确认 Codex 有独立 skill 目录机制，会切换为 symlink 型。
+- example-pdf-extractor

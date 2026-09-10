@@ -1,0 +1,8 @@
+# TOMBSTONE（T-20）：new-api 不是运行时。
+# NEWAPI.ENABLED 恒 false。禁止把本文件当调度/探针/规划出口。
+# 值班产品规则：config/default/relay.yml（RELAY.*）。
+# 网关 HTTP：config/default/litellm.yml（LITELLM.*）。
+# 编排墓碑：deploy/newapi/TOMBSTONE.md。
+# 设置 AUTO_AGENTS_NEWAPI__ENABLED=true 无效果——运行时已删 NEWAPI.* 读路径。
+NEWAPI:
+  ENABLED: false

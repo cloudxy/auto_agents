@@ -1,6 +1,6 @@
 """系统配置模型 - 存储网站基础信息"""
 from sqlalchemy import Column, Integer, String, Text, DateTime
-from datetime import datetime
+from sqlalchemy.sql import func
 from .base import Base
 
 class SystemConfig(Base):
@@ -10,4 +10,4 @@ class SystemConfig(Base):
     config_key = Column(String(50), unique=True, nullable=False, comment="配置键")
     config_value = Column(Text, nullable=False, comment="配置值")
     description = Column(String(255), comment="配置描述")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

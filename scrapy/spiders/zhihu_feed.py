@@ -1,11 +1,11 @@
 """知乎推荐页爬虫 - 需登录态与会话保持"""
-from scrapy_redis.spiders import RedisSpider
+from spiders.base import TaskAwareRedisSpider
 from items import ZhihuFeedItem
 from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 
-class ZhihuFeedSpider(RedisSpider):
+class ZhihuFeedSpider(TaskAwareRedisSpider):
     name = "zhihu_feed"
     redis_key = "zhihu_feed:start_urls"
     allowed_domains = ["zhihu.com"]

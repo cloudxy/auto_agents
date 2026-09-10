@@ -1,0 +1,879 @@
+# state.yaml — feat-four-pillars-v2 进度唯一事实源
+feature: feat-four-pillars-v2
+lane: L4
+appetite: "program; Wave0 5-7pw; Wave L 4-6pw (LiteLLM replaces new-api); Wave1 11-14pw; Wave2 4-8pw (Q-BILL); Wave3 2-6pw (Q-RELAY)"
+current_hat: Closed
+hats_done: [define, shape, implement, verify, review, qc, deliver]
+phase: HatReady
+intent:
+  class: resume
+  quote: "继续"
+  at: "2026-09-10"
+operator_override_prep_complete_before_start:
+  at: "2026-09-10"
+  action: "close remaining qc 2'/A/B + hygiene; do not start Wave 2/3; do not answer six Qs"
+  intent_quote: "先将没有准备好的内容，做完，我要求所有内容完备后，才允许动工。"
+operator_override_qc_conditions_2_6:
+  at: "2026-09-10"
+  action: "execute qc conditions 2-6; do not reopen Wave 2/3; do not answer six Qs"
+  intent_quote: "合主干 / 进生产前仍要做（条件 2–6），继续"
+qc_cond_2_6_wave:
+  at: "2026-09-10"
+  remaining: "动工只缺 rotated 真实日期; 039+untrack 已在 b8b5f85; 合主干仍须入库 031-038 与冻结施工产品（本拍）"
+  live_18_1: "PASS completed 40.56s task#2 result_count=1 export 200"
+  compose_down: "PASS exit 0"
+  rotation_44e9446: "pending operator date line; no secrets"
+  condition_M: "1336 passed / dual build 0 / arch 0 / mig 0"
+  start_work_allowed: false
+  qc_decision: "conditional"
+  at_close: "2026-09-10"
+  spawn: [dba-37.6, sre-nfr01, reviewer-cond-3-5, frontend-c35-qa01, backend-c35-qa02, sre-37.6]
+  nfr01: "PASS P95 1.444558s card-visible Chrome headless; not TestClient"
+  mysql_fidelity_37_6: "PASS 1 passed in 1.86s (sre independent); dialect batch 22 passed"
+  dba039: "listed_at DATETIME(6); isolated up-down-up 0; business alembic current 039"
+  do_not: "reopen Wave 2/3; answer six Qs; mark four-pillar GA"
+shape_complete: true
+implement_wave0_batch1:
+  at: "2026-09-08"
+  tickets: [T-01, T-04, T-11]
+  reason: >
+    操作者「继续」进入实现帽。合同并行度 T-01∥T-02∥T-03∥T-04∥T-06∥T-11。
+    本批按文件不重叠先派 T-01（official）/ T-04（backend 守卫）/ T-11（sre 离树）。
+    T-02/T-03/T-06/T-09 下一拍。不代选六问。不启网关。
+rework_rounds: 6
+systemic_stop: false
+systemic_stop_reason: ""
+operator_override_shape_continue_dba_designer:
+  at: "2026-09-08"
+  action: "ticket G-fresh r3 PASS persisted; spawn dba+designer in parallel; no implement hat"
+  reason: >
+    操作者「继续」：票过闸后做剩余塑形（dba + designer），不进实现帽。
+operator_override_shape_finish:
+  at: "2026-09-08"
+  action: "finish remaining shape: SH-15 SH-16, G-fresh, tickets if pass"
+  result: "done; tickets r3 PASS; dba+designer next"
+  reason: >
+    操作者问为何不一次性做完后面。本轮连续关剩余塑形 findings、独立审查，
+    过闸后写 tickets/*.md，不再按单号切片停问。
+operator_override_shape_r5:
+  at: "2026-09-08"
+  action: "shape rework SH-13 SH-14 then G-fresh; if pass then tickets/*.md"
+  result: "done; G-fresh r5 fail on SH-15/16"
+  reason: >
+    操作者明示：再开一轮塑形返工（只关 SH-13、SH-14，然后新的独立审查；
+    过了再写 tickets/*.md）。
+operator_override_shape_r4:
+  at: "2026-09-08"
+  action: "shape rework SH-10..12 then G-fresh; if pass then tickets/*.md"
+  result: "done; G-fresh r4 fail on SH-13/14"
+  reason: >
+    操作者明示：再开一轮塑形返工（只关 SH-10…12，然后新的独立审查；
+    过了再写 tickets/*.md）。无豁免。
+operator_override_r6:
+  at: "2026-09-08"
+  action: "round-6 PM rework then fresh G-fresh; if pass then architect"
+  scope: "QA-32, QA-33, QA-34, QA-35 only; Wave L GWT; no waivers"
+  reason: >
+    操作者明示：再返工 QA-32…35（只补 Wave L 的 GWT，然后新的独立审查；
+    过了再派 architect 把 Wave L 写进真正的方案书）。没有豁免可能。
+operator_override:
+  at: "2026-09-08"
+  action: "round-4 PM rework then fresh G-fresh"
+  scope: "QA-28, QA-29, QA-30 only"
+  result: "done; G-fresh r4 fail on QA-31"
+  reason: >
+    操作者明示：再开一轮 PM 返工（第 4 轮，只关 QA-28/29/30，然后新的独立审查）。
+    三次失败停止被该明示覆盖；第 4 轮完成后恢复停止。
+operator_decisions:
+  - id: Q-LLM
+    at: "2026-09-08"
+    decision: "LiteLLM 替换 new-api；必须重构；先出方案再并入未执行的四柱计划"
+    source: "/sdlc operator turn"
+    note: >
+      关闭 Q-LLM。定义帽仍停在 G-fresh fail（QA-31 open）。本轮：architect 先写
+      替换方案（定义帽输入，不写 02-shape/contract.md），PM 再并入 spec 并关 QA-31，
+      然后独立 G-fresh。current_hat 保持定义。
+
+supersedes: feat-four-pillars
+supersede_reason: >
+  操作者 2026-09-08 /sdlc：用插件角色从头到尾再审一遍，结合既有计划方案
+  与 grok-files 生成全新方案。旧 feature 定义帽 G-fresh 未过（hats_done 空），
+  塑形稿已存在但不得当作过闸。旧工件只作输入，不复制为现行合同。
+
+tickets:
+  - {id: T-01, title: "官网卖点闭集", status: done, evidence: "03-impl/T-01-evidence.md"}
+  - {id: T-02, title: "导出仅 CSV/JSON", status: done, evidence: "03-impl/T-02-evidence.md"}
+  - {id: T-03, title: "注册成功去登录", status: done, evidence: "03-impl/T-03-evidence.md"}
+  - {id: T-04, title: "平台写面 require_platform_admin", status: done, evidence: "03-impl/T-04-evidence.md"}
+  - {id: T-05, title: "租户壳隐藏+直打404", status: done, evidence: "03-impl/T-05-evidence.md"}
+  - {id: T-06, title: "到期停用拒绝登录", status: done, evidence: "03-impl/T-06-evidence.md"}
+  - {id: T-07, title: "产任务路径带企业", status: done, evidence: "03-impl/T-07-evidence.md"}
+  - {id: T-08, title: "候选不计配额", status: done, evidence: "03-impl/T-08-evidence.md"}
+  - {id: T-09, title: "LLM 月度闸接到 llm_chat", status: done, evidence: "03-impl/T-09-evidence.md"}
+  - {id: T-10, title: "出站钥匙绑企业", status: done, evidence: "03-impl/T-10-evidence.md"}
+  - {id: T-11, title: "密钥离树", status: done, evidence: "03-impl/T-11-evidence.md"}
+  - {id: T-12, title: "产品事件可查", status: done, evidence: "03-impl/T-12-evidence.md"}
+  - {id: T-13, title: "最小出数环", status: done, evidence: "03-impl/T-13-evidence.md"}
+  - {id: T-14, title: "LiteLLM 独立 compose", status: done, evidence: "03-impl/T-14-evidence.md"}
+  - {id: T-15, title: "llm_gateway chat/admin + B4", status: done, evidence: "03-impl/T-15-evidence.md"}
+  - {id: T-16, title: "llm_chat 四动作出口", status: done, evidence: "03-impl/T-16-evidence.md"}
+  - {id: T-17, title: "BYOK 直连+经办可点测试", status: done, evidence: "03-impl/T-17-evidence.md"}
+  - {id: T-18, title: "值班页改网关模型", status: done, evidence: "03-impl/T-18-evidence.md"}
+  - {id: T-19, title: "探针窗口改管理 HTTP", status: done, evidence: "03-impl/T-19-evidence.md"}
+  - {id: T-20, title: "new-api 退役验收", status: done, evidence: "03-impl/T-20-evidence.md"}
+  - {id: T-21, title: "单一能力市场五类", status: done, evidence: "03-impl/T-21-evidence.md"}
+  - {id: T-22, title: "列表可搜可筛", status: done, evidence: "03-impl/T-22-evidence.md"}
+  - {id: T-23, title: "查询侧 FR-33 闸+分页", status: done, evidence: "03-impl/T-23-evidence.md"}
+  - {id: T-24, title: "详情纯文本 XSS", status: done, evidence: "03-impl/T-24-evidence.md"}
+  - {id: T-25, title: "订阅只作用于这一行", status: done, evidence: "03-impl/T-25-evidence.md"}
+  - {id: T-26, title: "我的安装 unlist 残留", status: done, evidence: "03-impl/T-26-evidence.md"}
+  - {id: T-27, title: "引用解析忽略上架", status: done, evidence: "03-impl/T-27-evidence.md"}
+  - {id: T-28, title: "治理台七叶", status: done, evidence: "03-impl/T-28-evidence.md"}
+  - {id: T-29, title: "源登记同步 ADR-0012", status: done, evidence: "03-impl/T-29-evidence.md"}
+  - {id: T-30, title: "命令独立可订", status: done, evidence: "03-impl/T-30-evidence.md"}
+  - {id: T-31, title: "许可闸", status: done, evidence: "03-impl/T-31-evidence.md"}
+  - {id: T-32, title: "市场事件可查", status: done, evidence: "03-impl/T-32-evidence.md"}
+  - {id: T-33, title: "人工短名 alias", status: done, evidence: "03-impl/T-33-evidence.md"}
+
+gates:
+  - name: sdlc
+    kind: script
+    result: pass
+    cmd: "bash /Users/xuyun/.zcode/local-plugins/sdlc-workflow/scripts/check-sdlc.sh --require .sdlc/feat-four-pillars-v2"
+    exit_code: 0
+    at: "2026-09-08T06:50:00"
+  - name: test
+    kind: script
+    result: pass
+    cmd: "uv run pytest -x -q backend/tests/test_b1c_capabilities_coverage.py backend/tests/test_saas_isolation.py backend/tests/test_b1c_newapi_channels_coverage.py backend/tests/test_llm_platform_row_writes.py"
+    exit_code: 0
+    at: "2026-09-08T17:40:00"
+    note: "Wave0 batch1 T-04 gates; 65 passed. T-01 jest 3 nodes exit 0."
+  - name: lint
+    kind: script
+    result: pass
+    cmd: "bash tools/check/arch.sh"
+    exit_code: 0
+    at: "2026-09-08T17:40:00"
+  - name: build
+    kind: script
+    result: null
+    reason: 定义帽无前端实现
+  - name: migration
+    kind: script
+    result: null
+    reason: 定义帽不写表；Alembic 留到 /dba 与实现帽
+  - name: e2e
+    kind: script
+    result: null
+    reason: 仓库无独立 E2E 套件；verify 帽补 curl/浏览器路径
+  - name: fresh-context
+    kind: fresh-context
+    result: fail
+    findings_total: 20
+    blocker: 0
+    major: 14
+    minor: 6
+    at: "2026-09-08T07:05:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07e0f-fa71-7cd2-a468-ea76d60018f3
+    note: "round 1 on PM spec v1; hats_done stays empty; current_hat stays 定义"
+  - name: fresh-context-r2
+    kind: fresh-context
+    result: fail
+    findings_total: 7
+    blocker: 0
+    major: 5
+    minor: 2
+    at: "2026-09-08T07:25:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07e66-206c-7cb0-a64e-5f95fa509b28
+    note: "round 2 on PM v1.1; QA-01..20 independently closed; new QA-21..27; hats_done stays empty"
+  - name: fresh-context-r3
+    kind: fresh-context
+    result: fail
+    findings_total: 3
+    blocker: 0
+    major: 2
+    minor: 1
+    at: "2026-09-08T07:45:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07e7b-4069-7bc1-b25c-25701ad852fb
+    note: "round 3 on PM v1.2; QA-21..27 independently closed; new QA-28..30; systemic stop"
+  - name: fresh-context-r4
+    kind: fresh-context
+    result: fail
+    findings_total: 1
+    blocker: 0
+    major: 1
+    minor: 0
+    at: "2026-09-08T08:05:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07e8b-e2bd-7991-894e-bc663e9f6227
+    note: "round 4 on PM v1.3 (operator-authorized); QA-28..30 independently closed; new QA-31; hats_done stays empty"
+  - name: fresh-context-r5
+    kind: fresh-context
+    result: fail
+    findings_total: 4
+    blocker: 0
+    major: 3
+    minor: 1
+    at: "2026-09-08T09:50:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07eb5-1f59-70f3-856b-c5009e5cd643
+    note: "round 5 on PM v1.4; Q-LLM freeze + QA-31 independently closed; new QA-32..35; hats_done stays empty"
+  - name: fresh-context-r6
+    kind: fresh-context
+    result: fail
+    findings_total: 2
+    blocker: 0
+    major: 2
+    minor: 0
+    at: "2026-09-08T10:20:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07ecf-dc7d-7cc3-a5f4-413310749242
+    note: "round 6 on PM v1.5; QA-32..35 independently closed; new QA-36..37; no waivers; hats_done stays empty"
+  - name: fresh-context-r7
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-08T10:40:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07ee0-6c05-7941-8c7e-18126c27038b
+    note: "round 7 on PM v1.6; QA-36..37 independently closed; define hat may advance"
+  - name: fresh-context-shape-1
+    kind: fresh-context
+    result: fail
+    findings_total: 6
+    blocker: 0
+    major: 4
+    minor: 2
+    at: "2026-09-08T11:10:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07ef4-2612-7b23-9e29-3ac76b0b1995
+    note: "shape spawn 1; Wave L first-class in prose; SH-01..06 open; no tickets/*.md (allowed)"
+  - name: fresh-context-shape-2
+    kind: fresh-context
+    result: fail
+    findings_total: 3
+    blocker: 0
+    major: 3
+    minor: 0
+    at: "2026-09-08T11:35:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07f06-cfb7-7410-8732-c701fea509d8
+    note: "shape v1.1; SH-01..06 independently closed; SH-07..09 open; no tickets"
+  - name: fresh-context-shape-3
+    kind: fresh-context
+    result: fail
+    findings_total: 3
+    blocker: 0
+    major: 2
+    minor: 1
+    at: "2026-09-08T11:55:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07f17-5753-74a0-9097-1b99f307505e
+    note: "shape v1.2; SH-07..09 independently closed; SH-10..12 open; systemic stop"
+  - name: fresh-context-shape-4
+    kind: fresh-context
+    result: fail
+    findings_total: 2
+    blocker: 0
+    major: 1
+    minor: 1
+    at: "2026-09-08T12:15:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07f25-5f92-79e2-a9b3-06a80339373c
+    note: "shape v1.3; SH-10..12 independently closed; SH-13..14 open; no tickets"
+  - name: fresh-context-shape-5
+    kind: fresh-context
+    result: fail
+    findings_total: 2
+    blocker: 0
+    major: 2
+    minor: 0
+    at: "2026-09-08T12:45:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07f5c-146d-7f02-9827-a9d8724be991
+    note: "shape v1.4; SH-13..14 independently closed; SH-15..16 open; no tickets"
+  - name: fresh-context-shape-6
+    kind: fresh-context
+    result: fail
+    findings_total: 2
+    blocker: 0
+    major: 1
+    minor: 1
+    at: "2026-09-08T13:20:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07f96-124b-71b1-9ad7-0cbb03873d2e
+    note: "shape v1.5; SH-15..16 independently closed; SH-17..18 open"
+  - name: fresh-context-shape-7
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-08T13:35:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07fa6-a0f4-76d0-93f9-d73ca17cdad7
+    note: "shape v1.6 PASS; SH-17..18 independently closed; tickets spawn next"
+  - name: fresh-context-tickets-1
+    kind: fresh-context
+    result: fail
+    findings_total: 4
+    blocker: 0
+    major: 2
+    minor: 2
+    at: "2026-09-08T14:10:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07fca-cb52-7d13-9396-ea27c763be3b
+    note: "tickets r1 FAIL; TK-01..04 open; no implement hat"
+  - name: fresh-context-tickets-2
+    kind: fresh-context
+    result: fail
+    findings_total: 4
+    blocker: 0
+    major: 1
+    minor: 3
+    at: "2026-09-08T14:40:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07fe0-a03d-7763-9462-0bb0b21ce5ea
+    note: "tickets r2 FAIL; TK-01..04 independently closed; TK-05 major TK-06..08 minor; no implement hat"
+  - name: fresh-context-tickets-3
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-08T15:10:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a07ff4-8717-75a0-a725-d81737da706b
+    note: "tickets r3 PASS on contract v1.8; TK-05..08 independently closed; TK-09+ none; SH-01..18 stay closed; spawn dba+designer; no implement hat"
+  - name: fresh-context-shape-dba-ui-1
+    kind: fresh-context
+    result: fail
+    findings_total: 3
+    blocker: 0
+    major: 1
+    minor: 2
+    at: "2026-09-08T16:20:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a0800e-abab-7021-a07b-02fb6d11224f
+    note: "dba+designer r1 FAIL; DB-01 major; DB-02 UI-01 minor; SH/TK stay closed; no implement hat"
+  - name: fresh-context-shape-dba-ui-2
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-08T16:45:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a08020-d241-7a62-966e-c663e337e19a
+    note: "dba+designer r2 PASS; DB-01/02 UI-01 independently closed; DB-03+/UI-02+ none; shape hat complete; no implement spawn"
+  - name: fresh-context-impl-w0-b1
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-08T17:50:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a08060-cec0-7132-aa21-8497c5737cc5
+    note: "implement Wave0 batch1 T-01/T-04/T-11 PASS; IM-01+ none; continue T-02/T-03/T-09"
+  - name: fresh-context-impl-w0-b2
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-08T18:20:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a0807b-3f19-7de3-ab76-8047fb7cb519
+    note: "implement Wave0 batch2 T-02/T-03/T-09 PASS; IM-01+ none"
+  - name: fresh-context-impl-w0-b3
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-08T18:55:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a0809f-4768-7ab3-85db-070e153fe5a2
+    note: "implement Wave0 batch3 T-05/T-06/T-07 PASS; IM-01+ none; continue T-08/T-12/T-13"
+  - name: fresh-context-impl-w0-b4
+    kind: fresh-context
+    result: fail
+    findings_total: 1
+    blocker: 0
+    major: 1
+    minor: 0
+    at: "2026-09-08T19:50:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a0839d-0a34-7121-abe8-4ffb385bc1bc
+    note: "T-08/T-12 PASS; T-13 FAIL IM-01 hollow 18.1 fixture; rework T-13 only"
+  - name: fresh-context-impl-w0-b4-r2
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-09T00:10:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a083af-15ed-7b22-af1f-71f4379330c7
+    note: "T-13 IM-01 independently closed; T-08/T-12 stay PASS; Wave 0 remains T-10"
+  - name: fresh-context-impl-t10
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-09T01:30:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a083c1-0390-7a61-9999-edc1432ead31
+    note: "T-10 PASS; Wave 0 T-01..T-13 all independently PASSed; next Wave L"
+  - name: fresh-context-impl-wavel-b1
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-09T02:10:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a083eb-0428-7a63-99b1-5f63d74c6212
+    note: "Wave L T-14/T-15 PASS; IM-02+ none; next T-16/T-18"
+  - name: fresh-context-impl-t20
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-09T12:20:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a085d0-1796-76e0-be52-71941dd0dd91
+    note: "T-20 PASS after 402 retry; Wave L T-14..T-20 complete; next Wave 1 T-21"
+  - name: fresh-context-impl-t23
+    kind: fresh-context
+    result: pass
+    findings_total: 4
+    blocker: 0
+    major: 0
+    minor: 4
+    at: "2026-09-09T20:10:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a08608-0f20-7981-b27b-4f6ea1a77401
+    note: "T-23 PASS; IM-02..05 minor unwaived but non-blocking; next T-24∥T-25 (T-22 waits: official overlap with T-24, list_public overlap with T-25)"
+  - name: fresh-context-impl-t24-t25
+    kind: fresh-context
+    result: fail
+    findings_total: 6
+    blocker: 0
+    major: 3
+    minor: 3
+    at: "2026-09-09T22:30:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a08695-6df8-7d40-bc30-09526b7ea3db
+    note: "T-24/T-25 FAIL IM-06/07/08 major; HATADVANCE stay implement; rework T-24+T-25 only; do not spawn T-22"
+  - name: fresh-context-impl-t24-t25-r2
+    kind: fresh-context
+    result: pass
+    findings_total: 2
+    blocker: 0
+    major: 0
+    minor: 2
+    at: "2026-09-09T23:10:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a086ab-c2c3-7700-b1dd-19fc44b59449
+    note: "T-24/T-25 r2 PASS; IM-06..11 independently closed; IM-12/13 minor; next T-22∥T-26"
+  - name: fresh-context-impl-t22-t26
+    kind: fresh-context
+    result: fail
+    findings_total: 3
+    blocker: 1
+    major: 0
+    minor: 2
+    at: "2026-09-09T23:50:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a086d3-0fcf-7452-ad0b-67ae73ca5143
+    note: "T-22/T-26 FAIL IM-14 blocker (operator treated as viewer); HATADVANCE stay implement; rework T-26 (+ T-22 minors)"
+  - name: fresh-context-impl-t22-t26-r2
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-10T00:20:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a086e8-21b7-77f2-9389-bbd8d93c1be2
+    note: "T-22/T-26 r2 PASS; IM-14/15/16 independently closed; next T-27∥T-28"
+  - name: fresh-context-impl-t27-t28
+    kind: fresh-context
+    result: pass
+    findings_total: 3
+    blocker: 0
+    major: 0
+    minor: 3
+    at: "2026-09-10T01:00:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a0870d-055b-7f80-baf0-0faba137d79d
+    note: "T-27/T-28 PASS; IM-17..19 minor; next T-29∥T-30 (T-33 waits alembic 037)"
+  - name: fresh-context-impl-t29-t30
+    kind: fresh-context
+    result: fail
+    findings_total: 6
+    blocker: 0
+    major: 2
+    minor: 4
+    at: "2026-09-10T01:40:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a08731-cca3-78b2-a073-153708a08ea4
+    note: "T-29/T-30 FAIL IM-20/21 major; rework T-29 only; T-30 Then holds"
+  - name: fresh-context-impl-t29-t30-r2
+    kind: fresh-context
+    result: pass
+    findings_total: 1
+    blocker: 0
+    major: 0
+    minor: 1
+    at: "2026-09-10T02:00:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a08743-8a74-7fc2-b30c-92e6c24a21bb
+    note: "T-29/T-30 r2 PASS; IM-20/21 independently closed; IM-24 minor; next T-31∥T-32; T-33 after alembic 037"
+  - name: fresh-context-impl-t31-t32
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-10T02:20:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a0875b-952b-7793-9b6c-5d1911aef39c
+    note: "T-31/T-32 PASS; next T-33 last Wave 1 ticket"
+  - name: fresh-context-impl-t33
+    kind: fresh-context
+    result: pass
+    findings_total: 1
+    blocker: 0
+    major: 0
+    minor: 1
+    at: "2026-09-10T02:45:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a08772-eb23-7a33-88cb-7c730e762b12
+    note: "T-33 PASS; Wave 1 complete; implement hat done for frozen FRs 01-20+70-75+30-45; spawn qa"
+  - name: fresh-context-verify-1
+    kind: fresh-context
+    result: fail
+    findings_total: 8
+    blocker: 0
+    major: 3
+    minor: 5
+    at: "2026-09-10T03:05:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a08787-aaee-72b2-9e4b-b3f9bd5d09d0
+    note: "verify FAIL CV-01..03 major hollow ✅ mappings; HATADVANCE stay 验证; rework qa coverage.md"
+  - name: fresh-context-verify-2
+    kind: fresh-context
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: 0
+    minor: 0
+    at: "2026-09-10T03:25:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a0879b-a77d-72c2-83ad-c731ebfc43fe
+    note: "verify r2 PASS; CV-01..08 independently closed; 06.1/01.1 stay hole; spawn post-qa review"
+  - name: fresh-context-review-postqa
+    kind: fresh-context
+    result: pass
+    findings_total: 4
+    blocker: 0
+    major: 0
+    minor: 4
+    at: "2026-09-10T03:30:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a087a2-49f1-7791-9816-42ad09ca8c01
+    note: "post-qa review PASS; spawn qc"
+  - name: fresh-context-qc-cond-3-5
+    kind: fresh-context
+    result: fail
+    findings_total: 4
+    blocker: 0
+    major: 2
+    minor: 2
+    at: "2026-09-10T09:00:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a088c8-f6ce-77d2-a7cf-f8fd645e0ad3
+    note: "cond 3-5 G-fresh FAIL QA-01 (01.1 self-ref) QA-02 (audit request-session commit); HATADVANCE stay implement; cond 3 IM-24 holds"
+  - name: fresh-context-qc-cond-3-5-r2
+    kind: fresh-context
+    result: pass
+    findings_total: 3
+    blocker: 0
+    major: 0
+    minor: 3
+    at: "2026-09-10T09:40:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a088e2-67cb-7eb3-8924-220f21aadb0f
+    note: "cond 3-5 rework PASS; C35-QA-01/02 independently closed; minors 03/04/05 open; spawn qa flip matrix"
+  - name: fresh-context-verify-cond-2-6
+    kind: fresh-context
+    result: fail
+    findings_total: 1
+    blocker: 0
+    major: 1
+    minor: 0
+    at: "2026-09-10T10:00:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a088f0-08d7-7a70-bcd0-39c957f1a9f6
+    note: "coverage flip FAIL QA-01: GWT-18.1 ✅ but live completed +129s; 01.1/06.1/NFR-01/37.6 holds; HATADVANCE stay verify"
+  - name: fresh-context-verify-cond-2-6-r2
+    kind: fresh-context
+    result: pass
+    findings_total: 1
+    blocker: 0
+    major: 0
+    minor: 1
+    at: "2026-09-10T10:20:00"
+    evidence: .sdlc/feat-four-pillars-v2/05-review/findings.md
+    reviewer_session: 01a088fc-ee9f-7050-a4ea-eff3ed1618de
+    note: "18.1 ⚠️ independent; 01.1/06.1/NFR-01/37.6 hold; spawn qc update conditions"
+  - name: self-review-qc-cond-2-6
+    kind: self-review
+    result: pass
+    at: "2026-09-10T10:40:00"
+    note: >
+      G-self：冻结施工集仍是 FR-01…20 + 70…75 + 30…45；未膨胀 Wave 2/3；
+      039 listed_at DATETIME(6) 为 expand-only；listing/install/source 仍不可逆。
+      六问仍开放且未代选。qc 有条件放行：不得宣称 GWT-18.1 Then 已绿。
+      不是四柱 GA。
+  - name: test
+    kind: script
+    result: pass
+    cmd: "uv run pytest -x -q backend/tests"
+    exit_code: 0
+    at: "2026-09-10T08:50:00"
+    note: "1331 passed, 35 skipped after C35-QA-02 conftest DEFAULT engine (independent orchestrator rerun)"
+  - name: lint
+    kind: script
+    result: pass
+    cmd: "bash tools/check/arch.sh"
+    exit_code: 0
+    at: "2026-09-10T08:50:00"
+    note: "0 after cond 3-5 + 039 listed_at DATETIME(6)"
+  - name: build
+    kind: script
+    result: pass
+    cmd: "npm run build --prefix frontend/admin && npm run build --prefix frontend/official"
+    exit_code: 0
+    at: "2026-09-10T03:45:00"
+  - name: migration
+    kind: script
+    result: pass
+    cmd: "bash tools/check/db_migrations.sh"
+    exit_code: 0
+    at: "2026-09-10T02:32:00"
+  - name: self-review-shape
+    kind: self-review
+    result: pass
+    at: "2026-09-08T16:45:00"
+    note: >
+      G-self：冻结施工集仍是 FR-01…20 + 70…75 + 30…45；Wave L 第一等；
+      不可逆项（listing/安装/源/Alembic expand）已写进 db-spec；
+      appetite 未膨胀到 Wave 2/3；六问仍开放且未代选。不进实现帽。
+review_findings:
+  - {id: QA-01, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-02, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-03, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-04, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-05, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-06, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-07, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-08, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-09, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-10, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-11, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-12, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-13, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-14, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-15, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-16, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-17, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-18, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-19, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-20, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-21, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-22, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-23, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-24, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-25, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-26, severity: minor, status: fixed, note: "r3 independent"}
+  - {id: QA-27, severity: minor, status: fixed, note: "r3 independent"}
+  - {id: QA-28, severity: major, status: fixed, note: "r4 independent"}
+  - {id: QA-29, severity: major, status: fixed, note: "r4 independent"}
+  - {id: QA-30, severity: minor, status: fixed, note: "r4 independent"}
+  - {id: QA-31, severity: major, status: fixed, note: "r5 independent GWT-32.12"}
+  - {id: QA-32, severity: major, status: fixed, note: "r6 independent"}
+  - {id: QA-33, severity: major, status: fixed, note: "r6 independent"}
+  - {id: QA-34, severity: major, status: fixed, note: "r6 independent"}
+  - {id: QA-35, severity: minor, status: fixed, note: "r6 independent"}
+  - {id: QA-36, severity: major, status: fixed, note: "r7 independent"}
+  - {id: QA-37, severity: major, status: fixed, note: "r7 independent"}
+  - {id: SH-01, severity: major, status: fixed, note: "shape r2 independent"}
+  - {id: SH-02, severity: major, status: fixed, note: "shape r2 independent"}
+  - {id: SH-03, severity: major, status: fixed, note: "shape r2 independent"}
+  - {id: SH-04, severity: major, status: fixed, note: "shape r2 independent"}
+  - {id: SH-05, severity: minor, status: fixed, note: "shape r2 independent"}
+  - {id: SH-06, severity: minor, status: fixed, note: "shape r2 independent"}
+  - {id: SH-07, severity: major, status: fixed, note: "shape r3 independent"}
+  - {id: SH-08, severity: major, status: fixed, note: "shape r3 independent"}
+  - {id: SH-09, severity: major, status: fixed, note: "shape r3 independent"}
+  - {id: SH-10, severity: major, status: fixed, note: "shape r4 independent"}
+  - {id: SH-11, severity: major, status: fixed, note: "shape r4 independent"}
+  - {id: SH-12, severity: minor, status: fixed, note: "shape r4 independent"}
+  - {id: SH-13, severity: major, status: fixed, note: "shape r5 independent"}
+  - {id: SH-14, severity: minor, status: fixed, note: "shape r5 independent"}
+  - {id: SH-15, severity: major, status: fixed, note: "shape r6 independent"}
+  - {id: SH-16, severity: major, status: fixed, note: "shape r6 independent"}
+  - {id: SH-17, severity: major, status: fixed, note: "shape r7 independent"}
+  - {id: SH-18, severity: minor, status: fixed, note: "shape r7 independent"}
+  - {id: TK-01, severity: major, status: fixed, note: "tickets r2 independent"}
+  - {id: TK-02, severity: major, status: fixed, note: "tickets r2 independent"}
+  - {id: TK-03, severity: minor, status: fixed, note: "tickets r2 independent"}
+  - {id: TK-04, severity: minor, status: fixed, note: "tickets r2 independent"}
+  - {id: TK-05, severity: major, status: fixed, note: "tickets r3 independent"}
+  - {id: TK-06, severity: minor, status: fixed, note: "tickets r3 independent"}
+  - {id: TK-07, severity: minor, status: fixed, note: "tickets r3 independent"}
+  - {id: TK-08, severity: minor, status: fixed, note: "tickets r3 independent"}
+  - {id: DB-01, severity: major, status: fixed, note: "dba+designer r2 independent"}
+  - {id: DB-02, severity: minor, status: fixed, note: "dba+designer r2 independent"}
+  - {id: UI-01, severity: minor, status: fixed, note: "dba+designer r2 independent"}
+  - {id: IM-01, severity: major, status: fixed, note: "impl w0-b4 r2 independent"}
+  - {id: IM-02, severity: minor, status: open, note: "T-23 G-fresh QA-01: 32.3 oracle 自比 STORE_NOT_FOUND_HTML"}
+  - {id: IM-03, severity: minor, status: open, note: "T-23 G-fresh QA-02: 能力端 33.4 未钉 len(items)==20"}
+  - {id: IM-04, severity: minor, status: open, note: "T-23 G-fresh QA-03: public_license_override=1 无夹具"}
+  - {id: IM-05, severity: minor, status: open, note: "T-23 G-fresh QA-04: override TINYINT vs SmallInteger"}
+  - {id: IM-06, severity: major, status: fixed, note: "T-24/T-25 r2 independent"}
+  - {id: IM-07, severity: major, status: fixed, note: "T-24/T-25 r2 independent"}
+  - {id: IM-08, severity: major, status: fixed, note: "T-24/T-25 r2 independent"}
+  - {id: IM-09, severity: minor, status: fixed, note: "T-24/T-25 r2 independent"}
+  - {id: IM-10, severity: minor, status: fixed, note: "T-24/T-25 r2 independent"}
+  - {id: IM-11, severity: minor, status: fixed, note: "T-24/T-25 r2 independent"}
+  - {id: IM-12, severity: minor, status: open, note: "T-24/T-25 r2 QA-01: 弹窗离线句未用冻结文案"}
+  - {id: IM-13, severity: minor, status: open, note: "T-24/T-25 r2 QA-02: CTA 负向断言未解码 from"}
+  - {id: IM-14, severity: blocker, status: fixed, note: "T-22/T-26 r2 independent"}
+  - {id: IM-15, severity: minor, status: fixed, note: "T-22/T-26 r2 independent"}
+  - {id: IM-16, severity: minor, status: fixed, note: "T-22/T-26 r2 independent"}
+  - {id: IM-17, severity: minor, status: open, note: "T-27/T-28 G-fresh QA-01: 在目录中打开丢短名"}
+  - {id: IM-18, severity: minor, status: open, note: "T-27/T-28 G-fresh QA-02: 36.1 礼包对照未挂合集边"}
+  - {id: IM-19, severity: minor, status: open, note: "T-27/T-28 G-fresh QA-03: 治理叶无分页"}
+  - {id: IM-20, severity: major, status: fixed, note: "T-29/T-30 r2 independent"}
+  - {id: IM-21, severity: major, status: fixed, note: "T-29/T-30 r2 independent"}
+  - {id: IM-22, severity: minor, status: fixed, note: "T-29/T-30 r2 independent"}
+  - {id: IM-23, severity: minor, status: fixed, note: "T-29/T-30 r2 independent"}
+  - {id: IM-24, severity: minor, status: fixed, note: "cond3 named test + implement G-fresh r2 independent"}
+  - {id: C35-QA-01, severity: major, status: fixed, note: "r2 independent: GWT-01.1 FREE_TIER_FEATURE_COPY + GWT Given"}
+  - {id: C35-QA-02, severity: major, status: fixed, note: "r2 independent: record_audit standalone-only; DEFAULT engine in pytest"}
+  - {id: C35-QA-03, severity: minor, status: open, note: "Register handwritten free-tier copy"}
+  - {id: C35-QA-04, severity: minor, status: open, note: "src_sync command upsert no retract"}
+  - {id: C35-QA-05, severity: minor, status: open, note: "qc-cond-4-evidence.md stale DEFAULT_QUOTA green paragraph"}
+  - {id: IM-26, severity: minor, status: open, note: "T-33 G-fresh QA-1: 45.5 HTTP 夹具未钉同步出数"}
+  - {id: CV-01, severity: major, status: fixed, note: "verify r2 independent"}
+  - {id: CV-02, severity: major, status: fixed, note: "verify r2 independent"}
+  - {id: CV-03, severity: major, status: fixed, note: "verify r2 independent"}
+  - {id: CV-04, severity: minor, status: fixed, note: "verify r2 independent"}
+  - {id: CV-05, severity: minor, status: fixed, note: "verify r2 independent"}
+  - {id: CV-06, severity: minor, status: fixed, note: "verify r2 independent"}
+  - {id: CV-07, severity: minor, status: fixed, note: "verify r2 independent"}
+  - {id: CV-08, severity: minor, status: fixed, note: "verify r2 independent"}
+  - {id: CV-09, severity: major, status: fixed, note: "r2 independent: TC-18.1 back to ⚠️; completed +129s ≠ Then 120s"}
+  - {id: IM-25, severity: minor, status: fixed, note: "T-29/T-30 r2 independent"}
+stale_artifacts: []
+open_questions:
+  - Q-VOICE
+  - Q-PRICE
+  - Q-RELAY
+  - Q-MARKET-USER
+  - Q-BILL
+  - Q-AGPL
+  - Q-OPS-DUTY
+  - Q-OPS-COLLECT
+closed_questions:
+  - {id: Q-LLM, status: decided, decision: "LiteLLM 替换 new-api，必须重构"}
+lane_changes: []
+
+lane_judge:
+  Q1_schema: true
+  Q2_auth_tenant: true
+  Q3_external_contract: true
+  Q4_irreversible: true
+  Q5_new_dependency: true
+  Q6_files_or_subprojects: true
+  reason: >
+    智能采集 + SaaS 多租户 + 中转站外部契约 + Power Market schema；
+    listing/租户安装/源注册表不可逆；backend/scrapy/双前端/capability-library
+    多子项目。操作者点名全角色复审后出结合旧方案的全新方案。
+
+roles_invited_beyond_default:
+  - ops
+  - designer
+  - architect
+  - dba
+  - frontend
+  - backend
+  - sre
+  - data-collector
+  - data-warehouse-engineer
+  - miner
+  - analyst
+  - qa
+  - algo
+  - pm
+  - qc
+
+roles_skipped: []
+roles_skipped_note: >
+  诊断 fan-out 全请。实现帽再按票裁剪；miner/ops/algo/warehouse 若无实现面
+  再写入 roles_skipped。qc 在定义帽只做覆盖缺口诊断，不写 release-opinion.md。
+
+host_spawn:
+  requested: "sdlc-workflow:<role>"
+  available: [arch-warden, explore, general-purpose, memory-curator, plan, spider-doctor]
+  fallback: general-purpose
+  probed_at: "2026-09-08"
+  probe_type: "sdlc-workflow:ops"
+  probe_error: "Unknown subagent type"
+  reason: >
+    本宿主未注册插件 agents/ 的 sdlc-workflow:<role> 类型（ZCode 才会把
+    pluginName:bareName 挂进 spawn 表）。回退为每角色一个独立 general-purpose
+    子代理，强制先读 agents/<role>.md + skills/<role>/SKILL.md，编排器本窗口
+    不写诊断正文。这不是双派发（原生类型不存在，只派一次）。
+
+signals:
+  - /Users/xuyun/Documents/grok-files/power-market-design.md
+  - /Users/xuyun/Documents/grok-files/power-market-design-review.md
+  - /Users/xuyun/Documents/grok-files/four-pillars-plan.md
+  - /Users/xuyun/Documents/grok-files/four-pillars-diagnosis-and-plan.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-spec.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-user-story.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-metrics.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-algo-diagnosis.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-qa-diagnosis.md
+  - /Users/xuyun/Documents/grok-files/feat-four-pillars-sre-diagnosis.md
+  - .sdlc/feat-four-pillars/01-define/spec.md
+  - .sdlc/feat-four-pillars/02-shape/contract.md
+  - CONTEXT.md
+  - README.md

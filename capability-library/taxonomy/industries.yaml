@@ -1,0 +1,23 @@
+# 行业标签表。slug 供 meta.yaml 的 industries 字段引用，可随时增删条目。
+- slug: software-dev
+  name: 软件开发
+- slug: content-creation
+  name: 内容创作
+- slug: data-analytics-bi
+  name: 数据分析与BI
+- slug: growth-ops
+  name: 运营增长
+- slug: design
+  name: 设计
+- slug: legal-compliance
+  name: 法务合规
+- slug: finance
+  name: 财务
+- slug: education-research
+  name: 教育科研
+- slug: marketing
+  name: 市场营销
+- slug: customer-support
+  name: 客户支持
+- slug: general
+  name: 通用/跨行业

@@ -1,0 +1,5 @@
+# 密钥与运行时数据，严禁提交
+.env
+data/
+mysql-data/
+redis-data/

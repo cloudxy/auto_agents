@@ -1,163 +1,45 @@
 ---
 name: cicd
-description: 配置 GitHub Actions CI/CD 流程
+description: >-
+  Edits the five-stage GitHub Actions workflow at .github/workflows/ci.yml.
+  Use when 加 CI, 改 GitHub Actions, lint/test/arch/frontend 门禁.
 ---
 
-# 配置 CI/CD 流程
+# 配置 CI/CD
 
-当用户需要自动化部署时，使用此 Skill 生成 GitHub Actions 工作流。
+先读 `.github/workflows/ci.yml` 再改。约束：[references/workflow-templates.md](references/workflow-templates.md)。
 
-## 触发场景
+## Route
 
-- "配置自动化部署"
-- "设置 CI/CD"
-- "添加持续集成"
+| 观察到 | 先做 |
+|--------|------|
+| Dockerfile / compose / 端口 / 卷 | `deploy` |
+| 改 CI job、门禁、Secrets | 本 skill |
 
-## 执行流程
+## Quick start
 
-### Step 1: 确认 CI/CD 需求
-
-1. 目标分支（main/test）
-2. 是否需要测试环境
-3. 部署方式（SSH/Docker/K8s）
-4. 是否需要人工审核
-
-### Step 2: 生成后端测试工作流
-
-```yaml
-name: Backend Tests
-
-on:
-  push:
-    branches: [main, test]
-    paths:
-      - 'backend/**'
-      - 'scrapy/**'
-      - 'platform_core/**'
-      - 'config/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: test_password
-          MYSQL_DATABASE: test_db
-        options: >-
-          --health-cmd="mysqladmin ping"
-          --health-interval=10s
-          --health-retries=3
-        ports:
-          - 3306:3306
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd="redis-cli ping"
-          --health-interval=10s
-          --health-retries=3
-        ports:
-          - 6379:6379
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          enable-cache: true
-
-      - name: Setup Python
-        run: uv python install 3.13
-
-      - name: Install dependencies (uv workspace)
-        run: uv sync --frozen
-
-      - name: Run tests
-        env:
-          APP_ENV: dev
-        run: uv run pytest backend/tests platform_core/tests -v --cov=backend --cov=platform_core --cov-report=xml
-```
-
-### Step 3: 生成前端测试工作流
-
-```yaml
-name: Frontend Tests
-
-on:
-  push:
-    branches: [main, test]
-    paths: ['frontend/**']
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        app: [admin, official]
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/${{ matrix.app }}/package-lock.json
-
-      - name: Install & test
-        working-directory: frontend/${{ matrix.app }}
-        run: npm ci && npm test -- --watchAll=false && npm run build
-```
-
-### Step 4: 生成部署工作流
-
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    environment: production
-    
-    steps:
-      - name: Wait for approval
-        if: github.ref == 'refs/heads/main'
-        uses: trstringer/manual-approval@v1
-      
-      - name: Deploy
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.PROD_SERVER_HOST }}
-          username: ${{ secrets.PROD_SERVER_USER }}
-          key: ${{ secrets.PROD_SERVER_SSH_KEY }}
-          script: |
-            cd /opt/myapp
-            docker-compose pull && docker-compose up -d
-```
-
-### Step 5: 配置 Secrets
-
-在 GitHub → Settings → Secrets and variables → Actions 中添加：
+Copy and check off:
 
 ```
-DOCKER_USERNAME
-DOCKER_PASSWORD
-PROD_SERVER_HOST
-PROD_SERVER_USER
-PROD_SERVER_SSH_KEY
+cicd:
+- [ ] 五阶段仍在：python-lint-test / arch-check / db-migration-gate / frontend-build / docker-validate
+- [ ] 门禁用 tools/check/*，不手写第二套 grep
+- [ ] 前端：根 package-lock + 先 shared dist
+- [ ] bash tools/check/arch.sh
+- [ ] bash tools/check/frontend.sh
+- [ ] docker compose config --quiet
 ```
 
-### Step 6: 配置 Environment Protection
+push 任意分支 + 向 main 的 PR 跑上述 job。发布另开 job，密钥用 GitHub Secrets。
 
-在 GitHub → Settings → Environments 中：
+## 完成时回复
 
-- **production**：Required reviewers（至少 1 人审核）
-- **test**：无保护规则
+1. `.github/workflows/ci.yml` 里改了哪个 job
+2. 本地跑过的 `tools/check/*` 原文
+3. 五阶段名字仍在（列出来）
+
+## Examples
+
+**Input:** 「CI 加上架构检查」
+
+**Then:** 在现有 `ci.yml` 加 `arch-check` job，`run: bash tools/check/arch.sh`，不新建第二份 workflow。

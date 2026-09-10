@@ -1,12 +1,12 @@
 """Scrapy 示例爬虫 - 支持 API/Web/嗅探多模式采集"""
-from scrapy_redis.spiders import RedisSpider
+from spiders.base import TaskAwareRedisSpider
 from items import BaseItem
 from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 
 
-class ExampleSpider(RedisSpider):
+class ExampleSpider(TaskAwareRedisSpider):
     """
     分布式爬虫示例
     

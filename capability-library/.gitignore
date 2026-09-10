@@ -1,0 +1,4 @@
+.venv/
+index/index.db
+__pycache__/
+*.pyc

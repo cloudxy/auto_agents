@@ -1,11 +1,11 @@
 """大众点评首页爬虫 - 高风控站点，需代理与会话保持"""
-from scrapy_redis.spiders import RedisSpider
+from spiders.base import TaskAwareRedisSpider
 from items import BaseItem
 from platform_core.logger import get_logger
 
 logger = get_logger("spider")
 
-class DianpingHomeSpider(RedisSpider):
+class DianpingHomeSpider(TaskAwareRedisSpider):
     name = "dianping_home"
     redis_key = "dianping_home:start_urls"
     allowed_domains = ["dianping.com"]
