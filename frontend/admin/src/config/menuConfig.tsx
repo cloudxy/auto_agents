@@ -44,6 +44,7 @@ export const menuConfig: MenuItem[] = [
     children: [
       { key: '/dashboard', label: '仪表盘', permission: 'menu:dashboard' },
       { key: '/usage', label: '用量看板', permission: 'menu:usage', tenantOnly: true },
+      { key: '/relay', label: '渠道组', permission: 'menu:relay', tenantOnly: true },
     ],
   },
   {

@@ -11,6 +11,7 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs, { Dayjs } from 'dayjs'
 import { Tabs } from 'antd'
 import { listTenants, patchTenant, type TenantRow } from '../services/platformOps'
+import { confirmOrder, listPendingOrders, type OrderRow } from '../services/billing'
 import { clearDeadItems, discardDeadItem, listDeadItems, type DeadItem } from '../services/deadItems'
 import { apiErrorMessage } from '../utils/errorMessage'
 import ProductEvents from './ProductEvents'
@@ -190,6 +191,38 @@ const DeadItemsTab: React.FC = () => {
   )
 }
 
+function PendingOrdersTab() {
+  const [rows, setRows] = useState<OrderRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const load = useCallback(async () => {
+    setLoading(true)
+    try { setRows(await listPendingOrders()) }
+    catch (e) { message.error(apiErrorMessage(e, '订单加载失败')) }
+    finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load() }, [load])
+  return (
+    <div>
+      <Alert type="info" showIcon style={{ marginBottom: 12 }}
+             title="在线支付未开通。确认收款后把企业套餐配额改到该订单档。" />
+      <Button icon={<ReloadOutlined />} onClick={load} style={{ marginBottom: 12 }}>刷新</Button>
+      <Table rowKey="id" size="middle" loading={loading} dataSource={rows}
+             pagination={{ pageSize: 20 }}
+             columns={[
+               { title: '订单', dataIndex: 'id' },
+               { title: '套餐', dataIndex: 'plan_id' },
+               { title: '金额（分）', dataIndex: 'amount_cents' },
+               { title: '通道', dataIndex: 'channel' },
+               { title: '操作', render: (_: unknown, r: OrderRow) => (
+                 <Popconfirm title="确认已收到线下款项？" onConfirm={() => confirmOrder(r.id).then(load)}>
+                   <Button size="small" type="primary">确认收款</Button>
+                 </Popconfirm>
+               )},
+             ]} />
+    </div>
+  )
+}
+
   return (
     <div>
       <Tabs
@@ -210,6 +243,7 @@ const DeadItemsTab: React.FC = () => {
             ),
           },
           { key: 'dead-items', label: '死信队列', children: <DeadItemsTab /> },
+          { key: 'orders', label: '待确认收款', children: <PendingOrdersTab /> },
           { key: 'product-events', label: '产品事实', children: <ProductEvents /> },
         ]}
       />

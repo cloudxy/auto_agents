@@ -40,6 +40,8 @@ from platform_core.models.workflow import (
 from platform_core.models.archive import ArchiveRecord
 from platform_core.models.i18n import I18nLocale, I18nTranslation
 from platform_core.models.system_cache import SystemCache
+from platform_core.models.billing import Order, Plan, TenantSubscription
+from platform_core.models.relay import RelayGroup, RelayToken
 from platform_core.models.role import Role
 from platform_core.models.department import Department
 from platform_core.models.menu import Menu
@@ -53,6 +55,7 @@ __all__ = [
     "Skill", "SkillReview", "SkillJob", "LlmProviderModel", "Tenant", "TenantMixin", "CapabilityAsset", "CapabilityPlugin",
     "CapabilityExpert", "CapabilityTeam", "CapabilityCommand", "CapabilityComponent",
     "CapabilityInstall", "CapabilitySource", "CapabilityAlias",
+    "Plan", "TenantSubscription", "Order", "RelayGroup", "RelayToken",
     "SoftDeleteMixin", "AuditMixin",
     # DB 升级 2026-09 Phase B/C 横切功能表
     "Tag", "Tagging", "Attachment", "Notification", "ResourceVersion",

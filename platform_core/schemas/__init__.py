@@ -50,6 +50,10 @@ from platform_core.schemas.product_event import (
     CTA_BYPASS,
     WAVE0_EVENT_NAMES,
 )
+from platform_core.schemas.billing import OrderCreate, OrderOut, PlanOut, SubscriptionOut
+from platform_core.schemas.relay import (
+    RelayGroupCreate, RelayGroupOut, RelayGroupUpdate, RelayTokenCreate, RelayTokenOut,
+)
 from platform_core.schemas.newapi import (
     ProbeVerdict,
     ChannelEventAction,
@@ -108,4 +112,7 @@ __all__ = [
     "CTA_FUNNEL",
     "CTA_BYPASS",
     "WAVE0_EVENT_NAMES",
+    "PlanOut", "OrderCreate", "OrderOut", "SubscriptionOut",
+    "RelayGroupCreate", "RelayGroupUpdate", "RelayGroupOut",
+    "RelayTokenCreate", "RelayTokenOut",
 ]
