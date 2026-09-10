@@ -69,7 +69,10 @@ rotated: YYYY-MM-DD
 |---|---|
 | DeepSeek 已轮换 | ☐ 操作者机外完成后才勾 |
 | Moonshot 已轮换 | ☐ 操作者机外完成后才勾 |
-| 证明行 `rotated: YYYY-MM-DD` | **无**（attestation pending operator） |
+| 证明行 `rotated: YYYY-MM-DD` | **无** |
+
+操作者 2026-09-10 明示（原话）：「没有更换key，因为能够使用。后面再找时间更换。」  
+**未轮换。** 不代写 `rotated:` 日期。密钥仍可用 ≠ 历史 blob 已作废。
 
 **禁止** 由代理把上表勾成已轮换。无证明行 = 未轮换。
 
@@ -78,7 +81,7 @@ rotated: YYYY-MM-DD
 | 半格 | 证据 | 状态 |
 |---|---|---|
 | dockerd `compose down --remove-orphans` | 本帽独立 2026-09-10T03:53:38Z `DOWN_EXIT:0`（`docker info` 0；sock `~/.docker/run/docker.sock`；两条 `config -q` 0；`:4000` 无监听；compose ps 空）。先前 02:43:36Z exit 1（当时 daemon 未起）不作本半格 | **PASS** |
-| 机外轮换 `44e9446` | §4 无真实 `rotated: YYYY-MM-DD`。操作者确认证据不得写密钥。本帽不代写日期、不勾已轮换 | **attestation pending operator**（**not PASS**） |
+| 机外轮换 `44e9446` | 操作者 2026-09-10 延期轮换（Key 仍可用）。§4 无 `rotated:` 日期 | **deferred by operator**（**not PASS**） |
 
 条件 A 整体 **not PASS**（轮换半格未过）。**动工 = NO**。Wave 2/3 仍 lock。不是四柱 GA。
 
