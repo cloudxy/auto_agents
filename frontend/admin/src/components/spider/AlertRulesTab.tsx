@@ -250,7 +250,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
                 { value: 'consecutive_failures', label: '连续失败（次数）' },
                 { value: 'result_drop', label: '结果下降（百分比）' },
                 { value: 'task_timeout', label: '任务超时（分钟）' },
-                { value: 'queue_depth', label: '队列堆积（由调度器侧触发）' },
+                { value: 'queue_depth', label: '队列堆积（本企业排队任务数）' },
               ]}
             />
           </Form.Item>
@@ -258,7 +258,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
           <Form.Item
             name="threshold"
             label="阈值"
-            tooltip="连续失败：失败次数；结果下降：下降百分比；任务超时：分钟数"
+            tooltip="连续失败：失败次数；结果下降：下降百分比；任务超时：分钟数；队列堆积：本企业排队任务数（超过即触发）"
             rules={[{ required: true, message: '请输入阈值' }]}
           >
             <InputNumber min={0} style={{ width: '100%' }} placeholder="根据规则类型填写" />

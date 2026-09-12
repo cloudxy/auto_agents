@@ -36,6 +36,7 @@ jest.mock('../services/capabilities', () => ({
   fetchPublicCapability: jest.fn(),
   subscribeCapability: jest.fn(),
   listInstalls: jest.fn(),
+  importAssets: jest.fn(),
 }))
 
 jest.mock('./Skills', () => () => <div>skills-tab</div>)

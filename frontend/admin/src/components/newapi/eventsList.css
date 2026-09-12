@@ -1,0 +1,5 @@
+/* T-32/T-33（GWT-98.5）：自总览 Top N 跳入的目标行高亮（与 market-catalog-focus 同款
+   antd CSS 变量 + 兜底，不新增视觉体系） */
+.events-row-highlight td {
+  background: var(--ant-color-primary-bg, #e6f4ff);
+}

@@ -35,6 +35,8 @@ export const COMMAND_EMPTY = '还没有命令。同步源或在目录登记后�
 export const AGENT_EMPTY = '还没有智能体。同步源或扫描后会出现在这里。'
 export const TEAM_EMPTY = '还没有专家团。'
 export const CREATE_TEAM = '组建专家团'
+/** T-37（GWT-101.4）：成员选择器智能体分组空态句（无 agent 资产仍可纯专家组建） */
+export const TEAM_AGENT_EMPTY = '还没有智能体资产'
 export const GO_SOURCE = '去源叶'
 export const HEALTH_UNKNOWN = '未知'
 export const HEALTH_UNAVAILABLE = '不可用'

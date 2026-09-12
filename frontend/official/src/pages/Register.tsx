@@ -58,8 +58,8 @@ const isNetworkError = (e: unknown): boolean => {
 
 const displayName = (raw: string | undefined): string => (raw || '').trim()
 
-const successCopy = (company: string, username: string): string =>
-  `企业「${company}」已开通，负责人 ${username}。登录后开始采集。`
+const successCopy = (company: string, ownerLabel: string): string =>
+  `企业「${company}」已开通，负责人 ${ownerLabel}。登录时请填写注册邮箱，登录后开始采集。`
 
 const incompleteWithReason = (reason: string, traceId?: string): string => {
   const base = `注册未完成：${reason}。改正后再次创建企业。`
@@ -96,14 +96,16 @@ const Register: React.FC = () => {
         anonymousId ? { ...values, anonymous_id: anonymousId } : values,
       )
       const company = displayName(result.tenant?.name)
-      const username = displayName(result.owner?.username)
-      if (!company || !username) {
+      // GWT-83.3：负责人标识优先展示注册邮箱（登录时填的就是它）；旧响应无
+      // email 回退短名，但「登录时请填写注册邮箱」提示句恒在，不暗示只能用短名。
+      const ownerLabel = displayName(result.owner?.email) || displayName(result.owner?.username)
+      if (!company || !ownerLabel) {
         setFormError(incompleteWithReason('开通结果缺少企业名或负责人'))
         return
       }
       setDone({
         tenant: { name: company, slug: result.tenant.slug },
-        owner: { username },
+        owner: { username: ownerLabel },
       })
       message.success(COPY_CREATED_TOAST)
     } catch (e) {

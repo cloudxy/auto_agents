@@ -1,16 +1,24 @@
 /**
  * 事件时间线 Tab（工单 80 拆分自 NewApiOps.tsx）：分页 + 渠道过滤
+ * T-32/T-33（GWT-98.5）：新增可选 highlightId——总览 Top N 跳入的目标行可见并高亮；
+ * 既有列表/筛选/分页不动。
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import { Input, message, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchNewapiEvents, type ChannelEventItem } from '../../services/newapi'
 import { ACTION_TAG, DEFAULT_PAGE_SIZE, fmtQuota, fmtTime, parseChannelId } from './newapiShared'
+import './eventsList.css'
 
 const { Text } = Typography
 
 /** refreshSignal 变化时静默刷新；configSaved 保存渠道配置后联动刷新 */
-const EventsList: React.FC<{ refreshSignal?: number; configSaved?: number }> = ({ refreshSignal = 0, configSaved = 0 }) => {
+const EventsList: React.FC<{
+  refreshSignal?: number
+  configSaved?: number
+  /** GWT-98.5：自总览跳入的目标事件行（首页可见 + 高亮） */
+  highlightId?: number
+}> = ({ refreshSignal = 0, configSaved = 0, highlightId }) => {
   const [events, setEvents] = useState<ChannelEventItem[]>([])
   const [eventsTotal, setEventsTotal] = useState(0)
   const [eventsPage, setEventsPage] = useState(1)
@@ -94,6 +102,7 @@ const EventsList: React.FC<{ refreshSignal?: number; configSaved?: number }> = (
         rowKey="id"
         loading={eventsLoading}
         scroll={{ x: 900 }}
+        rowClassName={(record) => (highlightId != null && record.id === highlightId ? 'events-row-highlight' : '')}
         pagination={{
           current: eventsPage,
           pageSize: eventsPageSize,
