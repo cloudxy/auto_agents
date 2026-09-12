@@ -22,9 +22,9 @@ qc_cond_2_6_wave:
   remaining: "动工只缺 rotated 真实日期; 039+untrack 已在 b8b5f85; 合主干仍须入库 031-038 与冻结施工产品（本拍）"
   live_18_1: "PASS completed 40.56s task#2 result_count=1 export 200"
   compose_down: "PASS exit 0"
-  rotation_44e9446: "pending operator date line; no secrets"
+  rotation_44e9446: "rotated: 2026-09-10; DeepSeek + Moonshot/Kimi; no secrets"
   condition_M: "1336 passed / dual build 0 / arch 0 / mig 0"
-  start_work_allowed: false
+  start_work_allowed: true
   qc_decision: "conditional"
   at_close: "2026-09-10"
   spawn: [dba-37.6, sre-nfr01, reviewer-cond-3-5, frontend-c35-qa01, backend-c35-qa02, sre-37.6]

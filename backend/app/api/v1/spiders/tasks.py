@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
 from backend.app.api.deps import CurrentUser, require_admin, require_login, require_operator, task_actor_tenant_id
-from backend.app.api.v1.spiders.deps import _query_service, _task_service
+from backend.app.api.v1.spiders.deps import _query_service, _task_service, require_enqueue_operator
 from backend.app.responses import (
     ApiResponse,
     PaginatedResponse,
@@ -58,12 +58,15 @@ async def run_spider(
     payload: RunSpiderRequest,
     service: SpiderTaskService = Depends(_task_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_enqueue_operator),
 ) -> ApiResponse[SpiderTaskResponse]:
-    """入队一次爬虫任务（params 为 JSON 字符串，如 '{"urls": ["https://..."]}'；可指定优先级）"""
+    """入队一次爬虫任务（params 为 JSON 字符串，如 '{"urls": ["https://..."]}'；可指定优先级）
+
+    守卫走 require_enqueue_operator（GWT-87.3）：只读直调拒绝句为同族中文。"""
     task = await service.enqueue(
         spider_name=payload.spider_name, params=payload.params,
-        priority=payload.priority, tenant_id=task_actor_tenant_id(user),
+        priority=payload.priority,
+        tenant_id=await task_actor_tenant_id(user, session),
     )
     await record_audit(session, user, "task.run", f"task#{task.id}",
                  {"spider": payload.spider_name, "priority": payload.priority})

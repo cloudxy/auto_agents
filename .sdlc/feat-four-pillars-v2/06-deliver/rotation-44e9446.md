@@ -57,38 +57,27 @@ $ bash tools/check/arch.sh
 
 跟踪修复 ≠ 凭据作废。
 
-## 4. 操作者证明（本帽留空）
+## 4. 操作者证明
 
-本帽 **不勾**。操作者在提供商控制台轮换 **之后**，在本文件（或同目录一份已 ignore 的 sibling，例如 `rotation-44e9446.attested`）写且只写一行：
+操作者 2026-09-10 明示：Kimi 与 DeepSeek 的 Key 已全部修改。本文件只记日期，不写密钥。
 
 ```
-rotated: YYYY-MM-DD
+rotated: 2026-09-10
 ```
 
 | 项 | 状态 |
 |---|---|
-| DeepSeek 已轮换 | ☐ 操作者机外完成后才勾 |
-| Moonshot 已轮换 | ☐ 操作者机外完成后才勾 |
-| 证明行 `rotated: YYYY-MM-DD` | **无**（attestation pending operator） |
+| DeepSeek 已轮换 | ☑ 操作者机外完成（2026-09-10） |
+| Moonshot / Kimi 已轮换 | ☑ 操作者机外完成（2026-09-10） |
+| 证明行 `rotated: YYYY-MM-DD` | **rotated: 2026-09-10** |
 
-**禁止** 由代理把上表勾成已轮换。无证明行 = 未轮换。
+先前延期句（「没有更换key，因为能够使用」）被本轮操作者声明覆盖。新 Key 只许活在本机 env / gitignore 配置，禁止再入库。
 
 ## 5. 闸门（条件 A）
 
 | 半格 | 证据 | 状态 |
 |---|---|---|
 | dockerd `compose down --remove-orphans` | 本帽独立 2026-09-10T03:53:38Z `DOWN_EXIT:0`（`docker info` 0；sock `~/.docker/run/docker.sock`；两条 `config -q` 0；`:4000` 无监听；compose ps 空）。先前 02:43:36Z exit 1（当时 daemon 未起）不作本半格 | **PASS** |
-| 机外轮换 `44e9446` | §4 无真实 `rotated: YYYY-MM-DD`。操作者确认证据不得写密钥。本帽不代写日期、不勾已轮换 | **attestation pending operator**（**not PASS**） |
+| 机外轮换 `44e9446` | 操作者 2026-09-10：Kimi 与 DeepSeek Key 已全部修改。`rotated: 2026-09-10`。无密钥入库 | **PASS** |
 
-条件 A 整体 **not PASS**（轮换半格未过）。**动工 = NO**。Wave 2/3 仍 lock。不是四柱 GA。
-
-在 §4 证明行存在之前：
-
-- **禁止** 把 `LLM.ENABLED` 设为 true
-- **禁止** `docker compose -f deploy/litellm/docker-compose.yml up`（含 `-d`）
-- 默认保持 `config/default/llm.yml` `ENABLED: false`
-- 根 `docker-compose.yml` **禁止** 焊 litellm 服务
-
-无证明行而开网关 = 用已知泄漏凭据跑数据面。
-
-当前：**attestation pending operator**。条件 A 轮换半格 **not PASS**。down 半格 **PASS** 不等于条件 A PASS。
+条件 A 整体 **PASS**（down + 轮换日期行）。不是四柱 GA。仓库默认仍 `LLM.ENABLED: false`；本机可用 `AUTO_AGENTS_LLM__ENABLED=true` 打开。根 compose 仍禁止焊 litellm 服务。新 Key 禁止提交。

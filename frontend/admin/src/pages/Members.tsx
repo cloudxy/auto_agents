@@ -15,6 +15,7 @@ import {
   type MemberAuditRow, type MemberRow,
 } from '../services/members'
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
+import { useAuthStore } from '../store/useAuthStore'
 
 const { Text } = Typography
 
@@ -39,7 +40,12 @@ const ROLE_COLORS: Record<string, string> = {
   owner: 'gold', admin: 'green', operator: 'blue', viewer: 'default',
 }
 
+/** FR-89 成员写守卫：owner/admin 可操作（页头注释同口径）；只读/经办不渲染写控件（后端 403 为最终防线，RelayGroups/FileTab 同款写法） */
+const MEMBER_WRITER_ROLES = ['owner', 'admin']
+
 const Members: React.FC = () => {
+  const user = useAuthStore((s) => s.user)
+  const canManageMembers = MEMBER_WRITER_ROLES.includes(user?.tenant_role || '')
   const [rows, setRows] = useState<MemberRow[]>([])
   const [audit, setAudit] = useState<MemberAuditRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -127,7 +133,7 @@ const Members: React.FC = () => {
     {
       title: '租户角色', dataIndex: 'tenant_role', width: 140,
       render: (v: string, row: MemberRow) => (
-        row.tenant_role === 'owner'
+        row.tenant_role === 'owner' || !canManageMembers
           ? <Tag color={ROLE_COLORS[v]}>{v}</Tag>
           : (
             <Select
@@ -141,30 +147,30 @@ const Members: React.FC = () => {
     {
       title: '状态', dataIndex: 'is_active', width: 100,
       render: (v: boolean, row: MemberRow) => (
-        row.tenant_role === 'owner'
+        row.tenant_role === 'owner' || !canManageMembers
           ? (v ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>)
           : <Switch size="small" checked={v} onChange={(active) => onToggleActive(row, active)} />
       ),
     },
     {
       title: '操作', width: 160,
-      render: (_: unknown, row: MemberRow) => (
-        row.tenant_role === 'owner'
-          ? <Text type="secondary">所有者</Text>
-          : (
-            <Space size={0}>
-              <Button size="small" type="link" onClick={() => { setResetTarget(row); resetForm.resetFields() }}>重置密码</Button>
-              <Popconfirm
-                title={`删除成员「${row.username}」`}
-                description="账号将被移除且不可恢复（登录即时失效），收件箱随之清空；操作审计保留。"
-                okText="删除" okButtonProps={{ danger: true }} cancelText="取消"
-                onConfirm={() => onDelete(row)}
-              >
-                <Button size="small" type="link" danger>删除</Button>
-              </Popconfirm>
-            </Space>
-          )
-      ),
+      render: (_: unknown, row: MemberRow) => {
+        if (row.tenant_role === 'owner') return <Text type="secondary">所有者</Text>
+        if (!canManageMembers) return <Text type="secondary">—</Text>
+        return (
+          <Space size={0}>
+            <Button size="small" type="link" onClick={() => { setResetTarget(row); resetForm.resetFields() }}>重置密码</Button>
+            <Popconfirm
+              title={`删除成员「${row.username}」`}
+              description="账号将被移除且不可恢复（登录即时失效），收件箱随之清空；操作审计保留。"
+              okText="删除" okButtonProps={{ danger: true }} cancelText="取消"
+              onConfirm={() => onDelete(row)}
+            >
+              <Button size="small" type="link" danger>删除</Button>
+            </Popconfirm>
+          </Space>
+        )
+      },
     },
   ]
 
@@ -173,7 +179,9 @@ const Members: React.FC = () => {
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
              title="成员管理是租户内部事务（owner/admin 可操作）；平台级用户管理请用「用户管理」页（平台超管）" />
       <Space style={{ marginBottom: 12 }}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>添加成员</Button>
+        {canManageMembers && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>添加成员</Button>
+        )}
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
       </Space>
       <Table rowKey="id" size="middle" loading={loading} columns={columns} dataSource={rows} pagination={false} />

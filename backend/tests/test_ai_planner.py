@@ -810,6 +810,11 @@ def ai_client(admin_client, app):
     session.commit = AsyncMock()
     session.flush = AsyncMock()
     session.refresh = AsyncMock()
+    # T-38：task_actor_tenant_id 在端点内 await 解析平台租户（execute 须可等待；
+    # scalar_one_or_none 返回平台租户 id=1，与 conftest._mock_async_db 同构）
+    session.execute = AsyncMock(return_value=MagicMock(
+        scalar_one_or_none=MagicMock(return_value=1),
+    ))
     app.dependency_overrides[get_async_db] = lambda: session
     yield admin_client
     app.dependency_overrides.pop(get_async_db, None)

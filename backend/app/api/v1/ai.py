@@ -42,7 +42,8 @@ async def create_plan(
 ) -> ApiResponse[AiPlanResponse]:
     """创建 AI 采集计划（draft，target_url 必填；html_snippet 可选降级离线规划）"""
     plan = await service.create_plan(
-        payload, created_by=user.username, tenant_id=task_actor_tenant_id(user),
+        payload, created_by=user.username,
+        tenant_id=await task_actor_tenant_id(user, session),
     )
     await record_audit(session, user, "ai.plan.create", f"ai_plan#{plan.id}",
                  {"target_url": payload.target_url})

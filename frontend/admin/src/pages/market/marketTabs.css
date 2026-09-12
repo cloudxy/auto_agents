@@ -9,3 +9,7 @@
   flex-wrap: nowrap;
   transform: none !important;
 }
+
+.market-catalog-focus td {
+  background: var(--ant-color-primary-bg, #e6f4ff);
+}

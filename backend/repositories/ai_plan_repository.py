@@ -14,6 +14,21 @@ class AiPlanRepository(BaseRepository[AiPlan]):
     def __init__(self, session: AsyncSession):
         super().__init__(model=AiPlan, session=session)
 
+    async def get_by_registered_definition(self, name: str) -> Optional[AiPlan]:
+        """按注册产物的爬虫名查计划（plan_json.registered_definition 反查，T-39 编辑面）
+
+        注册时 orchestrator.register 写入 plan_json["registered_definition"] = 定义名，
+        是 flow 型定义 ↔ 来源计划的唯一关联；取 id 最新的注册计划（删建同名时取最近）。
+        """
+        stmt = (
+            select(AiPlan)
+            .where(AiPlan.plan_json["registered_definition"].as_string() == name)
+            .order_by(AiPlan.id.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_plans(
         self, skip: int = 0, limit: int = 20, status: Optional[str] = None
     ) -> List[AiPlan]:

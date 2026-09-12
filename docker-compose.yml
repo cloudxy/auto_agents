@@ -38,7 +38,9 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     ports:
-      - "3306:3306"   # 宿主机 run.py / setup.sh 走 127.0.0.1
+      # 发布钉 127.0.0.1：MySQL/Redis 是开发弱口令，若绑宿主机全网卡
+      # （"3306:3306" 默认行为）同网段机器可直接连库。需外部访问时显式改绑定并换强口令
+      - "127.0.0.1:3306:3306"   # 宿主机 run.py / setup.sh 走 127.0.0.1
 
   redis:
     image: redis:7-alpine
@@ -56,7 +58,7 @@ services:
       timeout: 3s
       retries: 20
     ports:
-      - "6379:6379"   # 宿主机 run.py / setup.sh 走 127.0.0.1
+      - "127.0.0.1:6379:6379"   # 发布钉 127.0.0.1（同 MySQL，防弱口令外泄）
 
   backend:
     build: .
@@ -69,11 +71,13 @@ services:
     logging: *default-logging
     command: ["uv", "run", "python", "-m", "scripts.runlib.backend", "--no-reload", "--env", "local"]
     ports:
-      - "9111:9111"
+      - "127.0.0.1:9111:9111"   # 发布钉 127.0.0.1：对外暴露开关在这里，不在容器内 HOST
     environment:
       APP_ENV: "local"
       # 容器内必须监听 0.0.0.0（P1-2 修复：API.HOST 默认 127.0.0.1 会让
-      # 发布端口 9111 在容器外不可达，且容器内 HEALTHCHECK 通过造成假象）
+      # 发布端口 9111 在容器外不可达，且容器内 HEALTHCHECK 通过造成假象）。
+      # 这只绑定"容器自己的网卡"≠对外放行；真正的对外暴露开关在 ports: 映射
+      # （上方已钉 127.0.0.1，仅宿主机本机可达）
       AUTO_AGENTS_API__HOST: "0.0.0.0"
       # 端口显式化（缺省与 config/default/api.yml 的 9111 一致）：
       # 改端口时同步上方 ports 映射；下方 healthcheck 从本变量拼接，避免双写漂移

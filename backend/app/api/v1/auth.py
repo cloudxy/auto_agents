@@ -99,18 +99,19 @@ _ROLE_PERMISSIONS = {
     "viewer": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
         'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
+        'menu:relay',
     ],
     "operator": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
         'menu:data', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
-        'menu:llm',
+        'menu:llm', 'menu:relay',
         'btn:create', 'btn:skill:edit',
     ],
     "admin": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
         'menu:users', 'menu:data', 'menu:settings', 'menu:ai', 'menu:skills',
         'menu:members', 'menu:usage', 'menu:platform-ops', 'menu:logs',
-        'menu:llm', 'menu:newapi',
+        'menu:llm', 'menu:newapi', 'menu:relay',
         'btn:create', 'btn:delete', 'btn:schedule', 'btn:skill:edit', 'btn:skill:admin',
     ],
 }

@@ -45,6 +45,9 @@ ALL_ORM_TABLES = {
     "capability_sources",
     "capability_aliases",
     "product_events",
+    # T-35 能力资产导入两表（迁移 043）
+    "asset_import_batches",
+    "asset_import_items",
     # DB 升级 2026-09 Phase B/C 横切功能表（13 张）
     "tags",
     "taggings",
@@ -64,6 +67,14 @@ ALL_ORM_TABLES = {
     "departments",
     "menus",
     "permissions",
+    # 账务/渠道组骨架（018c369，迁移 040）
+    "plans",
+    "tenant_subscriptions",
+    "orders",
+    "relay_groups",
+    "relay_tokens",
+    # 出站拉数钥匙（feat-product-complete T-04，迁移 041）
+    "outbound_keys",
 }
 
 

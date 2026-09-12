@@ -219,3 +219,18 @@ class GatewayConfigUpdateResult(BaseModel):
     gateway_ref: str
     cleared: bool = False
     config: Optional[ChannelConfigInfo] = None
+
+
+class ProbeTriggerRequest(BaseModel):
+    """T-33 / GWT-98.4：立即探测请求（对单个网关渠道发起一次探针）"""
+
+    gateway_ref: str = Field(..., min_length=1, description="网关模型 string 引用")
+
+
+class ProbeTriggerResponse(BaseModel):
+    """立即探测回执：触发即返回（accepted + batch_id），探测在后台执行不阻塞轮询循环"""
+
+    accepted: bool = Field(..., description="true = 已受理（同渠道在飞时复用原批次）")
+    gateway_ref: str
+    batch_id: str = Field("", description="探测批次 id（manual- 前缀；未受理为空）")
+    reason: Optional[str] = Field(None, description="未受理原因（用户可见中文）")

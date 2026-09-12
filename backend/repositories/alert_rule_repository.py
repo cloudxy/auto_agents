@@ -27,6 +27,24 @@ class AlertRuleRepository(BaseRepository[AlertRule]):
         """返回 enabled=True 的规则列表"""
         return await self.list_all(enabled_only=True)
 
+    async def list_queue_depth_rules(self) -> List[AlertRule]:
+        """全部租户的启用 queue_depth 规则（调度器平台态周期读，P-A04 / FR-105）
+
+        口径：rule_type='queue_depth' AND enabled AND deleted_at IS NULL；
+        调度器在无租户作用域下运行，各租户规则按各自 tenant_id 评估。
+        """
+        stmt = (
+            select(AlertRule)
+            .where(
+                AlertRule.rule_type == "queue_depth",
+                AlertRule.enabled == True,  # noqa: E712
+                AlertRule.deleted_at.is_(None),
+            )
+            .order_by(AlertRule.id.asc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_by_id(self, rule_id: int) -> Optional[AlertRule]:
         """根据 ID 获取规则"""
         return await super().get_by_id(rule_id)

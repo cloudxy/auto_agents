@@ -35,6 +35,26 @@ export const DUTY_LOCAL_PROBE_EMPTY = '还没有本地探针记录。下次探�
 export const DUTY_LOAD_FAILED = '值班页加载失败。检查网络后重试。'
 export const FORBIDDEN_CHANNEL_EMPTY = '暂无渠道'
 
+/** T-32 三问驾驶舱区级句（edge-states「中转站管控·总览」节，FR-84 同句式，不写第二套） */
+export const CHANNELS_3Q_LOAD_FAILED = '渠道判定加载失败。检查网络后重试。'
+export const EVENTS_3Q_LOAD_FAILED = '事件列表加载失败。检查网络后重试。'
+export const EVENTS_24H_EMPTY = '最近 24 小时还没有事件。'
+export const OFFLINE_LOCAL_HINT = '网络不可用，以下为已加载的本地数据。'
+export const CELL_UNAVAILABLE = '暂不可用'
+export const NO_BUDGET_WINDOW = '未配置预算窗口'
+export const USED_QUOTA_SOURCE_HINT = '最近一次事件记录的窗口用量'
+
+/** T-33 立即探测（GWT-98.4：行内进行中 + 完成行内更新） */
+export const PROBING_TEXT = '探测中…'
+export const PROBE_ACTION = '立即探测'
+export const PROBE_TRIGGER_FAILED = '触发探测失败'
+export const PROBE_DONE = '探测完成，判定与延迟已更新'
+
+/** T-11（GWT-61.1）：探针 tab 最新批次伪装计数——数据源 overview.latest_batch_verdicts，
+ *  文案入共享常量（冻结句纪律：不另起第二套说法） */
+export const PROBE_LATEST_BATCH_LABEL = '最新批次'
+export const PROBE_SPOOF_SUMMARY = (count: number): string => `伪装 ${count} 条`
+
 /** 动作 Tag 映射 */
 export const ACTION_TAG: Record<string, { color: string; text: string }> = {
   disabled: { color: 'red', text: '下线' },
@@ -62,4 +82,18 @@ export const DEFAULT_PAGE_SIZE = 10
 export const parseChannelId = (raw: string): number | undefined => {
   const n = Number(raw.trim())
   return raw.trim() && Number.isInteger(n) && n > 0 ? n : undefined
+}
+
+/**
+ * string gateway_ref → channel_id（数值引用直接取，镜像 backend
+ * `newapi_api._channel_id_from_ref` 的数字分支）。非数值引用的 sha256 映射分支
+ * 依赖 BigInt（构建 target=es5 不可用），**不在前端镜像**——返回 null，调用方以
+ * 「—」降级，不编数据（缺口口径见 03-impl/T-32-evidence.md：建议后端在
+ * channels/probe 响应直接携带 channel_id）。
+ */
+export const channelIdFromRef = (ref: string): number | null => {
+  const text = (ref || '').trim()
+  if (!/^\d+$/.test(text)) return null
+  const value = Number(text)
+  return value > 0 && Number.isSafeInteger(value) ? value : null
 }

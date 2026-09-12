@@ -7,8 +7,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import {
   AGENT_EMPTY, BULK_LIST, CATALOG_EMPTY, COMMAND_EMPTY, ENABLE_HOST, HOST_RUNNING,
-  LIST_CHILD, LISTED_NE_VERIFY, MERGED, NEED_PLATFORM_ADMIN, NEED_PLATFORM_MARKET,
-  OPEN_IN_CATALOG, SOURCE_EMPTY, SUB_NE_HOST, TAB_LABELS, TEAM_EMPTY,
+  GOVERNANCE_PAGE_SIZE, LIST_CHILD, LISTED_NE_VERIFY, MERGED, NEED_PLATFORM_ADMIN,
+  NEED_PLATFORM_MARKET, OPEN_IN_CATALOG, SOURCE_EMPTY, SUB_NE_HOST, TAB_LABELS,
+  TEAM_EMPTY, catalogFocusCopy,
 } from './market/marketCopy'
 import type { AssetRow } from '../services/capabilities'
 
@@ -35,6 +36,7 @@ jest.mock('../services/capabilities', () => ({
   fetchPublicCapability: jest.fn(),
   subscribeCapability: jest.fn(),
   listInstalls: jest.fn(),
+  importAssets: jest.fn(),
 }))
 
 jest.mock('./Skills', () => () => <div>skills-tab</div>)
@@ -150,6 +152,43 @@ test('GWT-37.5 plugin drawer has no bulk-list control', async () => {
   expect(await screen.findByText(OPEN_IN_CATALOG)).toBeInTheDocument()
   expect(screen.getByText(LIST_CHILD)).toBeInTheDocument()
   expect(document.body.textContent).not.toContain(BULK_LIST)
+})
+
+test('IM-17 open in catalog keeps short name', async () => {
+  perm.isPlatformAdmin = true
+  list.mockImplementation((type?: string) => {
+    if (type === 'plugin') {
+      return Promise.resolve({
+        total: 1,
+        items: [row({ id: 9, name: 'pack-a', asset_type: 'plugin' })],
+      })
+    }
+    return Promise.resolve({
+      total: 1,
+      items: [row({
+        id: 10, name: 'pack-a__child-a', title: 'child-a', asset_type: 'skill',
+      })],
+    })
+  })
+  pluginDetail.mockResolvedValue({
+    name: 'pack-a', health_status: 'unknown', bundled_skills: ['child-a'], mcp_servers: {},
+  })
+  renderPage()
+  fireEvent.click(screen.getByRole('tab', { name: '插件' }))
+  expect(await screen.findByText('pack-a')).toBeInTheDocument()
+  fireEvent.click(screen.getByText('详情'))
+  fireEvent.click(await screen.findByText(OPEN_IN_CATALOG))
+  expect(await screen.findByText(catalogFocusCopy('child-a'))).toBeInTheDocument()
+  expect(screen.getByText('pack-a__child-a')).toBeInTheDocument()
+})
+
+test('IM-19 governance catalog table paginates', async () => {
+  list.mockResolvedValue({ total: 1, items: [row()] })
+  renderPage()
+  expect(await screen.findByText('demo-skill')).toBeInTheDocument()
+  expect(document.querySelector('.ant-pagination')).toBeTruthy()
+  expect(screen.getByText('共 1 条')).toBeInTheDocument()
+  expect(GOVERNANCE_PAGE_SIZE).toBe(20)
 })
 
 test('GWT-37.6 listed_at remains after unlist in the row', async () => {

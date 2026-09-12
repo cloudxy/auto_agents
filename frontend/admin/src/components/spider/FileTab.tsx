@@ -4,27 +4,30 @@
  * 数据来源：
  * - fetchSpiderFiles：scrapy/spiders/*.py 文件清单（含未登记文件，registered 标记）
  * - fetchRegistry：DB 注册表（enabled 定义，含 AI 注册的 flow 定义——无对应文件也会列出）
- * 合并策略：文件行补注册表类型；注册表中无文件的定义追加到列表尾部
+ * 合并策略：文件行补注册表类型/参数；注册表中无文件的定义追加到列表尾部
  *
- * 操作（均仅管理员，后端为最终防线）：
- * - 启停开关（写 spider_definitions.enabled）
- * - 新增定义（name/title/type/description，type：api/web/custom/flow）
- * - 编辑元信息（title/description，PATCH /definitions/{name}/meta）
- * - 删除定义（被历史任务引用时后端拒绝，错误信息透出）
+ * 操作（后端为最终防线）：
+ * - 启停开关 / 新增定义（仅管理员，写 spider_definitions.enabled）
+ * - 编辑元信息（title/description/params，按类型分形态，见 EditDefinitionModal）
+ * - 删除定义（被历史任务引用时后端拒绝，拒绝句原样展示在确认弹窗内）
+ * 守卫（FR-103）：编辑/删除=经办（tenant_role ∈ operator/owner/admin，RelayGroups 同款写法）
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Table, Button, Tag, Space, Switch, Empty, Typography, message,
-  Modal, Form, Input, Select, Popconfirm,
+  Modal, Form, Input, Select,
 } from 'antd'
 import { ReloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
 import {
   fetchSpiderFiles, updateDefinition, fetchRegistry,
-  createDefinition, updateDefinitionMeta, deleteDefinition,
+  createDefinition, deleteDefinition,
 } from '../../services/spiders'
 import type { SpiderFile, SpiderInfo } from '../../services/spiders'
 import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
+import { useAuthStore } from '../../store/useAuthStore'
+import { EditDefinitionModal } from './EditDefinitionModal'
 
 const { Text } = Typography
 
@@ -46,13 +49,21 @@ interface DefinitionRow {
   type?: string
   description?: string
   source?: string
+  params?: Record<string, unknown> | null
 }
 
 export interface FileTabProps {
   isAdmin: boolean
 }
 
+/** FR-103 编辑/删除守卫：经办（tenant_role ∈ operator/owner/admin），与 RelayGroups 同写法 */
+const META_EDITOR_ROLES = ['operator', 'owner', 'admin']
+
 export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
+  const user = useAuthStore((s) => s.user)
+  const canManageMeta = META_EDITOR_ROLES.includes(user?.tenant_role || '')
+  const navigate = useNavigate()
+
   const [rows, setRows] = useState<DefinitionRow[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -61,10 +72,13 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
   const [creating, setCreating] = useState(false)
   const [createForm] = Form.useForm()
 
-  // 编辑元信息弹窗
+  // 编辑元信息弹窗（表单本体在 EditDefinitionModal）
   const [editRow, setEditRow] = useState<DefinitionRow | null>(null)
-  const [editing, setEditing] = useState(false)
-  const [editForm] = Form.useForm()
+
+  // 删除确认弹窗（拒绝句留在弹窗内原样展示）
+  const [deleteRow, setDeleteRow] = useState<DefinitionRow | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const loadRows = useCallback(async () => {
     setLoading(true)
@@ -86,6 +100,7 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
           enabled: f.enabled ?? (reg ? true : null),
           type: reg?.type,
           description: reg?.description,
+          params: reg?.params,
         }
       })
       // 注册表中无对应文件的定义（如 AI 注册的 flow 爬虫）追加到尾部
@@ -99,6 +114,7 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
           enabled: true,
           type: s.type,
           description: s.description,
+          params: s.params,
         })
       })
       setRows(merged)
@@ -144,41 +160,26 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
     }
   }
 
-  const onEditMeta = async () => {
-    if (!editRow) return
+  const onDeleteConfirm = async () => {
+    if (!deleteRow) return
     try {
-      const values = await editForm.validateFields()
-      setEditing(true)
-      await updateDefinitionMeta(editRow.name, {
-        title: values.title.trim(),
-        ...(values.description !== undefined ? { description: values.description } : {}),
-      })
-      message.success(`定义 ${editRow.name} 元信息已更新`)
-      setEditRow(null)
+      setDeleting(true)
+      await deleteDefinition(deleteRow.name)
+      message.success(`定义 ${deleteRow.name} 已删除`)
+      setDeleteRow(null)
       loadRows()
     } catch (error) {
-      if (isFormValidateError(error)) return
-      message.error(apiErrorMessage(error, '更新失败'))
+      // 被历史任务引用时后端返回业务错误：拒绝句原样展示在确认弹窗内（含 #任务号），弹窗保持打开
+      setDeleteError(apiErrorMessage(error, '删除失败'))
     } finally {
-      setEditing(false)
-    }
-  }
-
-  const onDelete = async (row: DefinitionRow) => {
-    try {
-      await deleteDefinition(row.name)
-      message.success(`定义 ${row.name} 已删除`)
-      loadRows()
-    } catch (error) {
-      // 被任务引用时后端返回业务错误，透出具体提示
-      message.error(apiErrorMessage(error, '删除失败'))
+      setDeleting(false)
     }
   }
 
   const columns: ColumnsType<DefinitionRow> = useMemo(() => [
     { title: '爬虫', dataIndex: 'name', key: 'name',
       render: (name: string, record: DefinitionRow) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text strong>{record.title || name}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>{name}</Text>
         </Space>
@@ -216,27 +217,20 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
     {
       title: '操作', key: 'action', width: 150,
       render: (_: unknown, record: DefinitionRow) =>
-        record.registered && isAdmin ? (
+        record.registered && canManageMeta ? (
           <Space size="small">
             <Button
               type="link" size="small" icon={<EditOutlined />}
-              onClick={() => {
-                setEditRow(record)
-                editForm.setFieldsValue({ title: record.title || record.name, description: record.description || '' })
-              }}
+              onClick={() => setEditRow(record)}
             >
               编辑
             </Button>
-            <Popconfirm
-              title={`确认删除定义 ${record.name}？`}
-              description="存在历史任务引用时将被拒绝。"
-              okText="删除"
-              okButtonProps={{ danger: true }}
-              cancelText="取消"
-              onConfirm={() => onDelete(record)}
+            <Button
+              type="link" danger size="small" icon={<DeleteOutlined />}
+              onClick={() => { setDeleteError(null); setDeleteRow(record) }}
             >
-              <Button type="link" danger size="small" icon={<DeleteOutlined />}>删除</Button>
-            </Popconfirm>
+              删除
+            </Button>
           </Space>
         ) : (
           <Text type="secondary" style={{ fontSize: 12 }}>
@@ -245,7 +239,7 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
         ),
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [isAdmin, rows])
+  ], [isAdmin, canManageMeta, rows])
 
   return (
     <>
@@ -271,7 +265,22 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
         rowKey="name"
         loading={loading}
         pagination={false}
-        locale={{ emptyText: <Empty description="未发现爬虫定义" /> }}
+        locale={{
+          // GWT-103.4/104.3 空态冻结句（edge-states 屏：采集方案 tab）：主句+说明+次链，不是失败句
+          emptyText: (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={(
+                <Space orientation="vertical" size={0}>
+                  <Text>还没有采集方案。</Text>
+                  <Text type="secondary">创建入口在 AI 采集规划。</Text>
+                </Space>
+              )}
+            >
+              <Button type="primary" onClick={() => navigate('/ai')}>去 AI 采集规划</Button>
+            </Empty>
+          ),
+        }}
       />
 
       {/* 新增定义弹窗 */}
@@ -313,29 +322,30 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
         </Form>
       </Modal>
 
-      {/* 编辑元信息弹窗（名称/类型不可改） */}
-      <Modal
-        title={`编辑定义元信息${editRow ? `：${editRow.name}` : ''}`}
-        open={!!editRow}
-        onOk={onEditMeta}
+      {/* 编辑元信息弹窗（名称/类型不可改；参数区按类型分形态） */}
+      <EditDefinitionModal
+        row={editRow}
         onCancel={() => setEditRow(null)}
-        confirmLoading={editing}
-        okText="保存"
+        onSaved={() => { setEditRow(null); loadRows() }}
+      />
+
+      {/* 删除确认弹窗：被引用时后端拒绝句原样展示（含 #任务号），弹窗保持打开 */}
+      <Modal
+        title={`确认删除定义${deleteRow ? `：${deleteRow.name}` : ''}`}
+        open={!!deleteRow}
+        onOk={onDeleteConfirm}
+        onCancel={() => setDeleteRow(null)}
+        confirmLoading={deleting}
+        okText="删除"
+        okButtonProps={{ danger: true }}
         cancelText="取消"
         destroyOnHidden
         width={520}
       >
-        <Form form={editForm} layout="vertical" preserve={false}>
-          <Form.Item label="爬虫名">
-            <Input value={editRow?.name} disabled />
-          </Form.Item>
-          <Form.Item name="title" label="展示标题" rules={[{ required: true, message: '请输入展示标题' }]}>
-            <Input allowClear />
-          </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-        </Form>
+        <Space orientation="vertical" size={4}>
+          <Text>删除后定义不可恢复；存在历史任务引用时将被拒绝。</Text>
+          {deleteError && <Text type="danger" data-testid="delete-reject-reason">{deleteError}</Text>}
+        </Space>
       </Modal>
     </>
   )

@@ -69,6 +69,12 @@ TENANT_EXEMPT_TABLES: "tuple[str, ...]" = (
     # 产品事实（T-12 / ADR-0016）：tenant_id 是事件主语可 NULL，非 Mixin。
     # 不豁免则租户态 UPDATE 注入打不中匿名行，且「有列⇒Mixin或豁免」S4 会红。
     "product_events",
+    # 导入批次/明细（T-35 / ADR-0023 / 迁移 043）：平台级 tenant_id 恒 NULL，
+    # 禁止 TenantMixin；与 product_events 同款同 PR 登记（PIT-3）。
+    "asset_import_batches",
+    "asset_import_items",
+    # 套餐价目：平台级目录，无 tenant_id 列（防御性声明）
+    "plans",
 )
 
 # 平台共享读表：tenant_scope 读注入保留平台公共行（tenant_id IS NULL 可见，
