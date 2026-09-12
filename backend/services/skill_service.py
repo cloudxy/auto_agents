@@ -166,12 +166,16 @@ class SkillService:
         missing_names = [name for name in existing if name not in dir_names]
         for name in missing_names:
             existing[name].sync_state = "missing"
+        retracted_assets = await self._retract_missing_assets(missing_names)
 
         job.total = len(dirs)
         job.succeeded = succeeded
         job.failed = failed
         job.status = "done"
-        job.detail = {"failed": failed_names, "missing": missing_names}
+        job.detail = {
+            "failed": failed_names, "missing": missing_names,
+            "retracted": retracted_assets,
+        }
         await self.session.flush()
         # ADR-0007 D2：快照先于 commit（job 属性 expire 后读取会抛 MissingGreenlet）
         summary = {
@@ -180,6 +184,7 @@ class SkillService:
             "failed": failed,
             "failed_names": failed_names,
             "missing": missing_names,
+            "retracted_assets": retracted_assets,
             "job_id": job.id,
         }
         if summary["total"] == 0:
@@ -259,6 +264,22 @@ class SkillService:
             await CapabilityService(self.session).upsert_skill_asset(skill)
         except Exception as exc:  # noqa: BLE001 目录同步失败不阻断扫描主路径
             logger.warning(f"asset 目录同步失败（忽略） | skill={skill.name} err={exc}")
+
+    async def _retract_missing_assets(self, names: list[str]) -> list[str]:
+        """源目录已删的技能：目录镜像行软收回（FR-88，GWT-88.1）
+
+        失败仅告警不阻断扫描主路径——与 _sync_asset 同口径（目录层是投影，
+        不反噬扫描事务）。
+        """
+        if not names:
+            return []
+        try:
+            from backend.services.capability_service import CapabilityService
+
+            return await CapabilityService(self.session).retract_skill_assets(names)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"asset 目录收回失败（忽略） | names={names} err={exc}")
+            return []
 
     async def _mark_parse_error(
         self, skill_dir: Path, root: Path, existing: Optional[Skill]

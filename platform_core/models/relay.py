@@ -27,7 +27,11 @@ class RelayGroup(TenantMixin, Base):
 
 
 class RelayToken(TenantMixin, Base):
-    """租户虚拟令牌。key_hash 唯一；明文不落库。"""
+    """租户虚拟令牌。key_hash 唯一；明文不落库。
+
+    041 expand：gateway_key_id / spend_synced_at（ADR-0019 网关引用）。
+    gateway_key_id NULL=040 骨架签发、从未登记网关的行；新签发必写。
+    """
 
     __tablename__ = "relay_tokens"
 
@@ -43,3 +47,11 @@ class RelayToken(TenantMixin, Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True, comment="最近使用")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
     note = Column(Text, nullable=True, comment="备注")
+    gateway_key_id = Column(
+        String(191), nullable=True, unique=True,
+        comment="LiteLLM 虚拟 Key 稳定引用（不透明）；NULL=骨架签发未登记网关。不是 DSN、不是 master",
+    )
+    spend_synced_at = Column(
+        DateTime(), nullable=True,
+        comment="最近一次网关 spend 回写 used_tokens 的时刻；NULL=从未同步",
+    )

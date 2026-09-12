@@ -1,7 +1,7 @@
-"""能力市场公开读模型：查询侧 FR-33 闸再 COUNT/LIMIT（PIT-5）。"""
+"""能力市场公开读模型：查询侧 FR-33 闸再 COUNT/LIMIT（PIT-5）+ FR-80 测试种子闸。"""
 from typing import Optional
 
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.power_market.aliases import AliasWriter
@@ -35,6 +35,9 @@ from backend.services.power_market.types import (
     PUBLIC_ASSET_TYPES,
     PUBLIC_HOSTS,
     READABLE_ASSET_TYPES,
+    SEED_DESC_MARKER,
+    SEED_NAME_PREFIX,
+    SEED_TITLE_PREFIX,
     PatchInstallRequest,
     PatchLicenseOverrideRequest,
     PatchListingRequest,
@@ -75,13 +78,36 @@ def _license_ok(row: CapabilityAsset) -> bool:
     return (row.license or "") in DEFAULT_ALLOWED_LICENSES
 
 
+def _seed_clause():
+    """FR-80 测试种子谓词（读模型层单点）：短名 nfr01qc2-* ∨ 标题「NFR卡片」开头 ∨ 描述含标记。
+
+    三支 coalesce 到空串——NULL 列不是"未知种子"，是与 _row_is_seed 同口径的
+    非种子（SQL 三值逻辑下 or_ 出 NULL 会把 listed 行整个挡出商店）。
+    """
+    return or_(
+        func.coalesce(func.lower(CapabilityAsset.name), "").like(f"{SEED_NAME_PREFIX}%"),
+        func.coalesce(CapabilityAsset.title, "").like(f"{SEED_TITLE_PREFIX}%"),
+        func.coalesce(CapabilityAsset.description, "").like(f"%{SEED_DESC_MARKER}%"),
+    )
+
+
+def _row_is_seed(row: CapabilityAsset) -> bool:
+    """FR-80 行级种子判定——与 _seed_clause 同口径（详情/订阅走同一闸）。"""
+    return (
+        (row.name or "").lower().startswith(SEED_NAME_PREFIX)
+        or (row.title or "").startswith(SEED_TITLE_PREFIX)
+        or SEED_DESC_MARKER in (row.description or "")
+    )
+
+
 def _fr33_clause():
-    """上架∈listed∪coming_soon ∩ 治理∈stable∪recommended ∩ 许可过闸 ∩ 非软删。"""
+    """上架∈listed∪coming_soon ∩ 治理∈stable∪recommended ∩ 许可过闸 ∩ 非软删 ∩ 非测试种子（FR-80）。"""
     return (
         CapabilityAsset.listing_state.in_(LISTING_VISIBLE),
         CapabilityAsset.status.in_(GOVERNANCE_PUBLIC),
         CapabilityAsset.deleted_at.is_(None),
         _license_clause(),
+        not_(_seed_clause()),
     )
 
 
@@ -131,6 +157,8 @@ def _row_is_fr33(row: CapabilityAsset) -> bool:
     if row.listing_state not in LISTING_VISIBLE:
         return False
     if row.status not in GOVERNANCE_PUBLIC:
+        return False
+    if _row_is_seed(row):  # FR-80：种子翻成 listed 也不进公开详情/订阅
         return False
     return _license_ok(row)
 

@@ -14,8 +14,22 @@ from platform_core.exceptions import BusinessException, NotFoundException
 class TestSpiderRegistryEndpoint:
     """/spiders/registry 端点（配置驱动，无 DB 依赖）"""
 
-    def test_registry_returns_types_and_spiders(self, admin_client):
-        resp = admin_client.get("/api/v1/spiders/registry")
+    def test_registry_returns_types_and_spiders(self, db_client, viewer_client, db_session):
+        """T-41 钉改写：清单来自 DB 登记行；demo 爬虫不再经配置兜底下发"""
+        import asyncio
+
+        from factories import build_spider_definition
+
+        async def _seed():
+            async with db_session() as s:
+                s.add(build_spider_definition(
+                    name="zhihu_feed", title="知乎推荐流", type="web"))
+                s.add(build_spider_definition(
+                    name="generic", title="自定义采集（免代码）", type="custom"))
+                await s.commit()
+
+        asyncio.run(_seed())
+        resp = db_client.get("/api/v1/spiders/registry")
         assert resp.status_code == 200
         body = resp.json()["data"]
 
@@ -23,9 +37,11 @@ class TestSpiderRegistryEndpoint:
         assert {"api", "web"} <= type_keys
 
         spider_map = {s["name"]: s for s in body["spiders"]}
-        assert "example" in spider_map
-        assert spider_map["openweather"]["type"] == "api"
+        # GWT-104.1：demo 爬虫不出现；业务爬虫正常下发
+        assert "example" not in spider_map
+        assert "openweather" not in spider_map
         assert spider_map["zhihu_feed"]["type"] == "web"
+        assert spider_map["generic"]["type"] == "custom"
 
     def test_registry_fields_drive_dynamic_form(self, admin_client):
         """类型的 fields 必须带 name/label/kind（前端动态表单契约）"""

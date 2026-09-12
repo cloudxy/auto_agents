@@ -44,6 +44,13 @@ async def _seed(db_session) -> None:
             User(username="twin-user", email="twin-b@x.local",
                  password_hash=get_password_hash("twin-pass-123"),
                  role="viewer", tenant_id=tb.id, tenant_role="viewer"),
+            # FR-83：跨租户同名 owner（邮箱不同、密码不同）——邮箱登录进本企业
+            User(username="boss", email="boss@a-mail.test",
+                 password_hash=get_password_hash("a-owner-pass-123"),
+                 role="admin", tenant_id=ta.id, tenant_role="owner"),
+            User(username="boss", email="boss@b-mail.test",
+                 password_hash=get_password_hash("b-owner-pass-123"),
+                 role="admin", tenant_id=tb.id, tenant_role="owner"),
         ])
         await s.commit()
         # 软删用户（密码正确）：deleted_at 过滤 → 401（直接 UPDATE 路径，不依赖 is_active）
@@ -59,6 +66,7 @@ async def _seed(db_session) -> None:
                         .values(deleted_at=func.now()))
         await s.commit()
         STATE["default_id"] = default.id
+        STATE["a_id"] = ta.id
         STATE["b_id"] = tb.id
 
 
@@ -70,7 +78,11 @@ def seeded(db_session):
 
 # 本文件 db_client 走真链路（登录/注册限流计数落本机 Redis，5 次/900s 跨轮次存活），
 # 固定用户名会被 401 消歧用例喂爆、testclient IP 会被全仓注册用例累计 → 200 变 429。逐用例清零。
-_LOGIN_FAIL_USERS = ("dup-user", "twin-user", "gone-user", "pub-reg-user")
+_LOGIN_FAIL_USERS = (
+    "dup-user", "twin-user", "gone-user", "pub-reg-user",
+    # FR-83 邮箱标识失败用例（Redis 计数跨轮次存活，逐用例清零防 429）
+    "boss@a-mail.test", "nobody@nowhere.test", "gone@x.local",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -163,3 +175,53 @@ def test_login_projects_is_platform_admin_false_for_tenant(db_client):
     data = resp.json()["data"]
     assert "is_platform_admin" in data
     assert data["is_platform_admin"] is False
+
+
+# ---------- FR-83 注册邮箱能登录（contract §7.6：含 @ 走 email 全局唯一查找） ----------
+
+
+def test_email_login_enters_own_tenant_not_other(db_client):
+    """GWT-83.1 + 83.4：跨租户同名 owner，邮箱+正确密码 → 进本企业（A），不进 B"""
+    resp = db_client.post("/api/v1/auth/login",
+                          json={"username": "boss@a-mail.test",
+                                "password": "a-owner-pass-123"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["access_token"]
+    assert data["tenant_id"] == STATE["a_id"]
+    assert data["tenant_id"] != STATE["b_id"]
+
+    # 对称：B 的邮箱进 B
+    resp_b = db_client.post("/api/v1/auth/login",
+                            json={"username": "boss@b-mail.test",
+                                  "password": "b-owner-pass-123"})
+    assert resp_b.status_code == 200, resp_b.text
+    assert resp_b.json()["data"]["tenant_id"] == STATE["b_id"]
+
+
+def test_unknown_email_and_wrong_password_same_sentence(db_client):
+    """GWT-83.2：未知邮箱与（已知邮箱）错密码同 code 同句，防账号枚举"""
+    unknown = db_client.post("/api/v1/auth/login",
+                             json={"username": "nobody@nowhere.test",
+                                   "password": "whatever-9"})
+    wrong_pw = db_client.post("/api/v1/auth/login",
+                              json={"username": "boss@a-mail.test",
+                                    "password": "wrong-pass-9"})
+    assert unknown.status_code == 401
+    assert wrong_pw.status_code == 401
+    body_unknown = unknown.json()
+    body_wrong = wrong_pw.json()
+    assert body_unknown["code"] == "AUTH_FAILED"
+    assert body_wrong["code"] == "AUTH_FAILED"
+    # 同句：message 完全一致（不因「邮箱是否存在」分叉）
+    assert body_unknown["message"] == body_wrong["message"]
+    assert "用户名或密码" in body_wrong["message"]
+
+
+def test_soft_deleted_user_email_login_rejected(db_client):
+    """软删行（deleted_at 置位）按邮箱登录同样 401——email 路径过滤软删行"""
+    resp = db_client.post("/api/v1/auth/login",
+                          json={"username": "gone@x.local",
+                                "password": "gone-pass-123"})
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "AUTH_FAILED"

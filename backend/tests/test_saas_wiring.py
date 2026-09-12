@@ -24,7 +24,9 @@ async def _tenant(db_session, slug="wire", **quota) -> int:
 
 @pytest.mark.asyncio
 async def test_enqueue_carries_tenant_and_quota_rejects(db_session, monkeypatch):
-    """enqueue 带 tenant_id；超并发配额 429 QUOTA_EXCEEDED"""
+    """enqueue 带 tenant_id；满额信封用户可见（T-12/FR-87 金标改写，PIT-2）：
+    入队边界不再把 429/QUOTA_EXCEEDED 裸交前端；执法本体（QuotaService 直调）
+    内部码仍 QUOTA_EXCEEDED——留给验收。"""
     from unittest.mock import AsyncMock, MagicMock
 
     tid = await _tenant(db_session, "w1", task_concurrency=1)
@@ -50,14 +52,22 @@ async def test_enqueue_carries_tenant_and_quota_rejects(db_session, monkeypatch)
             def model_validate(x, t):
                 return t
 
-        from backend.services.quota_service import PLAN_FULL_CTA, PLAN_FULL_USER, QuotaExceededException
+        from platform_core.exceptions import BusinessException
+        from backend.services.quota_service import QuotaExceededException, QuotaService
 
-        with pytest.raises(QuotaExceededException) as ei:
+        with pytest.raises(BusinessException) as ei:
             await svc.enqueue("w-spid", params="{}", tenant_id=tid)
-        assert ei.value.code == "QUOTA_EXCEEDED"
-        assert "任务并发" in ei.value.message
-        assert PLAN_FULL_USER in ei.value.message
-        assert PLAN_FULL_CTA in ei.value.message
+        assert ei.value.code == "TASK_QUOTA_LIMIT_REACHED"
+        assert ei.value.status_code != 429
+        assert "已达配额上限" in ei.value.message
+        assert "请联系企业管理员" in ei.value.message
+        assert "QUOTA_EXCEEDED" not in ei.value.message
+        assert "429" not in ei.value.message
+        # 执法本体不动：QuotaService 直调仍抛内部类型（内部码留给验收）
+        assert ei.value.__cause__ is not None
+        with pytest.raises(QuotaExceededException) as inner:
+            await QuotaService(s).check_task_concurrency(tid)
+        assert inner.value.code == "QUOTA_EXCEEDED"
 
 
 @pytest.mark.asyncio
@@ -287,20 +297,46 @@ async def test_wizard_test_crawl_result_stays_in_enqueue_tenant(db_session):
             assert rows == []
 
 
-def test_platform_admin_run_rejects_no_ownerless_task(
-    db_client, platform_admin_client, db_session,
+def test_platform_admin_run_enqueues_as_platform_tenant_no_ownerless(
+    db_client, platform_admin_client, db_session, monkeypatch,
 ):
-    """GWT-09.4：平台超管无企业空间走租户任务提交 → 拒绝入队，无无主任务"""
+    """GWT-09.4 不变量（无无主任务）在 T-38 / FR-102 后的新金标：
+
+    平台超管入队 → 归属平台租户（slug=platform 种子行），不再吃「没有企业身份，
+    无法入队」（契约 §5 已裁：该拒绝为 T-38 改解析对象）；任务行 tenant_id 恒非
+    NULL——「无主任务」仍为零。种子行缺失的 fail loud 分支见
+    test_t38_platform_tenant_enqueue.py。"""
+    from stubs import FakeRedis, seed_worker_heartbeat
+
+    fake = FakeRedis()
+    seed_worker_heartbeat(fake)
+
+    import backend.services.quota_service as quota_mod
+    import backend.services.spider_task_service as svc_mod
+    monkeypatch.setattr(svc_mod, "get_async_redis", lambda: fake)
+    monkeypatch.setattr(quota_mod, "get_async_redis", lambda: fake)
+
+    async def _seed():
+        async with db_session() as s:
+            platform = Tenant(slug="platform", name="平台租户")
+            s.add(platform)
+            await s.commit()
+            return int(platform.id)
+
+    ptid = asyncio.run(_seed())
+
     resp = platform_admin_client.post(
         "/api/v1/spiders/run",
         json={"spider_name": "example", "params": "{}"},
     )
-    assert resp.status_code == 400, resp.text
-    assert "没有企业身份" in resp.json()["message"]
+    assert resp.status_code == 200, resp.text
+    assert "没有企业身份" not in resp.json()["message"]
 
     async def _check():
         async with db_session() as s:
-            assert (await s.execute(select(SpiderTask))).scalars().all() == []
+            rows = (await s.execute(select(SpiderTask))).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].tenant_id == ptid  # 归属平台租户，非无主任务
 
     asyncio.run(_check())
 
