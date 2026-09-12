@@ -44,6 +44,8 @@ services:
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-sk-CHANGE_ME_SALT}
       STORE_MODEL_IN_DB: "True"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     volumes:
       - ${LITELLM_CONFIG:-./config.yaml.example}:/app/config.yaml:ro
