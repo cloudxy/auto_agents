@@ -3,8 +3,8 @@ feature: feat-product-complete
 lane: L4
 appetite: "program; three waves C 6-10pw + U 4-7pw + A 5-8pw, overlap discounted, stop-line >21pw; operator: chain hats, do not wait for 继续"
 current_hat: deliver
-hats_done: [define, shape, implement, verify, review, qc]
-phase: Spawned
+hats_done: [define, shape, implement, verify, review, qc, deliver]
+phase: Closed
 path: default
 manager_lineage:
   - {window: Grok CLI, span: "2026-09-10 23:30 – 2026-09-11 01:10", note: "signals→define r1-r3→shape 第一拍（contract v1 + ADR-0019/0020/0021）"}
@@ -288,6 +288,26 @@ gates:
       写面例外+QA-3 注记）+ frontend 微修 Settings 写面收紧（jest 6/6+build 绿）。
       IMPL-QA-3 维持既有（r13 金标）；QA-4 三缺口转后续票账本；QA-5 真库轮进 verify 帽；
       QA-6 过程账终态门禁已覆盖。
+  - name: sdlc-deliver-c1
+    kind: script
+    result: pass
+    cmd: "五闸 @ 743b96b（pytest/arch/migrations/双 build/jest 全量）"
+    exit_code: 0
+    at: "2026-09-12T11:00:00"
+    note: >
+      C1 执行 PASS：1546 passed/39 skipped（skip=MYSQL_FIDELITY 15+T-19 收敛 23+静态 1；
+      qc 指纹记 38 系记账时点差——passed 精确一致、fail/error 0、两轮复跑稳定、增量 skip
+      源自祖先 commit f069aa0，三链取证见 checklist §1 红标块，管理窗裁决为良性、留操作者复核）。
+      checklist.md 落盘；C2-C5 为环境闸待办（开放租户前 C2/C3/C4 必跑）。
+  - name: feature-closed
+    kind: self-review
+    result: pass
+    at: "2026-09-12T11:05:00"
+    note: >
+      L4 全帽完成（define/shape/implement/verify/review/qc/deliver）。三组提交：5f768be（后端）
+      + 2506797（前端）+ 743b96b（工件）；deploy/litellm 外部工作流未动；feature/pm ahead
+      origin/main 11，推送留操作者。六开放问（Q-VOICE/PRICE/MARKET-USER/AGPL/OPS-COLLECT/
+      Q-C-REG）仍待操作者，答案落地时按新工作开票。
   - name: openqopen-gate-exemption
     kind: script
     result: null
