@@ -1,0 +1,394 @@
+# state.yaml — feat-product-complete 进度唯一事实源
+feature: feat-product-complete
+lane: L4
+appetite: "program; three waves C 6-10pw + U 4-7pw + A 5-8pw, overlap discounted, stop-line >21pw; operator: chain hats, do not wait for 继续"
+current_hat: deliver
+hats_done: [define, shape, implement, verify, review, qc]
+phase: Spawned
+path: default
+manager_lineage:
+  - {window: Grok CLI, span: "2026-09-10 23:30 – 2026-09-11 01:10", note: "signals→define r1-r3→shape 第一拍（contract v1 + ADR-0019/0020/0021）"}
+  - {window: ZCode, span: "2026-09-11 01:16 起（用户：grok已经执行完了，你继续）", note: "接管；define v1.3 增补 + v1.4 返工；双评审并案中"}
+  - {window: Grok CLI（回光）, span: "2026-09-11 01:43-01:54", note: "shape G-fresh r1 fail（spec 变更所致，归档 findings-shape-r1.md）+ Wave A define 复审 fail QA-31..38；现挂起等待操作者，勿在该窗口输入"}
+concurrent_window_warning: >
+  Grok 进程（PID 76339）仍存活且 01:54 又写盘一次。其窗口停在「等待 QA-31 操作者钉死
+  queue_depth」挂起态。本 state 由 ZCode 管理窗维护；操作者已由原话推导钉死（见
+  Q-QUEUE-DEPTH），Grok 窗口不要再输入，避免双管理窗写冲突。
+intent:
+  class: resume
+  quote: "admin 总台新一批不好用反馈（2026-09-11）：软删用户可见可恢复；企业管理增强+平台默认租户保护；侧边栏与内容解耦；LLM 激活改默认语义；中转站总览/探针/事件重做；页头冗余移除+tab 上提；能力资产一键导入；AI 采集规划平台租户可入队；采集任务栏目整改"
+  quote_original: "我不管目前是什么样子，我要求将没有执行完的计划，一次全部执行完毕。我不想再等了。目前产品还有很多不好用的地方，我需要深度梳理。"
+  skip_shape: false
+  at: "2026-09-11"
+operator_override:
+  at: "2026-09-10"
+  action: "execute remaining unfinished four-pillar plans + deep UX梳理 in one session; do not pause for 继续; do not 代选 remaining Qs; do not mark four-pillar GA"
+  intent_quote: "将没有执行完的计划，一次全部执行完毕。产品还有很多不好用的地方，我需要深度梳理。"
+supersedes: null
+upstream:
+  closed_feature: feat-four-pillars-v2
+  frozen_done: "Wave 0+L+1 FR-01..20 + 70..75 + 30..45; T-01..T-33 done; hats Closed"
+  already_landed_outside_frozen: "018c369 线下账务骨架 + 租户渠道组 SKU; Alembic 040"
+lane_judge:
+  Q1_schema: true
+  Q2_auth_tenant: true
+  Q3_external_contract: true
+  Q4_irreversible: true
+  Q5_new_dependency: false
+  Q6_files_or_subprojects: true
+  reason: >
+    收口 Wave 2/3 stub（套餐出口/自助钥匙/租户渠道组）+ 产品不好用梳理 + admin 总台可用性；
+    触及 billing/relay schema、租户鉴权、中转令牌外部契约、订单/订阅不可逆；
+    无新付费依赖（在线支付仍空）；backend + admin + official 多子项目。
+roles_skipped:
+  - data-warehouse-engineer
+  - data-collector
+  - miner
+  - algo
+roles_skipped_why:
+  data-warehouse-engineer: "本特征不是数仓分层；L4 数据线上不需要 warehouse"
+  data-collector: "操作者未要求爬取；不是 collect 票"
+  miner: "无模型训练面"
+  algo: "无算法评估集面"
+roles_invited_beyond_default: [ops, designer, frontend, backend, qa]
+roles_invited_note: >
+  操作者点名深度梳理不好用 → 定义阶段诊断 fan-out（ops 信号池 +
+  frontend/backend/designer/qa 诊断稿）。qc 本阶段只做覆盖缺口诊断，
+  不写 06-deliver/release-opinion.md。
+operator_decisions_inherited:
+  - {id: Q-LLM, decision: "LiteLLM 替换 new-api", at: "2026-09-08"}
+  - {id: Q-BILL, decision: "支付先空着，建账务骨架（线下订单；在线通道 PAYMENT_NOT_CONFIGURED）", at: "2026-09-10"}
+  - {id: Q-RELAY, decision: "租户渠道组 SKU 参考常见中转站（relay_groups + relay_tokens；租户改不了全局熔断）", at: "2026-09-10"}
+  - {id: Q-OPS-DUTY, decision: "不发明电话号码；本机 AUTO_AGENTS_OPS__DUTY_CONTACT=本机操作者 仅启动闸", at: "2026-09-10"}
+  - {id: Q-ADMIN-WAVE, decision: "admin 总台整改并入本特征 define 增补 v1.3（Wave A）：软删可见+恢复、企业管理增强（含平台租户不可改名/不可删）、侧栏单布局树、LLM 激活改『默认』文案、中转站三 tab 呈现重做+页头精简、能力资产一键导入（文件/目录）、AI 规划平台租户可入队、采集方案可编辑可删+剔除无关爬虫；admin 种子账号不可删", at: "2026-09-11"}
+  - {id: Q-QUEUE-DEPTH, decision: "queue_depth 告警接通（调度器读 AlertRule 真实评估+通知，含静默窗）；下架支作废。推导依据=操作者 2026-09-11 原话『警告规则…都要符合采集的具体需要，不能随意设置』（队列堆积是采集运维真实需要；规则已在 UI 摆着却是死规则）。可一句话翻案", at: "2026-09-11"}
+  - {id: Q-OVERVIEW-3Q, decision: "FR-98 总览=值班驾驶舱三问方向（网关能不能用/渠道真不真稳不稳/刚才发生什么+立即探测）。推导依据=操作者『至于总览该如何设计，我希望听听你的意见』→管理窗给出三问方案→操作者回复『你继续』未否决。视觉细节留 designer", at: "2026-09-11"}
+operator_feedback_input: "01-define/operator-feedback-2026-09-11.md（verbatim 原话+13 项 file:line 事实核对+三问答复+冻结句冲突表；ZCode 会话两枚只读探查代理取证）"
+open_questions:
+  - Q-VOICE
+  - Q-PRICE
+  - Q-MARKET-USER
+  - Q-AGPL
+  - Q-OPS-COLLECT
+  - Q-C-REG
+closed_questions:
+  - {id: Q-LLM, status: decided}
+  - {id: Q-BILL, status: decided}
+  - {id: Q-RELAY, status: decided}
+  - {id: Q-OPS-DUTY, status: decided}
+  - {id: Q-QUEUE-DEPTH, status: decided}
+  - {id: Q-OVERVIEW-3Q, status: decided}
+tickets: []
+gates:
+  - name: e2e
+    kind: script
+    result: null
+    reason: "仓库无独立 E2E 套件；verify 帽补 curl/浏览器路径"
+  - name: sdlc-signals
+    kind: script
+    result: pass
+    cmd: "bash /Users/xuyun/auto_agents/.grok/plugins/sdlc-workflow/scripts/check-sdlc.sh --require --hat signals .sdlc/feat-product-complete"
+    exit_code: 0
+    at: "2026-09-10T23:45:00"
+    note: "ops requirement-pool + feedback-digest; diagnosis fan-out on disk"
+  - name: sdlc-define
+    kind: script
+    result: pass
+    cmd: "bash /Users/xuyun/auto_agents/.grok/plugins/sdlc-workflow/scripts/check-sdlc.sh --require --hat define .sdlc/feat-product-complete"
+    exit_code: 0
+    at: "2026-09-10T23:55:00"
+  - name: fresh-context-define-1
+    kind: fresh-context
+    stage: define
+    result: fail
+    findings_total: 13
+    blocker: 0
+    major: 10
+    minor: 3
+    at: "2026-09-10T23:58:00"
+    evidence: "(r1 报告已被后续快照覆盖，结论在本行)"
+    note: "define r1 FAIL QA-01..10 major; HATADVANCE stay define; rework pm only"
+  - name: fresh-context-define-2
+    kind: fresh-context
+    stage: define
+    result: fail
+    findings_total: 6
+    blocker: 0
+    major: 2
+    minor: 4
+    at: "2026-09-11T00:20:00"
+    evidence: "(r2 报告已被覆盖)"
+    note: "define r2 FAIL QA-14/15 major; QA-01..13 independently closed; HATADVANCE stay define; rework_rounds=2 debug_protocol"
+    root_cause: "本轮冻结 Then/漏斗/护栏把仍属开放问的消解写成已验收 oracle"
+  - name: fresh-context-define-3
+    kind: fresh-context
+    stage: define
+    result: pass
+    findings_total: 5
+    blocker: 0
+    major: 0
+    minor: 5
+    at: "2026-09-11T00:45:00"
+    evidence: "(r3 报告已被覆盖)"
+    note: "define r3 PASS (v1.2); QA-14..19 independently closed; QA-20..24 unwaived non-blocking carry→shape"
+  - name: self-review-define
+    kind: self-review
+    result: pass
+    at: "2026-09-11T00:46:00"
+    note: >
+      G-self：冻结集 Wave C 50/51/60/61/87 + Wave U 80-85/88-90/92；FR-91 已移出。
+      不可逆：线下确认收款、令牌签发。六问未代选。不是四柱 GA。进塑形。
+  - name: sdlc-define-addendum
+    kind: script
+    result: pass
+    cmd: "bash /Users/xuyun/.zcode/local-plugins/sdlc-workflow/scripts/check-sdlc.sh --require --hat define /Users/xuyun/auto_agents/.sdlc/feat-product-complete"
+    exit_code: 0
+    at: "2026-09-11T01:35:00"
+    note: >
+      define 增补 r1（v1.3 Wave A FR-93..105，ZCode pm native 直发）。
+      spec=9d394667651359ae7a880bb7434ab59989f0b083915c9bf3123dd4499b7ebb96
+      user-story=667d62b83822f5cd166eb972ff702656814b6d04b332c897ae8042a5bec4c557
+      metrics=f4085d894fb01efbfaaaf0b441e4e7323e8213438d56879ebafa0fafa4840805。
+  - name: fresh-context-define-4
+    kind: fresh-context
+    stage: define
+    result: fail
+    findings_total: 6
+    blocker: 0
+    major: 1
+    minor: 5
+    at: "2026-09-11T01:52:00"
+    evidence: "(r4 报告已被 r5/Grok 报告覆盖)"
+    reviewer_session: "ZCode reviewer agent_2c9b4960"
+    note: >
+      v1.3 增补复审 FAIL QA-25 major（导入路径穿越）+ QA-26..30 minor。
+      v1.4 返工六条全修（r5 与 Grok 双方独立确认）。
+  - name: fresh-context-define-5
+    kind: fresh-context
+    stage: define
+    result: pass-then-superseded
+    findings_total: 3
+    blocker: 0
+    major: 0
+    minor: 3
+    at: "2026-09-11T02:05:00"
+    evidence: "(r5 报告被 Grok 01:54 覆盖；结论在此)"
+    reviewer_session: "ZCode reviewer agent_5822d669"
+    note: >
+      v1.4 复审 PASS（QA-25..30 独立核实已修）；新开 QA-31/32/33 minor
+      （FR-104 前言残留、FR-97 设默认写权矩阵悬空、user-story 版本/区间漂移）。
+      该 PASS 被 Grok 同快照复审（fail 4 major）supersede → 并案回炉。
+  - name: fresh-context-define-5g
+    kind: fresh-context
+    stage: define
+    result: fail
+    findings_total: 8
+    blocker: 0
+    major: 4
+    minor: 4
+    at: "2026-09-11T01:54:00"
+    evidence: .sdlc/feat-product-complete/05-review/findings.md
+    reviewer_session: "Grok 窗口 reviewer"
+    note: >
+      Grok 对同一 v1.4 快照复审 FAIL：QA-31 105.1/105.2 互斥双正常 Then（→Q-QUEUE-DEPTH
+      已钉接通）、QA-32 82.4×FR-102 互否、QA-33 93.5 未按 username/email 拆、QA-34
+      appetite 算术；QA-35..38 minor。与 r5 并案去重：Grok QA-37=r5 QA-31、
+      QA-36=r5 QA-33；r5 QA-32（FR-97 写权）改编号 QA-39。→ 增补周期 rework r2。
+  - name: fresh-context-shape-1
+    kind: fresh-context
+    stage: shape
+    result: fail
+    findings_total: 10
+    blocker: 3
+    major: 6
+    minor: 1
+    at: "2026-09-11T01:43:00"
+    evidence: .sdlc/feat-product-complete/05-review/findings-shape-r1.md
+    reviewer_session: "Grok 窗口 reviewer"
+    note: >
+      shape r1 FAIL：主因 contract v1 只覆盖 v1.2 的 15 FR，Wave A 无票（QA-01/02/03/06/07
+      均由此）；另有契约层独立问题（60.3 双 Then、httpx 夹具空心、list_tokens 性能、
+      51.5/51.9 六态、Q-C-REG 未入表）。define 闭环后 architect 扩展轮逐条消化，本报告
+      作为 architect spawn 的必备输入。
+  - name: sdlc-define-rework-r2
+    kind: script
+    result: pass
+    cmd: "bash /Users/xuyun/.zcode/local-plugins/sdlc-workflow/scripts/check-sdlc.sh --require --hat define /Users/xuyun/auto_agents/.sdlc/feat-product-complete"
+    exit_code: 0
+    at: "2026-09-11T02:45:00"
+    note: >
+      v1.5 并案返工（QA-31..39；Q-QUEUE-DEPTH 接通 / Q-OVERVIEW-3Q 三问已拍板落 spec §9.2）。
+      spec=53ca28763768a13465435e48da920c75fecd99edd94f33824558ba04d8c2f276
+      user-story=009b958fb9c0ca4cb21dee8ad49f6916d1ad4f17e85e9564f1622d8c37a4d0b5
+      metrics=cbefaece（零改动）。root_cause 见 pm return（两可当双正常 Then + 三处未同步）。
+  - name: fresh-context-define-6
+    kind: fresh-context
+    stage: define
+    result: pass
+    findings_total: 1
+    blocker: 0
+    major: 0
+    minor: 1
+    at: "2026-09-11T02:55:00"
+    evidence: .sdlc/feat-product-complete/05-review/findings-define-r6.md
+    reviewer_session: "ZCode reviewer agent_7fa4607f"
+    note: >
+      v1.5 终审 PASS：QA-31..39 九条独立核实全修；闭合句六项+ v1.4 已修句零回退；
+      唯一新开 QA-40 minor（§0 可砍清单幽灵项）→ carry 进 architect 包显式点名不建设。
+  - name: fresh-context-shape-2
+    kind: fresh-context
+    stage: shape
+    result: pass
+    findings_total: 7
+    blocker: 0
+    major: 2
+    minor: 5
+    at: "2026-09-11T03:40:00"
+    evidence: .sdlc/feat-product-complete/05-review/findings.md
+    reviewer_session: "ZCode reviewer agent_2fc4ad51"
+    note: >
+      shape 扩展轮复审 PASS（附条件）：contract v2（T-01..T-42，28 FR 全票）+ ADR-0022/0023 +
+      db-spec/schema.dbml v2 + edge-states v2。SHAPE-QA-01（陈旧票 v1.2 残留）→ 管理窗归档
+      tickets-v1.2-stale-archived/；SHAPE-QA-02/06 → dba 微修 v2.1；SHAPE-QA-03 裁决=权限矩阵为
+      本特征增量口径（经办既有 LLM CRUD 写权保持，落 T-30 注记）；SHAPE-QA-04→T-36、
+      SHAPE-QA-05→T-42 注记；SHAPE-QA-07→编排串行约束（T-12×T-18、T-11 后于 T-31、T-15 后于 T-29）。
+      实施票源=contract §11 表（不建票文件，仓库先例 feat-four-pillars-v2 同构）。
+  - name: sdlc-dba-shape-fix
+    kind: script
+    result: pass
+    cmd: "bash /Users/xuyun/.zcode/local-plugins/sdlc-workflow/scripts/check-sdlc.sh --require --hat dba /Users/xuyun/auto_agents/.sdlc/feat-product-complete"
+    exit_code: 0
+    at: "2026-09-11T03:50:00"
+    note: "dba v2.1 微修（SHAPE-QA-02 列表读路径禁打网关 + SHAPE-QA-06 notifications.user_id 口径）"
+  - name: impl-consolidated-gates
+    kind: script
+    result: pass
+    cmd: "pytest 全量 + arch.sh + db_migrations.sh + admin/official build + admin jest 全量"
+    exit_code: 0
+    at: "2026-09-12T08:10:00"
+    note: >
+      42/42 票后全仓总验证：backend 1546 passed/38 skipped exit 0；arch 0（13红线+4边界+FR-14）；
+      migrations 0（041/042/043/044 可逆）；双端 build 0；admin jest 35 套件/224 测全过。
+  - name: fresh-context-implement-1
+    kind: fresh-context
+    stage: implement
+    result: pass
+    findings_total: 6
+    blocker: 0
+    major: 2
+    minor: 4
+    at: "2026-09-12T08:40:00"
+    evidence: .sdlc/feat-product-complete/05-review/findings.md
+    reviewer_session: "ZCode reviewer agent_e5de3576"
+    note: >
+      implement 终审 PASS：42/42 evidence 完整无缺号；15 份抽样红绿双输出无空声明；
+      冻结红线抽查全过（DSN/内码/平台租户/范围蔓延/六问未代选）；追认 a-h 全裁（8 新码/key_alias/
+      101.5 404/fail-loud/三缺口降级均接受）。IMPL-QA-1/2 两条 major 为规格层回写——已闭环：
+      pm 微修 spec v1.6（GWT-90.1 写者→平台超管）+ architect 微补 contract v2.1（8 码表+60.6
+      写面例外+QA-3 注记）+ frontend 微修 Settings 写面收紧（jest 6/6+build 绿）。
+      IMPL-QA-3 维持既有（r13 金标）；QA-4 三缺口转后续票账本；QA-5 真库轮进 verify 帽；
+      QA-6 过程账终态门禁已覆盖。
+  - name: openqopen-gate-exemption
+    kind: script
+    result: null
+    reason: >
+      check-sdlc OPENQOPEN 红项（exit 6）豁免：六个操作者问题（Q-VOICE/Q-PRICE/Q-MARKET-USER/
+      Q-AGPL/Q-OPS-COLLECT/Q-C-REG）按 spec §0/§9 设计性延后——冻结 FR 集以「不代选不变式」
+      独立于它们（GWT 不含六问绑定解法）；implement 终审已核实六问零代选。不伪造 answered；
+      操作者随时可答，答后本豁免即失效。后续阶段 OPENQOPEN 红项均按本条处理。
+implement_plan:
+  batching: "impl-1/2/3 并行批 → 5 路并发饱和超时事故 → impl-4 起**单路串行**（每会话一票/一链）"
+  serial_constraints:
+    - "T-07 → T-08（relay_service.py；已落）"
+    - "T-29 → T-15 → T-34（已全落）"
+    - "T-31 → T-32 → T-33（已全落）；T-11 后于 T-31 ✓ 可开工"
+    - "T-24 → T-26（已落）；T-04 → 041 迁移 → T-08 用列（已落）→ T-24 链 042（已落）"
+  batches:
+    - {id: impl-1, tickets: "T-01 T-04 T-13 T-16 T-29", at: "2026-09-11T04:00", result: "5/5 绿"}
+    - {id: impl-2, tickets: "T-07+08 T-12 T-19 T-24+26 T-15", at: "2026-09-11T05:00", result: "7 票绿（后端 1414）"}
+    - {id: impl-3, tickets: "T-02 T-05 T-09 T-14 T-10 T-25", at: "2026-09-11T06:00", result: "后端 4 票绿；T-10 落盘但代理超时（复核真绿）；T-25 半成品"}
+    - {id: impl-4-parallel-fail, tickets: "T-25重派 T-31 T-17 T-27 T-38 T-30", at: "2026-09-11T07:00", result: "仅 T-30 绿；5 路超时被杀（机器饱和：单 jest 38min）；教训=禁并行重测"}
+    - {id: serial, tickets: "T-25(重派+修 Users.test/App.menu.test) T-31 T-17 T-27 T-38 T-32+33 T-34 T-28 T-35(迁移043) T-36 T-37 T-39(迁移044)", at: "2026-09-11T09:30-19:30", result: "全绿（admin 29 套件/172 测；backend 1519 passed）"}
+  remaining_queue: "（已清空——42/42 票全部落地，2026-09-12）"
+  completion_note: >
+    2026-09-12 上午续跑（新会话，宿主瘦身+负载回落后 spawn 恢复）：T-40（第 4 次尝试成功）→
+    T-41 → T-42 → T-18 → GWT-98.2 时间炸弹修复（夹具硬编码 2026-09-11T08:00 掉出 24h 窗，
+    非组件回归）→ T-20 → T-21 → T-23 → T-03 → T-06 → T-11 → T-22。
+    T-22 修出真缺陷：refresh_tokens_usage commit 后读 ORM 过期属性（生产 expire_on_commit=True
+    抛 MissingGreenlet → 500+事件丢）；conftest 与生产形态相反是盲区（P-BE-01 家族）。
+    下一拍：implement G-fresh → verify(qa) → review → qc → deliver。
+  host_saturation_note: >
+    （历史）2026-09-11 20:50-21:20 T-40 三连斩：zcode-cli 自身 68% CPU 宿主自饿。
+    2026-09-12 新会话恢复，防饿死纪律（首动作写骨架/定向测试/禁 watch/单路串行）贯穿后续全部票。
+  impl_notes:
+    - "新稳定 code 待 architect 追认：ORDER_ROLE_NOT_ALLOWED/ORDER_ONLINE_UNAVAILABLE/TASK_QUOTA_LIMIT_REACHED/TASK_RUN_ROLE_NOT_ALLOWED/RELAY_TOKEN_ROLE_NOT_ALLOWED/RELAY_GROUP_ROLE_NOT_ALLOWED/OUTBOUND_KEY_ROLE_NOT_ALLOWED/RELAY_GATEWAY_UNAVAILABLE"
+    - "LoginRequest.username max_length 50→100 待追认；gateway_key_id 实存 key_alias（OpenAPI v1.100.0 实读，ADR 以钉 tag 为准）"
+    - "T-19 顺修 T-13 种子谓词 NULL 缺陷（coalesce）；T-24 留 /admin/users require_admin 钉住行为待裁决（r13 钉住测试=租户管理员 200 本租户行）"
+    - "T-09 留 GWT-60.6 写面 403 vs 404 同形待裁决（GWT-70.3 冻结测试钉 403）"
+    - "T-38 包面『兜底建租户』与契约『fail loud』冲突→按契约落，追认口径"
+    - "T-32 三个数据缺口优雅降级（per-channel 24h 聚合端点/窗口用量读 API/channel_id 直带）→ implement 评审裁量"
+    - "T-34 Content 顶距 48→16 全局生效（后续铺页对齐 16 口径）"
+    - "测试基建：conftest 已清 login_fail:*（T-07/08 票顺带）；antd 两字按钮断言用 /恢\s*复/ 形态"
+host_spawn:
+  requested: "sdlc-workflow:<role>"
+  available: [sdlc-workflow:pm, sdlc-workflow:architect, sdlc-workflow:reviewer, sdlc-workflow:qa, sdlc-workflow:designer, sdlc-workflow:dba, sdlc-workflow:ops, sdlc-workflow:frontend, sdlc-workflow:backend, sdlc-workflow:qc, sdlc-workflow:sre, sdlc-workflow:analyst]
+  fallback: general-purpose
+  probed_at: "2026-09-11"
+  probe_type: "ZCode 宿主 Agent 类型表直读"
+  probe_pending: false
+  probe_error: null
+  reason: >
+    Grok 宿主无原生 type（历史走 general-purpose）；ZCode 宿主原生含 sdlc-workflow:<role>。
+    双窗并发期间 state 由最后写入者胜出；01:54 后 ZCode 窗为唯一活跃管理窗。
+rework_rounds: 1
+define_rework_rounds: 3
+stale_artifacts: []
+lane_changes: []
+review_findings:
+  - {id: QA-01, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-02, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-03, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-04, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-05, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-06, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-07, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-08, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-09, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-10, severity: major, status: fixed, note: "r2 independent"}
+  - {id: QA-11, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-12, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-13, severity: minor, status: fixed, note: "r2 independent"}
+  - {id: QA-14, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-15, severity: major, status: fixed, note: "r3 independent"}
+  - {id: QA-16, severity: minor, status: fixed, note: "r3 independent"}
+  - {id: QA-17, severity: minor, status: fixed, note: "r3 independent"}
+  - {id: QA-18, severity: minor, status: fixed, note: "r3 independent"}
+  - {id: QA-19, severity: minor, status: fixed, note: "r3 independent"}
+  - {id: QA-20, severity: minor, status: open, note: "carry to shape（Grok define r3）"}
+  - {id: QA-21, severity: minor, status: open, note: "carry to shape"}
+  - {id: QA-22, severity: minor, status: open, note: "carry to shape"}
+  - {id: QA-23, severity: minor, status: open, note: "carry to shape"}
+  - {id: QA-24, severity: minor, status: open, note: "carry to shape"}
+  - {id: QA-25, severity: major, status: fixed, note: "v1.4 返工; r5+Grok 双确认"}
+  - {id: QA-26, severity: minor, status: fixed, note: "v1.4 返工 (95.7/100.8 拆格)"}
+  - {id: QA-27, severity: minor, status: fixed, note: "v1.4 返工 (104.2/104.4)；前言残留另立 QA-37"}
+  - {id: QA-28, severity: minor, status: fixed, note: "v1.4 返工 (蓝图§8)"}
+  - {id: QA-29, severity: minor, status: fixed, note: "v1.4 返工 (矩阵看权)；写权另立 QA-39"}
+  - {id: QA-30, severity: minor, status: fixed, note: "v1.4 返工 (95.1 保留名)"}
+  - {id: QA-31, severity: major, status: fixed, note: "v1.5; r6 independently closed（Q-QUEUE-DEPTH 接通）"}
+  - {id: QA-32, severity: major, status: fixed, note: "v1.5; r6 independently closed（82.4×102 双向钉边界）"}
+  - {id: QA-33, severity: major, status: fixed, note: "v1.5; r6 independently closed（93.5/93.7/93.8/93.9 拆格）"}
+  - {id: QA-34, severity: major, status: fixed, note: "v1.5; r6 independently closed（§1.7 折算；行加总独立重算吻合）"}
+  - {id: QA-35, severity: minor, status: fixed, note: "v1.5; r6 independently closed"}
+  - {id: QA-36, severity: minor, status: fixed, note: "v1.5; r6 independently closed（story v1.5 区间同步）"}
+  - {id: QA-37, severity: minor, status: fixed, note: "v1.5; r6 independently closed"}
+  - {id: QA-38, severity: minor, status: fixed, note: "v1.5; r6 independently closed"}
+  - {id: QA-39, severity: minor, status: fixed, note: "v1.5; r6 independently closed（FR-97 写权落位）"}
+  - {id: QA-40, severity: minor, status: open, note: "carry：architect 已零建设处理（contract 全文仅禁令）；终验时核对"}
+  - {id: SHAPE-QA-01, severity: major, status: fixed, note: "陈旧票 v1.2 残留归档 tickets-v1.2-stale-archived/；票源=contract §11 表"}
+  - {id: SHAPE-QA-02, severity: major, status: fixed, note: "db-spec v2.1 §12 列表读路径禁打网关"}
+  - {id: SHAPE-QA-03, severity: minor, status: fixed, note: "裁决：spec 矩阵=本特征权限增量；经办既有 LLM CRUD 写权保持；落 T-30 注记"}
+  - {id: SHAPE-QA-04, severity: minor, status: open, note: "T-36 实现包注入 100.7/100.8 UI 锚"}
+  - {id: SHAPE-QA-05, severity: minor, status: open, note: "T-42 实现包注入 105.3 正确口径"}
+  - {id: SHAPE-QA-06, severity: minor, status: fixed, note: "db-spec v2.1 §16.6 user_id=规则创建者"}
+  - {id: SHAPE-QA-07, severity: minor, status: fixed, note: "编排串行约束记入 implement_plan"}
