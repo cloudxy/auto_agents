@@ -16,6 +16,7 @@ MARKET_DETAIL_VIEWED = "market_detail_viewed"
 MARKET_UNINSTALLED = "market_uninstalled"
 MARKET_LISTING_CHANGED = "market_listing_changed"
 MARKET_SOURCE_SYNC_COMPLETED = "market_source_sync_completed"
+MARKET_LIST_PAGED = "market_list_paged"  # T-14（FR-92.5）：公开列表翻页（第 2 页起）
 
 MARKET_EVENT_NAMES = (
     MARKET_SUBSCRIBE_SUCCEEDED,
@@ -26,6 +27,7 @@ MARKET_EVENT_NAMES = (
     MARKET_UNINSTALLED,
     MARKET_LISTING_CHANGED,
     MARKET_SOURCE_SYNC_COMPLETED,
+    MARKET_LIST_PAGED,
 )
 
 # 字面量与 types.py 错误码对齐；本模块禁止 import power_market（R9 环）。
@@ -50,12 +52,14 @@ def _actor(user) -> dict[str, Any]:
 async def emit_market_event(
     session: AsyncSession, event_name: str, *,
     tenant_id: int | None = None, actor_user_id: int | None = None,
-    role: str | None = None, props: dict[str, Any] | None = None,
+    anonymous_id: str | None = None, role: str | None = None,
+    props: dict[str, Any] | None = None,
 ) -> None:
     logger.info(f"上报市场事件 | name={event_name} tenant={tenant_id}")
     await emit_product_event(
         session, event_name, tenant_id=tenant_id,
-        actor_user_id=actor_user_id, role=role, props=props,
+        actor_user_id=actor_user_id, anonymous_id=anonymous_id,
+        role=role, props=props,
     )
 
 
@@ -104,6 +108,20 @@ async def emit_public_detail(session: AsyncSession, item: dict) -> None:
     await emit_market_event(
         session, MARKET_DETAIL_VIEWED,
         props={"type": item.get("asset_type"), "listing_state": item.get("listing_state")},
+    )
+
+
+async def emit_market_list_paged(
+    session: AsyncSession, *, page: int, result_count: int,
+    anonymous_id: str | None = None,
+) -> None:
+    """FR-92.5：公开列表翻到第 2 页起上报。访客事件：无 tenant_id，带 anonymous_id。"""
+    logger.info(
+        f"market_events.emit_market_list_paged | page={page} result_count={result_count}"
+    )
+    await emit_market_event(
+        session, MARKET_LIST_PAGED, anonymous_id=anonymous_id,
+        props={"page": int(page), "result_count": int(result_count)},
     )
 
 

@@ -305,7 +305,8 @@ async def test_registry_db_first():
     svc = SpiderRegistryService.__new__(SpiderRegistryService)
     svc.session = MagicMock()
     definition = SimpleNamespace(
-        name="db_only_spider", title="仅存于 DB", type="web", description="db"
+        name="db_only_spider", title="仅存于 DB", type="web", description="db",
+        params=None,  # T-39 定义参数列（注册表清单透出）
     )
     with patch("backend.services.spider_registry_service.SpiderDefinitionRepository") as repo_cls:
         repo_cls.return_value.list_enabled = AsyncMock(return_value=[definition])
@@ -317,7 +318,7 @@ async def test_registry_db_first():
 
 @pytest.mark.asyncio
 async def test_registry_fallback_to_config_on_db_error():
-    """DB 异常时清单回退配置种子"""
+    """DB 异常时清单回退配置种子（T-41：回退种子同口径滤内部项）"""
     from backend.services.spider_registry_service import SpiderRegistryService
 
     svc = SpiderRegistryService.__new__(SpiderRegistryService)
@@ -327,12 +328,28 @@ async def test_registry_fallback_to_config_on_db_error():
         resp = await svc.registry()
 
     names = {s.name for s in resp.spiders}
-    assert "example" in names and "generic" in names  # 配置种子兜底
+    assert "generic" in names  # 配置种子兜底
+    assert "example" not in names  # demo 爬虫不因兜底混入（GWT-104.1）
 
 
-def test_registry_contains_custom_type_and_generic(admin_client):
-    """注册表端点含 custom 类型与 generic 爬虫（DB 种子或配置兜底均可）"""
-    body = admin_client.get("/api/v1/spiders/registry").json()["data"]
+def test_registry_contains_custom_type_and_generic(db_client, viewer_client, db_session):
+    """注册表端点含 custom 类型与 generic 爬虫（类型来自配置；清单来自 DB 登记行）
+
+    T-41 钉改写：查询成功而可见方案为 0 时不再回退 yml 种子充数
+    （GWT-103.4/104.3），generic 由 DB 登记行下发。
+    """
+    import asyncio
+
+    from factories import build_spider_definition
+
+    async def _seed():
+        async with db_session() as s:
+            s.add(build_spider_definition(
+                name="generic", title="自定义采集（免代码）", type="custom"))
+            await s.commit()
+
+    asyncio.run(_seed())
+    body = db_client.get("/api/v1/spiders/registry").json()["data"]
     type_map = {t["type"]: t for t in body["types"]}
     assert "custom" in type_map
     selector_field = next(
@@ -341,5 +358,5 @@ def test_registry_contains_custom_type_and_generic(admin_client):
     assert selector_field["kind"] == "selectors"
     assert selector_field["required"] is True
 
-    spider_map = {s["name"]: s for s in body["spiders"]}
-    assert spider_map["generic"]["type"] == "custom"
+    spider_map = {s["name"] for s in body["spiders"]}
+    assert "generic" in spider_map

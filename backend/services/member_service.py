@@ -58,16 +58,19 @@ class MemberService:
         if not username or not email or len(password) < 6:
             raise ValidationException(message="username/email 必填，密码至少 6 位", field="payload")
 
-        # 唯一性检查含软删行：users 的 (tenant_id, username) 与全局 email 唯一约束
-        # 不豁免已删行——若只查活行，同名/同邮箱重建会在 flush 时 IntegrityError 500
-        #（已删成员的 username/email 语义为"永久占用"，与"不可恢复"口径一致）
+        # 唯一性检查含软删行（租户自助口径，与用户管理超管路径的「在册释放」
+        # 口径不同，test_deleted_member_not_operable_or_reusable 钉住）：.limit(1)
+        # 是 042 在册化后的多行护栏——同 username/email 可同时存在在册行与
+        # 已删行（用户管理侧释放/恢复所致），scalar_one_or_none 会抛
+        # MultipleResultsFound 500；limit(1) 只判「有无任一行」，语义不变
         exists = (await self.session.execute(
-            select(User).where(User.tenant_id == tenant_id, User.username == username)
+            select(User.id).where(User.tenant_id == tenant_id, User.username == username)
+            .limit(1)
         )).scalar_one_or_none()
         if exists is not None:
             raise ValidationException(message=f"成员名已存在: {username}", field="username")
         email_taken = (await self.session.execute(
-            select(User).where(User.email == email)
+            select(User.id).where(User.email == email).limit(1)
         )).scalar_one_or_none()
         if email_taken is not None:
             raise ValidationException(message=f"邮箱已注册: {email}", field="email")

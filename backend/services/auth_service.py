@@ -71,7 +71,12 @@ class AuthService:
         self.user_repo = UserRepository(session)  # 注入 UserRepository
 
     async def authenticate(self, username: str, password: str) -> Optional[dict]:
-        """验证用户（T5 决策 A：多行候选 + 密码消歧）
+        """验证用户（T5 决策 A：多行候选 + 密码消歧；FR-83：标识含 @ 走 email）
+
+        标识解析（FR-83 / contract §7.6）：
+        - 含 "@" → 注册邮箱查找（users.email 全局 UNIQUE，单行；软删行不
+          参与）。邮箱统一小写匹配（signup 与 validate_email 均按小写落库）。
+        - 不含 "@" → 跨租户 username 多行候选 + 密码消歧（原行为不变）。
 
         跨租户同名是产品既定能力（各企业各建"张三"），get_by_username 返回
         全部候选行；凭据即身份——逐行验密码，唯一命中者胜出：
@@ -79,14 +84,22 @@ class AuthService:
         - 1 行：照常验证；
         - 多行：唯一命中胜出；多行皆中/皆不中 → None。401 文案不泄露命中数
           （"多中"本身即账号枚举信号）。
+        未知标识（邮箱/短名）与错密码同走 None → router 同句 401（GWT-83.2，
+        防账号枚举）；到期在密码命中后判定、异常另句（GWT-83.5，FR-08）。
 
         Returns:
             用户信息 dict，如果验证失败返回 None
         """
         logger.info(f"尝试验证用户: {username}")
+        identifier = (username or "").strip()
 
-        # 1. 通过 Repository 查询全部候选（跨租户口径见 get_by_username R13 声明）
-        candidates = await self.user_repo.get_by_username(username)
+        # 1. 标识解析：含 @ 走 email（全局唯一），否则 username 多行候选
+        # （跨租户口径见 get_by_username R13 声明）
+        if "@" in identifier:
+            candidates = await self.user_repo.get_login_candidates_by_email(
+                identifier.lower())
+        else:
+            candidates = await self.user_repo.get_by_username(identifier)
 
         if not candidates:
             # 时序对齐（P1-9）：对不存在的用户做一次等代价哈希校验
@@ -205,8 +218,9 @@ class AuthService:
                 status_code=503
             )
 
-        # 1. 唯一性检查：username 按 (default 租户, username) 口径（含软删行，
-        #    与 (tenant_id, username) 唯一约束及 T4 占位口径一致）；email 全局唯一
+        # 1. 唯一性检查：username 按 (default 租户, username) 在册口径、email 全局
+        #    在册口径（042 唯一键在册化 / T-24 FR-93：软删行释放标识，查重与
+        #    DB 约束同口径——否则应用放行 DB 拒绝/应用误杀 DB 放行都会出现）
         if await self.user_repo.exists_username_in_tenant(tenant.id, username):
             raise BusinessException(
                 message=f"用户名已存在: {username}",

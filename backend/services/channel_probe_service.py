@@ -38,6 +38,10 @@ from platform_core.queues import distributed_lock
 
 logger = get_logger("api")
 
+# T-33（GWT-98.4）：手动探测在飞登记（gateway_ref → batch_id；同渠道复用批次不重复触发）
+_MANUAL_INFLIGHT: dict[str, str] = {}
+_MANUAL_BATCH_PREFIX = "manual-"
+
 
 def _first_model(channel: dict | None) -> str:
     """目标模型名：优先 model_name，否则 models 逗号串首个。"""
@@ -118,6 +122,48 @@ class ChannelProbeService:
             self._loop_task = None
         self._redis = None
         logger.info("渠道真伪探针已停止")
+
+    async def trigger_manual_probe(self, gateway_ref: str) -> tuple[bool, str, str | None]:
+        """T-33 / GWT-98.4：对单个渠道立即探测一次（复用引擎；不抢轮询锁）。
+
+        触发即返回 (accepted, batch_id, reason)：同渠道在飞 → 复用原批次；
+        网关列表不可达/无该引用 → accepted=False（中文原因，不向上抛）。
+        """
+        ref = str(gateway_ref or "").strip()
+        logger.info(f"手动探针触发: gateway_ref={ref}")
+        if not ref:
+            return False, "", "gateway_ref 不能为空"
+        inflight = _MANUAL_INFLIGHT.get(ref)
+        if inflight:
+            logger.info(f"手动探针复用在飞批次: gateway_ref={ref}, batch_id={inflight}")
+            return True, inflight, None
+        models = await self._list_mapped()
+        target = next(
+            (m for m in models if str(m.get("gateway_ref") or "") == ref), None,
+        )
+        if target is None:
+            logger.warning(f"手动探针目标不在网关列表: gateway_ref={ref}")
+            return False, "", "网关模型不存在或网关不可达"
+        batch_id = f"{_MANUAL_BATCH_PREFIX}{uuid.uuid4().hex}"
+        _MANUAL_INFLIGHT[ref] = batch_id
+        task = asyncio.create_task(
+            self._run_manual_probe(target, batch_id),
+            name=f"manual-channel-probe:{ref}",
+        )
+        task.add_done_callback(lambda _t: _MANUAL_INFLIGHT.pop(ref, None))
+        return True, batch_id, None
+
+    async def _run_manual_probe(self, target: dict, batch_id: str) -> None:
+        """单渠道采集→评分→落库（ref_results=None：无参考对比口径，与批次路径一致）。"""
+        ref = str(target.get("gateway_ref") or "")
+        try:
+            questions = _load_questions(
+                str(settings.get("RELAY.PROBE_QUESTIONS_FILE", "") or "")
+            )
+            await self._probe_channel(target, None, questions, batch_id)
+            logger.info(f"手动探针完成: gateway_ref={ref}, batch_id={batch_id}")
+        except Exception as e:  # noqa: BLE001 —— 手动触发失败仅告警，不影响轮询循环
+            logger.error(f"手动探针失败: gateway_ref={ref}, batch_id={batch_id}, error={e}")
 
     async def _tick_loop(self) -> None:
         interval = int(

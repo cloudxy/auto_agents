@@ -3,7 +3,7 @@ import asyncio
 
 from sqlalchemy import select
 
-from platform_core.models.billing import Plan, TenantSubscription
+from platform_core.models.billing import Order, Plan, TenantSubscription
 from platform_core.models.tenant import Tenant
 
 
@@ -43,7 +43,16 @@ def test_list_plans_and_offline_order(
         json={"plan_id": pro_id, "channel": "alipay"},
     )
     assert blocked.status_code == 400
-    assert blocked.json()["code"] == "PAYMENT_NOT_CONFIGURED"
+    # T-01（FR-50 GWT-50.5）：在线通道零新行，可见句不带 PAYMENT_NOT_CONFIGURED 内码
+    assert "在线支付尚未开通" in blocked.json()["message"]
+    assert blocked.json()["code"] != "PAYMENT_NOT_CONFIGURED"
+
+    async def _order_count():
+        async with db_session() as s:
+            rows = (await s.execute(select(Order).where(Order.tenant_id == tid))).scalars().all()
+            return len(rows)
+
+    assert asyncio.run(_order_count()) == 0
 
     created = db_client.post(
         "/api/v1/billing/orders",
@@ -100,26 +109,41 @@ def test_viewer_cannot_create_order_or_token(db_client, db_session, db_engine):
     headers = {"Authorization": f"Bearer {asyncio.run(_viewer())}"}
     pro = next(p for p in db_client.get("/api/v1/billing/plans").json()["data"] if p["slug"] == "pro")
     resp = db_client.post("/api/v1/billing/orders", headers=headers, json={"plan_id": pro["id"]})
-    assert resp.status_code == 403
+    # T-01（FR-50 GWT-50.7）：只读下单 → 找管理员句，非 403 FORBIDDEN 内码
+    assert resp.status_code != 403
+    assert "请联系企业管理员" in resp.json()["message"]
+    assert resp.json()["code"] not in ("FORBIDDEN", "QUOTA_EXCEEDED")
+
+    async def _no_orders():
+        async with db_session() as s:
+            return (await s.execute(
+                select(Order).where(Order.tenant_id == tid)
+            )).scalars().all()
+
+    assert asyncio.run(_no_orders()) == []
     groups = db_client.get("/api/v1/relay/groups", headers=headers)
     assert groups.status_code == 200
+    # T-07（GWT-60.4）：viewer GET 不建 default 组——空态可达
+    assert groups.json()["data"] == []
     issue = db_client.post(
         "/api/v1/relay/tokens", headers=headers,
-        json={"group_id": groups.json()["data"][0]["id"], "name": "nope"},
+        json={"group_id": 999999, "name": "nope"},
     )
-    assert issue.status_code == 403
+    # T-07（GWT-60.7）：只读签发 → 找管理员句，非 403 FORBIDDEN 内码
+    assert issue.status_code != 403
+    assert "当前账号不能签发，请联系企业管理员" in issue.json()["message"]
+    assert issue.json()["code"] not in ("FORBIDDEN", "HTTP_403")
 
 
-def test_relay_group_token_issue_and_revoke(db_client, db_session, db_engine):
+def test_relay_group_token_issue_and_revoke(db_client, db_session, db_engine, monkeypatch):
     from conftest import make_tenant_owner_headers
+    from backend.services.llm_gateway import admin as gateway_admin
 
     owner, tid = make_tenant_owner_headers(db_session, slug="relay-co")
     listed = db_client.get("/api/v1/relay/groups", headers=owner)
     assert listed.status_code == 200, listed.text
-    groups = listed.json()["data"]
-    assert len(groups) == 1
-    assert groups[0]["name"] == "default"
-    gid = groups[0]["id"]
+    # T-07 作废「GET 必有 data[0]」金标：读路径不再建 default，空态可达（GWT-60.4）
+    assert listed.json()["data"] == []
 
     created = db_client.post(
         "/api/v1/relay/groups", headers=owner,
@@ -127,6 +151,16 @@ def test_relay_group_token_issue_and_revoke(db_client, db_session, db_engine):
     )
     assert created.status_code == 201, created.text
     vip = created.json()["data"]["id"]
+
+    # T-08（ADR-0019）：签发经网关 HTTP 登记虚拟 Key——骨架测试挂网关桩
+    async def _fake_generate(body, **_kwargs):
+        return {"key": "sk-gw-skel-1", "token_id": "tok-skel-1"}
+
+    async def _fake_delete(body, **_kwargs):
+        return {"deleted_keys": [], "key_aliases": {}}
+
+    monkeypatch.setattr(gateway_admin, "generate_key", _fake_generate)
+    monkeypatch.setattr(gateway_admin, "delete_key", _fake_delete)
 
     issued = db_client.post(
         "/api/v1/relay/tokens", headers=owner,
@@ -146,7 +180,7 @@ def test_relay_group_token_issue_and_revoke(db_client, db_session, db_engine):
 
     other, _ = make_tenant_owner_headers(db_session, slug="other-co")
     stolen = db_client.patch(
-        f"/api/v1/relay/groups/{gid}", headers=other, json={"status": "disabled"},
+        f"/api/v1/relay/groups/{vip}", headers=other, json={"status": "disabled"},
     )
     assert stolen.status_code == 404
 

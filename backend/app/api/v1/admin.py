@@ -58,11 +58,13 @@ async def get_stats(
 async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    status: str = Query("active", pattern="^(active|deleted)$",
+                        description="active=默认（不含已删）；deleted=已删除筛选（T-24/FR-93）"),
     service: UserService = Depends(_user_service),
     _user: CurrentUser = Depends(require_admin),
 ):
-    """用户列表（用户管理页陈列，不含密码哈希）"""
-    data = await service.list_users(skip=skip, limit=limit)
+    """用户列表（用户管理页陈列，不含密码哈希；status=deleted 为已删筛选）"""
+    data = await service.list_users(skip=skip, limit=limit, status=status)
     return ok(data=data.model_dump())
 
 
@@ -101,10 +103,27 @@ async def admin_delete_user(
     session: AsyncSession = Depends(get_async_db),
     service: UserService = Depends(_user_service),
 ):
-    """软删除账户（防删自己；防删最后一个平台超管）"""
+    """软删除账户（防删自己；防删最后一个平台超管；种子 admin 不可删）"""
     await service.delete_user(user_id, actor_id=int(user.id))
     await record_audit(session, user, "user.delete", f"user#{user_id}")
     return ok(data={"id": user_id, "deleted": True})
+
+
+@router.post("/users/{user_id}/restore")
+async def admin_restore_user(
+    user_id: int,
+    user: CurrentUser = Depends(require_platform_admin_or_404),
+    session: AsyncSession = Depends(get_async_db),
+    service: UserService = Depends(_user_service),
+):
+    """恢复软删账户（T-24 / FR-93；仅平台超管，租户直打 404 同形 GWT-93.6）
+
+    占用冲突（username 同租户在册 / email 全局在册）→ 400 中文句；
+    重复恢复 no-op（GWT-93.9）；成功上报 user_restored（GWT-92.8）。
+    """
+    restored = await service.restore_user(user_id, actor_id=int(user.id))
+    await record_audit(session, user, "user.restore", f"user#{user_id}")
+    return ok(data=restored.model_dump())
 
 
 @router.get("/audit-logs")
@@ -165,7 +184,7 @@ async def patch_tenant(
     session: AsyncSession = Depends(get_async_db),
     service: TenantAdminService = Depends(_tenant_service),
 ):
-    """套餐/配额/到期编辑（平台超管；事务由 service 持有 ADR-0007）"""
+    """名称/套餐/配额/到期编辑（平台超管；改名冲突域与平台租户守卫在 service 单点 T-26/T-27）"""
     await service.patch_tenant(tenant_id, body)
     await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
     return ok(data={"id": tenant_id, "updated": True})

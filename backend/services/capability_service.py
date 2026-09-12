@@ -1,4 +1,5 @@
 """能力资产目录服务（P6 C2）：统一目录层读写 + 技能扫描自动回填"""
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -35,7 +36,9 @@ class CapabilityService:
         listing_state: Optional[str] = None,
         offset: int = 0, limit: int = 20,
     ) -> tuple[list[CapabilityAsset], int]:
-        stmt = select(CapabilityAsset)
+        # FR-88：软收行（deleted_at 非空）不进治理目录——可上架/可操作列表
+        # 与 total 都不含已从源收回的行（GWT-88.1/88.2/88.3）。
+        stmt = select(CapabilityAsset).where(CapabilityAsset.deleted_at.is_(None))
         if asset_type:
             stmt = stmt.where(CapabilityAsset.asset_type == asset_type)
         if category:
@@ -70,13 +73,28 @@ class CapabilityService:
         return row
 
     async def upsert_skill_asset(self, skill: Skill) -> CapabilityAsset:
-        """技能 upsert 后同步 asset 行（skill 扫描管线调用点）"""
+        """技能 upsert 后同步 asset 行（skill 扫描管线调用点）
+
+        FR-88 软收可逆：源目录回归时复活镜像行（存活行优先；仅剩软收行则
+        取最新清 deleted_at）——镜像行生死跟随源目录，不永久滞留 gone 态。
+        """
         existing = (await self.session.execute(
             select(CapabilityAsset).where(
                 CapabilityAsset.asset_type == "skill",
                 CapabilityAsset.name == skill.name,
+                CapabilityAsset.deleted_at.is_(None),
             )
-        )).scalar_one_or_none()
+        )).scalars().first()
+        if existing is None:
+            dead = (await self.session.execute(
+                select(CapabilityAsset).where(
+                    CapabilityAsset.asset_type == "skill",
+                    CapabilityAsset.name == skill.name,
+                ).order_by(CapabilityAsset.id.desc())
+            )).scalars().first()
+            if dead is not None:
+                existing = dead
+                existing.deleted_at = None
         if existing is None:
             asset = CapabilityAsset(asset_type="skill", detail_id=skill.id, **_asset_row_from_skill(skill))
             self.session.add(asset)
@@ -87,3 +105,29 @@ class CapabilityService:
         existing.detail_id = skill.id
         await self.session.flush()
         return existing
+
+    async def retract_skill_assets(self, names: list[str]) -> list[str]:
+        """第一方技能镜像行软收回（FR-88）：源目录已删的行不再进治理目录。
+
+        只动 detail_id 镜像行（本扫描创建）且未 attach 源的行——第三方源行
+        的收回归 src_sync 单一归属，防两路互踩。
+        """
+        if not names:
+            return []
+        rows = (await self.session.execute(
+            select(CapabilityAsset).where(
+                CapabilityAsset.asset_type == "skill",
+                CapabilityAsset.name.in_(names),
+                CapabilityAsset.detail_id.is_not(None),
+                CapabilityAsset.source_id.is_(None),
+                CapabilityAsset.deleted_at.is_(None),
+            )
+        )).scalars().all()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        for row in rows:
+            row.deleted_at = now
+            row.sync_state = "gone"
+        if rows:
+            logger.info(f"capability.retract_skill_assets | count={len(rows)}")
+        await self.session.flush()
+        return [row.name for row in rows]

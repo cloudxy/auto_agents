@@ -634,10 +634,13 @@ class TestSpiderSchedulerLockRenewal:
             patch("backend.services.schedule_service.SpiderScheduleRepository", return_value=repo),
             patch.object(SpiderScheduler, "_engine", return_value=MagicMock()),
             patch("backend.services.schedule_service.settings") as mock_settings,
+            # T-42：tick 内联 queue_depth 告警评估（mock session 不可 await，桩化）
+            patch("backend.services.schedule_service.AlertService") as alert_cls,
         ):
             mock_settings.get = lambda key, default=None: (
                 30 if key == "SCHEDULER.TICK_SECONDS" else default
             )
+            alert_cls.return_value.evaluate_queue_depth = AsyncMock(return_value=0)
             await scheduler._tick_once()
 
         # tick=30 → min_ttl=60 → lock_ttl=max(默认 60, 60)=60 → renewal=60/3=20
@@ -675,10 +678,13 @@ class TestSpiderSchedulerLockRenewal:
             patch.object(SpiderScheduler, "_engine", return_value=MagicMock()),
             patch("backend.services.schedule_service.settings") as mock_settings,
             patch("backend.services.schedule_service.SpiderService", return_value=busy_service),
+            # T-42：tick 内联 queue_depth 告警评估（mock session 不可 await，桩化）
+            patch("backend.services.schedule_service.AlertService") as alert_cls,
         ):
             mock_settings.get = lambda key, default=None: (
                 30 if key == "SCHEDULER.TICK_SECONDS" else default
             )
+            alert_cls.return_value.evaluate_queue_depth = AsyncMock(return_value=0)
             await scheduler._tick_once()
 
         repo.update.assert_awaited_once()  # 入队成功后推进触发时刻

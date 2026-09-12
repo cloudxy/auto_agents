@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 PayChannel = Literal["offline", "alipay", "wechat"]
 
@@ -25,6 +25,8 @@ class OrderCreate(BaseModel):
 
 
 class OrderOut(BaseModel):
+    """订单读模型（GWT-50.3）：档位名称 + 状态 + 金额（用户可见=元，与定价页同一数字）。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -35,6 +37,14 @@ class OrderOut(BaseModel):
     paid_at: Optional[datetime] = None
     created_at: datetime
     tenant_id: Optional[int] = None
+    plan_name: str = ""
+    tenant_name: Optional[str] = None  # 超管运营台可见企业名（GWT-50.10）
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def amount_yuan(self) -> float:
+        """用户可见金额（元）：amount_cents/100，免心算分（GWT-50.3，Q-PRICE 不撤 ¥299）。"""
+        return round(self.amount_cents / 100, 2)
 
 
 class SubscriptionOut(BaseModel):

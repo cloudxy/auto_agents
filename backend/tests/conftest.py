@@ -449,20 +449,25 @@ def _workers_online_unless_offline_node(request, monkeypatch):
 
 
 def _purge_quota_count_keys() -> None:
-    """DEL quota:count:* via URL 直连（禁止 redis_client→init_all 拉真 MySQL）。"""
+    """DEL quota:count:* / login_fail:* via URL 直连（禁止 redis_client→init_all 拉真 MySQL）。
+
+    login_fail:*（既有缺口，三票回报）：本机 Redis 限流计数跨测试存活，曾把
+    test_gwt_15_4 的 fail-a/locked-a 喂爆 429 假红——与 quota:count:* 同口径清理。
+    """
     import redis as redis_sync
 
     from config import settings
-    from platform_core.queues import QUOTA_COUNT_PREFIX
+    from platform_core.queues import LOGIN_FAIL_PREFIX, QUOTA_COUNT_PREFIX
 
     url = str(settings.get("REDIS.DEFAULT.URL") or "")
     if not url:
         return
     client = redis_sync.from_url(url, decode_responses=True, socket_connect_timeout=0.5)
     try:
-        keys = list(client.scan_iter(match=f"{QUOTA_COUNT_PREFIX}*", count=200))
-        if keys:
-            client.delete(*keys)
+        for prefix in (QUOTA_COUNT_PREFIX, LOGIN_FAIL_PREFIX):
+            keys = list(client.scan_iter(match=f"{prefix}*", count=200))
+            if keys:
+                client.delete(*keys)
     finally:
         client.close()
 
