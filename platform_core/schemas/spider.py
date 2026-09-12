@@ -1,6 +1,6 @@
 """爬虫任务 Schema —— API 层与 Service 层之间的数据契约"""
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from platform_core.schemas.base import QueryParams, RequestBody
@@ -72,6 +72,9 @@ class SpiderInfo(BaseModel):
     title: str
     type: str
     description: str = ""
+    params: Optional[Dict[str, Any]] = Field(
+        None, description="定义参数（T-39：新增任务表单预填默认值）"
+    )
 
 
 class SpiderRegistryResponse(BaseModel):
@@ -250,9 +253,18 @@ class DefinitionCreateRequest(RequestBody):
 
 
 class DefinitionUpdateMetaRequest(RequestBody):
-    """爬虫定义元信息局部更新（仅 admin，不含启停/名称）"""
+    """采集方案编辑（FR-103 / GWT-103.1：经办可编辑，不含启停/名称/类型）
+
+    title/description 为元信息；params 为定义参数（按类型）：
+    - api 型：{"urls": [...], "headers": {...}}（字段集源自 yml SPIDER_TYPES.api.fields）
+    - flow 型：流程字段 {"urls": [...], "selectors": [...], "pagination": {...}, ...}
+    - 代码型（web/custom）：不可编辑 params（服务层拒绝并给出说明句）
+    """
     title: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=2000)
+    params: Optional[Dict[str, Any]] = Field(
+        None, description="定义参数（api 型 urls/headers；flow 型流程字段）；缺省=不改"
+    )
 
 
 class TaskUpdateRequest(RequestBody):
@@ -277,6 +289,9 @@ class SpiderDefinitionResponse(BaseModel):
     description: Optional[str] = None
     enabled: bool
     source: str = "yml_seed"
+    params: Optional[Dict[str, Any]] = Field(
+        None, description="定义参数（再次打开编辑时回显新值，GWT-103.1）"
+    )
 
 
 # ----------------------------------------------------------------------

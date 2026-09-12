@@ -1,11 +1,20 @@
 /**
  * 探针结果 Tab（工单 80 拆分自 NewApiOps.tsx）：分页 + 渠道过滤 + scores 展开
+ * T-11（GWT-61.1）：最新批次伪装计数徽标——与 Overview3q 共享查询键 ['newapi','overview']
+ * （总览已载时零额外请求）；overview 失败/无批次时静默不渲染，不新增空态句（GWT-61.2）。
  */
 import React, { useCallback, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Input, message, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { fetchNewapiProbeResults, type ChannelProbeResultItem, type ProbeVerdict } from '../../services/newapi'
-import { DEFAULT_PAGE_SIZE, DUTY_LOCAL_PROBE_EMPTY, VERDICT_TAG, fmtLatency, fmtTime, parseChannelId } from './newapiShared'
+import {
+  fetchNewapiOverview, fetchNewapiProbeResults,
+  type ChannelProbeResultItem, type ProbeVerdict,
+} from '../../services/newapi'
+import {
+  DEFAULT_PAGE_SIZE, DUTY_LOCAL_PROBE_EMPTY, PROBE_LATEST_BATCH_LABEL, PROBE_SPOOF_SUMMARY,
+  VERDICT_TAG, fmtLatency, fmtTime, parseChannelId,
+} from './newapiShared'
 
 const { Text } = Typography
 
@@ -17,6 +26,14 @@ const ProbeResults: React.FC<{ refreshSignal?: number }> = ({ refreshSignal = 0 
   const [probesPageSize, setProbesPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [probesChannelId, setProbesChannelId] = useState<number | undefined>(undefined)
   const [probesLoading, setProbesLoading] = useState(false)
+
+  // T-11：最新批次伪装计数（latest_batch_verdicts.spoofed 由后端探针引擎落库口径回传）
+  const overviewQuery = useQuery({
+    queryKey: ['newapi', 'overview'],
+    queryFn: fetchNewapiOverview,
+  })
+  const latestBatchId = overviewQuery.data?.latest_batch_id ?? null
+  const spoofedCount = overviewQuery.data?.latest_batch_verdicts?.spoofed ?? 0
 
   const loadProbes = useCallback(async (showSpin = true) => {
     if (showSpin) setProbesLoading(true)
@@ -77,6 +94,17 @@ const ProbeResults: React.FC<{ refreshSignal?: number }> = ({ refreshSignal = 0 
             setProbesPage(1)
           }}
         />
+        {latestBatchId && (
+          <>
+            <Text type="secondary">{PROBE_LATEST_BATCH_LABEL}</Text>
+            <Tooltip title={latestBatchId}>
+              <Text code style={{ fontSize: 12 }}>{latestBatchId}</Text>
+            </Tooltip>
+            <Tag data-testid="probe-latest-batch" color={VERDICT_TAG.spoofed.color}>
+              {PROBE_SPOOF_SUMMARY(spoofedCount)}
+            </Tag>
+          </>
+        )}
       </Space>
       <Table
         columns={probeColumns}

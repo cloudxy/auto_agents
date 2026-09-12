@@ -26,6 +26,7 @@ __all__ = [
     "_SPIDERS_DIR",
     "FLOW_SPIDER_NAME",
     "_FLOW_KEYS",
+    "_INTERNAL_SPIDERS",
     "_STORE_TARGET_ENUM",
     "resolve_spider_log_path",
     "extract_store_targets",
@@ -36,6 +37,8 @@ __all__ = [
 ]
 
 NO_TENANT_ENQUEUE_MESSAGE = "没有企业身份，无法入队"
+# FR-87 / GWT-87.3：只读提交入队拒绝句（同族中文；「无提交入口」的前端面归 T-18/T-20）。
+READONLY_ENQUEUE_MESSAGE = "当前账号不能提交采集任务，请联系企业管理员"
 
 
 def require_enqueue_tenant(tenant_id: int | None) -> int:
@@ -60,6 +63,12 @@ _SPIDERS_DIR = os.path.join(_PROJECT_ROOT, "scrapy", "spiders")
 # 阶段 5.1 流程化采集
 FLOW_SPIDER_NAME = "flow_generic"
 _FLOW_KEYS = ("pagination", "detail", "filters")
+
+# T-41 / FR-104 方案视图内部项清单：demo 爬虫（example/openweather）、能力资产
+# 收割器（skill_harvester）、flow 引擎伪爬虫（flow_generic 源码文件/引擎登记行）。
+# 仅作用于 registry / files 两个读面（方案视图数据源，只滤视图）；DB 定义行、
+# 启停、入队校验（_ensure_spider_available 走 DB 直查）与源码文件本身不受影响。
+_INTERNAL_SPIDERS = frozenset({"example", "openweather", "skill_harvester", FLOW_SPIDER_NAME})
 
 # 已实现的额外存储目标枚举
 _STORE_TARGET_ENUM = ("redis", "csv")

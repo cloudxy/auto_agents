@@ -27,6 +27,8 @@ logger = get_logger("service.quota")
 # 用户可见句（X-QUOTA / FR-12）。内部码 QUOTA_EXCEEDED 不得出现在这些常量里。
 PLAN_FULL_USER = "已达配额上限"
 PLAN_FULL_CTA = "申请提升配额"
+# FR-87 / GWT-87.1：入队满额用户可见句（经办 → 找管理员；Then 没有「提交升级申请」支）。
+TASK_QUOTA_FULL_CONTACT_ADMIN = "已达配额上限，请联系企业管理员。"
 NEAR_LIMIT_USER = "接近上限。超额操作会被拒绝。"
 GATEWAY_UNREACHABLE_USER = "平台 LLM 网关不可达"
 NO_MODEL_USER = "还没有平台模型"

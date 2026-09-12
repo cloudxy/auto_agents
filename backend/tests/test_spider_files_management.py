@@ -1,7 +1,7 @@
-"""代码爬虫文件管理测试（只读清单 + 启停）
+"""代码爬虫文件管理测试（已登记清单 + 启停）
 
 约定：不连真实 MySQL，Repository 用 AsyncMock 桩；文件扫描用 tmp 目录。
-覆盖：文件清单扫描、未登记爬虫展示、启停写库、未登记定义 404。
+覆盖：已登记文件清单（T-41：未登记/内部项不并入）、启停写库、未登记定义 404。
 """
 import sys
 from pathlib import Path
@@ -57,18 +57,19 @@ class TestSpiderFiles:
         ):
             resp = await svc.spider_files()
 
-        # __init__.py 与非 .py 文件被排除
-        assert resp.total == 2
+        # T-41 / GWT-104.1 钉改写：example 属内部项（demo）不并入方案视图
+        assert resp.total == 1
         by_name = {i.name: i for i in resp.items}
-        assert by_name["example"].registered is True
-        assert by_name["example"].enabled is True
-        assert by_name["example"].title == "示例爬虫"
-        assert by_name["example"].file == "scrapy/spiders/example.py"
-        assert by_name["example"].size_bytes > 0
+        assert "example" not in by_name
+        assert by_name["zhihu_feed"].registered is True
         assert by_name["zhihu_feed"].enabled is False
+        assert by_name["zhihu_feed"].title == "知乎动态"
+        assert by_name["zhihu_feed"].file == "scrapy/spiders/zhihu_feed.py"
+        assert by_name["zhihu_feed"].size_bytes > 0
 
     @pytest.mark.asyncio
-    async def test_unregistered_file_shown_as_disabled(self, spiders_dir):
+    async def test_unregistered_files_not_listed(self, spiders_dir):
+        """T-41 / GWT-104.2 钉改写：未登记源码文件一律不并入方案视图"""
         svc = _service()
         repo = MagicMock()
         repo.get_all = AsyncMock(return_value=[])  # 无任何登记
@@ -82,12 +83,12 @@ class TestSpiderFiles:
         ):
             resp = await svc.spider_files()
 
-        for item in resp.items:
-            assert item.registered is False
-            assert item.enabled is None  # 未登记视为未启用
+        assert resp.items == []
+        assert resp.total == 0
 
     @pytest.mark.asyncio
     async def test_definition_read_failure_degrades_gracefully(self, spiders_dir):
+        """T-41 钉改写：DB 异常时清单收敛为空（宁空勿泄，不回退全量源码清单）"""
         svc = _service()
         repo = MagicMock()
         repo.get_all = AsyncMock(side_effect=ConnectionError("db down"))
@@ -101,7 +102,7 @@ class TestSpiderFiles:
         ):
             resp = await svc.spider_files()
 
-        assert resp.total == 2  # DB 异常时清单仍返回
+        assert resp.total == 0  # 登记态不可判 → 收敛为空
 
 
 class TestUpdateDefinition:
@@ -110,7 +111,7 @@ class TestUpdateDefinition:
         svc = _service()
         definition = MagicMock(id=3, title="示例爬虫",
                                type="web", description="", enabled=True,
-                               source="yml_seed")
+                               source="yml_seed", params=None)
         definition.name = "example"  # MagicMock(name=...) 是保留参数，需显式赋值
         repo = MagicMock()
         repo.get_by_name = AsyncMock(return_value=definition)

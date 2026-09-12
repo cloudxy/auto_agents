@@ -6,7 +6,7 @@ import { listAssets, type AssetRow } from '../../services/capabilities'
 import { usePermission } from '../../hooks/usePermission'
 import { apiErrorMessage } from '../../utils/errorMessage'
 import ListingControls from './ListingControls'
-import { GO_SOURCE, loadFail } from './marketCopy'
+import { DETAIL, GO_SOURCE, GOVERNANCE_PAGINATION, loadFail } from './marketCopy'
 
 const { Text } = Typography
 
@@ -16,11 +16,12 @@ type Props = {
   emptyCopy: string
   onGoSource?: () => void
   onSubscribe?: (name: string) => void
+  onDetail?: (row: AssetRow) => void
   extra?: React.ReactNode
 }
 
 const TypeLeafTab: React.FC<Props> = ({
-  types, leaf, emptyCopy, onGoSource, onSubscribe, extra,
+  types, leaf, emptyCopy, onGoSource, onSubscribe, onDetail, extra,
 }) => {
   const { isPlatformAdmin } = usePermission()
   const [rows, setRows] = useState<AssetRow[]>([])
@@ -66,7 +67,8 @@ const TypeLeafTab: React.FC<Props> = ({
           {onGoSource ? <Button onClick={onGoSource}>{GO_SOURCE}</Button> : null}
         </Empty>
       ) : (
-        <Table rowKey="id" size="middle" loading={loading} dataSource={rows} pagination={false}
+        <Table rowKey="id" size="middle" loading={loading} dataSource={rows}
+               pagination={GOVERNANCE_PAGINATION}
                columns={[
                  { title: leaf, dataIndex: 'name', render: (v: string, r: AssetRow) => (
                    <Text strong>{r.title || v}</Text>
@@ -76,10 +78,17 @@ const TypeLeafTab: React.FC<Props> = ({
                    <ListingControls row={r} isPlatformAdmin={isPlatformAdmin}
                                     onChanged={replace} onError={setNotice} />
                  )},
-                 ...(onSubscribe ? [{
+                 ...(onSubscribe || onDetail ? [{
                    title: '操作',
                    render: (_: unknown, r: AssetRow) => (
-                     <Button size="small" onClick={() => onSubscribe(r.name)}>订阅</Button>
+                     <Space>
+                       {onDetail ? (
+                         <Button size="small" onClick={() => onDetail(r)}>{DETAIL}</Button>
+                       ) : null}
+                       {onSubscribe ? (
+                         <Button size="small" onClick={() => onSubscribe(r.name)}>订阅</Button>
+                       ) : null}
+                     </Space>
                    ),
                  }] : []),
                ]} />

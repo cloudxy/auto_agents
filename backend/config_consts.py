@@ -26,6 +26,12 @@ POWER_MARKET_SRC_SYNC_LOCK_TTL = 900
 # ---- new-api 墓碑（T-20：恒 false；运行时禁止 settings.get NEWAPI.*）----
 NEWAPI_ENABLED = False
 
+# ---- 能力资产导入（与 config/default/asset_import.yml 一致；FR-100 / ADR-0023）----
+ASSET_IMPORT_MAX_FILE_BYTES = 10 * 1024 * 1024  # 单条目上限（GWT-100.5 拒绝句含数字）
+ASSET_IMPORT_MAX_BATCH_BYTES = 50 * 1024 * 1024  # 批总量上限（含解包累计，炸弹防线）
+ASSET_IMPORT_MAX_ENTRIES = 200  # 条目数上限（同步解析耗时防护，无后台任务）
+ASSET_IMPORT_SANDBOX_ROOT = ""  # 沙箱根目录；空=系统 tempfile 默认
+
 # ---- 平台网关值班产品规则（与 config/default/relay.yml 一致）----
 RELAY_SCHEDULER_ENABLED = False
 RELAY_PROBE_ENABLED = False

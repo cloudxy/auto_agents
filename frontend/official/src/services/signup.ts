@@ -5,7 +5,7 @@ import api, { unwrap } from './api'
 
 export interface SignupResult {
   tenant: { name: string; slug: string }
-  owner: { username: string }
+  owner: { username: string; email?: string }
 }
 
 export interface SignupPayload {

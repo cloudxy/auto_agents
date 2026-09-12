@@ -72,14 +72,15 @@ class PluginService:
                 failed += 1
                 failed_names.append(plugin_dir.name)
                 logger.warning(f"插件解析失败 | dir={plugin_dir.name} err={exc}")
+        retracted = await self._retract_missing_plugins({d.name for d in dirs})
 
         job.total, job.succeeded, job.failed, job.status = len(dirs), succeeded, failed, "done"
-        job.detail = {"failed": failed_names}
+        job.detail = {"failed": failed_names, "retracted": retracted}
         await self.session.flush()
         # ADR-0007 D2：快照先于 commit（job 属性 expire 后读取会抛 MissingGreenlet）
         result = {"total": len(dirs), "succeeded": succeeded, "failed": failed,
-                  "failed_names": failed_names, "job_id": job.id,
-                  "scan_mode": "local_plugins"}
+                  "failed_names": failed_names, "retracted": retracted,
+                  "job_id": job.id, "scan_mode": "local_plugins"}
         if result["total"] == 0:
             result["empty"] = True
             result["message"] = "没有可同步的包"
@@ -112,11 +113,7 @@ class PluginService:
         hooks = manifest.get("hooks") or {}
         commands = manifest.get("commands") or {}
 
-        asset = (await self.session.execute(
-            select(CapabilityAsset).where(
-                CapabilityAsset.asset_type == "plugin", CapabilityAsset.name == name
-            )
-        )).scalar_one_or_none()
+        asset = await self._load_alive_or_revive(name)
         if asset is None:
             asset = CapabilityAsset(
                 asset_type="plugin", name=name,
@@ -149,6 +146,54 @@ class PluginService:
         detail.commands = commands
         await self.session.flush()
         return asset
+
+    async def _retract_missing_plugins(self, keep: set[str]) -> list[str]:
+        """本机 plugins/ 已无目录的插件行软收回（FR-88，GWT-88.2）。
+
+        只动未 attach 源的第一方行（source_id IS NULL）——源注册表行的
+        收回归 src_sync 单一归属。
+        """
+        rows = (await self.session.execute(
+            select(CapabilityAsset).where(
+                CapabilityAsset.asset_type == "plugin",
+                CapabilityAsset.source_id.is_(None),
+                CapabilityAsset.deleted_at.is_(None),
+            )
+        )).scalars().all()
+        now = _utcnow()
+        names: list[str] = []
+        for row in rows:
+            if row.name in keep:
+                continue
+            row.deleted_at = now
+            row.sync_state = "gone"
+            names.append(row.name)
+        if names:
+            logger.info(f"plugin.scan 收回缺失插件 | count={len(names)} names={names}")
+        await self.session.flush()
+        return names
+
+    async def _load_alive_or_revive(self, name: str) -> Optional[CapabilityAsset]:
+        """存活行优先；仅剩软收行时取最新并复活（目录回归，FR-88 软收可逆）"""
+        alive = (await self.session.execute(
+            select(CapabilityAsset).where(
+                CapabilityAsset.asset_type == "plugin",
+                CapabilityAsset.name == name,
+                CapabilityAsset.deleted_at.is_(None),
+            )
+        )).scalars().first()
+        if alive is not None:
+            return alive
+        dead = (await self.session.execute(
+            select(CapabilityAsset).where(
+                CapabilityAsset.asset_type == "plugin",
+                CapabilityAsset.name == name,
+            ).order_by(CapabilityAsset.id.desc())
+        )).scalars().first()
+        if dead is not None:
+            dead.deleted_at = None
+            dead.sync_state = "ok"
+        return dead
 
     async def get_plugin_detail(self, name: str) -> dict:
         """插件详情（asset + detail 投影）"""

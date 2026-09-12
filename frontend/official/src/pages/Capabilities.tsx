@@ -105,22 +105,49 @@ const MarketCard: React.FC<{ item: PublicListItem }> = ({ item }) => {
   )
 }
 
+const MarketPager: React.FC<{
+  page: number
+  total: number
+  hasMore: boolean
+  onPage: (page: number) => void
+}> = ({ page, total, hasMore, onPage }) => {
+  if (total <= 0) return null // GWT-81.3：0 件不出现翻页数字谎称有货
+  return (
+    <nav className="capability-market__pager" data-testid="market-pager" aria-label="翻页">
+      <span className="capability-market__pager-total">共 {total} 件</span>
+      <span className="capability-market__pager-current">第 {page} 页</span>
+      {page > 1 ? (
+        <Button onClick={() => onPage(page - 1)} autoInsertSpace={false}>上一页</Button>
+      ) : null}
+      {/* GWT-81.2：has_more 为假时不渲染下一页（无假控件带向空货架） */}
+      {hasMore ? (
+        <Button type="primary" onClick={() => onPage(page + 1)} autoInsertSpace={false}>
+          下一页
+        </Button>
+      ) : null}
+    </nav>
+  )
+}
+
 const AssetGrid: React.FC<{
   type: string
   q: string
   host: string
   category: string
+  page: number
+  onPage: (page: number) => void
   onClear: () => void
-}> = ({ type, q, host, category, onClear }) => {
+}> = ({ type, q, host, category, page, onPage, onClear }) => {
   const typeParam = type === 'all' ? undefined : type
   const filters: MarketFilterValues = { type, q, host, category }
   const query = useQuery({
-    queryKey: ['official', 'public-capabilities', typeParam, q, host, category],
+    queryKey: ['official', 'public-capabilities', typeParam, q, host, category, page],
     queryFn: () => listPublicAssets({
       type: typeParam,
       q: q || undefined,
       host: host || undefined,
       category: category || undefined,
+      page,
     }),
     retry: false,
   })
@@ -134,7 +161,19 @@ const AssetGrid: React.FC<{
     )
   }
   const items = query.data?.items || []
-  if (!items.length) return <MarketEmpty filters={filters} onClear={onClear} />
+  const total = query.data?.total ?? 0
+  const hasMore = query.data?.has_more === true
+  const pager = <MarketPager page={page} total={total} hasMore={hasMore} onPage={onPage} />
+  if (!items.length && total === 0) return <MarketEmpty filters={filters} onClear={onClear} />
+  if (!items.length) {
+    // 深链越过末页：不把空页谎称为「还没有上架的能力」
+    return (
+      <>
+        <div className="capability-market__empty"><p>没有更多了</p></div>
+        {pager}
+      </>
+    )
+  }
   const refreshing = query.isFetching && !query.isLoading
   return (
     <>
@@ -144,6 +183,7 @@ const AssetGrid: React.FC<{
           <MarketCard key={`${item.asset_type}-${item.name}`} item={item} />
         ))}
       </div>
+      {pager}
     </>
   )
 }
@@ -212,12 +252,25 @@ function useMarketFilters() {
     () => resolveType(rawType, pathIsSkills),
     [rawType, pathIsSkills],
   )
+  const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
   useEffect(() => {
     if (!rawType || !LEGACY_MAP[rawType]) return
     setSearchParams((prev) => writeParams(prev, { type: LEGACY_MAP[rawType] }), { replace: true })
   }, [rawType, setSearchParams])
   const patchParams = (partial: FilterPatch) => {
-    setSearchParams((prev) => writeParams(prev, partial), { replace: true })
+    setSearchParams((prev) => {
+      const next = writeParams(prev, partial)
+      if (!('page' in partial)) next.delete('page') // 筛选变化回第 1 页
+      return next
+    }, { replace: true })
+  }
+  const onPage = (target: number) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (target <= 1) next.delete('page')
+      else next.set('page', String(target))
+      return next
+    })
   }
   const onTab = (key: string) => patchParams({ type: key === 'all' ? '' : key })
   return {
@@ -225,8 +278,10 @@ function useMarketFilters() {
     q: searchParams.get('q') || '',
     host: searchParams.get('host') || '',
     category: searchParams.get('category') || '',
+    page,
     patchParams,
     onTab,
+    onPage,
     onClear: () => navigate('/capabilities'),
   }
 }
@@ -263,6 +318,8 @@ const Capabilities: React.FC = () => {
               q={market.q}
               host={market.host}
               category={market.category}
+              page={market.page}
+              onPage={market.onPage}
               onClear={market.onClear}
             />
           </>

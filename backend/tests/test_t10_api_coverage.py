@@ -86,11 +86,15 @@ def test_run_spider_anonymous_401(client):
     assert resp.json()["code"] == "AUTH_FAILED"
 
 
-def test_run_spider_viewer_403(viewer_client):
-    """viewer 直调（绕过前端隐藏按钮）→ 403（require_operator 守卫）"""
+def test_run_spider_viewer_rejected_user_visible(viewer_client):
+    """viewer 直调（绕过前端隐藏按钮）→ 400 同族中文拒绝句（T-12/GWT-87.3；
+    原 403 FORBIDDEN 金标随本票改写，PIT-2）。匿名 401 与 admin 端点 403 口径不变。"""
     resp = viewer_client.post(RUN_URL, json={"spider_name": "example"})
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 400, resp.text
+    body = resp.json()
+    assert body["code"] == "TASK_RUN_ROLE_NOT_ALLOWED"
+    assert "不能提交采集任务" in body["message"]
+    assert "请联系企业管理员" in body["message"]
 
 
 @pytest.mark.parametrize("payload,field", [

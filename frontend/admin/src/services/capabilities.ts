@@ -1,6 +1,8 @@
 /**
  * 能力资产域 service（P6 Hub，工单 71 归一）：四类资产目录 + 插件/专家/专家团操作
  */
+import type { AxiosProgressEvent } from 'axios'
+
 import api, { unwrap } from './api'
 
 export interface AssetRow {
@@ -53,6 +55,39 @@ export const getPlugin = (name: string): Promise<PluginDetail> =>
   api.get(`/capabilities/plugins/${encodeURIComponent(name)}`)
     .then((r) => unwrap<PluginDetail>(r))
 
+export interface ImportItemResult {
+  asset_type: string
+  name: string
+  status: 'succeeded' | 'failed' | 'skipped'
+  reason?: string | null
+  asset_id?: number | null
+}
+
+export interface ImportResult {
+  batch_id: number
+  origin: string
+  status: string
+  total: number
+  succeeded: number
+  failed: number
+  skipped: number
+  items: ImportItemResult[]
+  message?: string | null
+}
+
+/** T-36 一键导入（FR-100 / ADR-0023）：multipart file（可重复）或 directory 二选一。
+ * 逐条失败原因已是后端成品中文句，调用方直接渲染。 */
+export const importAssets = (
+  payload: { files?: File[]; directory?: string },
+  onUploadProgress?: (event: AxiosProgressEvent) => void,
+): Promise<ImportResult> => {
+  const form = new FormData()
+  for (const file of payload.files || []) form.append('file', file)
+  if (payload.directory) form.append('directory', payload.directory)
+  return api.post('/capabilities/import', form, { onUploadProgress })
+    .then((r) => unwrap<ImportResult>(r))
+}
+
 export interface SourceRow {
   id: number
   name: string
@@ -91,6 +126,25 @@ export const scanExperts = (): Promise<void> =>
 
 export const createTeam = (payload: Record<string, unknown>): Promise<void> =>
   api.post('/capabilities/teams', payload).then(() => undefined)
+
+/** T-37（FR-101）：团队成员引用——成员域扩 expert∪agent；旧数据为名称字符串（按专家） */
+export interface TeamMemberRef {
+  type: 'expert' | 'agent'
+  name: string
+}
+
+export interface TeamDetail {
+  name: string
+  title: string
+  status: string
+  leader: string
+  members: (TeamMemberRef | string)[]
+  workflow_md: string
+}
+
+export const getTeamDetail = (name: string): Promise<TeamDetail> =>
+  api.get(`/capabilities/teams/${encodeURIComponent(name)}`)
+    .then((r) => unwrap<TeamDetail>(r))
 
 export interface SubscribeResult {
   created: boolean

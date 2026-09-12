@@ -12,9 +12,11 @@ class LoginRequest(RequestBody):
 
     tenant_slug 暂不消费（可选、缺省走密码消歧，现有前端零改动）；租户级
     登录入口（子域名/租户选择页）上线时，届时带 slug 精确 (tenant, username) 查询。
+    username 兼作登录标识（FR-83）：含 @ 时后端按注册邮箱解析——上限 100
+    对齐 users.email 列与注册侧容量，否则 51–100 字符的注册邮箱无法凭邮箱登录。
     """
 
-    username: str = Field(..., min_length=3, max_length=50, description="用户名")
+    username: str = Field(..., min_length=3, max_length=100, description="登录标识（注册邮箱或用户名）")
     password: str = Field(..., min_length=6, max_length=128, description="密码")
     tenant_slug: Optional[str] = Field(
         None, max_length=64, description="租户标识（预留字段，暂不消费）")
@@ -58,6 +60,8 @@ class UserResponse(BaseModel):
     is_platform_admin: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # 已删除标记（T-24 / GWT-93.1）：非空=软删行（仅「已删除」筛选会出现）
+    deleted_at: Optional[datetime] = None
 
 
 class AdminUserCreateRequest(RequestBody):
@@ -68,7 +72,7 @@ class AdminUserCreateRequest(RequestBody):
     password: str = Field(..., min_length=8, max_length=128)
     role: str = Field("operator", pattern="^(admin|operator|viewer)$")
     is_active: bool = True
-    # 归属公司（NULL=平台超管账户，不挂租户）
+    # 归属公司（None/0=平台账户不挂公司，后端统一挂 platform 租户——GWT-95.4）
     tenant_id: Optional[int] = None
 
 

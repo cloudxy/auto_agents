@@ -17,6 +17,12 @@ on:
   pull_request:
     branches: [main, master]
 
+# 双触发收敛：push 与 pull_request 按分支名归入同一组，新推送自动取消同分支旧 run
+# （否则 feature/pm 每次推送跑两份完整 CI，frontend-build 双份 20+ 分钟白烧 runner 分钟）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   python-lint-test:
     name: Python Lint & Test
@@ -155,6 +161,8 @@ jobs:
   frontend-build:
     name: Frontend Build (admin + official)
     runs-on: ubuntu-latest
+    # jest maxWorkers=2 串行换稳定，双 app 测试在 2 核 runner 上 20-30 分钟属预期；40 分钟为挂死上限
+    timeout-minutes: 40
     env:
       APP_ENV: local
       AUTO_AGENTS_JWT__SECRET_KEY: ci-test-secret-key-not-for-production
