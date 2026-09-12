@@ -14,6 +14,11 @@ export interface OrderRow {
   amount_cents: number
   status: string
   channel: string
+  /** T-02 读模型：档位名（如「专业档」） */
+  plan_name?: string
+  /** T-02 读模型：金额（元，与定价页同一数字）。渲染用它，不做分→元心算 */
+  amount_yuan?: number
+  tenant_name?: string
 }
 
 export const listPlans = (): Promise<PlanRow[]> =>

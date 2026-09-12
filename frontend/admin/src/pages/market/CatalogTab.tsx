@@ -20,7 +20,7 @@ const TYPE_OPTIONS = [
   { value: 'team', label: '专家团' },
 ]
 
-type Props = { focusName?: string | null }
+type Props = { focusName?: string | null; refreshKey?: number }
 
 const matchesFocus = (row: AssetRow, focus: string): boolean => (
   row.name === focus
@@ -28,7 +28,7 @@ const matchesFocus = (row: AssetRow, focus: string): boolean => (
   || row.name.endsWith(`__${focus}`)
 )
 
-const CatalogTab: React.FC<Props> = ({ focusName }) => {
+const CatalogTab: React.FC<Props> = ({ focusName, refreshKey }) => {
   const { isPlatformAdmin } = usePermission()
   const [rows, setRows] = useState<AssetRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -51,7 +51,8 @@ const CatalogTab: React.FC<Props> = ({ focusName }) => {
     }
   }, [type, listing])
 
-  useEffect(() => { load() }, [load])
+  // refreshKey（T-36 导入完成计数）为显式重载触发器，不参与 load 逻辑
+  useEffect(() => { load() }, [load, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const replace = (next: AssetRow) => {
     setRows((cur) => cur.map((r) => (r.id === next.id ? { ...r, ...next } : r)))

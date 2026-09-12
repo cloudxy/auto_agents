@@ -17,7 +17,7 @@ export interface LlmProvider {
   temperature?: number | null
   timeout?: number | null
   max_retries?: number | null
-  /** 是否为当前激活供应商（同一时刻至多一个） */
+  /** 是否为当前默认供应商（同一时刻至多一个；FR-97 用户可见词=「默认」，字段名不动） */
   is_active: boolean
   /** 是否启用（停用后不参与调度） */
   enabled: boolean
@@ -67,7 +67,7 @@ export interface LlmTestResult {
 export const fetchLlmProviders = (): Promise<LlmProvider[]> =>
   api.get('/llm/providers').then((res) => unwrap<LlmProvider[]>(res))
 
-/** 当前激活供应商（未激活时 404 → 上层 catch；未包装 null） */
+/** 当前默认供应商（未设置时 404 → 上层 catch；未包装 null） */
 export const fetchActiveLlmProvider = (): Promise<LlmProvider | null> =>
   api.get('/llm/providers/active').then((res) => unwrap<LlmProvider | null>(res))
 
@@ -83,11 +83,11 @@ export const updateLlmProvider = (id: number, payload: LlmProviderPayload): Prom
 export const deleteLlmProvider = (id: number): Promise<unknown> =>
   api.delete(`/llm/providers/${id}`).then((res) => unwrap<unknown>(res))
 
-/** 激活供应商（同一时刻仅一个激活；激活后统一刷新列表） */
+/** 设为默认（FR-97：UI 词为「设为默认」，端点/机制不动；同一时刻仅一个默认） */
 export const activateLlmProvider = (id: number): Promise<unknown> =>
   api.put(`/llm/providers/${id}/activate`).then((res) => unwrap<unknown>(res))
 
-/** 取消激活（全部下线：运行时解析回退 yml/env 兜底；行保留可再激活） */
+/** 取消默认（FR-97：UI 词为「取消默认」，端点不动；行保留可再设默认） */
 export const deactivateLlmProvider = (id: number): Promise<LlmProvider> =>
   api.put(`/llm/providers/${id}/deactivate`).then((r) => unwrap<LlmProvider>(r))
 

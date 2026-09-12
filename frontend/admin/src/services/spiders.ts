@@ -28,6 +28,8 @@ export interface SpiderInfo {
   title: string
   type: string
   description?: string
+  /** 定义级参数（api 型 {urls,headers}；flow 型动态键值）；编辑弹窗回显用 */
+  params?: Record<string, unknown> | null
 }
 
 export interface SpiderRegistry {
@@ -288,10 +290,10 @@ export const createDefinition = (payload: {
 }): Promise<SpiderDefinition> =>
   api.post('/spiders/definitions', payload).then((res) => unwrap<SpiderDefinition>(res))
 
-/** 编辑爬虫定义元信息（标题/描述；仅管理员） */
+/** 编辑爬虫定义元信息（标题/描述/参数；api 型 params={urls,headers}，flow 型动态键值；代码型传 params 后端 400 拒绝；仅管理员） */
 export const updateDefinitionMeta = (
   name: string,
-  payload: { title?: string; description?: string }
+  payload: { title?: string; description?: string; params?: Record<string, unknown> }
 ): Promise<SpiderDefinition> =>
   api
     .patch(`/spiders/definitions/${name}/meta`, payload)

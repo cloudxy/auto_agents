@@ -10,10 +10,12 @@ import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { Dayjs } from 'dayjs'
 import { Tabs } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import { listTenants, patchTenant, type TenantRow } from '../services/platformOps'
 import { confirmOrder, listPendingOrders, type OrderRow } from '../services/billing'
 import { clearDeadItems, discardDeadItem, listDeadItems, type DeadItem } from '../services/deadItems'
 import { apiErrorMessage } from '../utils/errorMessage'
+import { LoadEmpty, LoadFailure } from '../components/LoadState'
 import ProductEvents from './ProductEvents'
 
 
@@ -191,30 +193,40 @@ const DeadItemsTab: React.FC = () => {
   )
 }
 
+// ---------------- 待确认收款 Tab（T-23 / GWT-84.4 + 真 0，FR-84 句族） ----------------
+const ORDERS_LOAD_FAILED = '待确认收款列表加载失败。检查网络后重试。'
+const ORDERS_EMPTY = '还没有待确认的收款。租户提交线下升级申请后会出现在这里。'
+
 function PendingOrdersTab() {
-  const [rows, setRows] = useState<OrderRow[]>([])
-  const [loading, setLoading] = useState(false)
-  const load = useCallback(async () => {
-    setLoading(true)
-    try { setRows(await listPendingOrders()) }
-    catch (e) { message.error(apiErrorMessage(e, '订单加载失败')) }
-    finally { setLoading(false) }
-  }, [])
-  useEffect(() => { load() }, [load])
+  const ordersQuery = useQuery({ queryKey: ['pending-orders'], queryFn: listPendingOrders })
+  const rows = ordersQuery.data || []
+  // GWT-84.4：列表失败 = 失败句 + 可点重试，整表替换，不回落默认「暂无数据」；
+  // 真 0（成功且 0 条 pending）= 「还没有…」空态句（GWT-84.2 同族）。
+  if (ordersQuery.isError) {
+    return (
+      <div>
+        <Alert type="info" showIcon style={{ marginBottom: 12 }}
+               title="在线支付未开通。确认收款后把企业套餐配额改到该订单档。" />
+        <LoadFailure title={ORDERS_LOAD_FAILED} onRetry={() => ordersQuery.refetch()} />
+      </div>
+    )
+  }
   return (
     <div>
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
              title="在线支付未开通。确认收款后把企业套餐配额改到该订单档。" />
-      <Button icon={<ReloadOutlined />} onClick={load} style={{ marginBottom: 12 }}>刷新</Button>
-      <Table rowKey="id" size="middle" loading={loading} dataSource={rows}
+      <Button icon={<ReloadOutlined />} onClick={() => ordersQuery.refetch()} style={{ marginBottom: 12 }}>刷新</Button>
+      <Table rowKey="id" size="middle" loading={ordersQuery.isPending} dataSource={rows}
              pagination={{ pageSize: 20 }}
+             locale={{ emptyText: <LoadEmpty title={ORDERS_EMPTY} /> }}
              columns={[
                { title: '订单', dataIndex: 'id' },
                { title: '套餐', dataIndex: 'plan_id' },
                { title: '金额（分）', dataIndex: 'amount_cents' },
                { title: '通道', dataIndex: 'channel' },
                { title: '操作', render: (_: unknown, r: OrderRow) => (
-                 <Popconfirm title="确认已收到线下款项？" onConfirm={() => confirmOrder(r.id).then(load)}>
+                 <Popconfirm title="确认已收到线下款项？"
+                             onConfirm={() => confirmOrder(r.id).then(() => ordersQuery.refetch())}>
                    <Button size="small" type="primary">确认收款</Button>
                  </Popconfirm>
                )},

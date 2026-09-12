@@ -130,3 +130,22 @@
 .capability-market__illegal {
   padding: var(--space-inset-lg);
 }
+
+/* T-14（FR-81）：翻页控件——总件数 + 上一页/下一页（无假下一页） */
+.capability-market__pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-inset-md);
+  margin-top: var(--space-stack-lg);
+}
+
+.capability-market__pager-total {
+  color: var(--color-text-secondary);
+}
+
+.capability-market__pager-current {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}

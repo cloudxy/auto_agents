@@ -131,6 +131,20 @@ test('test_no_accuracy_or_certification_copy', () => {
   FORBIDDEN_CLAIMS.forEach((phrase) => expect(copy).not.toContain(phrase))
 })
 
+/**
+ * GWT-60.9（T-10 收窄口径）：官网 0 次「当前可买中转」——渠道组对外句只在
+ * 企业档预告列表（允许，本轮不冻与后台能否管理的互否）；本票不新增互否句。
+ */
+test('test_no_currently_buyable_relay_copy_gwt_60_9', () => {
+  renderPricing()
+  const copy = document.body.textContent || ''
+  expect(copy).not.toContain('当前可买')
+  expect(copy).not.toContain('可买中转')
+  // 渠道组句保持预告形态（不写成可买、不撤预告）
+  const relayRow = featureRow('中转站渠道组分配')
+  expect(relayRow.textContent || '').toContain('预告')
+})
+
 test('pricing source has no session branch (GWT-01.3)', () => {
   const fs = require('fs') as typeof import('fs')
   const path = require('path') as typeof import('path')
