@@ -1,5 +1,5 @@
 /**
- * 能力市场详情（T-24）：不可信正文纯文本；出处仅父已上架才给商店链接。
+ * 能力市场详情：不可信 SKILL.md / 说明纯文本（T-11 FR-U13）；出处仅父已上架才给商店链接。
  */
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -11,7 +11,7 @@ import {
   type PublicAssetDetail,
   type PublicOrigin,
 } from '../services/capabilities'
-import { displaySlash } from './capabilityMarket'
+import { displaySlash, MARKET_CLOSED, MARKET_CLOSED_HINT } from './capabilityMarket'
 import NotFound from './NotFound'
 import './CapabilityDetail.css'
 
@@ -127,6 +127,25 @@ const DetailError: React.FC<{
   )
 }
 
+function pickUntrustedBody(detail: PublicAssetDetail): string {
+  for (const candidate of [detail.skill_md, detail.body_md]) {
+    if (typeof candidate === 'string' && candidate.trim() !== '') return candidate
+  }
+  return ''
+}
+
+/** Untrusted SKILL.md / body_md: React text children only. Never HTML. */
+const SkillMdBlock: React.FC<{ text: string }> = ({ text }) => {
+  if (!text.trim()) {
+    return <p data-testid="skill-md-empty" className="capability-detail__body-empty">暂无说明</p>
+  }
+  return (
+    <pre data-testid="skill-md" tabIndex={0} className="capability-detail__body">
+      {text}
+    </pre>
+  )
+}
+
 const HostsAndLicense: React.FC<{ detail: PublicAssetDetail }> = ({ detail }) => (
   <dl className="capability-detail__meta">
     {detail.license ? <><dt>许可</dt><dd>{detail.license}</dd></> : null}
@@ -160,9 +179,7 @@ const DetailView: React.FC<{
       <h2>说明</h2>
       <p>{detail.description || '（暂无描述）'}</p>
     </section>
-    <pre data-testid="skill-md" tabIndex={0} className="capability-detail__body">
-      {detail.skill_md ?? detail.body_md ?? ''}
-    </pre>
+    <SkillMdBlock text={pickUntrustedBody(detail)} />
     <IncludesList detail={detail} />
     <SubscribeCta detail={detail} offline={offline} />
     <p className="capability-detail__note">订阅不等于已在宿主运行</p>
@@ -194,6 +211,15 @@ const CapabilityDetail: React.FC = () => {
     )
   }
   if (!query.data) return <NotFound />
+  if (query.data.market_closed) {
+    return (
+      <div className="capability-detail" data-testid="market-closed">
+        <p><Link to="/capabilities">返回市场</Link></p>
+        <h1>{MARKET_CLOSED}</h1>
+        <p>{MARKET_CLOSED_HINT}</p>
+      </div>
+    )
+  }
   return (
     <DetailView
       detail={query.data}

@@ -22,7 +22,7 @@ const loginApi = apiLogin as jest.Mock
 
 function Where() {
   const loc = useLocation()
-  return <div data-testid="where">{loc.pathname}</div>
+  return <div data-testid="where">{`${loc.pathname}${loc.search}`}</div>
 }
 
 function renderLogin(initial = '/login') {
@@ -32,6 +32,7 @@ function renderLogin(initial = '/login') {
         <Route path="/login" element={<Login />} />
         <Route path="/dashboard" element={<Where />} />
         <Route path="/spiders/tasks" element={<Where />} />
+        <Route path="/billing/checkout" element={<Where />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -66,6 +67,16 @@ test('GWT-04.1 login with from query returns to that in-site path', async () => 
   renderLogin('/login?from=/spiders/tasks')
   fillAndSubmit()
   expect(await screen.findByTestId('where')).toHaveTextContent('/spiders/tasks')
+})
+
+test('GWT-U35.2 login from checkout keeps product query', async () => {
+  loginApi.mockResolvedValue({
+    access_token: 't', token_type: 'bearer', username: 'boss', is_admin: true, role: 'admin',
+  })
+  const from = encodeURIComponent('/billing/checkout?product=plan_pro')
+  renderLogin(`/login?from=${from}`)
+  fillAndSubmit()
+  expect(await screen.findByTestId('where')).toHaveTextContent('/billing/checkout?product=plan_pro')
 })
 
 test('open redirect from= is ignored', async () => {

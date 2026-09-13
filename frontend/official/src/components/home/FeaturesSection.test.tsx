@@ -1,5 +1,5 @@
 /**
- * T-01 功能介绍：导出当前可买仅 CSV/JSON + 100 条；GWT-70.4 文案。
+ * T-01 功能介绍：当前可导出仅 CSV/JSON + 100 条；GWT-70.4 文案。
  */
 import React from 'react'
 import { render, screen } from '@testing-library/react'

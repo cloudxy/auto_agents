@@ -118,8 +118,8 @@ def test_gwt_38_3_tenant_cannot_register(db_client, db_session, library_root):
     resp = db_client.post(_SRC, json={
         "name": "tenant-src", "source_kind": "local", "uri": str(library_root),
     }, headers=tenant)
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     after = db_client.get(_SRC, headers=pa)
     assert after.status_code == 200
     assert before.json()["data"]["items"] == after.json()["data"]["items"]
@@ -348,7 +348,8 @@ def test_gwt_41_3_tenant_cannot_list_third_party(
     resp = admin_client.patch(
         _LISTING.format("skill", "third-list"), json={"listing_state": "listed"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     row = _query(db_session, select(CapabilityAsset).where(
         CapabilityAsset.name == "third-list",
     ))[0]

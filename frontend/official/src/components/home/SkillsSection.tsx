@@ -62,7 +62,7 @@ const SkillsSection: React.FC = () => {
         )}
 
         {isError && (
-          <div role="alert" style={{ textAlign: 'center', marginTop: 32 }}>
+          <div role="alert" data-testid="featured-error" style={{ textAlign: 'center', marginTop: 32 }}>
             <p style={{ fontSize: 16, marginBottom: 16 }}>暂时无法加载能力</p>
             <Button
               type="primary"
@@ -78,7 +78,7 @@ const SkillsSection: React.FC = () => {
         )}
 
         {!isLoading && !isError && items.length === 0 && (
-          <div style={{ textAlign: 'center', marginTop: 32 }}>
+          <div data-testid="featured-empty" style={{ textAlign: 'center', marginTop: 32 }}>
             <p style={{ fontSize: 16, marginBottom: 16 }}>
               还没有上架的能力。开通后可在能力市场浏览。
             </p>

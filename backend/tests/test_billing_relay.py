@@ -85,12 +85,14 @@ def test_list_plans_and_offline_order(
 
 
 def test_viewer_cannot_create_order_or_token(db_client, db_session, db_engine):
+    from backend.tests.relay_sku_support import seed_relay_sku
     from conftest import make_tenant_owner_headers
     from backend.services.auth_service import AuthService
     from platform_core.models.user import User
 
     _seed_plans(db_session)
     owner, tid = make_tenant_owner_headers(db_session, slug="view-co")
+    seed_relay_sku(db_session, tid)
 
     async def _viewer():
         async with db_session() as s:
@@ -140,6 +142,8 @@ def test_relay_group_token_issue_and_revoke(db_client, db_session, db_engine, mo
     from backend.services.llm_gateway import admin as gateway_admin
 
     owner, tid = make_tenant_owner_headers(db_session, slug="relay-co")
+    from backend.tests.relay_sku_support import seed_relay_sku
+    seed_relay_sku(db_session, tid)
     listed = db_client.get("/api/v1/relay/groups", headers=owner)
     assert listed.status_code == 200, listed.text
     # T-07 作废「GET 必有 data[0]」金标：读路径不再建 default，空态可达（GWT-60.4）

@@ -87,7 +87,7 @@ async def list_capabilities(
 
 @router.get("/sources")
 async def list_capability_sources(
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     market: PowerMarketService = Depends(_market),
 ):
     """源列表。仅超管。"""
@@ -97,7 +97,7 @@ async def list_capability_sources(
 @router.post("/sources")
 async def register_capability_source(
     payload: CreateSourceRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
@@ -112,7 +112,7 @@ async def register_capability_source(
 @router.post("/sources/{name}/sync")
 async def sync_capability_source(
     name: str,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
@@ -129,7 +129,7 @@ async def sync_capability_source(
 
 @router.post("/backfill-first-party")
 async def backfill_first_party_listing(
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
@@ -143,7 +143,7 @@ async def backfill_first_party_listing(
 
 @router.post("/scan-plugins")
 async def scan_plugins(
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
 ):
     """扫描 capability-library/plugins/（plugin.json 解析入库；仅平台超管）"""
@@ -189,7 +189,7 @@ async def verify_plugin(
 
 @router.post("/scan-experts")
 async def scan_experts(
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
 ):
     """扫描 capability-library/experts/（subagent 格式解析入库；仅平台超管）"""
@@ -359,7 +359,7 @@ async def patch_capability_listing(
     asset_type: str,
     name: str,
     payload: PatchListingRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):

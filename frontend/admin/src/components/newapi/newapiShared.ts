@@ -1,7 +1,7 @@
 /**
  * new-api 运维域共享常量与格式化（工单 80 拆分自 NewApiOps.tsx）
  */
-import { CHANNEL_STATUS, type ProbeVerdict } from '../../services/newapi'
+import { CHANNEL_STATUS, type DutyPageState, type ProbeVerdict } from '../../services/newapi'
 
 export const STATUS_TAG: Record<number, { color: string; text: string }> = {
   [CHANNEL_STATUS.ENABLED]: { color: 'green', text: '启用' },
@@ -33,7 +33,72 @@ export const DUTY_DEGRADE_71_3_HINT =
 export const DUTY_TABLE_UNAVAILABLE = '网关列表暂不可用'
 export const DUTY_LOCAL_PROBE_EMPTY = '还没有本地探针记录。下次探针批次会显示在这里。'
 export const DUTY_LOAD_FAILED = '值班页加载失败。检查网络后重试。'
+export const DUTY_LIVE = '活'
+export const DUTY_ROW_LIVE_STATUS = 'live'
 export const FORBIDDEN_CHANNEL_EMPTY = '暂无渠道'
+
+/** 屏 19：error/loading 后 hasLiveRow 压过 empty/degrade（含 duty_page_state）。 */
+export type DutyBanner = 'loading' | 'error' | 'empty' | 'degrade' | 'live' | 'ok'
+
+export const isDutyPageState = (value: unknown): value is DutyPageState =>
+  value === 'empty' || value === 'degrade' || value === 'live'
+
+export const isDutyLiveRow = (
+  gatewayAvailable: boolean,
+  registered: boolean,
+  verdict: ProbeVerdict | null | undefined,
+): boolean => Boolean(gatewayAvailable && registered && verdict === 'original')
+
+/** 行「活」= 网关可达 ∧（API live ∨ 本地 original）；降级禁止标活。 */
+export const showDutyLiveRow = (input: {
+  dutyRowStatus?: string | null
+  dutyRowStatusText?: string | null
+  gatewayAvailable: boolean
+  registered: boolean
+  verdict?: ProbeVerdict | null
+}): boolean => {
+  if (!input.gatewayAvailable) return false
+  if (input.dutyRowStatus != null || input.dutyRowStatusText != null) {
+    return input.dutyRowStatus === DUTY_ROW_LIVE_STATUS || input.dutyRowStatusText === DUTY_LIVE
+  }
+  return isDutyLiveRow(input.gatewayAvailable, input.registered, input.verdict)
+}
+
+export const matchOverviewDuty = (
+  models: Array<{
+    gateway_ref: string
+    model_name: string
+    duty_row_status?: string | null
+    duty_row_status_text?: string | null
+  }> | undefined,
+  gatewayRef: string | null,
+  modelName: string,
+): { dutyRowStatus: string | null; dutyRowStatusText: string | null } => {
+  const list = models || []
+  const hit = (gatewayRef && list.find((m) => m.gateway_ref === gatewayRef))
+    || list.find((m) => m.model_name === modelName)
+  return {
+    dutyRowStatus: hit?.duty_row_status ?? null,
+    dutyRowStatusText: hit?.duty_row_status_text ?? null,
+  }
+}
+
+export const resolveDutyBanner = (input: {
+  loading: boolean
+  error: boolean
+  available?: boolean
+  modelTotal: number
+  hasLiveRow: boolean
+  dutyPageState?: string | null
+}): DutyBanner => {
+  if (input.loading) return 'loading'
+  if (input.error) return 'error'
+  if (input.hasLiveRow) return 'live'
+  if (isDutyPageState(input.dutyPageState)) return input.dutyPageState
+  if (input.available === false) return 'degrade'
+  if (input.available && input.modelTotal === 0) return 'empty'
+  return 'ok'
+}
 
 /** T-32 三问驾驶舱区级句（edge-states「中转站管控·总览」节，FR-84 同句式，不写第二套） */
 export const CHANNELS_3Q_LOAD_FAILED = '渠道判定加载失败。检查网络后重试。'

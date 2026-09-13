@@ -12,6 +12,8 @@ import type { ColumnsType } from 'antd/es/table'
 import { STATUS_META, PRIORITY_META } from './types'
 import type { Task, SpiderMap } from './types'
 import { SPIDER_WORKER_OFFLINE_COPY, STILL_RUNNING_COPY, ZERO_ITEMS_DONE_COPY } from './copy'
+import { LoadEmpty } from '../LoadState'
+import { CLEAR_FILTERS, EMPTY_TASKS_COPY, FILTERED_TASKS_EMPTY } from '../../constants/collectCopy'
 
 const { Text } = Typography
 
@@ -321,6 +323,30 @@ export const TaskList: React.FC<TaskListProps> = ({
           showSizeChanger: false,
           showTotal: (t) => `共 ${t} 条任务`,
           onChange: (p, ps) => onPaginationChange(p, ps),
+        }}
+        locale={{
+          emptyText: (statusFilter || spiderFilter || priorityFilter) ? (
+            <LoadEmpty
+              title={FILTERED_TASKS_EMPTY}
+              action={(
+                <Button size="small" onClick={() => {
+                  onStatusFilterChange(undefined)
+                  onSpiderFilterChange(undefined)
+                  onPriorityFilterChange(undefined)
+                }}
+                >
+                  {CLEAR_FILTERS}
+                </Button>
+              )}
+            />
+          ) : (
+            <LoadEmpty
+              title={EMPTY_TASKS_COPY}
+              action={canCreate ? (
+                <Button type="primary" size="small" onClick={onCreateNew}>新增任务</Button>
+              ) : undefined}
+            />
+          ),
         }}
       />
     </>

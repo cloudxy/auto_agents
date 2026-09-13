@@ -36,6 +36,7 @@ _REJECT_REASON = {
     "MARKET_NOT_FOUND": "unlisted",
     "MARKET_HOST_INCOMPAT": "host_incompat",
     "MARKET_READONLY_ROLE": "readonly",
+    "MARKET_CLOSED": "market_closed",
 }
 
 

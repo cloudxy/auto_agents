@@ -6,7 +6,7 @@
 - DELETE /api/v1/newapi/channels/{channel_id}/config
 - PUT    /api/v1/newapi/models/{gateway_ref}/config
 
-GET 非超管 404 同形；写面 require_platform_admin → 403。
+GET 非超管 404 同形；写面 require_platform_admin_or_404 → 404 同形（FR-U12）。
 远端不可达 GET 200 空列表（不 502）。新写 relay:channel:cfg:{ref}。
 """
 from unittest.mock import AsyncMock
@@ -202,19 +202,19 @@ def test_set_config_anonymous_401(client, monkeypatch, fake_redis):
     assert resp.status_code == 401
 
 
-def test_set_config_viewer_403(viewer_client, monkeypatch, fake_redis):
+def test_set_config_viewer_404(viewer_client, monkeypatch, fake_redis):
     _wire(monkeypatch, fake_redis, models=[_MODEL_3])
     resp = viewer_client.put(f"{CHANNELS_URL}/3/config", json={
         "limit_quota": 10, "window_hours": 24, "cooldown_seconds": 60})
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     assert fake_redis.hashes == {}
 
 
-def test_set_config_tenant_admin_403_quota_unchanged(
+def test_set_config_tenant_admin_404_quota_unchanged(
     db_client, admin_client, monkeypatch, fake_redis, db_session,
 ):
-    """GWT-70.3 写权：租户公司管理员改窗口 → 403；额度不变；越权记录"""
+    """GWT-U12.3 写权：租户公司管理员改窗口 → 404 同形；额度不变；越权记录"""
     import asyncio
 
     from sqlalchemy import select
@@ -224,8 +224,9 @@ def test_set_config_tenant_admin_403_quota_unchanged(
     _wire(monkeypatch, fake_redis, models=[_MODEL_3])
     resp = admin_client.put(f"{CHANNELS_URL}/3/config", json={
         "limit_quota": 10, "window_hours": 24, "cooldown_seconds": 60})
-    assert resp.status_code == 403, resp.text
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["code"] == "HTTP_404"
+    assert "抱歉" not in resp.text
     assert fake_redis.hashes == {}
 
     async def _logs():
@@ -269,8 +270,8 @@ def test_clear_config_anonymous_401(client, monkeypatch, fake_redis):
     assert client.delete(f"{CHANNELS_URL}/3/config").status_code == 401
 
 
-def test_clear_config_operator_403(operator_client, monkeypatch, fake_redis):
+def test_clear_config_operator_404(operator_client, monkeypatch, fake_redis):
     _wire(monkeypatch, fake_redis)
     resp = operator_client.delete(f"{CHANNELS_URL}/3/config")
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"

@@ -1,7 +1,7 @@
-"""值班总览：LiteLLM 模型/部署 + 本地事件/探针（T-18）
+"""值班总览：LiteLLM 模型/部署 + 本地事件/探针（T-18 / T-26 FR-U25）
 
 远程异常一律降级 available=false（HTTP 200，不 500）。
-空态 71.2 / 降级 71.3 冻结句。页上无完整上游 Key。
+空态 / 降级 / 活 三句互斥；页上无完整上游 Key；禁止「暂无渠道」。
 """
 import asyncio
 from datetime import datetime, timedelta
@@ -15,11 +15,14 @@ from backend.repositories.newapi_repository import (
 )
 from backend.services.gateway_models import (
     DUTY_DEGRADE_71_3,
-    DUTY_EMPTY_71_2,
+    apply_duty_row,
+    clear_duty_row,
     items_from_payload,
     map_gateway_model,
+    page_duty_copy,
 )
 from backend.services.llm_gateway import admin as gw_admin
+from backend.services.newapi_api import _channel_id_from_ref
 from platform_core.logger import get_logger
 from platform_core.schemas.newapi import (
     ChannelEventListResponse,
@@ -57,6 +60,45 @@ class NewapiOverviewService:
         """总览：网关模型（降级安全）+ 近 24h 事件 + 最近探针分布"""
         logger.info("聚合 LLM 网关值班总览")
         fetched = await self._fetch_models()
+        events_24h, batch_id, verdicts = await self._local_stats()
+        models = await self._duty_models(fetched)
+        empty, degrade, page = page_duty_copy(fetched.available, models)
+        return NewapiOverviewResponse(
+            available=fetched.available,
+            reason=fetched.reason,
+            empty_state=empty,
+            degrade_state=degrade,
+            duty_page_state=page,
+            models=models,
+            deployments=fetched.deployments,
+            channels=[],
+            total=len(models),
+            events_24h=events_24h,
+            latest_batch_id=batch_id,
+            latest_batch_verdicts=verdicts,
+        )
+
+    async def _duty_models(
+        self, fetched: _ModelFetchResult,
+    ) -> list[GatewayModelResponse]:
+        """可达时按当前 gateway_ref 集合+24h 窗标活；降级禁止标活。"""
+        logger.debug(
+            f"合成值班行态: available={fetched.available}, models={len(fetched.models)}"
+        )
+        models = fetched.models
+        if not fetched.available:
+            return [clear_duty_row(m) for m in models]
+        if not models:
+            return models
+        latest = await self.probe_repo.latest_result_per_channel(
+            channel_ids=[_channel_id_from_ref(m.gateway_ref) for m in models],
+            since=datetime.now() - timedelta(hours=EVENTS_WINDOW_HOURS),
+        )
+        return _annotate_duty_models(models, latest)
+
+    async def _local_stats(self) -> tuple[int, Optional[str], dict]:
+        """本地事件/探针统计（降级时仍返回）。"""
+        logger.debug("读取值班本地事件与探针统计")
         events_24h = await self.event_repo.count_events_since(
             datetime.now() - timedelta(hours=EVENTS_WINDOW_HOURS)
         )
@@ -64,22 +106,7 @@ class NewapiOverviewService:
         verdicts = (
             await self.probe_repo.count_results_by_verdict(batch_id) if batch_id else {}
         )
-        total = len(fetched.models)
-        empty = DUTY_EMPTY_71_2 if fetched.available and total == 0 else None
-        degrade = DUTY_DEGRADE_71_3 if not fetched.available else None
-        return NewapiOverviewResponse(
-            available=fetched.available,
-            reason=fetched.reason,
-            empty_state=empty,
-            degrade_state=degrade,
-            models=fetched.models,
-            deployments=fetched.deployments,
-            channels=[],
-            total=total,
-            events_24h=events_24h,
-            latest_batch_id=batch_id,
-            latest_batch_verdicts=verdicts,
-        )
+        return events_24h, batch_id, verdicts
 
     async def list_events(
         self, page: int, page_size: int, channel_id: Optional[int] = None
@@ -176,6 +203,38 @@ class NewapiOverviewService:
                 map_gateway_model(raw) for raw in items_from_payload(payload)
             ) if item is not None
         ]
+
+
+def _index_probe_rows(latest: dict[int, object]) -> tuple[dict[str, object], dict[str, object]]:
+    """按 gateway_ref / 模型名建索引，供行匹配。"""
+    by_ref: dict[str, object] = {}
+    by_name: dict[str, object] = {}
+    for row in latest.values():
+        scores = getattr(row, "scores", None)
+        payload = scores if isinstance(scores, dict) else {}
+        ref = str(payload.get("_gateway_ref") or "")
+        if ref and ref not in by_ref:
+            by_ref[ref] = row
+        name = str(getattr(row, "model", "") or "")
+        if name and name not in by_name:
+            by_name[name] = row
+    return by_ref, by_name
+
+
+def _annotate_duty_models(
+    models: list[GatewayModelResponse], latest: dict[int, object],
+) -> list[GatewayModelResponse]:
+    """可达且已登记时：original 行标「活」；降级路径不调用。"""
+    by_ref, by_name = _index_probe_rows(latest)
+    out: list[GatewayModelResponse] = []
+    for model in models:
+        cid = _channel_id_from_ref(model.gateway_ref)
+        row = latest.get(cid) or by_ref.get(model.gateway_ref) or by_name.get(
+            model.model_name,
+        )
+        verdict = getattr(row, "verdict", None) if row is not None else None
+        out.append(apply_duty_row(model, str(verdict) if verdict else None))
+    return out
 
 
 def _mapped_or_name(

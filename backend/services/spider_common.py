@@ -39,6 +39,8 @@ __all__ = [
 NO_TENANT_ENQUEUE_MESSAGE = "没有企业身份，无法入队"
 # FR-87 / GWT-87.3：只读提交入队拒绝句（同族中文；「无提交入口」的前端面归 T-18/T-20）。
 READONLY_ENQUEUE_MESSAGE = "当前账号不能提交采集任务，请联系企业管理员"
+# FR-U01 / NFR-U01：点提交后 3 秒内用户可见入队句（禁止「创建成功」顶替）。
+ENQUEUE_ACCEPTED_COPY = "已入队"
 
 
 def require_enqueue_tenant(tenant_id: int | None) -> int:

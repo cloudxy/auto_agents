@@ -4,6 +4,7 @@
  * 向导行为直接挂 ImportWizard（轻渲染）；入口/完成流转挂整页（Capabilities）。
  */
 import React from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -39,6 +40,9 @@ jest.mock('../services/capabilities', () => ({
   subscribeCapability: jest.fn(),
   listInstalls: jest.fn(),
   importAssets: jest.fn(),
+  listPublicAssets: jest.fn().mockResolvedValue({ items: [], total: 0, market_closed: false }),
+  getPowerMarket: jest.fn().mockResolvedValue({ enabled: true }),
+  putPowerMarket: jest.fn(),
 }))
 
 jest.mock('./Skills', () => () => <div>skills-tab</div>)
@@ -93,12 +97,15 @@ function renderWizard() {
 }
 
 function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter initialEntries={['/capabilities']}>
-      <Routes>
-        <Route path="/capabilities" element={<Capabilities />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/capabilities']}>
+        <Routes>
+          <Route path="/capabilities" element={<Capabilities />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 
@@ -282,6 +289,7 @@ test('GWT-100.6 非超管无导入入口，页面其余照常', async () => {
   perm.isPlatformAdmin = false
   renderPage()
   expect(screen.queryByRole('button', { name: /导入资产/ })).toBeNull()
-  expect(await screen.findByText('还没有目录项。同步源或扫描后会出现在这里。'))
-    .toBeInTheDocument()
+  expect(await screen.findByText('暂无已上架能力')).toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: '源' })).not.toBeInTheDocument()
+  expect(screen.queryByTestId('governance-shell')).not.toBeInTheDocument()
 })

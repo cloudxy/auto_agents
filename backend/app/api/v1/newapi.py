@@ -3,7 +3,7 @@
 - 路径 `/api/v1/newapi/*` 一周期保留；页 URL `/newapi` 保留
 - 列表来自 LiteLLM 模型/部署，不是 new-api 渠道
 - GET：require_platform_admin_or_404（GWT-71.4 / 07.3 同形）
-- 写/触发：require_platform_admin（GWT-70.3）；探针触发走 404 同形（GWT-98.7）
+- 写/触发：require_platform_admin_or_404（FR-U12 / U15；GWT-70.3 拒绝+行不变，404 同形）
 - 信封远端不可达 = 200 + available=false；探针触发即返回 accepted（不阻塞轮询循环）
 """
 from typing import Optional
@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.api._helpers import record_audit
 from backend.app.api.deps import (
     CurrentUser,
-    require_platform_admin,
     require_platform_admin_or_404,
 )
 from backend.app.responses import ApiResponse, PaginatedResponse, ok, paginated
@@ -127,7 +126,7 @@ async def set_channel_config(
     payload: ChannelConfigInfo,
     session: AsyncSession = Depends(get_async_db),
     service: ChannelConfigService = Depends(_config_service),
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> ApiResponse[ChannelConfigUpdateResult]:
     """int 路径 expand 写窗口配置（channel_id 类型不改）"""
     info = await service.set_config(channel_id, payload)
@@ -144,7 +143,7 @@ async def clear_channel_config(
     channel_id: int,
     session: AsyncSession = Depends(get_async_db),
     service: ChannelConfigService = Depends(_config_service),
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> ApiResponse[ChannelConfigUpdateResult]:
     """清除 int 路径配置"""
     previous = await service.clear_config(channel_id)
@@ -166,7 +165,7 @@ async def set_model_config(
     payload: ChannelConfigInfo,
     session: AsyncSession = Depends(get_async_db),
     service: ChannelConfigService = Depends(_config_service),
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> ApiResponse[GatewayConfigUpdateResult]:
     """按 string gateway_ref 写窗口配置"""
     info = await service.set_config_ref(gateway_ref, payload)
@@ -185,7 +184,7 @@ async def clear_model_config(
     gateway_ref: str,
     session: AsyncSession = Depends(get_async_db),
     service: ChannelConfigService = Depends(_config_service),
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> ApiResponse[GatewayConfigUpdateResult]:
     previous = await service.clear_config_ref(gateway_ref)
     await record_audit(
@@ -202,7 +201,7 @@ async def write_gateway_model(
     payload: GatewayModelWriteRequest,
     session: AsyncSession = Depends(get_async_db),
     service: NewapiOverviewService = Depends(_service),
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> ApiResponse[GatewayModelResponse]:
     """改/登记平台网关模型（GWT-70.3 非超管拒绝）"""
     info = await service.register_model(payload)
@@ -218,7 +217,7 @@ async def register_platform_upstream(
     payload: GatewayUpstreamWriteRequest,
     session: AsyncSession = Depends(get_async_db),
     service: NewapiOverviewService = Depends(_service),
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> ApiResponse[GatewayModelResponse]:
     """登记平台上游（GWT-70.3 非超管拒绝）"""
     info = await service.register_upstream(payload)

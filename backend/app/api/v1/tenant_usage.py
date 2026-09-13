@@ -3,15 +3,17 @@
 读：任意已登录租户成员（含只读 viewer）可见进度。
 写套餐：owner/admin；本波不提供自助改套餐（支付仍 FR-50）。
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import CurrentUser, require_login
 from backend.app.api.v1.members import require_tenant_manager
 from backend.app.responses import ok
 from backend.services.quota_service import (
+    DEFAULT_UPGRADE_PRODUCT,
     SHANGHAI_TZ,
     QuotaService,
+    resolve_upgrade_intent,
     shanghai_year_month,
 )
 from platform_core.db import get_async_db
@@ -61,6 +63,19 @@ async def tenant_usage_by_member(
     return ok(data=await service.usage_by_member(tid))
 
 
+@router.get("/quota/upgrade-intent")
+async def quota_upgrade_intent(
+    product: str = Query(DEFAULT_UPGRADE_PRODUCT),
+    user: CurrentUser = Depends(require_login),
+):
+    """申请提升分角色着陆（GWT-U02.6/U02.7）：不创建待支付。"""
+    _require_tenant_space(user)
+    logger.info(
+        f"申请提升意图 | user={user.username} role={user.tenant_role} product={product}"
+    )
+    return ok(data=resolve_upgrade_intent(user.tenant_role, product))
+
+
 @router.patch("/quota")
 async def patch_tenant_quota(
     user: CurrentUser = Depends(require_tenant_manager),
@@ -68,6 +83,6 @@ async def patch_tenant_quota(
     """改套餐写权：只读 403。本波不可自助改套餐（申请提升走联系说明）。"""
     logger.info(f"改套餐拒绝（本波锁定） | user={user.username} tenant={user.tenant_id}")
     raise BusinessException(
-        message="本波不可自助改套餐。请申请提升配额。",
+        message="本波不可自助改套餐。请申请提升。",
         code="QUOTA_PLAN_LOCKED",
     )

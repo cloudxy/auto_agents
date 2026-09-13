@@ -94,9 +94,8 @@ def _make_viewer_headers(db_session, tid: int, username: str) -> dict:
 
 
 def test_gwt_87_1_quota_full_envelope_is_user_visible(db_client, db_session, monkeypatch):
-    """GWT-87.1：经办已登录且并发已满，提交采集入队 →
-    用户可见「已达配额上限」+「请联系企业管理员」；可见处无 QUOTA_EXCEEDED、无裸 429；
-    Then 没有「提交升级申请」支（经办不能下单，GWT-50.8）。"""
+    """GWT-87.1 / FR-U02：并发已满 → 「已达配额上限」+「申请提升」；
+    可见处无 QUOTA_EXCEEDED、无裸 429；不建支付单。"""
     from conftest import make_tenant_owner_headers
 
     _seed_worker_redis(monkeypatch)
@@ -111,9 +110,10 @@ def test_gwt_87_1_quota_full_envelope_is_user_visible(db_client, db_session, mon
     _assert_no_inner_code(resp)
     body = resp.json()
     assert "已达配额上限" in body["message"]
-    assert "请联系企业管理员" in body["message"]
+    assert "申请提升" in body["message"]
+    assert "采集未运行，不会出数" not in body["message"]
+    assert "去结果库" not in body["message"]
     assert "提交升级" not in body["message"]
-    assert "申请提升配额" not in body["message"]
     assert len(_tasks_of(db_session, tid)) == 1  # 拒绝路径零新任务
 
 
@@ -132,7 +132,7 @@ def test_gwt_87_2_under_quota_enqueues_normally(db_client, db_session, monkeypat
     body = resp.json()
     assert body["success"] is True
     assert "已达配额上限" not in body["message"]
-    assert "请联系企业管理员" not in body["message"]
+    assert "申请提升" not in body["message"]
     rows = _tasks_of(db_session, tid)
     assert len(rows) == 1
     assert rows[0].status == "pending"

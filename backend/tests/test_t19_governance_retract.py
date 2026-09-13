@@ -348,8 +348,8 @@ def test_gwt_88_4_tenant_cannot_touch_retracted(
         _LISTING.format("skill", "t19-gone-skill"), headers=tenant,
         json={"listing_state": "listed"},
     )
-    assert denied.status_code == 403
-    assert denied.json()["code"] == "FORBIDDEN"
+    assert denied.status_code == 404
+    assert denied.json()["code"] == "HTTP_404"
 
     before = _public_names(db_client, _PUB_SKILLS)
     assert "t19-gone-skill" not in before

@@ -179,3 +179,31 @@ class ChannelProbeResultRepository(BaseRepository[ChannelProbeResult]):
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
+
+    async def latest_result_per_channel(
+        self,
+        channel_ids: Optional[list[int]] = None,
+        since: Optional[datetime] = None,
+    ) -> dict[int, ChannelProbeResult]:
+        """当前 channel_id 集合内每渠最新探针；无集合不扫表。"""
+        ids = list(dict.fromkeys(int(cid) for cid in (channel_ids or [])))
+        if not ids:
+            return {}
+        stmt_max = (
+            select(
+                ChannelProbeResult.channel_id,
+                func.max(ChannelProbeResult.id).label("max_id"),
+            )
+            .where(ChannelProbeResult.channel_id.in_(ids))
+        )
+        if since is not None:
+            stmt_max = stmt_max.where(ChannelProbeResult.created_at >= since)
+        subq = stmt_max.group_by(ChannelProbeResult.channel_id).subquery()
+        stmt = (
+            select(ChannelProbeResult)
+            .join(subq, ChannelProbeResult.id == subq.c.max_id)
+            .limit(len(ids))
+        )
+        result = await self.session.execute(stmt)
+        rows = list(result.scalars().all())
+        return {int(row.channel_id): row for row in rows}
