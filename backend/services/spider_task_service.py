@@ -37,7 +37,11 @@ from backend.services.spider_common import (
     extract_store_targets,
     require_enqueue_tenant,
 )
-from backend.services.spider_worker_gate import annotate_tasks, require_online_worker
+from backend.services.spider_worker_gate import (
+    SPIDER_WORKER_OFFLINE_CODE,
+    annotate_tasks,
+    require_online_worker,
+)
 from config import settings
 from platform_core.db import get_manager
 from platform_core.exceptions import BusinessException, NotFoundException
@@ -50,6 +54,12 @@ from platform_core.schemas.spider import (
 )
 
 logger = get_logger("api")
+
+_QUOTA_BLOCK_REASON = {
+    "storage": "quota_storage",
+    "concurrency": "quota_concurrency",
+    "llm_tokens": "quota_tokens",
+}
 
 # ----------------------------------------------------------------------
 # 失败重试延迟队列（ZSET）：score = 到期时间戳，consumer._scan_retry_zset
@@ -124,30 +134,48 @@ class SpiderTaskService:
         """同爬虫并发任务上限（配置即代码，至少 1）"""
         return max(1, int(settings.get("SPIDER_MAX_CONCURRENT_PER_SPIDER", 2)))
 
-    async def _check_enqueue_quota(self, tenant_id: int) -> None:
+    async def _emit_blocked(self, tenant_id: int, reason: str, spider_name: str) -> None:
+        logger.info(f"拦住事件 | tenant={tenant_id} reason={reason}")
+        from backend.services.product_event_service import emit_product_event
+        await emit_product_event(
+            self.session, "task_blocked",
+            tenant_id=tenant_id,
+            props={"reason": reason, "spider": spider_name},
+        )
+
+    async def _check_enqueue_quota(self, tenant_id: int, spider_name: str = "example") -> None:
         """入队前本租户并发配额（显式 tenant_id，不靠 Mixin 回填）
 
-        FR-87 / GWT-87.1（T-12）：执法本体仍抛 QuotaExceededException（内部码
-        QUOTA_EXCEEDED 留给验收）；入队信封边界改写为用户可见中文句——
-        「已达配额上限」+「请联系企业管理员」，HTTP 400 + 稳定非内码 code，
-        不再把 429/内码裸交给前端。所有入队入口（run/模板 run/调度/门面）经此单点。
+        FR-U02：执法本体仍抛 QuotaExceededException（内部码 QUOTA_EXCEEDED
+        留给验收）；入队信封改写为「已达配额上限」+ 存储「去结果库」/
+        并发「申请提升」。HTTP 400，无裸 429。工人句不走本闸。
         """
         logger.debug(f"入队配额检查: tenant_id={tenant_id}")
         from backend.services.quota_service import (
-            TASK_QUOTA_FULL_CONTACT_ADMIN,
             QuotaExceededException,
             QuotaService,
+            wrap_quota_exceeded,
         )
 
+        quota = QuotaService(self.session)
         try:
-            await QuotaService(self.session).check_task_concurrency(tenant_id)
+            await quota.check_task_concurrency(tenant_id)
+            await quota.check_result_storage(tenant_id)
         except QuotaExceededException as exc:
-            logger.warning(
-                f"入队配额满（信封转用户可见句）| tenant={tenant_id} | inner_code={exc.code}"
-            )
-            raise BusinessException(
-                message=TASK_QUOTA_FULL_CONTACT_ADMIN, code="TASK_QUOTA_LIMIT_REACHED",
-            ) from exc
+            reason = _QUOTA_BLOCK_REASON.get(exc.dimension, "quota_concurrency")
+            await self._emit_blocked(tenant_id, reason, spider_name)
+            raise wrap_quota_exceeded(exc) from exc
+
+    async def _reject_if_blocked(self, owner_id: int, spider_name: str) -> None:
+        """工人闸先于配额；拦住发 task_blocked，不入队、不停在采集中。"""
+        logger.info(f"入队拦住闸 | tenant={owner_id} spider={spider_name}")
+        try:
+            await require_online_worker(get_async_redis())
+        except BusinessException as exc:
+            if getattr(exc, "code", None) == SPIDER_WORKER_OFFLINE_CODE:
+                await self._emit_blocked(owner_id, "worker_offline", spider_name)
+            raise
+        await self._check_enqueue_quota(owner_id, spider_name)
 
     async def _ensure_spider_available(self, spider_name: str) -> None:
         """入队前注册表校验：DB 优先（存在且 enabled），无记录回退 yml 种子
@@ -217,8 +245,7 @@ class SpiderTaskService:
         # 阶段 6：注册表校验（DB 优先，yml 兜底；停用/未登记拒绝）
         await self._ensure_spider_available(spider_name)
 
-        await require_online_worker(get_async_redis())
-        await self._check_enqueue_quota(owner_id)
+        await self._reject_if_blocked(owner_id, spider_name)
 
         # 并发槽位守卫
         active_key = ACTIVE_TASK_KEY.format(spider_name=spider_name)

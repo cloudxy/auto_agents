@@ -16,7 +16,6 @@ from backend.app.api.deps import (
     require_admin,
     require_login,
     require_operator,
-    require_platform_admin,
     require_platform_admin_or_404,
 )
 from backend.app.responses import ok
@@ -47,7 +46,7 @@ def _service(session: AsyncSession = Depends(get_async_db)) -> SkillService:
 
 @router.post("/scan")
 async def scan_skills(
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):

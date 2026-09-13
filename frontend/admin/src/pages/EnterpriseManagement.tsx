@@ -259,7 +259,7 @@ const TenantsTab: React.FC = () => {
       // 平台租户（GWT-94.2/94.3）：改名/停用入口禁用 + 守卫句旁注；无删除企业控件（GWT-94.4）
       title: '操作', width: 210,
       render: (_: unknown, r: TenantRow) => r.is_platform_default ? (
-        <Space direction="vertical" size={2}>
+        <Space orientation="vertical" size={2}>
           <Space size={0}>
             <Button type="link" size="small" disabled>改名</Button>
             <Button type="link" size="small" danger disabled>停用</Button>

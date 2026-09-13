@@ -45,7 +45,10 @@ def _stub_delete(monkeypatch, *, error=None) -> list[dict]:
     return calls
 
 
-def _create_group(db_client, owner) -> int:
+def _create_group(db_client, owner, db_session, tid) -> int:
+    from backend.tests.relay_sku_support import seed_relay_sku
+
+    seed_relay_sku(db_session, tid)
     created = db_client.post(
         "/api/v1/relay/groups", headers=owner,
         json={"name": "vip", "rpm_limit": 60, "tpm_limit": 10000, "models": ["gpt-4o"]},
@@ -77,7 +80,7 @@ def test_issue_registers_gateway_key_and_plaintext_once(
     from conftest import make_tenant_owner_headers
 
     owner, tid = make_tenant_owner_headers(db_session, slug="t08-issue")
-    gid = _create_group(db_client, owner)
+    gid = _create_group(db_client, owner, db_session, tid)
     gen_calls = _stub_generate(
         monkeypatch, reply={"key": "sk-gw-plain-1", "token_id": "tok-1"},
     )
@@ -117,6 +120,8 @@ def test_issue_group_without_limits_omits_zero_limits(
     from conftest import make_tenant_owner_headers
 
     owner, tid = make_tenant_owner_headers(db_session, slug="t08-nolimit")
+    from backend.tests.relay_sku_support import seed_relay_sku
+    seed_relay_sku(db_session, tid)
     created = db_client.post("/api/v1/relay/groups", headers=owner, json={"name": "flat"})
     assert created.status_code == 201, created.text
     gid = created.json()["data"]["id"]
@@ -139,7 +144,7 @@ def test_issue_gateway_5xx_visible_no_local_row(
     from conftest import make_tenant_owner_headers
 
     owner, tid = make_tenant_owner_headers(db_session, slug="t08-5xx")
-    gid = _create_group(db_client, owner)
+    gid = _create_group(db_client, owner, db_session, tid)
     _req = httpx.Request("POST", "http://gw/key/generate")
     _stub_generate(
         monkeypatch,
@@ -165,7 +170,7 @@ def test_issue_gateway_unreachable_visible_no_local_row(
     from conftest import make_tenant_owner_headers
 
     owner, tid = make_tenant_owner_headers(db_session, slug="t08-down")
-    gid = _create_group(db_client, owner)
+    gid = _create_group(db_client, owner, db_session, tid)
     _stub_generate(monkeypatch, error=httpx.ConnectError("gateway down"))
 
     resp = _issue(db_client, owner, gid)
@@ -181,7 +186,7 @@ def test_revoke_invalidates_gateway_then_local(
     from conftest import make_tenant_owner_headers
 
     owner, tid = make_tenant_owner_headers(db_session, slug="t08-revoke")
-    gid = _create_group(db_client, owner)
+    gid = _create_group(db_client, owner, db_session, tid)
     gen_calls = _stub_generate(
         monkeypatch, reply={"key": "sk-gw-plain-3", "token_id": "tok-3"},
     )
@@ -212,7 +217,7 @@ def test_revoke_gateway_failure_keeps_active_then_recovers(
     from conftest import make_tenant_owner_headers
 
     owner, tid = make_tenant_owner_headers(db_session, slug="t08-revfail")
-    gid = _create_group(db_client, owner)
+    gid = _create_group(db_client, owner, db_session, tid)
     _stub_generate(
         monkeypatch, reply={"key": "sk-gw-plain-4", "token_id": "tok-4"},
     )

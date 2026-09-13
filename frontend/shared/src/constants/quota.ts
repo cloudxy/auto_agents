@@ -21,8 +21,7 @@ export const FREE_TIER_FEATURE_COPY = {
 /**
  * 专业档配额（T-03 / GWT-50.13 一套真相）：与官网定价页专业档三条同数。
  * 用量页 QA-23 夹具（企业已按专业档执法）必须读这里，不得手抄第二套数字。
- * 注意：官网 Pricing.tsx 本波冻结（Q-PRICE），专业档三条仍为其页内字面——
- * 本常量按同 deriv 规则生成，由 Usage 测试钉字面相等（漂移即红）。
+ * 官网定价专业档三条与用量页同一数字（Q-PRICE：不撤 ¥299、不写 FR-U24 四字）。
  */
 export const PRO_TIER_QUOTA = {
   task_concurrency: 50,
@@ -32,7 +31,7 @@ export const PRO_TIER_QUOTA = {
 
 export type ProTierQuota = typeof PRO_TIER_QUOTA
 
-/** 官网定价专业档三条（闭集 B；预告不可购买——Q-PRICE：不撤 ¥299、不写当前可买）。 */
+/** 官网定价专业档三条（闭集 B；主按钮「去结账」——Q-PRICE：不撤 ¥299、不写 FR-U24 四字）。 */
 export const PRO_TIER_FEATURE_COPY = {
   task_concurrency: `${PRO_TIER_QUOTA.task_concurrency} 个并发任务`,
   result_storage: `${PRO_TIER_QUOTA.result_storage.toLocaleString('en-US')} 条结果存储`,

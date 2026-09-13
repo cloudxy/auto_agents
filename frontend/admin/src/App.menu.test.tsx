@@ -85,6 +85,11 @@ beforeEach(() => {
   ;(api.get as jest.Mock).mockImplementation((url: string) => {
     if (url === '/auth/permissions') return Promise.resolve(envelope(TENANT_PERMS))
     if (url === '/auth/menus') return Promise.resolve(envelope(DIRTY_DB_TREE))
+    if (url === '/public/capabilities' || url.startsWith('/public/capabilities')) {
+      return Promise.resolve(envelope({
+        items: [], total: 0, market_closed: false, message: '暂无已上架能力',
+      }))
+    }
     return Promise.reject(new Error('mock network'))
   })
 })
@@ -115,7 +120,7 @@ test('GWT-82.1 dirty /auth/menus tree does not drive the tenant sidebar', async 
   const ui = siderUI(container)
 
   await openGroup(ui, '概览', '仪表盘')
-  expect(ui.getByText('渠道组')).toBeInTheDocument()
+  expect(ui.getByText('我的渠道组')).toBeInTheDocument()
   await openGroup(ui, '能力资产', '能力市场')
   expect(ui.getByText('我的安装')).toBeInTheDocument()
 
@@ -142,18 +147,22 @@ test('GWT-82.2 permissions not ready: loading note, tenant leaves stay, no ghost
   const ui = siderUI(container)
 
   await openGroup(ui, '概览', '仪表盘')
-  expect(ui.getByText('渠道组')).toBeInTheDocument()
+  expect(ui.getByText('我的渠道组')).toBeInTheDocument()
   await openGroup(ui, '能力资产', '能力市场')
   expect(ui.getByText('我的安装')).toBeInTheDocument()
 
   expect(screen.getByText('权限加载中')).toBeInTheDocument()
   expect(screen.queryByText('角色权限')).not.toBeInTheDocument()
   expect(screen.queryByText('企业管理')).not.toBeInTheDocument()
+  expect(ui.queryByText('中转站管控')).not.toBeInTheDocument()
+  expect(ui.queryByText('平台运营台')).not.toBeInTheDocument()
+  expect(ui.queryByText('用户管理')).not.toBeInTheDocument()
+  expect(screen.queryByText('抱歉，您没有权限')).not.toBeInTheDocument()
 
   // 权限就绪：渠道组/我的安装不消失，「权限加载中」退场且不再回来
   await act(async () => { resolvePerms(envelope(TENANT_PERMS)) })
   await waitFor(() => expect(screen.queryByText('权限加载中')).not.toBeInTheDocument())
-  expect(ui.getByText('渠道组')).toBeInTheDocument()
+  expect(ui.getByText('我的渠道组')).toBeInTheDocument()
   expect(ui.getByText('我的安装')).toBeInTheDocument()
 })
 
@@ -220,4 +229,92 @@ test('tenant owner still gets the real relay page, not the enterprise-space note
   // 稳定判据 = RelayGroups 自有失败句（TenantSpaceOnly 无此句），企业空间说明态仍须缺席
   expect(await screen.findByText('渠道组加载失败。检查网络后重试。')).toBeInTheDocument()
   expect(screen.queryByText('渠道组属于企业空间')).not.toBeInTheDocument()
+})
+
+test('GWT-U15.2 permissions unknown keeps read leaves, not blank, not platform writes', async () => {
+  login(TENANT_COMPANY_ADMIN)
+  let resolvePerms!: (v: unknown) => void
+  const deferred = new Promise((res) => { resolvePerms = res })
+  ;(api.get as jest.Mock).mockImplementation((url: string) => {
+    if (url === '/auth/permissions') return deferred
+    if (url === '/public/capabilities' || url.startsWith('/public/capabilities')) {
+      return Promise.resolve(envelope({
+        items: [], total: 0, market_closed: false, message: '暂无已上架能力',
+      }))
+    }
+    return Promise.reject(new Error('mock network'))
+  })
+  const { container } = renderApp('/capabilities')
+  const ui = siderUI(container)
+  expect(await screen.findByText('权限加载中')).toBeInTheDocument()
+  expect(screen.getByText('AutoAgents')).toBeInTheDocument()
+  expect(screen.queryByText('抱歉，您没有权限')).not.toBeInTheDocument()
+  expect(screen.queryByText('抱歉您没有权限')).not.toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: '源' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: '目录' })).not.toBeInTheDocument()
+  expect(screen.queryByText('角色权限菜单管理')).not.toBeInTheDocument()
+  expect(ui.queryByText('中转站管控')).not.toBeInTheDocument()
+  expect(ui.queryByText('平台运营台')).not.toBeInTheDocument()
+  expect(ui.queryByText('用户管理')).not.toBeInTheDocument()
+  await openGroup(ui, '能力资产', '能力市场')
+  expect(ui.getByText('我的安装')).toBeInTheDocument()
+  await act(async () => { resolvePerms(envelope(TENANT_PERMS)) })
+  await waitFor(() => expect(screen.queryByText('权限加载中')).not.toBeInTheDocument())
+})
+
+test('GWT-U21.2 我的渠道组 nav has no 已开通/使用中 badge', async () => {
+  login(TENANT_OWNER)
+  const { container } = renderApp('/dashboard')
+  const ui = siderUI(container)
+  await openGroup(ui, '概览', '仪表盘')
+  expect(ui.getByText('我的渠道组')).toBeInTheDocument()
+  expect(ui.queryByText('已开通')).not.toBeInTheDocument()
+  expect(ui.queryByText('使用中')).not.toBeInTheDocument()
+  expect(container.textContent || '').not.toContain('当前可买')
+})
+
+test('GWT-U15.3 tenant company admin /newapi is same 404 shell, no 抱歉', async () => {
+  login(TENANT_COMPANY_ADMIN)
+  renderApp('/newapi')
+  expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: /返回工作台/ })).toBeInTheDocument()
+  expect(screen.queryByText(/抱歉/)).not.toBeInTheDocument()
+  expect(screen.queryByText('AutoAgents')).not.toBeInTheDocument()
+})
+
+test('GWT-U25.3 tenant company admin /newapi is same 404 shell as missing page', async () => {
+  login(TENANT_COMPANY_ADMIN)
+  renderApp('/newapi')
+  expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: /返回工作台/ })).toBeInTheDocument()
+  expect(screen.queryByText(/抱歉/)).not.toBeInTheDocument()
+  expect(screen.queryByText('抱歉您没有权限')).not.toBeInTheDocument()
+  expect(screen.queryByText('AutoAgents')).not.toBeInTheDocument()
+  expect(screen.queryByText('还没有平台模型，去网关登记')).not.toBeInTheDocument()
+  expect(screen.queryByText('LLM 网关管理面不可达，仅本地事件/探针')).not.toBeInTheDocument()
+  expect(screen.queryByText('暂无渠道')).not.toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: /总览/ })).not.toBeInTheDocument()
+  expect(screen.queryByText('密钥')).not.toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain('当前可买')
+})
+
+test('GWT-U15.3 tenant company admin listing sources is same 404 shell, no 抱歉', async () => {
+  login(TENANT_COMPANY_ADMIN)
+  renderApp('/capabilities/sources')
+  expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: /返回工作台/ })).toBeInTheDocument()
+  expect(screen.queryByText(/抱歉/)).not.toBeInTheDocument()
+  expect(screen.queryByText('AutoAgents')).not.toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: '源' })).not.toBeInTheDocument()
+  expect(screen.queryByText('还没有源。登记源后才能同步。')).not.toBeInTheDocument()
+})
+
+test('GWT-U15.3 tenant company admin /capabilities is shelf not 404', async () => {
+  login(TENANT_COMPANY_ADMIN)
+  renderApp('/capabilities')
+  expect(await screen.findByTestId('tenant-shelf')).toBeInTheDocument()
+  expect(screen.queryByText('页面不存在或已被移除')).not.toBeInTheDocument()
+  expect(screen.queryByText(/抱歉/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: '源' })).not.toBeInTheDocument()
+  expect(screen.queryByTestId('governance-shell')).not.toBeInTheDocument()
 })

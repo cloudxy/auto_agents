@@ -34,6 +34,8 @@ const NewApiOps = React.lazy(() => import('./pages/NewApiOps'))
 const LogCenter = React.lazy(() => import('./pages/LogCenter'))
 const Members = React.lazy(() => import('./pages/Members'))
 const Usage = React.lazy(() => import('./pages/Usage'))
+const Checkout = React.lazy(() => import('./pages/Checkout'))
+const Pricing = React.lazy(() => import('./pages/Pricing'))
 const Capabilities = React.lazy(() => import('./pages/Capabilities'))
 const MyInstalls = React.lazy(() => import('./pages/MyInstalls'))
 const PlatformOps = React.lazy(() => import('./pages/PlatformOps'))
@@ -113,6 +115,8 @@ function App() {
               <Route path="capabilities" element={<Page label="capabilities"><Capabilities /></Page>} />
               <Route path="members" element={<Page label="members"><Members /></Page>} />
               <Route path="usage" element={<Page label="usage"><Usage /></Page>} />
+              <Route path="billing/checkout" element={<Page label="checkout"><Checkout /></Page>} />
+              <Route path="pricing" element={<Page label="pricing"><Pricing /></Page>} />
               <Route path="relay" element={<Page label="relay"><RelayGroups /></Page>} />
               {/* T-06 出站拉数钥匙（FR-51）：数据工厂组叶，不冒充渠道组（X-KEY） */}
               <Route path="outbound-keys" element={<Page label="outbound-keys"><OutboundKeys /></Page>} />

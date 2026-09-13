@@ -20,6 +20,7 @@ from backend.app.responses import (
     paginated_from_offset,
     updated,
 )
+from backend.services.spider_common import ENQUEUE_ACCEPTED_COPY
 from backend.services.spider_query_service import SpiderQueryService
 from backend.services.spider_task_service import SpiderTaskService
 from platform_core.db import get_async_db
@@ -70,7 +71,7 @@ async def run_spider(
     )
     await record_audit(session, user, "task.run", f"task#{task.id}",
                  {"spider": payload.spider_name, "priority": payload.priority})
-    return created(task)
+    return created(task, message=ENQUEUE_ACCEPTED_COPY)
 
 
 @router.get("/tasks/{task_id}/store", response_model=ApiResponse[TaskStoreStatusResponse])

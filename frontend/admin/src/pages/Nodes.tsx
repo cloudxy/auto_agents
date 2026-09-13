@@ -57,7 +57,7 @@ const Nodes: React.FC = () => {
       title: '节点',
       key: 'worker_id',
       render: (_: unknown, record: WorkerNode) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text strong><ClusterOutlined style={{ marginRight: 6 }} />{record.worker_id}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
             PID {record.pid ?? '-'} · 启动于 {record.started_at || '-'} · 重启 {record.respawn_count} 次

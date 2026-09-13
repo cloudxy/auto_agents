@@ -510,6 +510,8 @@ def _t22_relay_env(db_session, *, slug: str) -> tuple[int, int]:
             t = Tenant(slug=slug, name="公司-relay")
             s.add(t)
             await s.flush()
+            from platform_core.models.relay_sku_entitlement import RelaySkuEntitlement
+            s.add(RelaySkuEntitlement(tenant_id=t.id, status="active"))
             g = RelayGroup(tenant_id=t.id, name="g", rpm_limit=0, tpm_limit=0)
             s.add(g)
             await s.flush()

@@ -172,7 +172,7 @@ def test_gwt_51_6_relay_sk_token_rejected_and_not_listed(
     _stub_generate(
         monkeypatch, reply={"key": "sk-relay-fresh-token-x", "token_id": "tok-516"},
     )
-    gid = _create_group(db_client, owner)
+    gid = _create_group(db_client, owner, db_session, tid)
     issued = db_client.post(
         "/api/v1/relay/tokens", headers=owner,
         json={"group_id": gid, "name": "ci", "quota_tokens": 1000},
@@ -303,7 +303,7 @@ def test_gwt_51_10_outbound_key_rejected_on_gateway_paths_no_usage_side_effect(
     _stub_generate(
         monkeypatch, reply={"key": "sk-relay-baseline-x", "token_id": "tok-510"},
     )
-    gid = _create_group(db_client, owner)
+    gid = _create_group(db_client, owner, db_session, tid)
     created = db_client.post(
         "/api/v1/relay/tokens", headers=owner,
         json={"group_id": gid, "name": "ci", "quota_tokens": 1000},

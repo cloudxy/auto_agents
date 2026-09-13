@@ -173,7 +173,7 @@ const ImportWizard: React.FC<Props> = ({ open, onCancel, onFinished }) => {
           {IMPORT_CHOOSE_HINT}
         </Text>
       ) : null}
-      <Space direction="vertical" size="middle" style={{ width: '100%' }} aria-live="polite">
+      <Space orientation="vertical" size="middle" style={{ width: '100%' }} aria-live="polite">
         <div>
           <input
             ref={fileInput}

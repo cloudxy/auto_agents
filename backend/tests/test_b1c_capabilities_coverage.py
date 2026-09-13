@@ -8,11 +8,12 @@
 - GET  /api/v1/capabilities/experts/{name}        专家详情（tools/persona）
 - GET  /api/v1/capabilities/teams/{name}          专家团详情
 - GET  /api/v1/capabilities/teams/{name}/export   专家团导出（TEAM.md）
-管理端写（require_platform_admin；租户 admin / viewer / operator 403 + 零落库 + leftover）：
-- POST /api/v1/capabilities/scan-plugins
+管理端写（require_platform_admin；租户 admin / viewer 403 + 零落库 + leftover）：
 - POST /api/v1/capabilities/plugins/{name}/verify
-- POST /api/v1/capabilities/scan-experts
 管理端写（require_platform_admin_or_404；租户 404 同形 + 零落库 + leftover）：
+- POST /api/v1/capabilities/scan-plugins
+- POST /api/v1/capabilities/scan-experts
+- PATCH /api/v1/capabilities/{type}/{name}/listing
 - POST /api/v1/capabilities/teams（T-37 / GWT-101.5：与「页面不存在」同形）
 公开端（无鉴权）：
 - GET  /api/v1/public/capabilities                官网能力市场（五类枚举；非法 type 失败）
@@ -166,20 +167,22 @@ def test_scan_plugins_anonymous_401(client):
     assert client.post("/api/v1/capabilities/scan-plugins").status_code == 401
 
 
-def test_scan_plugins_viewer_403_zero_write(db_client, viewer_client, db_session, cap_library):
-    """GWT-06.4：仅登录查看者扫描 → 拒绝且零落库（作废 viewer 可扫 200 金标）"""
+def test_scan_plugins_viewer_404_zero_write(db_client, viewer_client, db_session, cap_library):
+    """GWT-06.4 / FR-U12：仅登录查看者扫描 → 404 同形且零落库"""
     resp = viewer_client.post("/api/v1/capabilities/scan-plugins")
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
+    assert "抱歉" not in resp.text
     assert _query_all(db_session, select(CapabilityAsset)) == []
     assert _denied_logs(db_session)
 
 
-def test_scan_plugins_tenant_admin_403_leftover(db_client, admin_client, db_session, cap_library):
-    """GWT-06.3：租户公司管理员扫描 → 拒绝；目录不变；留下越权记录"""
+def test_scan_plugins_tenant_admin_404_leftover(db_client, admin_client, db_session, cap_library):
+    """GWT-U12.3：租户公司管理员扫描 → 404 同形；目录不变；留下越权记录"""
     resp = admin_client.post("/api/v1/capabilities/scan-plugins")
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
+    assert "抱歉" not in resp.text
     assert _query_all(db_session, select(CapabilityAsset)) == []
     logs = _denied_logs(db_session)
     assert len(logs) == 1
@@ -284,8 +287,8 @@ def test_plugin_verify_anonymous_401(client):
     assert client.post(f"/api/v1/capabilities/plugins/{PLUGIN_NAME}/verify").status_code == 401
 
 
-def test_listing_tenant_admin_403_row_unchanged(db_client, admin_client, db_session):
-    """PIT-2：租户公司管理员不能上架；行不变。"""
+def test_listing_tenant_admin_404_row_unchanged(db_client, admin_client, db_session):
+    """PIT-2 / FR-U12：租户公司管理员不能上架；404 同形；行不变。"""
     from backend.tests.fr33_support import fr33_asset, seed_rows
 
     seed_rows(db_session, [fr33_asset(name="pit2-row", listing_state="unlisted")])
@@ -293,7 +296,9 @@ def test_listing_tenant_admin_403_row_unchanged(db_client, admin_client, db_sess
         "/api/v1/capabilities/skill/pit2-row/listing",
         json={"listing_state": "listed"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
+    assert "抱歉" not in resp.text
     row = _query_all(db_session, select(CapabilityAsset).where(
         CapabilityAsset.name == "pit2-row",
     ))[0]
@@ -301,8 +306,8 @@ def test_listing_tenant_admin_403_row_unchanged(db_client, admin_client, db_sess
     assert _denied_logs(db_session)
 
 
-def test_listing_viewer_403_row_unchanged(db_client, viewer_client, db_session):
-    """PIT-2：viewer 不能上架。"""
+def test_listing_viewer_404_row_unchanged(db_client, viewer_client, db_session):
+    """PIT-2 / FR-U12：viewer 不能上架；404 同形。"""
     from backend.tests.fr33_support import fr33_asset, seed_rows
 
     seed_rows(db_session, [fr33_asset(name="pit2-view", listing_state="unlisted")])
@@ -310,7 +315,8 @@ def test_listing_viewer_403_row_unchanged(db_client, viewer_client, db_session):
         "/api/v1/capabilities/skill/pit2-view/listing",
         json={"listing_state": "listed"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     row = _query_all(db_session, select(CapabilityAsset).where(
         CapabilityAsset.name == "pit2-view",
     ))[0]

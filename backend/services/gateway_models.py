@@ -8,6 +8,11 @@ logger = get_logger("api")
 
 DUTY_EMPTY_71_2 = "还没有平台模型，去网关登记"
 DUTY_DEGRADE_71_3 = "LLM 网关管理面不可达，仅本地事件/探针"
+DUTY_PAGE_EMPTY = "empty"
+DUTY_PAGE_DEGRADE = "degrade"
+DUTY_PAGE_LIVE = "live"
+DUTY_ROW_LIVE = "live"
+DUTY_ROW_LIVE_TEXT = "活"
 
 _KEY_FIELDS = frozenset({
     "key", "api_key", "openai_api_key", "anthropic_api_key",
@@ -70,3 +75,43 @@ def map_gateway_model(raw: dict) -> Optional[GatewayModelResponse]:
         api_key_masked=mask_secret(str(secret) if secret else None),
         extra=extra,
     )
+
+
+def apply_duty_row(
+    model: GatewayModelResponse, verdict: Optional[str],
+) -> GatewayModelResponse:
+    """探针 original → 行态 live / 文字「活」；伪装/离线只打 status，不写「活」。"""
+    logger.debug(f"标注值班行态: ref={model.gateway_ref}, verdict={verdict}")
+    if verdict == "original":
+        return model.model_copy(update={
+            "duty_row_status": DUTY_ROW_LIVE,
+            "duty_row_status_text": DUTY_ROW_LIVE_TEXT,
+        })
+    if verdict in {"spoofed", "offline"}:
+        return model.model_copy(update={"duty_row_status": verdict})
+    return model
+
+
+def clear_duty_row(model: GatewayModelResponse) -> GatewayModelResponse:
+    """降级路径禁止把行标活。"""
+    logger.debug(f"清除值班行活标: ref={model.gateway_ref}")
+    if model.duty_row_status is None and model.duty_row_status_text is None:
+        return model
+    return model.model_copy(update={
+        "duty_row_status": None,
+        "duty_row_status_text": None,
+    })
+
+
+def page_duty_copy(
+    available: bool, models: list[GatewayModelResponse],
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """页级三句互斥：empty / degrade / live。有活行时不得回空/降级句。"""
+    logger.debug(f"合成值班页态: available={available}, models={len(models)}")
+    if not available:
+        return None, DUTY_DEGRADE_71_3, DUTY_PAGE_DEGRADE
+    if not models:
+        return DUTY_EMPTY_71_2, None, DUTY_PAGE_EMPTY
+    if any(m.duty_row_status == DUTY_ROW_LIVE for m in models):
+        return None, None, DUTY_PAGE_LIVE
+    return None, None, None

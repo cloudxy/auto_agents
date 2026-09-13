@@ -1,7 +1,7 @@
 /**
  * 数据中心导出（T-02 / FR-03）：仅 CSV/JSON，单次 100 条，空窗不下载。
  * T-17 / FR-84（GWT-84.1/84.2）：结果/统计加载失败=失败句+重试（统计卡不得 ?? 0）；
- * 真 0=「还没有采集结果。完成一次采集后会显示在这里。」+ 去采集。
+ * 真 0=T-04「还没有结果，去提交采集」；失败不得装成 0 条。
  */
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -92,11 +92,12 @@ test('zero rows: 没有可导出的结果 and no file download', async () => {
   warn.mockRestore()
 })
 
-test('GWT-84.2 true zero results: 还没有采集结果 + 去采集 goes to /spiders/tasks', async () => {
+test('GWT-U01.2 true zero results: 还没有结果，去提交采集 goes to /spiders/tasks', async () => {
   renderData()
-  expect(await screen.findByText('还没有采集结果。完成一次采集后会显示在这里。')).toBeInTheDocument()
+  expect(await screen.findByText('还没有结果，去提交采集')).toBeInTheDocument()
   expect(screen.queryByText(/加载失败/)).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: /去采集/ }))
+  expect(document.body.textContent).not.toContain('当前可买')
+  fireEvent.click(screen.getByRole('button', { name: /去提交采集/ }))
   expect(await screen.findByTestId('where')).toHaveTextContent('/spiders/tasks')
 })
 
@@ -106,7 +107,7 @@ test('GWT-84.1 results load failure: failure sentence + retry, table does not fa
   expect(await screen.findByText('结果加载失败。检查网络后重试。')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /重\s*试/ })).toBeInTheDocument()
   expect(screen.queryByText(/暂无数据/)).not.toBeInTheDocument()
-  expect(screen.queryByText(/还没有采集结果/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/还没有结果，去提交采集/)).not.toBeInTheDocument()
 })
 
 test('GWT-84.1 stats failure: stats cards replaced by failure sentence + retry, results still work', async () => {
@@ -115,6 +116,16 @@ test('GWT-84.1 stats failure: stats cards replaced by failure sentence + retry, 
   expect(await screen.findByText('统计数据加载失败。检查网络后重试。')).toBeInTheDocument()
   // 统计卡失败不得用 0 冒充（卡片整体不渲染）
   expect(screen.queryByText('任务总数')).not.toBeInTheDocument()
-  // 局部失败不拖垮检索区：真 0 空态句照常出现
-  expect(await screen.findByText('还没有采集结果。完成一次采集后会显示在这里。')).toBeInTheDocument()
+  expect(await screen.findByText('还没有结果，去提交采集')).toBeInTheDocument()
+})
+
+test('GWT-U01.2 filtered empty is not the true-zero lock sentence', async () => {
+  renderData()
+  await screen.findByText('还没有结果，去提交采集')
+  fireEvent.change(screen.getByPlaceholderText('关键词（标题/URL/内容）'), { target: { value: 'zzz-no-hit' } })
+  fireEvent.click(screen.getByTestId('apply-result-filters'))
+  expect(await screen.findByText('没有符合条件的结果')).toBeInTheDocument()
+  expect(screen.queryByText('还没有结果，去提交采集')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '清除筛选' }))
+  expect(await screen.findByText('还没有结果，去提交采集')).toBeInTheDocument()
 })

@@ -9,8 +9,15 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 
 import { listPublicAssets, type PublicListItem } from '../services/capabilities'
 import {
+  EMPTY_SHELF,
+  EMPTY_SHELF_HINT,
+  FILTER_EMPTY,
   HOST_OPTIONS,
   LEGACY_MAP,
+  LOAD_FAIL,
+  LOAD_FAIL_HINT,
+  MARKET_CLOSED,
+  MARKET_CLOSED_HINT,
   PUBLIC_TYPES,
   TYPE_LABELS,
   activeFilterEcho,
@@ -40,8 +47,8 @@ const MarketError: React.FC<{ onRetry: () => void; retrying: boolean }> = ({
   onRetry, retrying,
 }) => (
   <div className="capability-market__error" role="alert">
-    <p>市场列表加载失败</p>
-    <p>检查网络后重试</p>
+    <p>{LOAD_FAIL}</p>
+    <p>{LOAD_FAIL_HINT}</p>
     <Button type="primary" onClick={onRetry} loading={retrying} autoInsertSpace={false}>
       重试
     </Button>
@@ -56,22 +63,33 @@ const FilterEcho: React.FC<{ filters: MarketFilterValues }> = ({ filters }) => (
   </ul>
 )
 
-const MarketEmpty: React.FC<{ filters: MarketFilterValues; onClear: () => void }> = ({
-  filters, onClear,
-}) => {
+const MarketEmpty: React.FC<{
+  closed: boolean
+  filters: MarketFilterValues
+  onClear: () => void
+}> = ({ closed, filters, onClear }) => {
   const filtered = hasActiveFilters(filters)
+  if (closed) {
+    return (
+      <div className="capability-market__empty" data-testid="market-closed">
+        <p>{MARKET_CLOSED}</p>
+        <p>{MARKET_CLOSED_HINT}</p>
+        <Link to="/">返回首页</Link>
+      </div>
+    )
+  }
   return (
-    <div className="capability-market__empty">
+    <div className="capability-market__empty" data-testid={filtered ? 'filter-empty' : 'empty-shelf'}>
       {filtered ? (
         <>
-          <p>没有符合条件的能力</p>
+          <p>{FILTER_EMPTY}</p>
           <FilterEcho filters={filters} />
           <Button onClick={onClear} autoInsertSpace={false}>清除筛选</Button>
         </>
       ) : (
         <>
-          <p>还没有上架的能力</p>
-          <p>已上架且过许可的能力会出现在这里。</p>
+          <p>{EMPTY_SHELF}</p>
+          <p>{EMPTY_SHELF_HINT}</p>
           <a href="#capability-filters">了解类型</a>
         </>
       )}
@@ -163,10 +181,13 @@ const AssetGrid: React.FC<{
   const items = query.data?.items || []
   const total = query.data?.total ?? 0
   const hasMore = query.data?.has_more === true
+  const closed = query.data?.market_closed === true
   const pager = <MarketPager page={page} total={total} hasMore={hasMore} onPage={onPage} />
-  if (!items.length && total === 0) return <MarketEmpty filters={filters} onClear={onClear} />
+  if (closed || (!items.length && total === 0)) {
+    return <MarketEmpty closed={closed} filters={filters} onClear={onClear} />
+  }
   if (!items.length) {
-    // 深链越过末页：不把空页谎称为「还没有上架的能力」
+    // 深链越过末页：不把空页谎称为空货架句
     return (
       <>
         <div className="capability-market__empty"><p>没有更多了</p></div>
