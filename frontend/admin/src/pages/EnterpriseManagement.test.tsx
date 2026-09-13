@@ -8,8 +8,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-jest.setTimeout(60000);
-
 jest.mock('../services/rbac', () => ({
   createDepartment: jest.fn(),
   deleteDepartment: jest.fn(),

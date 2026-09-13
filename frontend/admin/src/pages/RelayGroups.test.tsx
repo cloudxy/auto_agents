@@ -3,7 +3,7 @@
  * 读 T-18 /relay/sku。租户不得当值班页。禁 FR-U24 四字。
  */
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom'
 
@@ -169,7 +169,10 @@ test('gwt_60_11: after closing plaintext modal only prefix and status remain', a
   await waitFor(() => {
     expect(screen.queryByText(/sk-RelaySecret123/)).not.toBeInTheDocument()
   })
-  expect(screen.getByText('已签发')).toBeInTheDocument()
+  // toast 句与行状态同文案「已签发」；钉令牌表，避免无动画时 toast 未卸导致 getByText 多匹配
+  const tokenTable = screen.getAllByRole('table').find((t) => within(t).queryByText(/sk-AbCd/))
+  expect(tokenTable).toBeTruthy()
+  expect(within(tokenTable as HTMLElement).getByText('已签发')).toBeInTheDocument()
 })
 
 test('gwt_60_2: viewer sees usage number and cannot-issue note', async () => {
