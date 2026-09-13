@@ -2,6 +2,7 @@
 
 Seam（工单预确认）：/public/tenant/signup 端点 + expire_overdue_tenants + 登录拒绝。
 """
+import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
@@ -21,6 +22,8 @@ from platform_core.models.spider_result import SpiderResult
 from platform_core.models.spider_task import SpiderTask
 from platform_core.models.tenant import Tenant
 from platform_core.models.user import User
+from platform_core.queues import LOGIN_FAIL_PREFIX
+from platform_core.redis_async import get_async_redis
 
 _MEMBER_PASSWORD = "SuperSecret1!"
 _CREDENTIAL_MESSAGE = "用户名或密码错误"
@@ -34,6 +37,24 @@ def _no_signup_rate_limit(monkeypatch):
         "backend.app.api.v1.tenant_signup.enforce_request_limit",
         AsyncMock(return_value=None),
     )
+
+
+@pytest.fixture(autouse=True)
+def _clear_login_fail_counters():
+    """登录失败计数落本机 Redis（5 次/15 分钟跨轮次存活）：本文件多处故意 401 的
+    用例（错密码/未创建用户）反复跑同一批用户名会被自己喂爆成 429——逐轮清零。
+    与 test_auth_login_tenant.py 同一防抖模式。"""
+    usernames = (
+        "weakowner", "new-boss", "exowner", "mailowner@disabled.test",
+        "dup", "hijack-co-owner",
+    )
+
+    async def _clear() -> None:
+        redis = get_async_redis()
+        await redis.delete(*[f"{LOGIN_FAIL_PREFIX}{u}" for u in usernames])
+
+    asyncio.run(_clear())
+    yield
 
 
 def test_signup_creates_tenant_and_owner(db_client, db_engine, db_session):
@@ -272,6 +293,27 @@ def test_disabled_tenant_login_rejected(db_client, db_engine, db_session):
         json={"username": "disowner", "password": _MEMBER_PASSWORD},
     )
     _assert_tenant_expired_response(resp)
+
+
+def test_disabled_tenant_email_login_uses_expiry_sentence(db_client, db_engine, db_session):
+    """GWT-83.5：注册邮箱+正确密码登录停用企业 → 到期句，与 GWT-83.2 凭证句不同句。"""
+    import asyncio
+
+    asyncio.run(_seed_member(
+        db_session, slug="disabled-mail-co", username="mailowner",
+        email="mailowner@disabled.test", status="disabled",
+    ))
+    resp = db_client.post(
+        "/api/v1/auth/login",
+        json={"username": "mailowner@disabled.test", "password": _MEMBER_PASSWORD},
+    )
+    assert resp.status_code == 401, resp.text
+    body = resp.json()
+    # 到期句（AUTH_TENANT_EXPIRED），不是凭证句
+    assert body["code"] == AUTH_TENANT_EXPIRED
+    assert body["message"] == TENANT_EXPIRED_MESSAGE
+    assert body["message"] != _CREDENTIAL_MESSAGE
+    assert "用户名或密码" not in body["message"]
 
 
 def test_preissued_session_writes_refused_after_expiry(db_client, db_engine, db_session):

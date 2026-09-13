@@ -80,6 +80,8 @@ def _service() -> AiPlannerService:
                     "list_plans", "create", "claim_status"):
         setattr(svc.repo, _method, AsyncMock())
     svc.repo.claim_status.return_value = True  # 默认抢断成功
+    # FR-U02：launch_plan 规划前 token 闸走真 QuotaService；本模块 session 是 MagicMock。
+    svc._reject_if_token_quota_full = AsyncMock()
     return svc
 
 
@@ -810,6 +812,12 @@ def ai_client(admin_client, app):
     session.commit = AsyncMock()
     session.flush = AsyncMock()
     session.refresh = AsyncMock()
+    # T-38：task_actor_tenant_id 会查平台租户。admin_client 是租户 admin 且
+    # tenant_id=1；若这里返回 1 会被当成「冒名平台租户」拒绝。mock 会话无
+    # 平台租户行 → None，走普通用户 user.tenant_id。
+    session.execute = AsyncMock(return_value=MagicMock(
+        scalar_one_or_none=MagicMock(return_value=None),
+    ))
     app.dependency_overrides[get_async_db] = lambda: session
     yield admin_client
     app.dependency_overrides.pop(get_async_db, None)

@@ -26,7 +26,8 @@ const pickFeatured = (items: PublicSkill[]): PublicSkill[] => {
 const SkillsSection: React.FC = () => {
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['official', 'public-skills-featured'],
-    queryFn: () => listPublicSkills({ page: 1, page_size: 50 }),
+    // T-14：公开端 page_size 上限收到 20；精选非翻页列表，取前 20 挑 ≤6 张即可
+    queryFn: () => listPublicSkills({ page: 1, page_size: 20 }),
   })
 
   const items = data ? pickFeatured(data.items) : []
@@ -61,7 +62,7 @@ const SkillsSection: React.FC = () => {
         )}
 
         {isError && (
-          <div role="alert" style={{ textAlign: 'center', marginTop: 32 }}>
+          <div role="alert" data-testid="featured-error" style={{ textAlign: 'center', marginTop: 32 }}>
             <p style={{ fontSize: 16, marginBottom: 16 }}>暂时无法加载能力</p>
             <Button
               type="primary"
@@ -77,7 +78,7 @@ const SkillsSection: React.FC = () => {
         )}
 
         {!isLoading && !isError && items.length === 0 && (
-          <div style={{ textAlign: 'center', marginTop: 32 }}>
+          <div data-testid="featured-empty" style={{ textAlign: 'center', marginTop: 32 }}>
             <p style={{ fontSize: 16, marginBottom: 16 }}>
               还没有上架的能力。开通后可在能力市场浏览。
             </p>

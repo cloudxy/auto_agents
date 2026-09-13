@@ -6,7 +6,12 @@ API V1 版本路由聚合器
 - 定义 V1 版本的路由前缀和标签
 """
 from fastapi import APIRouter
-from . import root, health, spiders, admin, auth, configs, ai, llm_providers, newapi, skills, public_skills, members, tenant_usage, tenant_signup, capabilities, rbac, api_keys, billing, litellm_admin, product_events
+from . import (
+    admin, ai, api_keys, auth, billing, capabilities, configs, health,
+    internal_fixture_tenants, litellm_admin, llm_providers, members, newapi,
+    outbound_keys, payment_credentials, product_events, public_skills, rbac,
+    relay, root, skills, spiders, tenant_signup, tenant_usage,
+)
 
 router = APIRouter()
 
@@ -32,5 +37,17 @@ router.include_router(billing.router, prefix="/billing", tags=["billing"])
 router.include_router(litellm_admin.router, prefix="/litellm", tags=["litellm"])
 router.include_router(product_events.public_router, prefix="/public", tags=["public"])
 router.include_router(product_events.admin_router, tags=["product-events"])
+router.include_router(
+    internal_fixture_tenants.router,
+    prefix="/admin/internal-fixture-tenants",
+    tags=["internal-fixture-tenants"],
+)
+router.include_router(
+    payment_credentials.router,
+    prefix="/admin/payment-credentials",
+    tags=["payment-credentials"],
+)
+router.include_router(relay.router, prefix="/relay", tags=["relay"])
+router.include_router(outbound_keys.router, prefix="/outbound", tags=["outbound"])
 
 __all__ = ["router"]

@@ -3,7 +3,7 @@
 DB 承接 config/default/spiders.yml 的 SPIDERS 元数据（yml 保留为种子）；
 代码级爬虫文件仍在 scrapy/spiders/，DB 只管元数据，不破坏 B2 边界。
 """
-from sqlalchemy import Boolean, Column, Computed, DateTime, Integer, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, Computed, DateTime, Integer, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
@@ -35,6 +35,10 @@ class SpiderDefinition(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
     description = Column(Text, nullable=True, comment="描述")
     source = Column(String(20), nullable=False, default="yml_seed", server_default="yml_seed",
                     comment="来源：yml_seed（种子迁移）/ manual（手动登记）/ ai_generated（AI 生成）")
+    params = Column(JSON, nullable=True,
+                    comment="定义参数（T-39/FR-103）：api 型默认任务参数（urls/headers）；"
+                            "flow 型镜像注册来源计划的 generated_params；代码型恒 NULL。"
+                            "入队未带 params 时取此值（编辑后对后续任务生效）")
     enabled = Column(Boolean, nullable=False, default=True, server_default="1",
                      comment="是否启用（停用后注册表不再下发）")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")

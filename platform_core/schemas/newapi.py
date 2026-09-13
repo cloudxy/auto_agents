@@ -93,6 +93,12 @@ class GatewayModelResponse(BaseModel):
     api_base: Optional[str] = Field(None, description="上游地址（非密钥）")
     api_key_masked: Optional[str] = Field(None, description="仅掩码；完整 Key 不回传")
     extra: dict = Field(default_factory=dict, description="未知字段（敏感字段已剔除）")
+    duty_row_status: Optional[str] = Field(
+        None, description="行态：live / spoofed / offline；探针 original → live",
+    )
+    duty_row_status_text: Optional[str] = Field(
+        None, description="行状态文字；live 时为「活」",
+    )
 
 
 class GatewayModelWriteRequest(BaseModel):
@@ -148,8 +154,12 @@ class NewapiOverviewResponse(BaseModel):
 
     available: bool = Field(True, description="LLM 网关管理面是否可达")
     reason: Optional[str] = Field(None, description="不可达原因（available=false 时给出）")
-    empty_state: Optional[str] = Field(None, description="71.2 空态句")
-    degrade_state: Optional[str] = Field(None, description="71.3 降级句")
+    empty_state: Optional[str] = Field(None, description="71.2 / U25.2 空态句")
+    degrade_state: Optional[str] = Field(None, description="71.3 / U25.4 降级句")
+    duty_page_state: Optional[str] = Field(
+        None,
+        description="页级三态 empty / degrade / live；互斥，有活行时不得 empty/degrade",
+    )
     models: list[GatewayModelResponse] = Field(default_factory=list, description="网关模型列表")
     deployments: list[GatewayModelResponse] = Field(
         default_factory=list, description="网关部署列表",
@@ -219,3 +229,18 @@ class GatewayConfigUpdateResult(BaseModel):
     gateway_ref: str
     cleared: bool = False
     config: Optional[ChannelConfigInfo] = None
+
+
+class ProbeTriggerRequest(BaseModel):
+    """T-33 / GWT-98.4：立即探测请求（对单个网关渠道发起一次探针）"""
+
+    gateway_ref: str = Field(..., min_length=1, description="网关模型 string 引用")
+
+
+class ProbeTriggerResponse(BaseModel):
+    """立即探测回执：触发即返回（accepted + batch_id），探测在后台执行不阻塞轮询循环"""
+
+    accepted: bool = Field(..., description="true = 已受理（同渠道在飞时复用原批次）")
+    gateway_ref: str
+    batch_id: str = Field("", description="探测批次 id（manual- 前缀；未受理为空）")
+    reason: Optional[str] = Field(None, description="未受理原因（用户可见中文）")

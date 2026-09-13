@@ -1,0 +1,540 @@
+// schema.dbml · feat-product-complete
+// 上游：db-spec.md ｜ 下游：Alembic autogenerate → /backend ORM
+// 泳道：L4｜作者：/dba｜日期：2026-09-11｜合同 v2（shape r1 扩展：并入 Wave A；v1 表集原样保持）
+// 增量 IR：不替换 feat-four-pillars-v2 schema.dbml。
+// 已有表 = 040/live 全列 ∪ 本特征加列。禁止 stub。对齐禁止 DROP 现网列/索引（042 唯一键换防除外，见 users）。
+// 每个索引注释必须标注访问模式 ID。物理 VARCHAR，禁止 MySQL ENUM。
+// 主键跟仓 INT。naive DATETIME 存 UTC。LiteLLM Postgres 不在本 IR。
+// 生产禁止 downgrade past 037。禁止复活 028/029/030。禁止改 relay_tokens.key_hash 类型。
+// 标注约定：[既有] live 不动 ｜ [改] 本特征变更 ｜ [新增] 本特征新表/新列。
+
+Project product_complete {
+  database_type: 'MySQL'
+  note: 'C/U：FR-51 出站新表 + FR-60 relay expand 网关引用；orders/plans 040 扩写规则不加列。Wave A：users 唯一键在册化（042）+ 导入两表（043）+ 平台租户/queue_depth 零 DDL。种子不进 schema。'
+}
+
+// ─────────────────────────────────────────────
+// 枚举：文档合法值（物理 VARCHAR + 应用校验）
+// ─────────────────────────────────────────────
+
+enum subscription_status {
+  active  [note: '在订']
+  expired [note: '到期']
+}
+
+enum order_status {
+  pending    [note: '待确认收款；本波正常入口同一企业至多一张']
+  paid       [note: '已确认；终态不可逆']
+  cancelled  [note: '040 字面量；本波应用不写入']
+}
+
+enum order_channel {
+  offline    [note: '唯一可产生行的通道']
+  alipay     [note: '本波零新行']
+  wechat     [note: '本波零新行']
+}
+
+enum plan_slug {
+  free
+  pro        [note: '本波唯一可申请付费档；企业档无 SKU 行']
+}
+
+enum relay_group_status {
+  enabled
+  disabled
+}
+
+enum relay_token_status {
+  active     [note: '派生：revoked_at IS NULL 且未过期']
+  expired    [note: '派生：expires_at < now']
+  revoked    [note: '派生：revoked_at 非空；终态']
+}
+
+enum outbound_key_status {
+  active     [note: '派生：revoked_at IS NULL']
+  revoked    [note: '派生：revoked_at 非空；终态不可再拉']
+}
+
+enum product_event_name {
+  // v2 已冻（不改名）
+  official_page_viewed
+  official_cta_clicked
+  tenant_signup_succeeded
+  login_succeeded
+  login_failed
+  task_run_submitted
+  task_completed
+  results_exported
+  quota_exceeded
+  market_list_viewed
+  market_search_submitted
+  market_detail_viewed
+  market_subscribe_succeeded
+  market_subscribe_rejected
+  market_uninstalled
+  market_listing_changed
+  market_source_sync_completed
+  // 本特征 FR-92 追加（C/U）
+  offline_order_submitted
+  offline_order_confirmed
+  outbound_key_issued
+  relay_token_call_succeeded
+  market_list_paged
+  // Wave A 追加（GWT-92.8/92.9）
+  user_restored
+  asset_imported
+}
+
+// ─────────────────────────────────────────────
+// Wave A 追加枚举（文档合法值；物理 VARCHAR + 应用校验）
+// ─────────────────────────────────────────────
+
+enum user_lifecycle_state {
+  active       [note: '派生：deleted_at IS NULL（在册，参与唯一约束）']
+  soft_deleted [note: '派生：deleted_at 非空（alive_flag=NULL，脱离唯一约束；「已删除」筛选可见，可恢复）']
+}
+
+enum tenant_status {
+  active   [note: '常规企业 ⇄ disabled 双向（GWT-95.2/95.7）；平台租户恒 active（94.2/94.3 拒绝停用）']
+  expired  [note: '既有：到期（FR-08 执法）']
+  disabled [note: '停用；仅常规企业']
+}
+
+enum import_origin {
+  file
+  directory
+}
+
+enum import_batch_status {
+  running
+  completed [note: '含部分成功（常态语义）；0 可导入也 completed+total=0']
+  failed    [note: '整批失败（沙箱/上传层故障）']
+}
+
+enum import_item_status {
+  succeeded
+  failed
+  skipped [note: '幂等跳过：目录已有同 (asset_type, name) 行（GWT-100.8）']
+}
+
+enum asset_type {
+  skill
+  plugin
+  command
+  agent  [note: 'Wave A 导入通道补齐（GWT-100.4）；专家团成员域扩 agent（FR-101）']
+  team
+  expert
+  expert_team
+}
+
+enum asset_status {
+  experimental [note: '默认值；值域=ORM CapabilityAsset comment（六态治理梯）']
+  testing
+  stable
+  recommended
+  deprecated
+  blacklist
+}
+
+enum alert_rule_type {
+  consecutive_failures
+  result_drop
+  task_timeout
+  queue_depth [note: 'Wave A 接通（GWT-105.1 唯一正常路径）；SCHEDULER.QUEUE_DEPTH_WARN 日志路径退役为非评估结果']
+}
+
+// ─────────────────────────────────────────────
+// 040 live ∪ 本波（账务）
+// ─────────────────────────────────────────────
+
+Table plans {
+  id           int          [pk, increment, note: '代理主键']
+  slug         varchar(32)  [not null, note: '见 enum plan_slug']
+  name         varchar(64)  [not null]
+  price_cents  int          [not null, default: 0, note: '标价分；0=免费；展示换算元']
+  period       varchar(16)  [not null, default: 'month']
+  quota_json   text         [null, note: 'JSON 三数字；专业档须与定价页同一套']
+  is_public    int          [not null, default: 1, note: '1=公开价目']
+  created_at   datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  // updated_at：040 建表与 ORM Plan 均无此列——价目=低频平台配置行，本波不加列；不虚构列，登记豁免
+
+  indexes {
+    (slug) [unique, name: 'slug']
+    // 040 UniqueConstraint(slug)。档位标识全局唯一
+  }
+
+  note: '一行=一条价目。平台表，TENANT_EXEMPT。本波不加列、无企业档行。'
+}
+
+Table tenant_subscriptions {
+  id                  int          [pk, increment]
+  tenant_id           int          [null, note: '040 live 可空；写路径必填；本波不收紧 NOT NULL']
+  plan_id             int          [not null, ref: > plans.id]
+  status              subscription_status [not null, default: 'active', note: '见 enum subscription_status（值域=ORM billing.TenantSubscription comment）']
+  current_period_end  datetime     [null, note: 'NULL=免费档无账期']
+  created_at          datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at          datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (tenant_id) [unique, name: 'uq_tenant_subscriptions_tenant']
+    // 040 已有。一企业一行。GWT-50.16 两张 paid 不叠档的库级底
+
+    (tenant_id) [name: 'ix_tenant_subscriptions_tenant_id']
+    // 040 已有单列索引（与 UNIQUE 并存于真库，禁止为对齐 stub 而 DROP）
+  }
+
+  note: '一行=一企业当前订阅。确认收款 _apply_plan SET 本行，不 INSERT 第二行。'
+}
+
+Table orders {
+  id               int          [pk, increment]
+  tenant_id        int          [null, note: '040 live 可空；申请写路径必填；本波不 ALTER NOT NULL']
+  plan_id          int          [not null, ref: > plans.id]
+  amount_cents     int          [not null, note: '下单时快照（分）；当时不是现在']
+  status           order_status [not null, default: 'pending', note: '见 enum order_status']
+  channel          varchar(16)  [not null, default: 'offline', note: '见 enum order_channel']
+  idempotency_key  varchar(64)  [null, note: 'NULL=骨架未写；本波入口必写']
+  paid_at          datetime     [null, note: 'NULL=未确认；确认业务时间']
+  created_at       datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  // updated_at：040 建表与 ORM Order 均无此列——订单推进用业务时间 paid_at（记录时间≠业务时间）；本波不加列，登记豁免
+
+  indexes {
+    (idempotency_key) [unique, name: 'idempotency_key']
+    // 040 UniqueConstraint。服务下单重试。先查后插不够
+
+    (tenant_id) [name: 'ix_orders_tenant_id']
+    // 040 已有。服务 P-B01 我的订单 / P-B03 pending COUNT 前缀
+
+    // 已评估不建：
+    //   (status) / (status, created_at) —— P-B02 基数低、表小；慢查询再补
+    //   生成列 pending_guard UNIQUE —— 会挡住 GWT-50.16 夹具两张 pending
+    //   (tenant_id, status) UNIQUE —— 会只允许一张 paid
+  }
+
+  note: '一行=一次升级申请。本波不加列。paid 不可逆。在线通道零新行。'
+}
+
+// ─────────────────────────────────────────────
+// 040 live ∪ 本波（渠道组）
+// ─────────────────────────────────────────────
+
+Table relay_groups {
+  id           int          [pk, increment]
+  tenant_id    int          [null, note: '040 live 可空；写路径必填']
+  name         varchar(64)  [not null, note: '企业内唯一']
+  rpm_limit    int          [not null, default: 0, note: '0=不限']
+  tpm_limit    int          [not null, default: 0, note: '0=不限']
+  models_json  json         [null, note: '非查询；空=未限制']
+  status       relay_group_status [not null, default: 'enabled', note: '见 enum relay_group_status']
+  created_at   datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at   datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (tenant_id, name) [unique, name: 'uq_relay_groups_tenant_name']
+    // 040 已有。组名企业内唯一
+
+    (tenant_id) [name: 'ix_relay_groups_tenant_id']
+    // 040 已有
+  }
+
+  note: '一行=一个租户渠道组。本波不加列。禁止 GET 读路径 INSERT default。'
+}
+
+Table relay_tokens {
+  id               int          [pk, increment]
+  tenant_id        int          [null, note: '040 live 可空；写路径必填']
+  group_id         int          [not null, ref: > relay_groups.id]
+  name             varchar(64)  [not null]
+  key_prefix       varchar(16)  [not null, note: '展示前缀 sk-…；明文不落库']
+  key_hash         varchar(64)  [not null, note: 'SHA-256 hex；禁止改类型/长度']
+  quota_tokens     int          [not null, default: -1, note: '-1=不限']
+  used_tokens      int          [not null, default: 0, note: '本地缓存；金标=网关 spend HTTP']
+  expires_at       datetime     [null, note: 'NULL=不过期']
+  revoked_at       datetime     [null, note: 'NULL=active；非空=终态不可再打网关']
+  last_used_at     datetime     [null, note: '网关侧最近使用缓存；NULL=未知']
+  created_at       datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  note             text         [null]
+  // 本波 ADD 接表尾
+  gateway_key_id   varchar(191) [null, note: 'LiteLLM 虚拟 Key 不透明引用。NULL=040 骨架未登记网关']
+  spend_synced_at  datetime     [null, note: '最近一次成功把网关 spend 写入 used_tokens。NULL=从未同步']
+  // updated_at：040 建表与 ORM RelayToken 均无此列——变更轨迹由业务时间列承载（revoked_at/last_used_at/spend_synced_at）；041 expand 亦未加；登记豁免
+
+  indexes {
+    (key_hash) [unique, name: 'key_hash']
+    // 040 UniqueConstraint。禁止改列。不是出站查找集合
+
+    (tenant_id) [name: 'ix_relay_tokens_tenant_id']
+    // 040 已有。服务 P-R01 本企业令牌列表
+
+    (gateway_key_id) [unique, name: 'uk_relay_tokens_gateway_key_id']
+    // 服务 P-R03：按网关引用对账 spend。ESR 等值。多 NULL 合法（骨架）
+
+    // 已评估不建：
+    //   (used_tokens) / (spend_synced_at) —— 非过滤列
+    //   (revoked_at) —— 基数低
+  }
+
+  note: '一行=一把渠道组令牌。used_tokens 由 RelayService 列表读路径写。吊销门闩=revoked_at+网关作废。'
+}
+
+// ─────────────────────────────────────────────
+// 本波新表（出站拉数钥匙）
+// ─────────────────────────────────────────────
+
+Table outbound_keys {
+  id                  int          [pk, increment, note: '代理主键']
+  tenant_id           int          [not null, note: 'TenantMixin；禁止 NULL=平台；禁止 TENANT_EXEMPT']
+  name                varchar(64)  [null, note: 'NULL=未起名']
+  key_prefix          varchar(16)  [not null, note: '再进页可见；应用禁止 sk- 开头']
+  key_hash            varchar(64)  [not null, note: 'SHA-256 hex；明文不落库']
+  issued_by_user_id   int          [not null, note: '签发者；无 FK']
+  revoked_at          datetime     [null, note: 'NULL=active；非空=终态不可再拉']
+  created_at          datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at          datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (key_hash) [unique, name: 'uk_outbound_keys_key_hash']
+    // 服务 P-O02：拉数验钥等值指纹。业务唯一兼热路径
+
+    (tenant_id, created_at) [name: 'idx_outbound_keys_tenant_created']
+    // 服务 P-O01：本企业列表。ESR：等值 tenant_id → 排序 created_at
+
+    // 已评估不建：
+    //   (tenant_id) 单列 —— 被上条最左覆盖
+    //   (issued_by_user_id) —— 非 Top-N
+    //   (revoked_at) —— 基数低
+  }
+
+  note: '一行=一把本企业出站拉数钥匙。不得与 relay_tokens 混表。查找先本表后 KEY_BINDINGS（配置，非表）。'
+}
+
+// ─────────────────────────────────────────────
+// [Wave A] users：live 表唯一键换防（042）——在册行口径
+// ─────────────────────────────────────────────
+
+Table users {
+  id                 int          [pk, increment, note: '[既有]']
+  username           varchar(50)  [not null, note: '[既有] 同租户内唯一（在册口径）']
+  email              varchar(100) [not null, note: '[既有] 全局唯一（在册口径，GWT-93.7）']
+  password_hash      varchar(255) [not null, note: '[既有] 明文不落库']
+  is_active          tinyint(1)   [null, note: '[既有]']
+  is_admin           tinyint(1)   [null, note: '[既有] 存量标记']
+  role               varchar(20)  [not null, default: 'operator', note: '[既有] admin/operator/viewer']
+  tenant_id          int          [not null, note: '[既有] 024 收紧；平台超管挂 platform 租户']
+  tenant_role        varchar(20)  [null, note: '[既有] owner/admin/operator/viewer']
+  is_platform_admin  tinyint(1)   [not null, default: 0, note: '[既有]']
+  deleted_at         datetime     [null, note: '[既有] NULL=在册；非空=已删除（可恢复，FR-93）']
+  department_id      int          [null, note: '[既有]']
+  last_login_at      datetime     [null, note: '[既有]']
+  created_at         datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '[既有]']
+  updated_at         datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '[既有]']
+  alive_flag         smallint     [null, note: '[新增 042] 生成列 VIRTUAL：CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END。唯一键组件——已删行 NULL 脱离唯一约束']
+
+  indexes {
+    (tenant_id, username, alive_flag) [unique, name: 'uq_users_tenant_username_alive']
+    // [改 042] 服务 P-A01（恢复/新建占用判定，等值 tenant_id+username）+ 业务唯一（在册口径，
+    // GWT-93.5 已删行释放 username）。替换旧 uq_users_tenant_username（放松方向，025 先例）
+
+    (email, alive_flag) [unique, name: 'uq_users_email_alive']
+    // [改 042] 服务 P-A02（邮箱登录 FR-83 / email 占用 GWT-93.7，等值 email 最左前缀）
+    // + 业务唯一（全局在册口径）。替换旧唯一键 `email`（001 部署自动名）
+
+    (username) [name: 'ix_users_username']
+    // [既有保留] 跨租户 username 消歧（get_by_username，R13 单点）；不被新键覆盖（新键 tenant_id 最左）
+
+    // [042 contract 撤除]：uq_users_tenant_username、唯一键 `email`、ix_users_email（与唯一键纯重复，026 口径）
+    // 已评估不建：
+    //   (deleted_at) / (tenant_id, deleted_at) —— P-A03 回收站全扫 6 行最优（EXPLAIN type=ALL 实证）；>1e4 行再议
+  }
+
+  note: '一行=一个租户内一个用户账号。恢复=UPDATE 清 deleted_at（约束兜底防并发覆盖，SEC-12）；禁物理删除已删行。'
+}
+
+// ─────────────────────────────────────────────
+// [Wave A] tenants：live 表，零 DDL（slug 守卫在应用层单点）
+// ─────────────────────────────────────────────
+
+Table tenants {
+  id          int          [pk, increment, note: '[既有]']
+  slug        varchar(64)  [not null, note: '[既有] 全局唯一且不可改（025 冻结）；平台租户锚 slug=platform（种子 024，无回填）']
+  name        varchar(128) [not null, note: '[既有] 企业名；改名=纯 UPDATE（GWT-95.1），冲突域（含保留名「平台租户」/AutoAgents）应用层判定']
+  status      tenant_status [not null, default: 'active', note: '[既有] 见 enum tenant_status；停用⇄启用纯 UPDATE（95.2/95.7）']
+  quota       json         [null, note: '[既有] 三数字；平台租户入队按此执法（GWT-102.3）']
+  expires_at  datetime     [null, note: '[既有] NULL=不过期']
+  created_at  datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '[既有]']
+  updated_at  datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '[既有]']
+  deleted_at  datetime     [null, note: '[既有] 软删保持']
+
+  indexes {
+    (slug) [unique, name: 'slug']
+    // [既有] 平台租户守卫与 FR-102 actor 解析的锚（单行等值）
+  }
+
+  note: '一行=一家企业。本特征零 DDL：保护=tenant 写服务 slug 守卫（94.2/94.3/94.4）；企业管理页与运营台一处写两处读。'
+}
+
+// ─────────────────────────────────────────────
+// [Wave A] alert_rules / notifications：live 表，零 DDL（queue_depth 接通=读行+评估）
+// ─────────────────────────────────────────────
+
+Table alert_rules {
+  id                int          [pk, increment, note: '[既有]']
+  name              varchar(200) [not null, note: '[既有]']
+  spider_name       varchar(100) [null, note: '[既有] NULL=全局规则']
+  rule_type         varchar(50)  [not null, note: '[既有] 见 enum alert_rule_type；queue_depth 本特征接通']
+  threshold         float        [not null, note: '[既有] 阈值（queue_depth=排队任务数上限）']
+  window_minutes    int          [null, default: 60, note: '[既有] 兼静默窗（now−last_triggered_at<window 不重发）']
+  severity          varchar(20)  [null, default: 'warning', note: '[既有]']
+  channels          text         [null, note: '[既有] JSON 通知渠道；空=用全局']
+  enabled           tinyint(1)   [null, default: 1, note: '[既有]']
+  last_triggered_at datetime     [null, note: '[既有] 最近命中时刻（FR-105 命中记录「何时」+静默窗判定）']
+  created_at        datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '[既有]']
+  tenant_id         int          [not null, note: '[既有] TenantMixin；评估深度=按规则所属租户排队任务数']
+  deleted_at        datetime     [null, note: '[既有]']
+  created_by        varchar(64)  [null, note: '[既有]']
+  updated_by        varchar(64)  [null, note: '[既有]']
+  // updated_at：live 与 ORM AlertRule 均无此时间列——操作人审计=AuditMixin（created_by/updated_by 上两行）；本波零 DDL，登记豁免
+
+  indexes {
+    (tenant_id) [name: 'ix_alert_rules_tenant_id']
+    // [既有] 服务 P-A04 前缀（调度器周期读 queue_depth 行）。
+    // 已评估不建：(rule_type) —— 基数≈4、配置量级表（EXPLAIN 全扫 1 行=最优）
+  }
+
+  note: '一行=一条告警规则。命中记录=notifications 行+last_triggered_at（§16.6），不建 alert_hits 表。'
+}
+
+Table notifications {
+  id            int          [pk, increment, note: '[既有] 本特征零 DDL，仅登记命中记录载体语义']
+  tenant_id     int          [null, note: '[既有]']
+  user_id       int          [not null, ref: > users.id, note: '[既有] 接收人']
+  type          varchar(32)  [not null, note: '[既有] queue_depth 命中写 type=alert']
+  title         varchar(255) [not null, note: '[既有]']
+  content       text         [null, note: '[既有] 命中记录的「深度」写这里（谁=规则身份见下行）']
+  resource_type varchar(32)  [null, note: '[既有] 命中记录写 alert_rule（逻辑关联，无 FK）']
+  resource_id   int          [null, note: '[既有] 命中记录写 alert_rules.id（「在规则处可见」的关联键）']
+  is_read       tinyint(1)   [not null, default: 0, note: '[既有]']
+  read_at       datetime     [null, note: '[既有]']
+  created_at    datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '[既有]']
+  // updated_at：live 与 ORM Notification 均无此列——通知插入后仅已读态迁移（is_read/read_at），无正文更新路径；登记豁免
+
+  indexes {
+    (tenant_id, user_id, is_read, created_at) [name: 'ix_notifications_inbox']
+    // [既有] 收件箱模式；命中记录按 resource_type/resource_id 关联走既有读路径（低频，不建新索引）
+  }
+
+  note: '一行=一条站内通知。[Wave A] 复用为 queue_depth 命中记录载体（仅调度器写，GWT-105.1）。'
+}
+
+// ─────────────────────────────────────────────
+// [Wave A] 能力资产导入（043 新表 + capability_assets 复用零扩列）
+// ─────────────────────────────────────────────
+
+Table asset_import_batches {
+  id               int          [pk, increment, note: '代理主键（跟仓 INT）']
+  origin           varchar(16)  [not null, note: '见 enum import_origin（GWT-92.9 同字面量）']
+  status           import_batch_status [not null, default: 'running', note: '见 enum import_batch_status']
+  total_count      int          [not null, default: 0, note: '=succeeded+failed+skipped；批结束写一次']
+  succeeded_count  int          [not null, default: 0]
+  failed_count     int          [not null, default: 0]
+  skipped_count    int          [not null, default: 0, note: '幂等跳过（GWT-100.8）']
+  created_by       varchar(64)  [null, note: '操作者用户名；NULL=系统路径预留']
+  tenant_id        int          [null, note: '平台级恒 NULL——模型禁 TenantMixin，必须登记 TENANT_EXEMPT_TABLES（PIT-3）']
+  created_at       datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  finished_at      datetime     [null, note: 'NULL=未结束']
+  // updated_at：ORM AssetImportBatch（043 建表同款）无此列——批次=事件流：开始=created_at（记录时间）、结束=finished_at（业务时间）；登记豁免
+
+  indexes {
+    // 无业务唯一键（批次=事件流）。已评估不建：(created_at)——批次数极小，倒序扫可接受
+  }
+
+  note: '[新增 043] 一行=一次导入（含部分成功）。无软删（审计表）。'
+}
+
+Table asset_import_items {
+  id          int          [pk, increment, note: '代理主键']
+  batch_id    int          [not null, ref: > asset_import_batches.id, note: 'CASCADE：明细=批的子行']
+  asset_type  varchar(16)  [not null, note: '见 enum asset_type（四类：skill/agent/command/plugin）；类型由导入过程判定']
+  name        varchar(128) [not null, note: '与 capability_assets.name 同宽同语义=幂等键组件']
+  status      import_item_status [not null, note: '见 enum import_item_status']
+  reason      varchar(512) [null, note: '中文失败原因（不合法/超大/路径逃逸，GWT-100.2/100.3/100.5/100.7）']
+  asset_id    int          [null, ref: > capability_assets.id, note: 'RESTRICT：成功时指向目录行；provenance 回放入口']
+  created_at  datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  // updated_at：ORM AssetImportItem（043 建表同款）无此列——处置结果明细不可变（无软删子表，豁免矩阵）；登记豁免
+
+  indexes {
+    (batch_id) [name: 'idx_import_items_batch']
+    // 服务 P-A05：导入明细按批回放（T-36 UI 逐条呈现）。ESR：等值 batch_id；FK 必带索引
+    // 已评估不建：(batch_id, asset_type, name) unique——单写者批内去重，无并发冲突面
+  }
+
+  note: '[新增 043] 一行=一次导入中一个条目的处置结果。无软删（子表）。'
+}
+
+Table capability_assets {
+  id                int          [pk, increment, note: '[既有·节选] 全列见 platform_core/models/capability.py；本块只列 Wave A 契约相关列']
+  asset_type        varchar(16)  [not null, note: '[既有] 见 enum asset_type；agent 通道=导入新分支，值域早有']
+  name              varchar(128) [not null, note: '[既有] 目录名（类型内唯一，在册口径）——导入幂等键组件']
+  title             varchar(256) [null, note: '[既有] 种子谓词三列之一（GWT-80.1）']
+  description       varchar(1024) [null, note: '[既有] 种子谓词三列之一']
+  listing_state     varchar(16)  [not null, default: 'unlisted', note: '[既有] 导入产物入库=unlisted（不自动上架，PC-2 不动）']
+  status            asset_status [not null, default: 'experimental', note: '[既有] 见 enum asset_status；治理态，与 listing_state 独立']
+  file_path         varchar(512) [null, note: '[既有] 库内目录路径（导入落位写这里）']
+  source_type       varchar(32)  [not null, default: 'self_built', note: '[既有] 不加 local_import 值——通道不是来源类型，provenance 走 items.asset_id']
+  alive_flag        smallint     [null, note: '[既有 025] 生成列；uq_asset_type_name_alive 组件=导入幂等键（GWT-100.8）零新键']
+  created_at        datetime     [null, default: `CURRENT_TIMESTAMP`, note: '[既有 018] 补登记（ORM/018 建表实有）；live nullable']
+  updated_at        datetime     [null, note: '[既有 018] 补登记（ORM 实有 onupdate=now）；live nullable、无 server default']
+
+  indexes {
+    (asset_type, name, alive_flag) [unique, name: 'uq_asset_type_name_alive']
+    // [既有 025] 服务 P-A06：导入幂等判定（类型+名称，等值两列）+ 业务唯一。Wave A 直接复用，零扩列
+  }
+
+  note: '[既有] 一行=一条能力资产目录行。[Wave A] 复用零扩列：不加 origin 列（那服务 capability_sources 外部树）；沙箱是文件系统不是库表（ADR-0023）。'
+}
+
+// ─────────────────────────────────────────────
+// 产品事实：本波不加列，只登记事件名（表 live 见 v2 IR）
+// ─────────────────────────────────────────────
+
+Table product_events {
+  id             int          [pk, increment, note: '跟仓 INT']
+  occurred_at    datetime     [not null, note: '业务时间 UTC']
+  event_name     varchar(64)  [not null, note: '见 enum product_event_name；本波追加五件']
+  tenant_id      int          [null, note: 'NULL=匿名；事件主语非隔离归属']
+  actor_user_id  int          [null]
+  anonymous_id   varchar(64)  [null, note: 'market_list_paged 访客必带']
+  role           varchar(32)  [null]
+  props          json         [null, note: '禁止明文钥匙/密码/master']
+  created_at     datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at     datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '应用永不更新']
+
+  indexes {
+    (event_name, occurred_at) [name: 'idx_product_events_name_occurred']
+    // 服务 P-E01：超管按事件名 + 发生时间。已有；新字面量共用
+
+    (tenant_id, occurred_at) [name: 'idx_product_events_tenant_occurred']
+    // v2 P-E02。本波不加新索引
+  }
+
+  note: '一行=一次产品事实。本波无 DDL。TENANT_EXEMPT 保持。'
+}
+
+// ─────────────────────────────────────────────
+// 关系（级联默认 RESTRICT；tenants 无 FK 跟 040）
+// ─────────────────────────────────────────────
+
+Ref: orders.plan_id > plans.id [delete: restrict, update: cascade]
+Ref: tenant_subscriptions.plan_id > plans.id [delete: restrict, update: cascade]
+Ref: relay_tokens.group_id > relay_groups.id [delete: restrict, update: cascade]
+Ref: asset_import_items.batch_id > asset_import_batches.id [delete: cascade, update: cascade]
+// [Wave A] CASCADE：明细=批的组合子行（批无删除入口，仅为孤儿防御）
+Ref: asset_import_items.asset_id > capability_assets.id [delete: restrict, update: cascade]
+// [Wave A] RESTRICT：目录行被明细引用时不随批删，保 provenance 回放链
+// outbound_keys.tenant_id / issued_by_user_id / gateway_key_id：无 FK
+// users.tenant_id / tenants 侧 / alert_rules.tenant_id / notifications.resource_*：无 FK（跟仓）
+// spider_tasks.tenant_id：[Wave A] FR-102 既有列传递，零 DDL，不在本 IR 展开全表
+// LiteLLM PG 表禁止出现在本文件
+
+// 种子过滤：不建列。公开 listed 读模型在 capability_assets 上对
+// name / title / description 做残差谓词（GWT-80.1）。不进本 IR 表清单。

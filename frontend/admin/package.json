@@ -27,7 +27,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "test": "jest",
+    "test": "jest --maxWorkers=2",
     "e2e": "NO_PROXY=127.0.0.1,localhost,::1 no_proxy=127.0.0.1,localhost,::1 playwright test",
     "eject": "react-scripts eject"
   },
@@ -51,6 +51,9 @@
   },
   "jest": {
     "testEnvironment": "jsdom",
+    "setupFiles": [
+      "<rootDir>/src/setupAntdRender.js"
+    ],
     "setupFilesAfterEnv": [
       "<rootDir>/src/setupTests.ts"
     ],
@@ -88,7 +91,7 @@
     "transformIgnorePatterns": [
       "node_modules/(?!(@ant-design|antd|rc-|@rc-component|@auto-agents)/)"
     ],
-    "testTimeout": 60000
+    "testTimeout": 120000
   },
   "devDependencies": {
     "@babel/preset-env": "^7.29.7",

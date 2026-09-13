@@ -9,9 +9,10 @@
  * - 删除任务：二次确认 + 级联删除采集结果（运行中禁止删除）
  * - 定时任务：Cron 调度计划管理（创建/启停/删除）
  */
-import React, { useMemo, useState } from 'react'
-import { Alert, Card, Tabs, message } from 'antd'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Button, message } from 'antd'
 import { ClockCircleOutlined, AlertOutlined, BookOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import {
   fetchRegistry, fetchTasks, deleteTask, controlTask,
   fetchTemplates,
@@ -21,7 +22,8 @@ import { usePermission } from '../hooks/usePermission'
 import { apiErrorMessage } from '../utils/errorMessage'
 import type { SpiderMap, Task, SpiderRegistry, TaskTemplate } from '../components/spider/types'
 import type { TaskPreset } from '../components/spider/TaskModal'
-import { SPIDER_WORKER_OFFLINE_COPY } from '../components/spider/copy'
+import { SPIDER_WORKER_OFFLINE_COPY, GO_NODES_TEXT } from '../components/spider/copy'
+import PageHeaderTabs, { pageTabPaneStyle } from '../components/layout/PageHeaderTabs'
 
 import { TaskList } from '../components/spider/TaskList'
 import { TaskModal } from '../components/spider/TaskModal'
@@ -37,9 +39,28 @@ import { useQuery } from '@tanstack/react-query'
 
 const PAGE_SIZE = 20
 
+/** 页级 tab（§0.10 / T-34：顶栏行 = 页名「采集任务」+ 本五 tab，与欢迎语同一行） */
+const PAGE_TAB_ITEMS = [
+  { key: 'tasks', label: '任务列表' },
+  {
+    key: 'schedules',
+    label: <span><ClockCircleOutlined style={{ marginRight: 4 }} />定时任务</span>,
+  },
+  { key: 'files', label: '采集方案' },
+  {
+    key: 'alerts',
+    label: <span><AlertOutlined style={{ marginRight: 4 }} />告警规则</span>,
+  },
+  {
+    key: 'templates',
+    label: <span><BookOutlined style={{ marginRight: 4 }} />任务模板</span>,
+  },
+]
+
 const Spiders: React.FC = () => {
   // 角色权限（后端为最终防线，前端仅隐藏高危按钮）
   const { hasPermission, isAdmin } = usePermission()
+  const navigate = useNavigate()
   const canCreate = hasPermission('btn:create')
   const canDelete = hasPermission('btn:delete')
   const canSchedule = hasPermission('btn:schedule')
@@ -49,8 +70,7 @@ const Spiders: React.FC = () => {
   const [priorityFilter, setPriorityFilter] = useState<string | undefined>(undefined)
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
   const [spiderFilter, setSpiderFilter] = useState<string | undefined>(undefined)
-  const { data: registryData } = useQuery({ queryKey: ['spider-registry'], queryFn: fetchRegistry })
-  const registry: SpiderRegistry = registryData ?? { types: [], spiders: [] }
+  const [registry, setRegistry] = useState<SpiderRegistry>({ types: [], spiders: [] })
 
   // 新增任务弹窗（preset 携带待回填参数）
   const [modalOpen, setModalOpen] = useState(false)
@@ -69,11 +89,17 @@ const Spiders: React.FC = () => {
   // 编辑待执行任务弹窗
   const [editTask, setEditTask] = useState<Task | null>(null)
 
-  const { data: templatesData, refetch: refetchTemplates } = useQuery({
-    queryKey: ['spider-templates'],
-    queryFn: fetchTemplates,
-  })
-  const templates: TaskTemplate[] = templatesData ?? []
+  // 模板列表（供 TaskModal 的"从模板创建"使用）
+  const [templates, setTemplates] = useState<TaskTemplate[]>([])
+
+  // 页级 tab（T-34 / GWT-99.1）：五 tab 经 PageHeaderTabs 上提顶栏行；
+  // pane 与原 Tabs 同语义——首次激活才挂载（数据装配时机不变），此后保持（筛选/分页态不丢）
+  const [activeTab, setActiveTab] = useState('tasks')
+  const [visitedTabs, setVisitedTabs] = useState<Record<string, boolean>>({ tasks: true })
+  const onTabChange = useCallback((key: string) => {
+    setActiveTab(key)
+    setVisitedTabs((visited) => (visited[key] ? visited : { ...visited, [key]: true }))
+  }, [])
 
   const spiderMap = useMemo<SpiderMap>(() => {
     const m: SpiderMap = {}
@@ -89,7 +115,7 @@ const Spiders: React.FC = () => {
   })
   const workerOffline = nodesFetched && (nodesRes?.total ?? 0) === 0
 
-  const { data: tasksRes, isLoading: loading, isError: tasksError, error: tasksErr, refetch: refetchTasks } = useQuery({
+  const { data: tasksRes, isLoading: loading, refetch: refetchTasks } = useQuery({
     queryKey: ['spider-tasks', page, priorityFilter, statusFilter, spiderFilter],
     queryFn: () => fetchTasks((page - 1) * PAGE_SIZE, PAGE_SIZE, {
       priority: priorityFilter,
@@ -114,7 +140,19 @@ const Spiders: React.FC = () => {
   const changeSpiderFilter = (v: string | undefined) => { setSpiderFilter(v); setPage(1) }
   const changePagination = (p: number) => { setPage(p) }
 
-  const loadTemplates = () => { void refetchTemplates() }
+  const loadTemplates = useCallback(async () => {
+    try {
+      const res = await fetchTemplates()
+      setTemplates(res || [])
+    } catch (error) {
+      message.error('获取任务模板失败')
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchRegistry().then(setRegistry).catch((e) => message.error(apiErrorMessage(e, '获取爬虫注册表失败')))
+    loadTemplates()
+  }, [loadTemplates])
 
 
   // ---------------- 新增任务弹窗 ----------------
@@ -170,125 +208,111 @@ const Spiders: React.FC = () => {
   }
 
   return (
-    <Card title="采集任务">
+    <>
+      {/* 页级 tab 上提顶栏（T-34 / GWT-99.1）；无槽位（单测直渲染）时原位回退 */}
+      <PageHeaderTabs items={PAGE_TAB_ITEMS} activeKey={activeTab} onChange={onTabChange} />
+
+      {/* 无工人提示（FR-85 条件态，§0.10 允许保留；非装饰横幅）+「去节点」下一步（T-18 / GWT-85.1） */}
       {workerOffline && (
         <Alert
           type="warning"
           showIcon
           title={SPIDER_WORKER_OFFLINE_COPY}
+          action={(
+            <Button size="small" onClick={() => navigate('/spiders/nodes')}>
+              {GO_NODES_TEXT}
+            </Button>
+          )}
           style={{ marginBottom: 12 }}
         />
       )}
-      <Tabs
-        items={[
-          {
-            key: 'tasks',
-            label: '任务列表',
-            children: (
-              <>
-              {tasksError ? (
-                <Alert type="error" showIcon style={{ marginBottom: 12 }}
-                       title={apiErrorMessage(tasksErr, '任务列表加载失败')} />
-              ) : null}
-              <TaskList
-                tasks={tasks}
-                loading={loading}
-                total={total}
-                page={page}
-                pageSize={PAGE_SIZE}
-                spiderMap={spiderMap}
-                canCreate={canCreate}
-                canDelete={canDelete}
-                canOperate={canOperate}
-                priorityFilter={priorityFilter}
-                onPriorityFilterChange={changePriorityFilter}
-                statusFilter={statusFilter}
-                onStatusFilterChange={changeStatusFilter}
-                spiderFilter={spiderFilter}
-                onSpiderFilterChange={changeSpiderFilter}
-                spiderOptions={registry.spiders.map((s: { name: string; title: string }) => ({
-                  value: s.name,
-                  label: s.title,
-                }))}
-                onPaginationChange={changePagination}
-                onRun={(task: Task) => openModal({ spiderName: task.spider_name, params: task.params, priority: task.priority })}
-                onCreateNew={() => openModal()}
-                onPause={(task: Task) => onControlTask(task, 'pause')}
-                onResume={(task: Task) => onControlTask(task, 'resume')}
-                onStop={(task: Task) => onControlTask(task, 'stop')}
-                onDelete={onDelete}
-                onSaveTemplate={openTemplateModal}
-                onViewLog={(task: Task) => setLogTask(task)}
-                onViewResult={(task: Task) => setResultTask(task)}
-                onEdit={(task: Task) => setEditTask(task)}
-                onRefresh={() => loadTasks()}
-              />
-              </>
-            ),
-          },
-          {
-            key: 'schedules',
-            label: (
-              <span><ClockCircleOutlined style={{ marginRight: 4 }} />定时任务</span>
-            ),
-            children: (
-              <ScheduleTab
-                registry={registry}
-                spiderMap={spiderMap}
-                canCreate={canCreate}
-                canSchedule={canSchedule}
-                onRunTask={(record) => openModal({
-                  spiderName: record.spider_name,
-                  params: record.params,
-                  priority: undefined,
-                })}
-              />
-            ),
-          },
-          {
-            key: 'files',
-            label: '采集方案',
-            children: (
-              <FileTab isAdmin={isAdmin} />
-            ),
-          },
-          {
-            key: 'alerts',
-            label: (
-              <span><AlertOutlined style={{ marginRight: 4 }} />告警规则</span>
-            ),
-            children: (
-              <AlertRulesTab
-                registry={registry}
-                spiderMap={spiderMap}
-                isAdmin={isAdmin}
-              />
-            ),
-          },
-          {
-            key: 'templates',
-            label: (
-              <span><BookOutlined style={{ marginRight: 4 }} />任务模板</span>
-            ),
-            children: (
-              <TemplateTab
-                spiderMap={spiderMap}
-                canCreate={canCreate}
-                canDelete={canDelete}
-                onRunFromTemplate={onRunFromTemplate}
-              />
-            ),
-          },
-        ]}
-      />
 
-      {/* 新增任务弹窗 */}
+      {/* 内容区直接当前 tab 开始；pane 首次激活挂载后保持，display 切换 + ≤150ms 透明度 */}
+      {visitedTabs.tasks && (
+        <div style={pageTabPaneStyle(activeTab === 'tasks')}>
+          <TaskList
+            tasks={tasks}
+            loading={loading}
+            total={total}
+            page={page}
+            pageSize={PAGE_SIZE}
+            spiderMap={spiderMap}
+            canCreate={canCreate}
+            canDelete={canDelete}
+            canOperate={canOperate}
+            priorityFilter={priorityFilter}
+            onPriorityFilterChange={changePriorityFilter}
+            statusFilter={statusFilter}
+            onStatusFilterChange={changeStatusFilter}
+            spiderFilter={spiderFilter}
+            onSpiderFilterChange={changeSpiderFilter}
+            spiderOptions={registry.spiders.map((s: { name: string; title: string }) => ({
+              value: s.name,
+              label: s.title,
+            }))}
+            onPaginationChange={changePagination}
+            onRun={(task: Task) => openModal({ spiderName: task.spider_name, params: task.params, priority: task.priority })}
+            onCreateNew={() => openModal()}
+            onPause={(task: Task) => onControlTask(task, 'pause')}
+            onResume={(task: Task) => onControlTask(task, 'resume')}
+            onStop={(task: Task) => onControlTask(task, 'stop')}
+            onDelete={onDelete}
+            onSaveTemplate={openTemplateModal}
+            onViewLog={(task: Task) => setLogTask(task)}
+            onViewResult={(task: Task) => setResultTask(task)}
+            onEdit={(task: Task) => setEditTask(task)}
+            onRefresh={() => loadTasks()}
+          />
+        </div>
+      )}
+      {visitedTabs.schedules && (
+        <div style={pageTabPaneStyle(activeTab === 'schedules')}>
+          <ScheduleTab
+            registry={registry}
+            spiderMap={spiderMap}
+            canCreate={canCreate}
+            canSchedule={canSchedule}
+            onRunTask={(record) => openModal({
+              spiderName: record.spider_name,
+              params: record.params,
+              priority: undefined,
+            })}
+          />
+        </div>
+      )}
+      {visitedTabs.files && (
+        <div style={pageTabPaneStyle(activeTab === 'files')}>
+          <FileTab isAdmin={isAdmin} />
+        </div>
+      )}
+      {visitedTabs.alerts && (
+        <div style={pageTabPaneStyle(activeTab === 'alerts')}>
+          <AlertRulesTab
+            registry={registry}
+            spiderMap={spiderMap}
+            isAdmin={isAdmin}
+          />
+        </div>
+      )}
+      {visitedTabs.templates && (
+        <div style={pageTabPaneStyle(activeTab === 'templates')}>
+          <TemplateTab
+            spiderMap={spiderMap}
+            canCreate={canCreate}
+            canDelete={canDelete}
+            onRunFromTemplate={onRunFromTemplate}
+          />
+        </div>
+      )}
+
+      {/* 新增任务弹窗（workerOffline：0 工人时提交被拦，T-18 / GWT-85.2） */}
       <TaskModal
         visible={modalOpen}
         registry={registry}
         spiderMap={spiderMap}
         templates={templates}
         preset={preset}
+        workerOffline={workerOffline}
         onSubmitSuccess={onTaskSubmitSuccess}
         onCancel={() => setModalOpen(false)}
       />
@@ -324,7 +348,7 @@ const Spiders: React.FC = () => {
         onSubmitSuccess={() => loadTasks(false)}
         onCancel={() => setEditTask(null)}
       />
-    </Card>
+    </>
   )
 }
 

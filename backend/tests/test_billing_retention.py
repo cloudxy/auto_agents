@@ -104,10 +104,12 @@ async def test_create_order_service(db_session):
         plan = Plan(slug="pro-ord", name="专业档", price_cents=29900, period="month", is_public=1)
         s.add_all([tenant, plan])
         await s.commit()
-        out = await BillingService(s).create_order(tenant.id, OrderCreate(plan_id=plan.id, channel="alipay"))
+        out = await BillingService(s).create_order(
+            tenant.id, "owner", OrderCreate(plan_id=plan.id, channel="offline"),
+        )
         assert out.status == "pending"
         assert out.amount_cents == 29900
-        assert out.channel == "alipay"
+        assert out.channel == "offline"
 
 
 @pytest.mark.asyncio
@@ -166,12 +168,12 @@ async def test_enqueue_uses_tenant_slot_key():
     svc.session.commit = AsyncMock()
     svc.session.refresh = AsyncMock()
     svc.repo = MagicMock()
+    svc._check_enqueue_quota = AsyncMock()
     fake_redis = AsyncMock()
     fake_redis.scard.return_value = 2
     with (
         patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis),
         patch("backend.services.spider_task_service.settings") as fake_settings,
-        patch("backend.services.quota_service.QuotaService.check_task_concurrency", new_callable=AsyncMock),
     ):
         fake_settings.get.return_value = 2
         with pytest.raises(BusinessException, match="进行中的任务"):

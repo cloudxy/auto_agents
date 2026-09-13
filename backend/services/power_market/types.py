@@ -26,7 +26,13 @@ HOST_LABELS: dict[str, str] = {
     "grok": "Grok", "zcode": "ZCode", "kimi": "Kimi", "claude": "Claude",
 }
 PAGE_SIZE_DEFAULT = 20
-PAGE_SIZE_MAX = 50
+# T-14（FR-81/NFR-02）：公开端页大小上限收到 20（此前 50）。
+# 该常量只被公开两端（/public/skills、/public/capabilities）消费，无管理端分闸需求。
+PAGE_SIZE_MAX = 20
+# T-13（FR-80）：公开商店测试种子谓词三支（与 GWT-80.1 同口径；PIT-5 双公开端共享）
+SEED_NAME_PREFIX = "nfr01qc2-"
+SEED_TITLE_PREFIX = "NFR卡片"
+SEED_DESC_MARKER = "preprod nfr-01 seed"
 STORE_NOT_FOUND_COPY = "页面不存在，可能已被移除或地址有误"
 STORE_NOT_FOUND_HOME = "返回首页"
 MARKET_NOT_FOUND_CODE = "MARKET_NOT_FOUND"

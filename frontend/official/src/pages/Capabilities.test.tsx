@@ -17,7 +17,8 @@ import Capabilities from './Capabilities'
 
 const fetchList = listPublicAssets as jest.MockedFunction<typeof listPublicAssets>
 
-const EMPTY = '还没有上架的能力'
+const EMPTY = '暂无已上架能力'
+const CLOSED = '能力市场未开放'
 const FILTER_EMPTY = '没有符合条件的能力'
 const FAIL = '市场列表加载失败'
 const FAIL_HINT = '检查网络后重试'
@@ -97,15 +98,18 @@ test('search box writes q into the URL', async () => {
   expect(decodeURIComponent(screen.getByTestId('loc').textContent || '')).toContain('q=代码审查')
 })
 
-test('GWT-31.2 unfiltered empty is 还没有上架的能力, not 暂无已发布', async () => {
-  fetchList.mockResolvedValue({ items: [] })
+test('GWT-31.2 / GWT-U10.2 unfiltered empty is 暂无已上架能力, not closed or load-fail', async () => {
+  fetchList.mockResolvedValue({ items: [], total: 0, market_closed: false, message: EMPTY })
   renderMarket('/capabilities')
   expect(await screen.findByText(EMPTY)).toBeInTheDocument()
   expect(screen.getByText(/已上架且过许可的能力会出现在这里/)).toBeInTheDocument()
   expect(screen.queryByText(FILTER_EMPTY)).not.toBeInTheDocument()
   expect(screen.queryByText(FAIL)).not.toBeInTheDocument()
+  expect(screen.queryByText(CLOSED)).not.toBeInTheDocument()
   expect(screen.queryByText(ILLEGAL)).not.toBeInTheDocument()
   expect(screen.queryByTestId('filter-echo')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('market-closed')).not.toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain('当前可买')
 })
 
 test('GWT-31.3 filtered empty is 没有符合条件的能力 plus 清除筛选', async () => {
@@ -123,6 +127,7 @@ test('GWT-31.3 filtered empty is 没有符合条件的能力 plus 清除筛选',
   expect(echo).toHaveTextContent('分类')
   expect(echo).toHaveTextContent('none')
   expect(screen.queryByText(EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(CLOSED)).not.toBeInTheDocument()
   expect(screen.queryByText(FAIL)).not.toBeInTheDocument()
   expect(screen.queryByText(ILLEGAL)).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '清除筛选' }))
@@ -138,6 +143,7 @@ test('GWT-31.4 load failure is 市场列表加载失败, not empty stock', async
   expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
   expect(screen.queryByText(EMPTY)).not.toBeInTheDocument()
   expect(screen.queryByText(FILTER_EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(CLOSED)).not.toBeInTheDocument()
   expect(screen.queryByText(ILLEGAL)).not.toBeInTheDocument()
   expect(screen.queryByTestId('filter-echo')).not.toBeInTheDocument()
 })
@@ -195,6 +201,7 @@ test('list sends URL filters and renders mock items without a second client filt
     q: '代码审查',
     host: 'kimi',
     category: 'dev-tools',
+    page: 1,
   })
   const args = fetchList.mock.calls[0][0]
   expect(args).not.toHaveProperty('listing_state')
@@ -225,4 +232,104 @@ test('GWT-43.3 official market has no tenant analytics query surface', async () 
   expect(fetchList).toHaveBeenCalledWith(expect.objectContaining({
     type: 'skill', host: 'kimi', category: 'dev-tools',
   }))
+})
+
+// ---------- T-14（FR-81/92.5）：翻页控件 ----------
+
+const pageOf = (n: number, titlePrefix = '夹具'): PublicListItem[] =>
+  Array.from({ length: n }, (_, i) =>
+    prefixedSkill({ name: `g814-vis-${i}`, title: `${titlePrefix}${i}` }))
+
+test('GWT-81.1 pager shows total and next; page 2 reaches the 21st without overlap', async () => {
+  fetchList.mockImplementation(async (params = {}) => {
+    const page = params.page ?? 1
+    if (page <= 1) {
+      return { items: pageOf(20), total: 21, page: 1, page_size: 20, has_more: true }
+    }
+    return {
+      items: [prefixedSkill({ name: 'g814-vis-20', title: '第二十一张' })],
+      total: 21, page: 2, page_size: 20, has_more: false,
+    }
+  })
+  renderMarket('/capabilities')
+  expect(await screen.findByText('共 21 件')).toBeInTheDocument()
+  expect((await screen.findAllByRole('link')).length).toBe(20) // 第一页 ≤20 张
+  expect(screen.getByRole('button', { name: '下一页' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+  expect(await screen.findByText('第二十一张')).toBeInTheDocument()
+  expect(screen.queryByText('夹具19')).not.toBeInTheDocument() // 不与第一页整页重复
+  expect(screen.queryByRole('button', { name: '下一页' })).not.toBeInTheDocument()
+  expect(fetchList).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
+})
+
+test('GWT-81.2 exactly 20 items has no fake next control', async () => {
+  fetchList.mockResolvedValue({
+    items: pageOf(20), total: 20, page: 1, page_size: 20, has_more: false,
+  })
+  renderMarket('/capabilities')
+  expect(await screen.findByText('共 20 件')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '下一页' })).not.toBeInTheDocument()
+})
+
+test('GWT-81.3 zero stock keeps empty sentence without pager numbers', async () => {
+  fetchList.mockResolvedValue({
+    items: [], total: 0, page: 1, page_size: 20, has_more: false,
+  })
+  renderMarket('/capabilities')
+  expect(await screen.findByText(EMPTY)).toBeInTheDocument()
+  expect(screen.queryByText(/共 \d+ 件/)).not.toBeInTheDocument()
+  expect(screen.queryByTestId('market-pager')).not.toBeInTheDocument()
+})
+
+test('GWT-92.5 paging request goes out with page 2; filter change resets page', async () => {
+  fetchList.mockImplementation(async (params = {}) => {
+    const page = params.page ?? 1
+    return page <= 1
+      ? { items: pageOf(20), total: 21, page: 1, page_size: 20, has_more: true }
+      : { items: [prefixedSkill({ name: 'g814-vis-20', title: '第二十一张' })],
+          total: 21, page: 2, page_size: 20, has_more: false }
+  })
+  renderMarket('/capabilities')
+  fireEvent.click(await screen.findByRole('button', { name: '下一页' }))
+  await screen.findByText('第二十一张')
+  expect(fetchList).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
+  fireEvent.change(screen.getByLabelText('搜索能力'), { target: { value: 'pdf' } })
+  fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+  await screen.findByText('夹具0') // 重置回第 1 页
+  expect(fetchList).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 }))
+  expect(screen.getByTestId('loc').textContent).not.toContain('page=')
+})
+
+test('GWT-U11.2 closed market is 能力市场未开放, not empty shelf', async () => {
+  fetchList.mockResolvedValue({
+    items: [], total: 0, market_closed: true, empty: true, message: CLOSED,
+  })
+  renderMarket('/capabilities')
+  expect(await screen.findByText(CLOSED)).toBeInTheDocument()
+  expect(screen.getByText('开放后，已上架的能力会出现在这里。')).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/')
+  expect(screen.queryByText(EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(FILTER_EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(FAIL)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /订阅/ })).not.toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain('当前可买')
+})
+
+test('GWT-U11.2 closed plus filters still uses closed copy, not filter-empty', async () => {
+  fetchList.mockResolvedValue({
+    items: [], total: 0, market_closed: true, message: CLOSED,
+  })
+  renderMarket('/capabilities?type=skill&q=没有这货')
+  expect(await screen.findByText(CLOSED)).toBeInTheDocument()
+  expect(screen.queryByText(EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(FILTER_EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '清除筛选' })).not.toBeInTheDocument()
+})
+
+test('GWT-U10.2 load failure is not empty shelf or closed', async () => {
+  fetchList.mockRejectedValue(new Error('boom'))
+  renderMarket('/capabilities')
+  expect(await screen.findByText(FAIL)).toBeInTheDocument()
+  expect(screen.queryByText(EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(CLOSED)).not.toBeInTheDocument()
 })

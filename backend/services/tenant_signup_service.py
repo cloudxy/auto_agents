@@ -93,6 +93,12 @@ class TenantSignupService:
         )
         self.session.add(owner)
         await self.session.flush()
+        try:
+            from backend.services.billing_service import BillingService
+
+            await BillingService(self.session).attach_free_plan(int(tenant.id))
+        except Exception as exc:  # noqa: BLE001 价目未种子时不阻断注册
+            logger.warning(f"挂接免费档失败（忽略）| tenant={tenant.id} err={exc}")
         snapshot = {
             "tenant": {"id": tenant.id, "slug": tenant.slug, "name": tenant.name},
             "owner": {"id": owner.id, "username": owner.username, "email": owner.email},

@@ -154,10 +154,10 @@ def _registry_service() -> SpiderRegistryService:
 
 
 def _definition(**overrides) -> MagicMock:
-    """可被 SpiderDefinitionResponse.model_validate 的定义实体桩"""
+    """可被 SpiderDefinitionResponse.model_validate 的定义实体桩（params 列 T-39 新增）"""
     d = MagicMock(
         id=5, title="通用采集示例", type="web",
-        description="", enabled=True, source="yml_seed",
+        description="", enabled=True, source="yml_seed", params=None,
         created_at=None, updated_at=None,
     )
     d.name = overrides.pop("name", "example")  # name 是 MagicMock 保留参数，需显式赋值
@@ -244,18 +244,22 @@ class TestDefinitionCrud:
 
     @pytest.mark.asyncio
     async def test_delete_rejected_when_tasks_exist(self):
-        """m1 回归：原子条件删除 rowcount=0 且定义存在 → 被引用拒绝（先插任务再删的等价态）"""
+        """m1 回归：原子条件删除 rowcount=0 且定义存在 → 被引用拒绝（先插任务再删的等价态）
+
+        T-39：拒绝句升级为说明引用任务（#id 列举，GWT-103.3），口径不变。"""
         svc = _registry_service()
         repo = MagicMock()
         repo.delete_if_unreferenced = AsyncMock(return_value=False)
         repo.get_by_name = AsyncMock(return_value=_definition(id=5))
         svc.repo.count_by_spider = AsyncMock(return_value=3)
+        svc.repo.list_ids_by_spider = AsyncMock(return_value=[12, 15])
 
         with patch("backend.services.spider_registry_service.SpiderDefinitionRepository", return_value=repo):
-            with pytest.raises(BusinessException):
+            with pytest.raises(BusinessException) as e:
                 await svc.delete_definition("example")
 
         repo.delete_if_unreferenced.assert_awaited_once_with("example")
+        assert "#12" in str(e.value) and "#15" in str(e.value)
         svc.session.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -612,7 +616,7 @@ class TestSearchResults:
         kwargs = svc.result_repo.query_by_spider.await_args.kwargs
         assert kwargs.get("exclude_source") == "marketplace"
         assert resp.total == 0 and resp.items == []
-        assert EMPTY_DATACENTER_COPY == "还没有采集结果"
+        assert EMPTY_DATACENTER_COPY == "还没有结果，去提交采集"
 
     @pytest.mark.asyncio
     async def test_query_public_results_excludes_marketplace(self):

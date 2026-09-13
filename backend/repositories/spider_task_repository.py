@@ -72,6 +72,20 @@ class SpiderTaskRepository(BaseRepository[SpiderTask]):
         result = await self.session.execute(stmt)
         return int(result.scalar() or 0)
 
+    async def count_pending_by_tenant(self, tenant_id: int) -> int:
+        """指定租户的排队任务数（status='pending'，软删行不计）
+
+        queue_depth 告警评估口径（FR-105 / db-spec §16.6）：规则所属租户的
+        排队任务深度；等值查询由 ix_spider_tasks_tenant_status_priority 承接。
+        """
+        stmt = select(func.count(SpiderTask.id)).where(
+            SpiderTask.tenant_id == tenant_id,
+            SpiderTask.status == "pending",
+            SpiderTask.deleted_at.is_(None),
+        )
+        result = await self.session.execute(stmt)
+        return int(result.scalar() or 0)
+
     async def count_by_status(self, since: datetime | None = None) -> dict:
         """一次性返回各状态的计数（用于 /admin/stats；since 与近 7 日窗同一套）"""
         stmt = select(SpiderTask.status, func.count(SpiderTask.id)).group_by(SpiderTask.status)
@@ -170,6 +184,17 @@ class SpiderTaskRepository(BaseRepository[SpiderTask]):
         stmt = select(func.count(SpiderTask.id)).where(SpiderTask.spider_name == spider_name)
         result = await self.session.execute(stmt)
         return int(result.scalar() or 0)
+
+    async def list_ids_by_spider(self, spider_name: str, limit: int = 5) -> List[int]:
+        """按爬虫名列引用任务 ID（删除拒绝句说明引用它的任务，GWT-103.3/T-39）"""
+        stmt = (
+            select(SpiderTask.id)
+            .where(SpiderTask.spider_name == spider_name)
+            .order_by(SpiderTask.id.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return [int(row) for row in result.scalars().all()]
 
     async def find_stale_running(self, cutoff: datetime, limit: int = 100) -> List[SpiderTask]:
         """运行超时候选（P0-1b）：running 且 started_at < cutoff，供消费者超时回收"""

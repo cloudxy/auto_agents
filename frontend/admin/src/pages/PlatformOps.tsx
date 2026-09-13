@@ -1,8 +1,7 @@
 /**
  * 平台运营台（SaaS S5-2）：租户列表 / 套餐配额编辑 / 到期管理（平台超管专属）。
  */
-import React, { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   Alert, Button, DatePicker, Form, InputNumber, Modal, Popconfirm, Space, Table, Tag,
   Typography, message,
@@ -11,10 +10,12 @@ import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { Dayjs } from 'dayjs'
 import { Tabs } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import { listTenants, patchTenant, type TenantRow } from '../services/platformOps'
+import { confirmOrder, listPendingOrders, type OrderRow } from '../services/billing'
 import { clearDeadItems, discardDeadItem, listDeadItems, type DeadItem } from '../services/deadItems'
-import PendingOrdersTab from '../components/ops/PendingOrdersTab'
 import { apiErrorMessage } from '../utils/errorMessage'
+import { LoadEmpty, LoadFailure } from '../components/LoadState'
 import ProductEvents from './ProductEvents'
 
 
@@ -25,14 +26,23 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const PlatformOps: React.FC = () => {
-  const qc = useQueryClient()
-  const tenantsQ = useQuery({ queryKey: ['tenants'], queryFn: listTenants })
-  const rows = tenantsQ.data ?? []
-  const loading = tenantsQ.isLoading
+  const [rows, setRows] = useState<TenantRow[]>([])
+  const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState<TenantRow | null>(null)
   const [form] = Form.useForm()
 
-  const load = () => { qc.invalidateQueries({ queryKey: ['tenants'] }) }
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      setRows(await listTenants())
+    } catch (e) {
+      message.error(apiErrorMessage(e, '租户列表加载失败'))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
 
   const onSave = async () => {
     if (!editing) return
@@ -110,12 +120,24 @@ const PlatformOps: React.FC = () => {
 
 // ---------------- 死信队列 Tab（B6 工单 91：排障刚需） ----------------
 const DeadItemsTab: React.FC = () => {
-  const qc = useQueryClient()
-  const deadQ = useQuery({ queryKey: ['dead-items'], queryFn: () => listDeadItems() })
-  const items = deadQ.data?.items ?? []
-  const total = deadQ.data?.total ?? 0
-  const loading = deadQ.isLoading
-  const load = () => { qc.invalidateQueries({ queryKey: ['dead-items'] }) }
+  const [items, setItems] = useState<DeadItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await listDeadItems()
+      setItems(data.items)
+      setTotal(data.total)
+    } catch (e) {
+      message.error(apiErrorMessage(e, '死信队列加载失败'))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
 
   const onDiscard = async (index: number) => {
     try {
@@ -144,7 +166,7 @@ const DeadItemsTab: React.FC = () => {
     <div>
       <Alert
         type="info" showIcon style={{ marginBottom: 12 }}
-        title={`共 ${total} 条死信（最新在前）`}
+        message={`共 ${total} 条死信（最新在前）`}
         description="结果消息缺少 task_id 等无法归属时转入此队列留档；确认无用后可单条丢弃或清空。"
       />
       <Space style={{ marginBottom: 12 }}>
@@ -171,6 +193,48 @@ const DeadItemsTab: React.FC = () => {
   )
 }
 
+// ---------------- 待确认收款 Tab（T-23 / GWT-84.4 + 真 0，FR-84 句族） ----------------
+const ORDERS_LOAD_FAILED = '待确认收款列表加载失败。检查网络后重试。'
+const ORDERS_EMPTY = '还没有待确认的收款。租户提交线下升级申请后会出现在这里。'
+
+function PendingOrdersTab() {
+  const ordersQuery = useQuery({ queryKey: ['pending-orders'], queryFn: listPendingOrders })
+  const rows = ordersQuery.data || []
+  // GWT-84.4：列表失败 = 失败句 + 可点重试，整表替换，不回落默认「暂无数据」；
+  // 真 0（成功且 0 条 pending）= 「还没有…」空态句（GWT-84.2 同族）。
+  if (ordersQuery.isError) {
+    return (
+      <div>
+        <Alert type="info" showIcon style={{ marginBottom: 12 }}
+               title="在线支付未开通。确认收款后把企业套餐配额改到该订单档。" />
+        <LoadFailure title={ORDERS_LOAD_FAILED} onRetry={() => ordersQuery.refetch()} />
+      </div>
+    )
+  }
+  return (
+    <div>
+      <Alert type="info" showIcon style={{ marginBottom: 12 }}
+             title="在线支付未开通。确认收款后把企业套餐配额改到该订单档。" />
+      <Button icon={<ReloadOutlined />} onClick={() => ordersQuery.refetch()} style={{ marginBottom: 12 }}>刷新</Button>
+      <Table rowKey="id" size="middle" loading={ordersQuery.isPending} dataSource={rows}
+             pagination={{ pageSize: 20 }}
+             locale={{ emptyText: <LoadEmpty title={ORDERS_EMPTY} /> }}
+             columns={[
+               { title: '订单', dataIndex: 'id' },
+               { title: '套餐', dataIndex: 'plan_id' },
+               { title: '金额（分）', dataIndex: 'amount_cents' },
+               { title: '通道', dataIndex: 'channel' },
+               { title: '操作', render: (_: unknown, r: OrderRow) => (
+                 <Popconfirm title="确认已收到线下款项？"
+                             onConfirm={() => confirmOrder(r.id).then(() => ordersQuery.refetch())}>
+                   <Button size="small" type="primary">确认收款</Button>
+                 </Popconfirm>
+               )},
+             ]} />
+    </div>
+  )
+}
+
   return (
     <div>
       <Tabs
@@ -180,12 +244,8 @@ const DeadItemsTab: React.FC = () => {
             key: 'tenants', label: '租户管理',
             children: (
               <>
-      {tenantsQ.isError ? (
-        <Alert type="error" showIcon style={{ marginBottom: 12 }}
-               title={apiErrorMessage(tenantsQ.error, '租户列表加载失败')} />
-      ) : null}
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
-             title="平台运营台为平台超管专属；到期租户会被登录拒绝（可行动文案），此处可续期/调整套餐" />
+             message="平台运营台为平台超管专属；到期租户会被登录拒绝（可行动文案），此处可续期/调整套餐" />
       <Space style={{ marginBottom: 12 }}>
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
       </Space>
@@ -194,8 +254,8 @@ const DeadItemsTab: React.FC = () => {
               </>
             ),
           },
-          { key: 'orders', label: '待确认收款', children: <PendingOrdersTab /> },
           { key: 'dead-items', label: '死信队列', children: <DeadItemsTab /> },
+          { key: 'orders', label: '待确认收款', children: <PendingOrdersTab /> },
           { key: 'product-events', label: '产品事实', children: <ProductEvents /> },
         ]}
       />

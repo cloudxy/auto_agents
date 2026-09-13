@@ -59,7 +59,7 @@ logger = get_logger("api")
 # FR-03 / NFR-02 / FR-11：列表、导出、出站同一谓词 source <> marketplace。
 EXPORT_MAX_ROWS = 100
 EMPTY_EXPORT_MESSAGE = "没有可导出的结果"
-EMPTY_DATACENTER_COPY = "还没有采集结果"
+EMPTY_DATACENTER_COPY = "还没有结果，去提交采集"
 
 
 class SpiderQueryService:

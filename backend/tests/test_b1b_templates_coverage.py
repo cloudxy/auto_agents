@@ -323,6 +323,10 @@ def test_run_from_template_unregistered_spider_400(
 
 
 def test_run_from_template_viewer_403(viewer_client):
+    """viewer 直调模板入队 → 400 同族中文拒绝句（T-12/GWT-87.3；原 403 金标随本票改写，PIT-2）"""
     resp = viewer_client.post(f"{BASE}/1/run")
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 400, resp.text
+    body = resp.json()
+    assert body["code"] == "TASK_RUN_ROLE_NOT_ALLOWED"
+    assert "不能提交采集任务" in body["message"]
+    assert "请联系企业管理员" in body["message"]

@@ -7,7 +7,7 @@ import { usePermission } from '../../hooks/usePermission'
 import { apiErrorMessage } from '../../utils/errorMessage'
 import ListingControls from './ListingControls'
 import {
-  CATALOG_EMPTY, LISTING_OPTIONS, loadFail,
+  CATALOG_EMPTY, GOVERNANCE_PAGINATION, LISTING_OPTIONS, catalogFocusCopy, loadFail,
 } from './marketCopy'
 
 const { Text } = Typography
@@ -20,7 +20,15 @@ const TYPE_OPTIONS = [
   { value: 'team', label: '专家团' },
 ]
 
-const CatalogTab: React.FC = () => {
+type Props = { focusName?: string | null; refreshKey?: number }
+
+const matchesFocus = (row: AssetRow, focus: string): boolean => (
+  row.name === focus
+  || row.title === focus
+  || row.name.endsWith(`__${focus}`)
+)
+
+const CatalogTab: React.FC<Props> = ({ focusName, refreshKey }) => {
   const { isPlatformAdmin } = usePermission()
   const [rows, setRows] = useState<AssetRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -43,7 +51,8 @@ const CatalogTab: React.FC = () => {
     }
   }, [type, listing])
 
-  useEffect(() => { load() }, [load])
+  // refreshKey（T-36 导入完成计数）为显式重载触发器，不参与 load 逻辑
+  useEffect(() => { load() }, [load, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const replace = (next: AssetRow) => {
     setRows((cur) => cur.map((r) => (r.id === next.id ? { ...r, ...next } : r)))
@@ -52,9 +61,11 @@ const CatalogTab: React.FC = () => {
 
   const filtered = Boolean(type || listing)
   const empty = !loading && !error && rows.length === 0
+  const focus = (focusName || '').trim()
 
   return (
     <div>
+      {focus ? <Alert type="info" showIcon title={catalogFocusCopy(focus)} style={{ marginBottom: 12 }} /> : null}
       {notice ? <Alert type="error" showIcon title={notice} style={{ marginBottom: 12 }} /> : null}
       {error ? (
         <Alert type="error" showIcon title={error} action={<Button onClick={load}>重试</Button>} />
@@ -69,7 +80,9 @@ const CatalogTab: React.FC = () => {
       {empty ? (
         <Empty description={filtered ? '没有符合条件的目录项' : CATALOG_EMPTY} />
       ) : (
-        <Table rowKey="id" size="middle" loading={loading} dataSource={rows} pagination={false}
+        <Table rowKey="id" size="middle" loading={loading} dataSource={rows}
+               pagination={GOVERNANCE_PAGINATION}
+               rowClassName={(r) => (focus && matchesFocus(r, focus) ? 'market-catalog-focus' : '')}
                columns={[
                  { title: '名称', dataIndex: 'name', render: (v: string) => <Text code>{v}</Text> },
                  { title: '类型', dataIndex: 'asset_type' },

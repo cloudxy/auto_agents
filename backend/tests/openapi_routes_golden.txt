@@ -1,5 +1,7 @@
 DELETE /api/v1/admin/dead-items
 DELETE /api/v1/admin/dead-items/{index}
+DELETE /api/v1/admin/internal-fixture-tenants/{tenant_id}
+DELETE /api/v1/admin/payment-credentials/{channel}
 DELETE /api/v1/admin/users/{user_id}
 DELETE /api/v1/ai/plans/{plan_id}
 DELETE /api/v1/capabilities/installs/{install_id}
@@ -8,10 +10,12 @@ DELETE /api/v1/llm/providers/{provider_id}
 DELETE /api/v1/members/{member_id}
 DELETE /api/v1/newapi/channels/{channel_id}/config
 DELETE /api/v1/newapi/models/{gateway_ref}/config
+DELETE /api/v1/outbound/keys/{key_id}
 DELETE /api/v1/rbac/departments/{department_id}
 DELETE /api/v1/rbac/menus/{menu_id}
 DELETE /api/v1/rbac/permissions/{permission_id}
 DELETE /api/v1/rbac/roles/{role_key}
+DELETE /api/v1/relay/tokens/{token_id}
 DELETE /api/v1/spiders/alert-rules/{rule_id}
 DELETE /api/v1/spiders/definitions/{name}
 DELETE /api/v1/spiders/results/{result_id}
@@ -21,7 +25,10 @@ DELETE /api/v1/spiders/templates/{template_id}
 GET /api/v1/
 GET /api/v1/admin/audit-logs
 GET /api/v1/admin/dead-items
+GET /api/v1/admin/internal-fixture-tenants
 GET /api/v1/admin/notify-config
+GET /api/v1/admin/payment-credentials
+GET /api/v1/admin/power-market
 GET /api/v1/admin/stats
 GET /api/v1/admin/tenants
 GET /api/v1/admin/users
@@ -32,6 +39,7 @@ GET /api/v1/api-keys
 GET /api/v1/auth/menus
 GET /api/v1/auth/permissions
 GET /api/v1/billing/admin/orders
+GET /api/v1/billing/checkout
 GET /api/v1/billing/orders
 GET /api/v1/billing/plans
 GET /api/v1/billing/subscription
@@ -62,6 +70,7 @@ GET /api/v1/newapi/channels
 GET /api/v1/newapi/events
 GET /api/v1/newapi/overview
 GET /api/v1/newapi/probe-results
+GET /api/v1/outbound/keys
 GET /api/v1/product-events
 GET /api/v1/public/capabilities
 GET /api/v1/public/capabilities/aliases
@@ -72,6 +81,11 @@ GET /api/v1/rbac/departments
 GET /api/v1/rbac/menus/tree
 GET /api/v1/rbac/permissions
 GET /api/v1/rbac/roles
+GET /api/v1/relay/groups
+GET /api/v1/relay/sku
+GET /api/v1/relay/tokens
+GET /api/v1/relay/tokens/by-key
+GET /api/v1/relay/tokens/{token_id}
 GET /api/v1/skills
 GET /api/v1/skills/candidates
 GET /api/v1/skills/jobs
@@ -93,6 +107,7 @@ GET /api/v1/spiders/tasks/{task_id}/quality
 GET /api/v1/spiders/tasks/{task_id}/store
 GET /api/v1/spiders/templates
 GET /api/v1/tenants/me/delivery-webhook
+GET /api/v1/tenants/me/quota/upgrade-intent
 GET /api/v1/tenants/me/usage
 GET /api/v1/tenants/me/usage/by-member
 GET /api/v2/
@@ -113,6 +128,7 @@ PATCH /api/v1/capabilities/installs/{install_id}
 PATCH /api/v1/capabilities/{asset_type}/{name}/license-override
 PATCH /api/v1/capabilities/{asset_type}/{name}/listing
 PATCH /api/v1/members/{member_id}
+PATCH /api/v1/relay/groups/{group_id}
 PATCH /api/v1/spiders/alert-rules/{rule_id}
 PATCH /api/v1/spiders/definitions/{name}
 PATCH /api/v1/spiders/definitions/{name}/meta
@@ -120,8 +136,10 @@ PATCH /api/v1/spiders/schedules/{schedule_id}
 PATCH /api/v1/spiders/tasks/{task_id}
 PATCH /api/v1/spiders/templates/{template_id}
 PATCH /api/v1/tenants/me/quota
+POST /api/v1/admin/internal-fixture-tenants
 POST /api/v1/admin/tenants
 POST /api/v1/admin/users
+POST /api/v1/admin/users/{user_id}/restore
 POST /api/v1/ai/plans
 POST /api/v1/ai/plans/{plan_id}/plan
 POST /api/v1/ai/plans/{plan_id}/register
@@ -130,9 +148,12 @@ POST /api/v1/api-keys
 POST /api/v1/api-keys/{key_id}/revoke
 POST /api/v1/auth/login
 POST /api/v1/auth/register
+POST /api/v1/billing/checkout
+POST /api/v1/billing/notify/{channel}
 POST /api/v1/billing/orders
 POST /api/v1/billing/orders/{order_id}/confirm
 POST /api/v1/capabilities/backfill-first-party
+POST /api/v1/capabilities/import
 POST /api/v1/capabilities/plugins/{name}/verify
 POST /api/v1/capabilities/scan-experts
 POST /api/v1/capabilities/scan-plugins
@@ -151,7 +172,9 @@ POST /api/v1/llm/providers/{provider_id}/test
 POST /api/v1/members
 POST /api/v1/members/{member_id}/reset-password
 POST /api/v1/newapi/models
+POST /api/v1/newapi/probe
 POST /api/v1/newapi/upstreams
+POST /api/v1/outbound/keys
 POST /api/v1/public/capabilities/{asset_type}/{name}/subscribe
 POST /api/v1/public/events
 POST /api/v1/public/skills/{name}/subscribe
@@ -160,6 +183,9 @@ POST /api/v1/rbac/departments
 POST /api/v1/rbac/menus
 POST /api/v1/rbac/permissions
 POST /api/v1/rbac/roles
+POST /api/v1/relay/groups
+POST /api/v1/relay/tokens
+POST /api/v1/relay/tokens/refresh-usage
 POST /api/v1/skills/candidates/{result_id}/approve
 POST /api/v1/skills/candidates/{result_id}/reject
 POST /api/v1/skills/import-url
@@ -177,6 +203,8 @@ POST /api/v1/spiders/templates
 POST /api/v1/spiders/templates/{template_id}/run
 POST /external/v1/webhooks/spider/callback
 PUT /api/v1/admin/notify-config
+PUT /api/v1/admin/payment-credentials
+PUT /api/v1/admin/power-market
 PUT /api/v1/capabilities/{asset_type}/{name}/alias
 PUT /api/v1/configs/{key}
 PUT /api/v1/llm/providers/{provider_id}

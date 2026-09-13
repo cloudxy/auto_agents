@@ -6,10 +6,12 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import (
-    CurrentUser, require_admin, require_login, require_platform_admin_or_404,
+    CurrentUser, require_admin, require_login, require_platform_admin,
+    require_platform_admin_or_404,
 )
 from platform_core.schemas.auth import AdminUserCreateRequest, AdminUserUpdateRequest
 from backend.app.responses import ok, created
@@ -62,11 +64,13 @@ async def get_stats(
 async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    status: str = Query("active", pattern="^(active|deleted)$",
+                        description="active=默认（不含已删）；deleted=已删除筛选（T-24/FR-93）"),
     service: UserService = Depends(_user_service),
     _user: CurrentUser = Depends(require_admin),
 ):
-    """用户列表（用户管理页陈列，不含密码哈希）"""
-    data = await service.list_users(skip=skip, limit=limit)
+    """用户列表（用户管理页陈列，不含密码哈希；status=deleted 为已删筛选）"""
+    data = await service.list_users(skip=skip, limit=limit, status=status)
     return ok(data=data.model_dump())
 
 
@@ -105,10 +109,27 @@ async def admin_delete_user(
     session: AsyncSession = Depends(get_async_db),
     service: UserService = Depends(_user_service),
 ):
-    """软删除账户（防删自己；防删最后一个平台超管）"""
+    """软删除账户（防删自己；防删最后一个平台超管；种子 admin 不可删）"""
     await service.delete_user(user_id, actor_id=int(user.id))
     await record_audit(session, user, "user.delete", f"user#{user_id}")
     return ok(data={"id": user_id, "deleted": True})
+
+
+@router.post("/users/{user_id}/restore")
+async def admin_restore_user(
+    user_id: int,
+    user: CurrentUser = Depends(require_platform_admin_or_404),
+    session: AsyncSession = Depends(get_async_db),
+    service: UserService = Depends(_user_service),
+):
+    """恢复软删账户（T-24 / FR-93；仅平台超管，租户直打 404 同形 GWT-93.6）
+
+    占用冲突（username 同租户在册 / email 全局在册）→ 400 中文句；
+    重复恢复 no-op（GWT-93.9）；成功上报 user_restored（GWT-92.8）。
+    """
+    restored = await service.restore_user(user_id, actor_id=int(user.id))
+    await record_audit(session, user, "user.restore", f"user#{user_id}")
+    return ok(data=restored.model_dump())
 
 
 @router.get("/audit-logs")
@@ -169,10 +190,41 @@ async def patch_tenant(
     session: AsyncSession = Depends(get_async_db),
     service: TenantAdminService = Depends(_tenant_service),
 ):
-    """套餐/配额/到期编辑（平台超管；事务由 service 持有 ADR-0007）"""
+    """名称/套餐/配额/到期编辑（平台超管；改名冲突域与平台租户守卫在 service 单点 T-26/T-27）"""
     await service.patch_tenant(tenant_id, body)
     await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
     return ok(data={"id": tenant_id, "updated": True})
+
+
+class PowerMarketSwitchBody(BaseModel):
+    enabled: bool
+
+
+@router.get("/power-market")
+async def get_power_market_switch(
+    _user: CurrentUser = Depends(require_platform_admin),
+):
+    """市场总开关（超管可读；租户公司管理员拒绝且开关不变，GWT-U11.3）。"""
+    from backend.services.power_market.flag import is_power_market_enabled
+
+    return ok(data={"enabled": is_power_market_enabled()})
+
+
+@router.put("/power-market")
+async def put_power_market_switch(
+    body: PowerMarketSwitchBody,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """超管打开/关闭能力市场总开关。yaml 默认 false；本写覆盖运行时。"""
+    from backend.services.power_market.flag import set_power_market_enabled
+
+    enabled = set_power_market_enabled(body.enabled)
+    await record_audit(
+        session, user, "power_market.switch", "POWER_MARKET.ENABLED",
+        detail={"enabled": enabled},
+    )
+    return ok(data={"enabled": enabled})
 
 
 # ---------------- 死信队列（B6 工单 91：排障刚需，admin 专属） ----------------

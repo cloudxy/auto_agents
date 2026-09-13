@@ -37,7 +37,11 @@ from backend.services.spider_common import (
     extract_store_targets,
     require_enqueue_tenant,
 )
-from backend.services.spider_worker_gate import annotate_tasks, require_online_worker
+from backend.services.spider_worker_gate import (
+    SPIDER_WORKER_OFFLINE_CODE,
+    annotate_tasks,
+    require_online_worker,
+)
 from config import settings
 from platform_core.db import get_manager
 from platform_core.exceptions import BusinessException, NotFoundException
@@ -50,6 +54,12 @@ from platform_core.schemas.spider import (
 )
 
 logger = get_logger("api")
+
+_QUOTA_BLOCK_REASON = {
+    "storage": "quota_storage",
+    "concurrency": "quota_concurrency",
+    "llm_tokens": "quota_tokens",
+}
 
 # ----------------------------------------------------------------------
 # 失败重试延迟队列（ZSET）：score = 到期时间戳，consumer._scan_retry_zset
@@ -124,12 +134,48 @@ class SpiderTaskService:
         """同爬虫并发任务上限（配置即代码，至少 1）"""
         return max(1, int(settings.get("SPIDER_MAX_CONCURRENT_PER_SPIDER", 2)))
 
-    async def _check_enqueue_quota(self, tenant_id: int) -> None:
-        """入队前本租户并发配额（显式 tenant_id，不靠 Mixin 回填）"""
-        logger.debug(f"入队配额检查: tenant_id={tenant_id}")
-        from backend.services.quota_service import QuotaService
+    async def _emit_blocked(self, tenant_id: int, reason: str, spider_name: str) -> None:
+        logger.info(f"拦住事件 | tenant={tenant_id} reason={reason}")
+        from backend.services.product_event_service import emit_product_event
+        await emit_product_event(
+            self.session, "task_blocked",
+            tenant_id=tenant_id,
+            props={"reason": reason, "spider": spider_name},
+        )
 
-        await QuotaService(self.session).check_task_concurrency(tenant_id)
+    async def _check_enqueue_quota(self, tenant_id: int, spider_name: str = "example") -> None:
+        """入队前本租户并发配额（显式 tenant_id，不靠 Mixin 回填）
+
+        FR-U02：执法本体仍抛 QuotaExceededException（内部码 QUOTA_EXCEEDED
+        留给验收）；入队信封改写为「已达配额上限」+ 存储「去结果库」/
+        并发「申请提升」。HTTP 400，无裸 429。工人句不走本闸。
+        """
+        logger.debug(f"入队配额检查: tenant_id={tenant_id}")
+        from backend.services.quota_service import (
+            QuotaExceededException,
+            QuotaService,
+            wrap_quota_exceeded,
+        )
+
+        quota = QuotaService(self.session)
+        try:
+            await quota.check_task_concurrency(tenant_id)
+            await quota.check_result_storage(tenant_id)
+        except QuotaExceededException as exc:
+            reason = _QUOTA_BLOCK_REASON.get(exc.dimension, "quota_concurrency")
+            await self._emit_blocked(tenant_id, reason, spider_name)
+            raise wrap_quota_exceeded(exc) from exc
+
+    async def _reject_if_blocked(self, owner_id: int, spider_name: str) -> None:
+        """工人闸先于配额；拦住发 task_blocked，不入队、不停在采集中。"""
+        logger.info(f"入队拦住闸 | tenant={owner_id} spider={spider_name}")
+        try:
+            await require_online_worker(get_async_redis())
+        except BusinessException as exc:
+            if getattr(exc, "code", None) == SPIDER_WORKER_OFFLINE_CODE:
+                await self._emit_blocked(owner_id, "worker_offline", spider_name)
+            raise
+        await self._check_enqueue_quota(owner_id, spider_name)
 
     async def _ensure_spider_available(self, spider_name: str) -> None:
         """入队前注册表校验：DB 优先（存在且 enabled），无记录回退 yml 种子
@@ -157,6 +203,25 @@ class SpiderTaskService:
             raise BusinessException(f"爬虫 {spider_name} 未在注册表登记，请先登记后再提交任务")
         logger.warning(f"配置种子不可读，跳过注册表校验: spider={spider_name}")
 
+    async def _definition_default_params(self, spider_name: str) -> Optional[str]:
+        """取定义参数（T-39 / GWT-103.1：方案编辑后，后续未带 params 的任务按新定义执行）
+
+        定义行无 params（None/非 dict/空）返回 None（既有行为不变）；
+        DB 故障只记日志不阻断入队（与 _ensure_spider_available 同口径）。
+        """
+        logger.debug(f"读取定义参数默认值: spider={spider_name}")
+        try:
+            definition = await SpiderDefinitionRepository(self.session).get_by_name(spider_name)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"定义参数读取失败（跳过默认填充）: spider={spider_name}, error={e}")
+            return None
+        if definition is None:
+            return None
+        stored = definition.params
+        if not isinstance(stored, dict) or not stored:
+            return None
+        return json.dumps(stored, ensure_ascii=False)
+
     async def enqueue(
         self,
         spider_name: str,
@@ -168,6 +233,11 @@ class SpiderTaskService:
         logger.info(f"爬虫任务入队: spider={spider_name}, priority={priority}")
         owner_id = require_enqueue_tenant(tenant_id)
 
+        # FR-103 / GWT-103.1：请求未带 params 时取定义参数（显式 params 优先）。
+        # 放在流程段识别之前：flow 型定义的镜像参数含 flow 段，需参与 flow_generic 归并。
+        if params is None:
+            params = await self._definition_default_params(spider_name)
+
         # 阶段 5.1：含流程段（分页/详情/过滤）的任务统一归入 flow_generic 执行
         if extract_flow(params) is not None:
             spider_name = FLOW_SPIDER_NAME
@@ -175,8 +245,7 @@ class SpiderTaskService:
         # 阶段 6：注册表校验（DB 优先，yml 兜底；停用/未登记拒绝）
         await self._ensure_spider_available(spider_name)
 
-        await require_online_worker(get_async_redis())
-        await self._check_enqueue_quota(owner_id)
+        await self._reject_if_blocked(owner_id, spider_name)
 
         # 并发槽位：有租户时按 {tenant}:{spider} 计数，两租户互不挤占
         max_concurrent = self._max_concurrent()

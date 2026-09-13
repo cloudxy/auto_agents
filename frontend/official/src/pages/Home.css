@@ -135,6 +135,22 @@
   text-align: center;
 }
 
+.hero-title-accent {
+  background: linear-gradient(92deg, #69c0ff 0%, #7ee7e2 55%, #95de64 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero-cta-primary:hover {
+  filter: brightness(0.92);
+}
+
+.hero-cta-primary:focus-visible {
+  outline: var(--size-focus-ring) solid var(--color-focus-ring);
+  outline-offset: 3px;
+}
+
 /* Hero 滚动提示 */
 .hero-scroll-hint {
   position: absolute;

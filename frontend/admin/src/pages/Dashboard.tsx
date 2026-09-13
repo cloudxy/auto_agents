@@ -8,8 +8,7 @@
  * - 质量概览：最近任务的质量评分分布（B1）
  */
 import React from 'react'
-import { Alert, Typography, Card, Row, Col, Statistic, Button, Empty, Space } from 'antd'
-import { useQuery } from '@tanstack/react-query'
+import { Alert, Typography, Card, Row, Col, Statistic, Button, Empty, Spin, Space } from 'antd'
 import {
   CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, ThunderboltOutlined,
   SafetyCertificateOutlined, PlusOutlined, RobotOutlined,
@@ -19,13 +18,19 @@ import {
   BarChart, Bar, Cell,
 } from 'recharts'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/useAuthStore'
 import { fetchAdminStats, fetchQualityReport, fetchRecentCompletedTasks } from '../services/admin'
-import { apiErrorMessage } from '../utils/errorMessage'
+import { LoadFailure } from '../components/LoadState'
 import { BRAND_TOKENS } from '@auto-agents/frontend-shared'
-import { QueryStateView } from '../components/QueryStateView'
 
 const { Title } = Typography
+
+// T-17 / FR-84：失败≠空——统计失败=页内失败句+重试（卡片不得用 0 冒充没跑过）；
+// 质量报告为局部卡，失败只卡内错误+重试；真 0 走「还没有…」句
+const STATS_LOAD_FAILED = '仪表盘加载失败。检查网络后重试。'
+const QUALITY_LOAD_FAILED = '质量报告加载失败。检查网络后重试。'
+const EMPTY_TREND = '近 7 日还没有运行记录。'
 
 interface DailyPoint {
   date: string
@@ -58,43 +63,52 @@ interface QualityReport {
 const Dashboard: React.FC = () => {
   const { user } = useAuthStore()
   const navigate = useNavigate()
-  const statsQ = useQuery({
+
+  // react-query 托管读模型：isError/refetch 驱动 FR-84 失败态（GWT-84.1/84.2）
+  const statsQuery = useQuery({
     queryKey: ['admin-stats'],
     queryFn: () => fetchAdminStats<Stats>(),
   })
-  const recentQ = useQuery({
-    queryKey: ['recent-completed-tasks'],
-    queryFn: () => fetchRecentCompletedTasks(5),
+  // 辅助入口（最近完成任务 ID）：失败不拖垮整页，降级为无质量报告
+  const recentQuery = useQuery({
+    queryKey: ['recent-completed-tasks', 5],
+    queryFn: () => fetchRecentCompletedTasks(5).catch(() => [] as number[]),
   })
-  const qualityQ = useQuery({
-    queryKey: ['quality-report', recentQ.data?.[0]],
-    queryFn: () => fetchQualityReport<QualityReport>(recentQ.data![0]),
-    enabled: !!recentQ.data?.[0],
+  const qualityTaskId = recentQuery.data?.[0]
+  const qualityQuery = useQuery({
+    queryKey: ['quality-report', qualityTaskId],
+    queryFn: () => fetchQualityReport<QualityReport>(qualityTaskId as number),
+    enabled: qualityTaskId != null,
   })
-  const stats = statsQ.data ?? null
-  const loading = statsQ.isLoading
-  const error = statsQ.isError ? apiErrorMessage(statsQ.error, '获取运行统计失败') : null
-  const qualityData = qualityQ.data ?? null
+
+  const stats = statsQuery.data ?? null
+  const qualityData = qualityQuery.data ?? null
+  const loading = statsQuery.isPending
 
   // 近 7 日趋势：把任务数/结果数按日期合并成一行（双折线共用 X 轴）
   const trendData = (() => {
     if (!stats) return []
     const map: Record<string, { date: string; tasks: number; results: number }> = {}
-    const dayKey = (d: string) => d.slice(0, 10)
-    for (const p of stats.daily_tasks || []) {
-      const k = dayKey(p.date)
-      map[k] = { date: k.slice(5), tasks: p.count, results: 0 }
-    }
+    for (const p of stats.daily_tasks || []) map[p.date] = { date: p.date.slice(5), tasks: p.count, results: 0 }
     for (const p of stats.daily_results || []) {
-      const k = dayKey(p.date)
-      if (map[k]) map[k].results = p.count
-      else map[k] = { date: k.slice(5), tasks: 0, results: p.count }
+      const key = p.date.slice(5)
+      if (map[p.date]) map[p.date].results = p.count
+      else map[p.date] = { date: key, tasks: 0, results: p.count }
     }
     return Object.values(map).sort((a, b) => a.date.localeCompare(b.date))
   })()
 
   const successRate = stats?.success_rate != null ? `${(stats.success_rate * 100).toFixed(1)}%` : '-'
   const avgDuration = stats?.avg_duration_seconds != null ? `${stats.avg_duration_seconds.toFixed(1)}s` : '-'
+
+  // 质量卡共体（GWT-84.1 局部卡规则）：质量报告失败只卡内错误+重试；真 0 不走「暂无质量评分数据」死胡同
+  const qualityBody = (content: React.ReactNode) => {
+    if (qualityQuery.isError) {
+      return <LoadFailure title={QUALITY_LOAD_FAILED} onRetry={() => qualityQuery.refetch()} />
+    }
+    if (qualityData && qualityData.total_items > 0) return content
+    return <Empty description={EMPTY_TREND} />
+  }
 
   return (
     <div style={{ padding: 0 }}>
@@ -140,9 +154,11 @@ const Dashboard: React.FC = () => {
         </Col>
       </Row>
 
-      <QueryStateView loading={loading} error={error} data={stats}>
-        {(_stats) => (
-          <>
+      {/* GWT-84.1：统计加载失败=失败句+重试，内容区替换；卡片不得用 0 冒充没跑过 */}
+      {statsQuery.isError ? (
+        <LoadFailure title={STATS_LOAD_FAILED} onRetry={() => statsQuery.refetch()} />
+      ) : (
+      <Spin spinning={loading}>
           {/* 统计卡片 */}
           <Row gutter={[16, 16]}>
             <Col xs={12} md={6}>
@@ -232,7 +248,7 @@ const Dashboard: React.FC = () => {
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <Empty description="暂无采集结果" />
+                  <Empty description={EMPTY_TREND} />
                 )}
               </Card>
             </Col>
@@ -242,43 +258,41 @@ const Dashboard: React.FC = () => {
           <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
             <Col xs={24} lg={10}>
               <Card title={<span><SafetyCertificateOutlined style={{ marginRight: 8 }} />数据质量概览</span>}>
-                {qualityData && qualityData.total_items > 0 ? (
+                {qualityBody(
                   <>
                     <Row gutter={16}>
                       <Col span={8}>
                         <Statistic
                           title="平均评分"
-                          value={qualityData.avg_score ?? '-'}
+                          value={qualityData?.avg_score ?? '-'}
                           suffix="/ 100"
-                          valueStyle={{ color: (qualityData.avg_score ?? 0) >= 60 ? '#3f8600' : '#cf1322' }}
+                          valueStyle={{ color: (qualityData?.avg_score ?? 0) >= 60 ? '#3f8600' : '#cf1322' }}
                         />
                       </Col>
                       <Col span={8}>
-                        <Statistic title="最低分" value={qualityData.min_score ?? '-'} suffix="/ 100" />
+                        <Statistic title="最低分" value={qualityData?.min_score ?? '-'} suffix="/ 100" />
                       </Col>
                       <Col span={8}>
-                        <Statistic title="最高分" value={qualityData.max_score ?? '-'} suffix="/ 100" />
+                        <Statistic title="最高分" value={qualityData?.max_score ?? '-'} suffix="/ 100" />
                       </Col>
                     </Row>
                     <div style={{ marginTop: 12, fontSize: 12, color: '#999' }}>
-                      基于最近完成任务 #{qualityData.task_id}（{qualityData.total_items} 条数据）
+                      基于最近完成任务 #{qualityData?.task_id}（{qualityData?.total_items} 条数据）
                     </div>
-                  </>
-                ) : (
-                  <Empty description="暂无质量评分数据" />
+                  </>,
                 )}
               </Card>
             </Col>
             <Col xs={24} lg={14}>
               <Card title="质量分布">
-                {qualityData && qualityData.total_items > 0 ? (
+                {qualityBody(
                   <ResponsiveContainer width="100%" height={200}>
                     <BarChart
                       data={[
-                        { name: '优秀(80-100)', count: qualityData.score_distribution['excellent(80-100)'] || 0 },
-                        { name: '良好(60-80)', count: qualityData.score_distribution['good(60-80)'] || 0 },
-                        { name: '一般(40-60)', count: qualityData.score_distribution['fair(40-60)'] || 0 },
-                        { name: '较差(0-40)', count: qualityData.score_distribution['poor(0-40)'] || 0 },
+                        { name: '优秀(80-100)', count: qualityData?.score_distribution['excellent(80-100)'] || 0 },
+                        { name: '良好(60-80)', count: qualityData?.score_distribution['good(60-80)'] || 0 },
+                        { name: '一般(40-60)', count: qualityData?.score_distribution['fair(40-60)'] || 0 },
+                        { name: '较差(0-40)', count: qualityData?.score_distribution['poor(0-40)'] || 0 },
                       ]}
                       margin={{ top: 8, right: 16, left: 8 }}
                     >
@@ -293,16 +307,13 @@ const Dashboard: React.FC = () => {
                         <Cell fill="#ff4d4f" />
                       </Bar>
                     </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <Empty description="暂无质量分布数据" />
+                  </ResponsiveContainer>,
                 )}
               </Card>
             </Col>
           </Row>
-          </>
-        )}
-      </QueryStateView>
+      </Spin>
+      )}
     </div>
   )
 }

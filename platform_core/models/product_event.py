@@ -3,7 +3,7 @@
 一行 = 一次已发生的产品事实。tenant_id 是事件主语（可 NULL），不是隔离归属。
 禁止 TenantMixin；T-12 同 PR 登记 TENANT_EXEMPT_TABLES。v1 无精确一次键。
 """
-from sqlalchemy import JSON, Column, DateTime, Index, Integer, String
+from sqlalchemy import JSON, Boolean, Column, DateTime, Index, Integer, String
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
@@ -16,6 +16,10 @@ class ProductEvent(Base):
     __table_args__ = (
         Index("idx_product_events_name_occurred", "event_name", "occurred_at"),
         Index("idx_product_events_tenant_occurred", "tenant_id", "occurred_at"),
+        Index(
+            "idx_product_events_name_fixture_occurred",
+            "event_name", "is_internal_fixture", "occurred_at",
+        ),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="代理主键，跟仓 INT")
@@ -32,6 +36,10 @@ class ProductEvent(Base):
     updated_at = Column(
         DateTime, nullable=False, server_default=func.current_timestamp(),
         comment="R-AUD；应用永不更新",
+    )
+    is_internal_fixture = Column(
+        Boolean, nullable=True,
+        comment="当时是否夹具企业。1=是 0=否 NULL=本列上线前旧事件",
     )
 
     def __repr__(self) -> str:

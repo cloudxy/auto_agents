@@ -120,7 +120,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
       dataIndex: 'spider_name',
       key: 'spider_name',
       render: (name: string) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text strong>{spiderMap[name]?.title || name}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>{name}</Text>
         </Space>
