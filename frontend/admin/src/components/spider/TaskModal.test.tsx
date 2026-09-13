@@ -1,7 +1,5 @@
 /**
- * T-18 / FR-85 GWT-85.2：0 在线工人时新建任务提交被拦住（单支，无「提交后立即可见」）。
- * 拦 = runSpider 未被调用（任务未入队）、不出现「正在排队执行」、未报成功；
- * 提示句在场且含「去节点」入口。有工人/加载中（workerOffline=false）不拦。
+ * T-04 / FR-U02：工人句与配额句不得混用；入队成功见「已入队」。
  */
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -13,10 +11,24 @@ jest.mock('../../services/spiders', () => ({
   }),
 }))
 
+jest.mock('../../services/usage', () => ({
+  fetchUpgradeIntent: jest.fn().mockResolvedValue({
+    action: 'contact_admin', product: 'plan_pro', checkout_path: null, message: '请联系本企业管理员开通',
+  }),
+}))
+
 // eslint-disable-next-line import/first
 import { TaskModal } from './TaskModal'
 import { runSpider } from '../../services/spiders'
-import { NO_WORKER_SUBMIT_BLOCKED_COPY } from './copy'
+import {
+  ENQUEUED_COPY,
+  PLAN_FULL_COPY,
+  SPIDER_WORKER_OFFLINE_COPY,
+  STORAGE_CTA,
+  TASK_QUOTA_LIMIT_CODE,
+  UPGRADE_CTA,
+  VIEW_NODES_TEXT,
+} from '../../constants/collectCopy'
 import type { SpiderRegistry } from './types'
 
 const registry: SpiderRegistry = {
@@ -46,19 +58,18 @@ function renderModal(workerOffline?: boolean) {
           )}
         />
         <Route path="/spiders/nodes" element={<div>nodes-page-probe</div>} />
+        <Route path="/data" element={<div>data-page-probe</div>} />
       </Routes>
     </MemoryRouter>,
   )
 }
 
-/** antd v6：Select 无 .ant-select-selector，mousedown 目标是 .ant-select 根（弹窗内定位） */
 const openModalSelect = (idx: number) => {
   // eslint-disable-next-line testing-library/no-node-access
   const modal = document.querySelector('.ant-modal') as HTMLElement
   fireEvent.mouseDown(modal.querySelectorAll('.ant-select')[idx])
 }
 
-/** antd v6：按选项内容定位下拉项点击（role=option 在 jsdom 不可靠） */
 const clickDropdownOption = async (text: string) => {
   const node = await waitFor(() => {
     // eslint-disable-next-line testing-library/no-node-access
@@ -72,35 +83,84 @@ const clickDropdownOption = async (text: string) => {
 }
 
 beforeEach(() => {
-  ;(runSpider as jest.Mock).mockClear()
+  ;(runSpider as jest.Mock).mockReset()
+  ;(runSpider as jest.Mock).mockResolvedValue({
+    id: 7, spider_name: 'example', status: 'pending', result_count: 0,
+  })
   onSubmitSuccess.mockClear()
   onCancel.mockClear()
 })
 
-test('T-18 GWT-85.2：0 工人提交被拦住——未入队、无「正在排队执行」、提示句含「去节点」', async () => {
+test('GWT-U02.1：0 工人提交被拦住——未入队、工人锁句、查看节点，无配额句', async () => {
   renderModal(true)
   expect(screen.getByText('新增采集任务')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: /提交任务/ }))
 
-  // 提示句在场 + 去节点入口打开节点页；弹窗保持打开（未关、未入队、未报成功）
-  expect(await screen.findByText(NO_WORKER_SUBMIT_BLOCKED_COPY)).toBeInTheDocument()
+  expect(await screen.findByText(SPIDER_WORKER_OFFLINE_COPY)).toBeInTheDocument()
+  expect(screen.queryByText(PLAN_FULL_COPY)).toBeNull()
   expect(screen.getByText('新增采集任务')).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: /去节点/ }))
+  fireEvent.click(screen.getByRole('button', { name: VIEW_NODES_TEXT }))
   expect(await screen.findByText('nodes-page-probe')).toBeInTheDocument()
 
   expect(runSpider).not.toHaveBeenCalled()
-  expect(screen.queryByText(/正在排队执行/)).toBeNull()
+  expect(screen.queryByText(ENQUEUED_COPY)).toBeNull()
   expect(onSubmitSuccess).not.toHaveBeenCalled()
 })
 
-test('T-18 GWT-85.2 前置：有工人/加载中（workerOffline=false）不拦——正常入队并出现排队 toast', async () => {
+test('GWT-U01.1 有工人提交成功见已入队', async () => {
   renderModal(false)
   openModalSelect(0)
   await clickDropdownOption('示例（example）')
   fireEvent.click(screen.getByRole('button', { name: /提交任务/ }))
 
-  expect(await screen.findByText(/正在排队执行/)).toBeInTheDocument()
+  expect(await screen.findByText(ENQUEUED_COPY)).toBeInTheDocument()
   expect(runSpider).toHaveBeenCalledTimes(1)
-  expect(runSpider).toHaveBeenCalledWith('example', expect.any(String), 'normal')
   expect(onSubmitSuccess).toHaveBeenCalledTimes(1)
+})
+
+test('GWT-U02.2 storage full: 已达配额上限 + 去结果库, not worker', async () => {
+  ;(runSpider as jest.Mock).mockRejectedValueOnce({
+    response: {
+      status: 400,
+      data: {
+        code: TASK_QUOTA_LIMIT_CODE,
+        message: `${PLAN_FULL_COPY}。${STORAGE_CTA}`,
+        data: { dimension: 'storage', cta: STORAGE_CTA },
+      },
+    },
+  })
+  renderModal(false)
+  openModalSelect(0)
+  await clickDropdownOption('示例（example）')
+  fireEvent.click(screen.getByRole('button', { name: /提交任务/ }))
+
+  expect(await screen.findByText(PLAN_FULL_COPY)).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: STORAGE_CTA })).toHaveAttribute('href', '/data')
+  expect(screen.queryByText(SPIDER_WORKER_OFFLINE_COPY)).toBeNull()
+  expect(onSubmitSuccess).not.toHaveBeenCalled()
+  expect(document.body.textContent).not.toContain('QUOTA_EXCEEDED')
+  expect(document.body.textContent).not.toContain('当前可买')
+})
+
+test('GWT-U02.4 token full on submit: 已达配额上限 + 申请提升, not worker', async () => {
+  ;(runSpider as jest.Mock).mockRejectedValueOnce({
+    response: {
+      status: 400,
+      data: {
+        code: TASK_QUOTA_LIMIT_CODE,
+        message: `${PLAN_FULL_COPY}。${UPGRADE_CTA}`,
+        data: { dimension: 'tokens', cta: UPGRADE_CTA },
+      },
+    },
+  })
+  renderModal(false)
+  openModalSelect(0)
+  await clickDropdownOption('示例（example）')
+  fireEvent.click(screen.getByRole('button', { name: /提交任务/ }))
+
+  expect(await screen.findByText(PLAN_FULL_COPY)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: UPGRADE_CTA })).toBeInTheDocument()
+  expect(screen.queryByText(SPIDER_WORKER_OFFLINE_COPY)).toBeNull()
+  expect(screen.queryByRole('button', { name: '申请提升配额' })).toBeNull()
+  expect(onSubmitSuccess).not.toHaveBeenCalled()
 })

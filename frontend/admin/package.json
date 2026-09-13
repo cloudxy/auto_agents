@@ -50,6 +50,9 @@
   },
   "jest": {
     "testEnvironment": "jsdom",
+    "setupFiles": [
+      "<rootDir>/src/setupAntdRender.js"
+    ],
     "setupFilesAfterEnv": [
       "<rootDir>/src/setupTests.ts"
     ],

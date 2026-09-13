@@ -45,8 +45,9 @@ import {
 } from '../services/newapi'
 import NewApiOps from './NewApiOps'
 import {
-  DUTY_DEGRADE_71_3, DUTY_EMPTY_71_2, DUTY_LOCAL_PROBE_EMPTY, EVENTS_24H_EMPTY,
-  FORBIDDEN_CHANNEL_EMPTY, PROBE_LATEST_BATCH_LABEL, PROBE_SPOOF_SUMMARY,
+  DUTY_DEGRADE_71_3, DUTY_EMPTY_71_2, DUTY_LIVE, DUTY_LOAD_FAILED,
+  DUTY_LOCAL_PROBE_EMPTY, EVENTS_24H_EMPTY, FORBIDDEN_CHANNEL_EMPTY,
+  PROBE_LATEST_BATCH_LABEL, PROBE_SPOOF_SUMMARY,
 } from '../components/newapi/newapiShared'
 
 const overview = fetchNewapiOverview as jest.Mock
@@ -85,11 +86,12 @@ function renderOps() {
   )
 }
 
-test('GWT-71.2 reachable zero models is empty not load failure', async () => {
+test('GWT-71.2 / GWT-U25.2 reachable zero models is empty not load failure', async () => {
   overview.mockResolvedValue({
     available: true,
     empty_state: DUTY_EMPTY_71_2,
     degrade_state: null,
+    duty_page_state: 'empty',
     models: [],
     deployments: [],
     channels: [],
@@ -104,15 +106,18 @@ test('GWT-71.2 reachable zero models is empty not load failure', async () => {
   expect(screen.getByText(/平台 LLM 网关已连通/)).toBeInTheDocument()
   expect(screen.queryByText(FORBIDDEN_CHANNEL_EMPTY)).not.toBeInTheDocument()
   expect(screen.queryByText(/加载失败/)).not.toBeInTheDocument()
+  expect(screen.queryByText(DUTY_LOAD_FAILED)).not.toBeInTheDocument()
   expect(screen.queryByText(DUTY_DEGRADE_71_3)).not.toBeInTheDocument()
+  expect(screen.queryByText(DUTY_LIVE)).not.toBeInTheDocument()
 })
 
-test('GWT-71.3 unreachable shows degrade and keeps local probes/events', async () => {
+test('GWT-71.3 / GWT-U25.4 unreachable shows degrade and keeps local probes/events', async () => {
   overview.mockResolvedValue({
     available: false,
     reason: DUTY_DEGRADE_71_3,
     empty_state: null,
     degrade_state: DUTY_DEGRADE_71_3,
+    duty_page_state: 'degrade',
     models: [],
     deployments: [],
     channels: [],
@@ -128,6 +133,7 @@ test('GWT-71.3 unreachable shows degrade and keeps local probes/events', async (
   expect(screen.getByText('4')).toBeInTheDocument()
   expect(screen.queryByText(FORBIDDEN_CHANNEL_EMPTY)).not.toBeInTheDocument()
   expect(screen.queryByText(DUTY_EMPTY_71_2)).not.toBeInTheDocument()
+  expect(screen.queryByText(DUTY_LIVE)).not.toBeInTheDocument()
   expect(screen.getByText('探针')).toBeInTheDocument()
   expect(screen.getByText('事件')).toBeInTheDocument()
 })
@@ -282,6 +288,7 @@ test('GWT-98.2 three questions on one screen: health/models, per-channel verdict
   expect(within(healthRegion).getByText('部署 1 个')).toBeInTheDocument()
   // 第二问：判定 + 延迟 + 24h 事件数 + 窗口用量（已用/额度）
   expect(screen.getByText('正品')).toBeInTheDocument()
+  expect(screen.getByText(DUTY_LIVE)).toBeInTheDocument()
   expect(screen.getByText('120 ms')).toBeInTheDocument()
   const channelRow = screen.getByText('gpt-4o').closest('tr') as HTMLElement
   expect(channelRow).not.toBeNull()
@@ -496,6 +503,7 @@ test('GWT-61.1 spoofed latest batch is visible on the duty page; channel stays u
   // 渠道保持可用（探针判伪装不自动关）：无「已禁用」态，操作列是值班动作而非关闭渠道
   expect(screen.queryByText('自动禁用')).not.toBeInTheDocument()
   expect(screen.queryByText('人工禁用')).not.toBeInTheDocument()
+  expect(screen.queryByText(DUTY_LIVE)).not.toBeInTheDocument()
   const channelsRegion = screen.getByTestId('overview-3q-channels')
   expect(within(channelsRegion).queryByRole('button', { name: /禁\s*用/ })).toBeNull()
   expect(within(channelsRegion).getAllByRole('button', { name: /立即探测/ }).length).toBeGreaterThan(0)
@@ -537,4 +545,51 @@ test('GWT-61.2 gateway down / unregistered models: only frozen empty sentences, 
   expect(screen.queryByTestId('probe-latest-batch')).not.toBeInTheDocument()
   expect(screen.queryByText('暂无数据')).not.toBeInTheDocument()
   expect(screen.queryByText(FORBIDDEN_CHANNEL_EMPTY)).not.toBeInTheDocument()
+})
+
+test('GWT-U25.1 duty page live row shows 活, not empty/degrade', async () => {
+  overview.mockResolvedValue({
+    available: true, empty_state: null, degrade_state: null,
+    duty_page_state: 'live',
+    models: [{
+      gateway_ref: 'dep-gpt-4o', model_name: 'gpt-4o',
+      duty_row_status: 'live', duty_row_status_text: DUTY_LIVE,
+    }],
+    deployments: [], channels: [],
+    total: 1, events_24h: 0, latest_batch_verdicts: { original: 1 },
+  })
+  channels.mockResolvedValue([{
+    gateway_ref: 'dep-gpt-4o', model_name: 'gpt-4o',
+    api_base: 'https://upstream.test/v1', api_key_masked: 'sk***x',
+    effective: { limit_quota: 5000, window_hours: 24, cooldown_seconds: 3600 },
+    effective_source: 'channel',
+    config: null,
+  }])
+  probes.mockResolvedValue({
+    total: 1,
+    items: [{
+      id: 9, channel_id: 7, model: 'gpt-4o', verdict: 'original', latency_ms: 120,
+      batch_id: 'b-live', created_at: NOW, scores: {},
+    }],
+  })
+  renderOps()
+  expect(await screen.findByTestId('duty-live')).toBeInTheDocument()
+  expect(screen.getByText(DUTY_LIVE)).toBeInTheDocument()
+  expect(screen.queryByText(DUTY_EMPTY_71_2)).not.toBeInTheDocument()
+  expect(screen.queryByText(DUTY_DEGRADE_71_3)).not.toBeInTheDocument()
+  expect(screen.queryByText(FORBIDDEN_CHANNEL_EMPTY)).not.toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain('当前可买')
+})
+
+test('GWT-U25 load fail is not empty', async () => {
+  overview.mockRejectedValue(new Error('network'))
+  channels.mockResolvedValue([])
+  probes.mockResolvedValue({ total: 0, items: [] })
+  events.mockResolvedValue({ total: 0, items: [] })
+  renderOps()
+  expect(await screen.findByText(DUTY_LOAD_FAILED)).toBeInTheDocument()
+  expect(screen.queryByText(DUTY_EMPTY_71_2)).not.toBeInTheDocument()
+  expect(screen.queryByText(DUTY_DEGRADE_71_3)).not.toBeInTheDocument()
+  expect(screen.queryByText(FORBIDDEN_CHANNEL_EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(DUTY_LIVE)).not.toBeInTheDocument()
 })

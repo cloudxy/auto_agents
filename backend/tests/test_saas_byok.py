@@ -7,7 +7,6 @@ import pytest
 from sqlalchemy import select
 
 from backend.services.llm_provider_service import LlmProviderService
-from backend.services.quota_service import QuotaExceededException
 from platform_core.models.llm_provider import LlmProvider
 from platform_core.models.tenant import Tenant
 from platform_core.tenant_context import tenant_scope
@@ -144,6 +143,7 @@ async def test_platform_fallback_subject_to_token_quota(db_session, monkeypatch)
     import backend.services.ai_planner_service as aps
     import backend.services.ai_planner.llm_client as lc
     from backend.services.llm_common import LlmRuntimeConfig
+    from platform_core.exceptions import BusinessException
     from backend.services.quota_service import PLAN_FULL_CTA, PLAN_FULL_USER
     from platform_core.models.llm_token_usage import LlmTokenUsage
 
@@ -188,9 +188,13 @@ async def test_platform_fallback_subject_to_token_quota(db_session, monkeypatch)
     monkeypatch.setattr(lc.httpx, "AsyncClient", _Client)
 
     with tenant_scope(t1):
-        with pytest.raises(QuotaExceededException, match="LLM token") as ei:
+        with pytest.raises(BusinessException) as ei:
             await lc.llm_chat([{"role": "user", "content": "hi"}])
+    assert ei.value.code == "TASK_QUOTA_LIMIT_REACHED"
+    assert ei.value.status_code != 429
     assert PLAN_FULL_USER in ei.value.message
     assert PLAN_FULL_CTA in ei.value.message
+    assert "QUOTA_EXCEEDED" not in ei.value.message
+    assert "采集未运行，不会出数" not in ei.value.message
     assert outbound == []
     assert t2  # 对照租户已种子，本夹具只闸 t1

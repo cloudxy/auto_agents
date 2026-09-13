@@ -6,16 +6,16 @@
  * 两组内部按判定时间倒序。T-33：每行「立即探测」入口（仅总览；探测中行内状态）。
  */
 import React from 'react'
-import { Button, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { Badge, Button, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { SettingOutlined } from '@ant-design/icons'
 import type {
   ChannelProbeResultItem, GatewayModelWithConfig,
 } from '../../services/newapi'
 import {
-  CELL_UNAVAILABLE, CHANNELS_3Q_LOAD_FAILED, DUTY_LOCAL_PROBE_EMPTY,
+  CELL_UNAVAILABLE, CHANNELS_3Q_LOAD_FAILED, DUTY_LIVE, DUTY_LOCAL_PROBE_EMPTY,
   NO_BUDGET_WINDOW, PROBE_ACTION, PROBING_TEXT, USED_QUOTA_SOURCE_HINT,
-  VERDICT_TAG, fmtLatency, fmtQuota,
+  VERDICT_TAG, fmtLatency, fmtQuota, showDutyLiveRow,
 } from './newapiShared'
 import { LoadEmpty, LoadFailure } from '../LoadState'
 
@@ -35,6 +35,9 @@ export interface ChannelRow {
   limitQuota: number | null
   /** 网关侧渠道行（含配置动作/上游地址/密钥；仅本地探针行时为 null） */
   channel?: GatewayModelWithConfig | null
+  /** T-26 overview.models 行态；缺省回落本地派生 */
+  dutyRowStatus?: string | null
+  dutyRowStatusText?: string | null
 }
 
 interface OverviewChannelsProps {
@@ -46,6 +49,8 @@ interface OverviewChannelsProps {
   /** 行 key → 在飞批次 id（GWT-98.4 行内「探测中…」+ 按钮加载态） */
   probing: Record<string, string>
   onProbe: (row: ChannelRow) => void
+  /** 网关可达才允许行标「活」；降级禁止（屏 19） */
+  gatewayAvailable: boolean
 }
 
 /** GWT-98.3：伪装/离线组在前（组内判定时间倒序），其余在后 */
@@ -67,7 +72,7 @@ export const sortChannelRows = (rows: ChannelRow[]): ChannelRow[] =>
   )
 
 const OverviewChannels: React.FC<OverviewChannelsProps> = ({
-  rows, loading, failed, onRetry, onOpenConfig, probing, onProbe,
+  rows, loading, failed, onRetry, onOpenConfig, probing, onProbe, gatewayAvailable,
 }) => {
   if (failed) {
     return <LoadFailure title={CHANNELS_3Q_LOAD_FAILED} onRetry={onRetry} />
@@ -84,6 +89,25 @@ const OverviewChannels: React.FC<OverviewChannelsProps> = ({
     {
       title: '模型/部署', dataIndex: 'model', key: 'model', width: 180,
       render: (v: string) => <Text strong>{v || '-'}</Text>,
+    },
+    {
+      title: '状态', key: 'dutyStatus', width: 72,
+      render: (_, row) => {
+        const live = showDutyLiveRow({
+          dutyRowStatus: row.dutyRowStatus,
+          dutyRowStatusText: row.dutyRowStatusText,
+          gatewayAvailable,
+          registered: Boolean(row.channel),
+          verdict: row.probe?.verdict,
+        })
+        if (!live) return '—'
+        const text = row.dutyRowStatusText || DUTY_LIVE
+        return (
+          <span data-testid="duty-live" aria-label={text}>
+            <Badge status="success" text={text} />
+          </span>
+        )
+      },
     },
     {
       title: '最新判定', key: 'verdict', width: 100,

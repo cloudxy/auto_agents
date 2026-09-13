@@ -36,6 +36,26 @@ export interface RelayPageData {
 
 const envelopeMessage = (r: unknown): string => (r as ApiEnvelope<unknown>)?.message || ''
 
+export interface RelayUpgrade {
+  action: string
+  product: string
+  checkout_path: string | null
+  message: string
+}
+
+/** T-18 GET /relay/sku：权益状态，不是组行 COUNT。 */
+export interface RelaySkuPage {
+  status: 'none' | 'active' | 'expired' | string
+  period_end?: string | null
+  can_issue: boolean
+  empty_title: string
+  empty_hint: string
+  upgrade: RelayUpgrade | null
+}
+
+export const fetchRelaySku = (): Promise<RelaySkuPage> =>
+  api.get('/relay/sku').then((r) => unwrap<RelaySkuPage>(r))
+
 export const fetchRelayPage = async (): Promise<RelayPageData> => {
   const [g, t] = await Promise.all([api.get('/relay/groups'), api.get('/relay/tokens')])
   return {

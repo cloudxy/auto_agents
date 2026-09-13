@@ -119,6 +119,35 @@ test('MARKET_NOT_FOUND copy branches on code not message', async () => {
   expect(screen.queryByText('未找到该能力')).not.toBeInTheDocument()
 })
 
+test('MARKET_CLOSED copy branches on code not message and does not toast subscribed', async () => {
+  fetchCard.mockResolvedValueOnce({
+    name: 'closed', hosts: ['grok'], subscribable: false, market_closed: true,
+  })
+  const toast = jest.spyOn(message, 'success').mockImplementation(() => undefined as never)
+  renderModal('closed')
+  expect(await screen.findByText('能力市场未开放')).toBeInTheDocument()
+  expect(subscribe).not.toHaveBeenCalled()
+  expect(toast).not.toHaveBeenCalled()
+  toast.mockRestore()
+})
+
+test('MARKET_CLOSED subscribe reject uses closed copy', async () => {
+  fetchCard.mockResolvedValueOnce({
+    name: 'listed-ok', hosts: ['grok', 'zcode', 'kimi', 'claude'], subscribable: true,
+  })
+  subscribe.mockRejectedValueOnce({
+    response: { data: { code: 'MARKET_CLOSED', message: 'wrong' } },
+  })
+  const toast = jest.spyOn(message, 'success').mockImplementation(() => undefined as never)
+  renderModal('listed-ok')
+  await waitFor(() => expect(screen.getByRole('radio', { name: /Grok/ })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('radio', { name: /Grok/ }))
+  fireEvent.click(screen.getByRole('button', { name: /订阅到 Grok/ }))
+  expect(await screen.findByText('能力市场未开放')).toBeInTheDocument()
+  expect(toast).not.toHaveBeenCalled()
+  toast.mockRestore()
+})
+
 test('MARKET_COMING_SOON copy branches on code not message', async () => {
   fetchCard.mockResolvedValueOnce({
     name: 'soon', hosts: ['grok', 'zcode', 'kimi', 'claude'], subscribable: false,
@@ -142,8 +171,10 @@ test('hostNote distinguishes undeclared vs declared empty', () => {
 test('frozen copy helpers match edge-states', () => {
   expect(COPY_BY_CODE.MARKET_NOT_FOUND).toBe('没有这个能力，不能订阅。')
   expect(COPY_BY_CODE.MARKET_COMING_SOON).toBe('这是预告项，现在不能订阅。')
+  expect(COPY_BY_CODE.MARKET_CLOSED).toBe('能力市场未开放')
   expect(successCopy('grok', true)).toBe('已订阅到 Grok')
   expect(successCopy('grok', false)).toBe('已订阅到 Grok，没有新增行。')
   expect(formErrorFromCode('MARKET_NOT_FOUND', '未找到该能力')).toBe('没有这个能力，不能订阅。')
   expect(formErrorFromCode('MARKET_COMING_SOON', '预告项不可订阅')).toBe('这是预告项，现在不能订阅。')
+  expect(formErrorFromCode('MARKET_CLOSED', 'wrong')).toBe('能力市场未开放')
 })

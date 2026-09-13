@@ -2,12 +2,13 @@
  * T-28 治理台七叶：GWT-37.1…37.6 / 40.1…40.3。
  */
 import React from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import {
   AGENT_EMPTY, BULK_LIST, CATALOG_EMPTY, COMMAND_EMPTY, ENABLE_HOST, HOST_RUNNING,
-  GOVERNANCE_PAGE_SIZE, LIST_CHILD, LISTED_NE_VERIFY, MERGED, NEED_PLATFORM_ADMIN,
+  GOVERNANCE_PAGE_SIZE, LIST_CHILD, LISTED_NE_VERIFY, MERGED,
   NEED_PLATFORM_MARKET, OPEN_IN_CATALOG, SOURCE_EMPTY, SUB_NE_HOST, TAB_LABELS,
   TEAM_EMPTY, catalogFocusCopy,
 } from './market/marketCopy'
@@ -37,6 +38,9 @@ jest.mock('../services/capabilities', () => ({
   subscribeCapability: jest.fn(),
   listInstalls: jest.fn(),
   importAssets: jest.fn(),
+  listPublicAssets: jest.fn().mockResolvedValue({ items: [], total: 0, market_closed: false }),
+  getPowerMarket: jest.fn().mockResolvedValue({ enabled: true }),
+  putPowerMarket: jest.fn(),
 }))
 
 jest.mock('./Skills', () => () => <div>skills-tab</div>)
@@ -67,17 +71,20 @@ const row = (over: Partial<AssetRow> = {}): AssetRow => ({
 })
 
 function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter initialEntries={['/capabilities']}>
-      <Routes>
-        <Route path="/capabilities" element={<Capabilities />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/capabilities']}>
+        <Routes>
+          <Route path="/capabilities" element={<Capabilities />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 
 beforeEach(() => {
-  perm.isPlatformAdmin = false
+  perm.isPlatformAdmin = true
   list.mockReset()
   patch.mockReset()
   pluginDetail.mockReset()
@@ -87,11 +94,13 @@ beforeEach(() => {
 test('GWT-37.1 seven tabs and no 专家 agent leaf', async () => {
   renderPage()
   expect(await screen.findByText(CATALOG_EMPTY)).toBeInTheDocument()
+  expect(await screen.findByTestId('power-market-switch')).toBeInTheDocument()
   for (const label of TAB_LABELS) {
     expect(screen.getByRole('tab', { name: label })).toBeInTheDocument()
   }
   expect(screen.queryByRole('tab', { name: /^专家$/ })).not.toBeInTheDocument()
   expect(document.querySelector('.market-tabs')).toBeTruthy()
+  expect(document.body.textContent || '').not.toContain('当前可买')
 })
 
 test('GWT-37.2 command empty is actionable not git path', async () => {
@@ -103,12 +112,13 @@ test('GWT-37.2 command empty is actionable not git path', async () => {
   expect(screen.getByRole('button', { name: '去源叶' })).toBeInTheDocument()
 })
 
-test('GWT-37.3 tenant listing switch disabled with platform note', async () => {
+test('GWT-37.3 platform admin listing switch is enabled on governance shell', async () => {
   list.mockResolvedValue({ total: 1, items: [row()] })
   renderPage()
   const group = await screen.findByRole('group', { name: '上架 demo-skill' })
-  expect(group.querySelector('input')).toBeDisabled()
-  expect(screen.getByText(NEED_PLATFORM_MARKET)).toBeInTheDocument()
+  expect(group.querySelector('input')).not.toBeDisabled()
+  expect(screen.queryByText(NEED_PLATFORM_MARKET)).not.toBeInTheDocument()
+  expect(screen.getByTestId('governance-shell')).toBeInTheDocument()
 })
 
 test('GWT-37.4 merged sentence keeps listed child', async () => {
@@ -244,28 +254,11 @@ test('GWT-40.2 no host-running copy and no enable-host', async () => {
   expect(document.body.textContent).not.toContain(ENABLE_HOST)
 })
 
-test('GWT-40.3 tenant verify is disabled with note', async () => {
-  list.mockImplementation((type?: string) => {
-    if (type === 'plugin') {
-      return Promise.resolve({
-        total: 1,
-        items: [row({ id: 5, name: 'pack-c', asset_type: 'plugin' })],
-      })
-    }
-    return Promise.resolve({ total: 0, items: [] })
-  })
-  renderPage()
-  fireEvent.click(screen.getByRole('tab', { name: '插件' }))
-  expect(await screen.findByText('pack-c')).toBeInTheDocument()
-  const verify = screen.getByText(NEED_PLATFORM_ADMIN).closest('button')
-  expect(verify).toBeDisabled()
-})
-
-test('source empty hides register for tenant', async () => {
+test('source empty shows register for platform admin', async () => {
   renderPage()
   fireEvent.click(screen.getByRole('tab', { name: '源' }))
   expect(await screen.findByText(SOURCE_EMPTY)).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: '登记源' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '登记源' })).toBeInTheDocument()
 })
 
 test('team empty keeps create for platform admin', async () => {

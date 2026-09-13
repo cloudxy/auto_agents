@@ -7,8 +7,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-jest.setTimeout(60000);
-
 jest.mock('../services/admin', () => ({ fetchUsersPage: jest.fn() }));
 jest.mock('../services/platformOps', () => ({ listTenants: jest.fn(() => Promise.resolve([])) }));
 jest.mock('../services/rbac', () => ({ listDepartments: jest.fn(() => Promise.resolve([])) }));

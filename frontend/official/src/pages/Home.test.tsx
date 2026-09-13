@@ -1,5 +1,5 @@
 /**
- * T-01 官网首页诚实面：无虚构规模；精选失败非空成功句；GWT-70.4 文案。
+ * T-01 官网首页诚实面 + T-06 FR-U04：Hero 第一句锁采集；支付/中转不得顶替。
  */
 import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -7,15 +7,21 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 jest.mock('../services/skills', () => ({
-  listPublicSkills: jest.fn().mockRejectedValue(new Error('public list unavailable')),
+  listPublicSkills: jest.fn(),
   getPublicSkill: jest.fn(),
 }))
 
-import Home from './Home'
+import { listPublicSkills } from '../services/skills'
+import Home, { HERO_FIRST_SENTENCE } from './Home'
+
+const mockedList = listPublicSkills as jest.MockedFunction<typeof listPublicSkills>
 
 const FORBIDDEN_GATEWAY = '直连平台网关'
 const FORBIDDEN_RELAY_TOKEN = '我的中转令牌'
 const FORBIDDEN_CLAIMS = ['抽取准确率', '已校准', '官方认证', '正品保证'] as const
+
+const FORBIDDEN_HERO = ['订阅成功', '支付成功', '中转可买', '当前可买'] as const
+const PAYMENT_REPLACE = ['去结账', '支付宝', '微信支付', '订阅成功', '支付成功', '中转可买'] as const
 
 function renderHome() {
   const client = new QueryClient({
@@ -29,6 +35,11 @@ function renderHome() {
     </QueryClientProvider>,
   )
 }
+
+beforeEach(() => {
+  mockedList.mockReset()
+  mockedList.mockRejectedValue(new Error('public list unavailable'))
+})
 
 test('test_no_direct_gateway_or_relay_token_copy', async () => {
   renderHome()
@@ -112,3 +123,62 @@ test('home page source has no session branch (GWT-01.3)', () => {
   const src = fs.readFileSync(path.join(__dirname, 'Home.tsx'), 'utf8')
   expect(src).not.toMatch(/useAuthStore|isAuthenticated|sessionStorage/)
 })
+
+test('GWT-U04.1 hero first sentence is collection paste-link / 出数', () => {
+  expect(HERO_FIRST_SENTENCE).toContain('粘贴链接')
+  expect(HERO_FIRST_SENTENCE).toContain('出数')
+  FORBIDDEN_HERO.forEach((phrase) => expect(HERO_FIRST_SENTENCE).not.toContain(phrase))
+
+  renderHome()
+  const first = screen.getByTestId('hero-first-sentence')
+  const text = (first.textContent || '').trim()
+  expect(text.startsWith(HERO_FIRST_SENTENCE)).toBe(true)
+  const hero = screen.getByTestId('hero-section')
+  const heroCopy = hero.textContent || ''
+  FORBIDDEN_HERO.forEach((phrase) => expect(heroCopy).not.toContain(phrase))
+  expect(heroCopy).not.toContain('去结账')
+})
+
+test('GWT-U04.2 featured empty does not replace hero with payment or subscribe', async () => {
+  mockedList.mockResolvedValue({ total: 0, items: [] })
+  renderHome()
+  const first = screen.getByTestId('hero-first-sentence')
+  expect((first.textContent || '').trim().startsWith(HERO_FIRST_SENTENCE)).toBe(true)
+
+  const empty = await screen.findByTestId('featured-empty')
+  expect(empty).toHaveTextContent('还没有上架的能力')
+  const emptyCopy = empty.textContent || ''
+  PAYMENT_REPLACE.forEach((phrase) => expect(emptyCopy).not.toContain(phrase))
+  expect(screen.queryByTestId('featured-error')).not.toBeInTheDocument()
+  expect(screen.queryByText('暂时无法加载能力')).not.toBeInTheDocument()
+})
+
+test('GWT-U04.3 no edit-hero entry on official home', () => {
+  const fs = require('fs') as typeof import('fs')
+  const path = require('path') as typeof import('path')
+  const homeSrc = fs.readFileSync(path.join(__dirname, 'Home.tsx'), 'utf8')
+  const appSrc = fs.readFileSync(path.join(__dirname, '../App.tsx'), 'utf8')
+  const layoutSrc = fs.readFileSync(
+    path.join(__dirname, '../components/layout/SiteLayout.tsx'),
+    'utf8',
+  )
+  expect(homeSrc).not.toMatch(/\/billing|payment_succeeded|relay\/groups/)
+  ;[homeSrc, appSrc, layoutSrc].forEach((src: string) => {
+    expect(src).not.toMatch(/编辑官网第一句|改 Hero|heroEditor/)
+  })
+
+  renderHome()
+  const copy = document.body.textContent || ''
+  expect(copy).not.toContain('编辑官网第一句')
+  expect(copy).not.toContain('改 Hero')
+  expect(screen.queryByRole('button', { name: /编辑官网第一句|改 Hero/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /编辑官网第一句|改 Hero/ })).not.toBeInTheDocument()
+})
+
+test('GWT-U24.1 homepage visitor copy has no 当前可买', async () => {
+  renderHome()
+  expect(await screen.findByText('暂时无法加载能力')).toBeInTheDocument()
+  const copy = document.body.textContent || ''
+  expect(copy).not.toContain('当前可买')
+})
+

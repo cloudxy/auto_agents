@@ -45,6 +45,8 @@ ALL_ORM_TABLES = {
     "capability_sources",
     "capability_aliases",
     "product_events",
+    # T-01 内部测试企业名单（upgrade-four-pillars N1，迁移 045）
+    "internal_fixture_tenants",
     # T-35 能力资产导入两表（迁移 043）
     "asset_import_batches",
     "asset_import_items",
@@ -73,6 +75,9 @@ ALL_ORM_TABLES = {
     "orders",
     "relay_groups",
     "relay_tokens",
+    # T-14 N3 结账 widen + 凭据 + 中转 SKU 权益（迁移 046）
+    "payment_channel_credentials",
+    "relay_sku_entitlements",
     # 出站拉数钥匙（feat-product-complete T-04，迁移 041）
     "outbound_keys",
 }

@@ -18,8 +18,6 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
-jest.setTimeout(60000)
-
 jest.mock('../services/settings', () => ({
   fetchSiteConfigs: jest.fn().mockResolvedValue({}),
   fetchWebhookStatus: jest.fn().mockResolvedValue({ secret_configured: false, env_override_active: false }),

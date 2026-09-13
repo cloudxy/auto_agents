@@ -26,6 +26,7 @@ export const COPY_BY_CODE: Record<string, string> = {
   MARKET_COMING_SOON: '这是预告项，现在不能订阅。',
   MARKET_HOST_INCOMPAT: '该能力未声明支持该宿主',
   MARKET_NOT_FOUND: '没有这个能力，不能订阅。',
+  MARKET_CLOSED: '能力市场未开放',
 }
 
 type ApiErr = { response?: { data?: { code?: string; message?: string } } }
@@ -116,7 +117,13 @@ const SubscribeModal: React.FC<Props> = ({
     setFormError(null)
     setCard(null)
     fetchPublicCapability(assetType, assetName)
-      .then(setCard)
+      .then((next) => {
+        if (next.market_closed) {
+          setFormError(COPY_BY_CODE.MARKET_CLOSED)
+          return
+        }
+        setCard(next)
+      })
       .catch((e) => {
         const code = errorCode(e)
         const server = (e as ApiErr).response?.data?.message

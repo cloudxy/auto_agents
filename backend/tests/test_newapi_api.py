@@ -65,7 +65,7 @@ def api_client(platform_admin_client, app):
     app.dependency_overrides.pop(get_async_db, None)
 
 
-def _local_stats(monkeypatch, events=0, batch_id=None, verdicts=None):
+def _local_stats(monkeypatch, events=0, batch_id=None, verdicts=None, latest=None):
     monkeypatch.setattr(
         ChannelEventRepository, "count_events_since", AsyncMock(return_value=events)
     )
@@ -76,6 +76,10 @@ def _local_stats(monkeypatch, events=0, batch_id=None, verdicts=None):
     monkeypatch.setattr(
         ChannelProbeResultRepository, "count_results_by_verdict",
         AsyncMock(return_value=verdicts or {}),
+    )
+    monkeypatch.setattr(
+        ChannelProbeResultRepository, "latest_result_per_channel",
+        AsyncMock(return_value=latest or {}),
     )
 
 
@@ -119,6 +123,7 @@ class TestOverviewAggregation:
         assert body["empty_state"] == DUTY_EMPTY_71_2
         assert body["empty_state"] == "还没有平台模型，去网关登记"
         assert body["degrade_state"] is None
+        assert body["duty_page_state"] == "empty"
         assert body["events_24h"] == 2
         assert "暂无渠道" not in resp.text
         assert "加载失败" not in resp.text
@@ -161,6 +166,8 @@ class TestOverviewDegradation:
         assert body["degrade_state"] == DUTY_DEGRADE_71_3
         assert body["degrade_state"] == "LLM 网关管理面不可达，仅本地事件/探针"
         assert body["reason"] == DUTY_DEGRADE_71_3
+        assert body["duty_page_state"] == "degrade"
+        assert body["empty_state"] is None
         assert body["models"] == [] and body["total"] == 0
         assert body["events_24h"] == 1
         assert body["latest_batch_id"] == "batch-local"
@@ -329,11 +336,12 @@ def test_operator_or_tenant_admin_write_gateway_model_rejected_list_unchanged(
         for user_fn in (_operator, _tenant_admin):
             app.dependency_overrides[get_current_user] = user_fn
             m_resp = api_client.post(MODELS_URL, json=model_body)
-            assert m_resp.status_code == 403, m_resp.text
-            assert m_resp.json()["code"] == "FORBIDDEN"
+            assert m_resp.status_code == 404, m_resp.text
+            assert m_resp.json()["code"] == "HTTP_404"
+            assert "抱歉" not in m_resp.text
             u_resp = api_client.post(UPSTREAMS_URL, json=upstream_body)
-            assert u_resp.status_code == 403, u_resp.text
-            assert u_resp.json()["code"] == "FORBIDDEN"
+            assert u_resp.status_code == 404, u_resp.text
+            assert u_resp.json()["code"] == "HTTP_404"
     finally:
         app.dependency_overrides[get_current_user] = original
 

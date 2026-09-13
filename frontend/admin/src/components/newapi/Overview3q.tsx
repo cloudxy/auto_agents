@@ -6,6 +6,8 @@
  * 本地探针/事件继续显示（GWT-98.6，无第三套空态）。
  * T-33：立即探测（行内入口 + accepted 批次条件轮询，react-query refetchInterval，
  * 无手写定时器；探测中不锁其他区）。
+ * T-27 / FR-U25：空 / 降级 / 活 页级标题互斥；行状态「活」+●；加载失败 ≠ 空。
+ * T-26 字段：消费 duty_page_state / duty_row_status*；有活行时压过 empty/degrade。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -27,7 +29,8 @@ import {
   ACTION_TAG, DUTY_DEGRADE_71_3, DUTY_DEGRADE_71_3_HINT,
   DUTY_EMPTY_71_2, DUTY_EMPTY_71_2_HINT, DUTY_LOAD_FAILED, EVENTS_24H_EMPTY,
   EVENTS_3Q_LOAD_FAILED, OFFLINE_LOCAL_HINT, PROBE_DONE, PROBE_TRIGGER_FAILED,
-  VERDICT_TAG, channelIdFromRef, fmtTime,
+  VERDICT_TAG, channelIdFromRef, fmtTime, matchOverviewDuty, resolveDutyBanner,
+  showDutyLiveRow,
 } from './newapiShared'
 
 const { Text } = Typography
@@ -103,6 +106,7 @@ const Overview3q: React.FC<Overview3qProps> = ({ onOpenConfig, onJumpToEvent }) 
     const probes = probesQuery.data?.items || []
     const events = eventsQuery.data?.items || []
     const channels = channelsQuery.data || []
+    const models = overviewQuery.data?.models
 
     const latestByModel = new Map<string, ChannelProbeResultItem>()
     for (const item of probes) {
@@ -129,6 +133,7 @@ const Overview3q: React.FC<Overview3qProps> = ({ onOpenConfig, onJumpToEvent }) 
       const probe = latestByModel.get(channel.model_name) || null
       // channel_id 关联：探针行自带；无探针记录时仅数值引用可镜像（见 channelIdFromRef）
       const channelId = probe?.channel_id ?? channelIdFromRef(channel.gateway_ref)
+      const duty = matchOverviewDuty(models, channel.gateway_ref, channel.model_name)
       out.push({
         key: `cfg:${channel.gateway_ref}`,
         model: channel.model_name,
@@ -139,12 +144,15 @@ const Overview3q: React.FC<Overview3qProps> = ({ onOpenConfig, onJumpToEvent }) 
         usedQuota: channelId === null ? null : (usedByChannel.get(channelId) ?? null),
         limitQuota: channel.effective_source === 'none' ? null : channel.effective.limit_quota,
         channel,
+        dutyRowStatus: duty.dutyRowStatus ?? channel.duty_row_status ?? null,
+        dutyRowStatusText: duty.dutyRowStatusText ?? channel.duty_row_status_text ?? null,
       })
       seenModels.add(channel.model_name)
     }
     // 网关降级（71.3）时 channels 为空：本地探针行仍显示（「仅本地事件/探针」）
     latestByModel.forEach((probe, model) => {
       if (seenModels.has(model)) return
+      const duty = matchOverviewDuty(models, null, model)
       out.push({
         key: `probe:${probe.channel_id}`,
         model,
@@ -155,17 +163,35 @@ const Overview3q: React.FC<Overview3qProps> = ({ onOpenConfig, onJumpToEvent }) 
         usedQuota: usedByChannel.get(probe.channel_id) ?? null,
         limitQuota: null,
         channel: null,
+        dutyRowStatus: duty.dutyRowStatus,
+        dutyRowStatusText: duty.dutyRowStatusText,
       })
     })
     return out
-  }, [probesQuery.data, eventsQuery.data, channelsQuery.data])
+  }, [probesQuery.data, eventsQuery.data, channelsQuery.data, overviewQuery.data])
 
   const overview = overviewQuery.data
   const offline = typeof navigator !== 'undefined' && !navigator.onLine
+  const gatewayAvailable = overview?.available === true
+  const hasLiveRow = rows.some((row) => showDutyLiveRow({
+    dutyRowStatus: row.dutyRowStatus,
+    dutyRowStatusText: row.dutyRowStatusText,
+    gatewayAvailable,
+    registered: Boolean(row.channel),
+    verdict: row.probe?.verdict,
+  }))
+  const banner = resolveDutyBanner({
+    loading: overviewQuery.isLoading,
+    error: overviewQuery.isError,
+    available: overview?.available,
+    modelTotal: overview?.total ?? 0,
+    hasLiveRow,
+    dutyPageState: overview?.duty_page_state,
+  })
 
   const renderHealth = () => {
-    if (overviewQuery.isLoading) return <Skeleton active paragraph={{ rows: 1 }} />
-    if (overviewQuery.isError) {
+    if (banner === 'loading') return <Skeleton active paragraph={{ rows: 1 }} />
+    if (banner === 'error') {
       return <LoadFailure title={DUTY_LOAD_FAILED} onRetry={() => overviewQuery.refetch()} />
     }
     if (!overview) return null
@@ -195,31 +221,35 @@ const Overview3q: React.FC<Overview3qProps> = ({ onOpenConfig, onJumpToEvent }) 
             </Tooltip>
           </div>
         </Space>
-        {!overview.available && (
-          <Alert
-            type="warning" showIcon style={{ marginTop: 12 }}
-            title={overview.degrade_state || DUTY_DEGRADE_71_3}
-            description={DUTY_DEGRADE_71_3_HINT}
-          />
+        {banner === 'degrade' && (
+          <div data-testid="duty-banner-degrade">
+            <Alert
+              type="warning" showIcon style={{ marginTop: 12 }}
+              title={overview.degrade_state || DUTY_DEGRADE_71_3}
+              description={DUTY_DEGRADE_71_3_HINT}
+            />
+          </div>
         )}
-        {overview.available && (overview.total ?? 0) === 0 && (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={
-              <span>
-                <div>{overview.empty_state || DUTY_EMPTY_71_2}</div>
-                <Text type="secondary">{DUTY_EMPTY_71_2_HINT}</Text>
-              </span>
-            }
-          >
-            <Button type="primary" onClick={() => {
-              overviewQuery.refetch()
-              channelsQuery.refetch()
-            }}
+        {banner === 'empty' && (
+          <div data-testid="duty-banner-empty">
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={
+                <span>
+                  <div>{overview.empty_state || DUTY_EMPTY_71_2}</div>
+                  <Text type="secondary">{DUTY_EMPTY_71_2_HINT}</Text>
+                </span>
+              }
             >
-              刷新
-            </Button>
-          </Empty>
+              <Button type="primary" onClick={() => {
+                overviewQuery.refetch()
+                channelsQuery.refetch()
+              }}
+              >
+                刷新
+              </Button>
+            </Empty>
+          </div>
         )}
       </>
     )
@@ -305,6 +335,7 @@ const Overview3q: React.FC<Overview3qProps> = ({ onOpenConfig, onJumpToEvent }) 
           onOpenConfig={onOpenConfig}
           probing={probingBatches}
           onProbe={handleProbe}
+          gatewayAvailable={gatewayAvailable}
         />
       </Card>
       <Card

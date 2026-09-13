@@ -60,7 +60,8 @@ async def test_enqueue_carries_tenant_and_quota_rejects(db_session, monkeypatch)
         assert ei.value.code == "TASK_QUOTA_LIMIT_REACHED"
         assert ei.value.status_code != 429
         assert "已达配额上限" in ei.value.message
-        assert "请联系企业管理员" in ei.value.message
+        assert "申请提升" in ei.value.message
+        assert "采集未运行，不会出数" not in ei.value.message
         assert "QUOTA_EXCEEDED" not in ei.value.message
         assert "429" not in ei.value.message
         # 执法本体不动：QuotaService 直调仍抛内部类型（内部码留给验收）

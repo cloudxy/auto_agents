@@ -1,43 +1,25 @@
 /**
- * 用量看板（FR-12 / T-03）：三指标 vs 配额；满额/将满用户可见句；满额 CTA 不到企业注册。
- * T-03（FR-50 UI 面）：满额动词统一骨架「提交升级申请」（channel=offline，GWT-50.12）；
- * token/并发满同一申请入口（GWT-50.6）；经办/只读无申请按钮 +「请联系企业管理员」；
- * 页内「我的订单」Tab（GWT-50.3，listMyOrders 渲染，只读也能看）。
- * 内部码 QUOTA_EXCEEDED / 裸 429 / FORBIDDEN 禁止渲染给租户。
+ * 用量看板（T-04 / FR-U02）：将满≠已尽；申请提升分角色（upgrade-intent，不建单）。
+ * 内部码 QUOTA_EXCEEDED / 裸 429 禁止渲染给租户。禁 FR-U24 四字。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Col, Modal, Progress, Row, Spin, Table, Tabs, Typography, message } from 'antd'
+import { Alert, Button, Card, Col, Progress, Row, Spin, Table, Tabs, Typography } from 'antd'
 
 import { usePermission } from '../hooks/usePermission'
-import { useAuthStore } from '../store/useAuthStore'
 import { fetchUsageByMember, fetchUsageOverview, type MemberUsageRow, type UsageOverview } from '../services/usage'
-import { createOrder, listPlans } from '../services/billing'
 import { apiErrorMessage } from '../utils/errorMessage'
+import { UpgradeIntentButton } from '../components/quota/UpgradeIntentButton'
+import {
+  GO_SUBMIT_COLLECT,
+  NEAR_LIMIT_COPY,
+  PLAN_FULL_COPY,
+  STORAGE_CTA,
+} from '../constants/collectCopy'
 import MyOrders from './MyOrders'
 
-const { Title, Text, Paragraph } = Typography
+const { Title, Text } = Typography
 
-const CONTACT_MAIL = process.env.REACT_APP_CONTACT_MAIL || 'contact@localhost'
-const PLAN_FULL = '已达配额上限'
-const TASK_FULL = '已达任务并发上限'
-const PLAN_FULL_CTA = '申请提升配额'
-const APPLY_UPGRADE = '提交升级申请'
-const NEAR_LIMIT = '接近上限。超额操作会被拒绝。'
-const STORAGE_CTA = '去结果库'
 const GATEWAY_UNREACHABLE = '平台 LLM 网关不可达'
-const CONTACT_ADMIN = '请联系企业管理员'
-const GO_MY_ORDERS = '去我的订单'
-const APPLY_SUCCESS = '已提交升级申请，等待管理员确认收款。'
-const PENDING_EXISTS = '已有待确认的升级申请'
-
-/** T-01 稳定 code → 用户可见句（禁渲染 code 字面；未列码走后端信封 message 兜底） */
-const ORDER_ERROR_TEXT: Record<string, string> = {
-  ORDER_ROLE_NOT_ALLOWED: CONTACT_ADMIN,
-  FORBIDDEN: CONTACT_ADMIN,
-  ORDER_ONLINE_UNAVAILABLE: '在线支付尚未开通，请改用线下对公。',
-  ORDER_PENDING_EXISTS: PENDING_EXISTS,
-  ORDER_FREE_PLAN: '免费档无需下单',
-}
 
 const METRICS: Array<{ key: keyof NonNullable<UsageOverview['usage']>; label: string; unit: string }> = [
   { key: 'task_concurrency', label: '任务并发', unit: '个运行中' },
@@ -53,58 +35,22 @@ function tenantVisibleLoadError(e: unknown): string {
   if (code === 'LLM_GATEWAY_UNREACHABLE') return GATEWAY_UNREACHABLE
   if (code === 'LLM_COST_FUSE') {
     const msg = (e as ApiErr)?.response?.data?.message || '平台 LLM 成本熔断，请稍后重试'
-    return msg.includes(PLAN_FULL) ? '平台 LLM 成本熔断，请稍后重试' : msg
+    return msg.includes(PLAN_FULL_COPY) ? '平台 LLM 成本熔断，请稍后重试' : msg
   }
-  if (code === 'QUOTA_EXCEEDED') return PLAN_FULL
+  if (code === 'QUOTA_EXCEEDED') return PLAN_FULL_COPY
   const raw = apiErrorMessage(e, '用量加载失败')
   return raw.replace(/QUOTA_EXCEEDED/g, '').replace(/\b429\b/g, '').trim() || '用量加载失败'
 }
 
 const Usage: React.FC = () => {
   const { role, isAdmin } = usePermission()
-  const tenantRole = useAuthStore((s) => s.user?.tenant_role)
-  const readonly = role === 'viewer' || tenantRole === 'viewer' || (!isAdmin && role !== 'operator' && role !== 'admin')
-  // 线下升级申请写面 = 负责人/公司管理员（RelayGroups/LlmProviders 同款写法；后端 T-01 独立校验）
-  const canOrder = tenantRole === 'owner' || tenantRole === 'admin'
+  const readonly = role === 'viewer' || (!isAdmin && role !== 'operator' && role !== 'admin')
 
   const [data, setData] = useState<UsageOverview | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [byMember, setByMember] = useState<MemberUsageRow[]>([])
-  const [contactOpen, setContactOpen] = useState(false)
-  const [ordering, setOrdering] = useState(false)
   const [activeTab, setActiveTab] = useState<TabKey>('usage')
-  const [orderHint, setOrderHint] = useState<'submitted' | 'pending' | null>(null)
-
-  const goMyOrders = () => {
-    setOrderHint(null)
-    setActiveTab('orders')
-  }
-
-  const submitUpgrade = async () => {
-    setOrdering(true)
-    try {
-      const plans = await listPlans()
-      const pro = plans.find((p) => p.slug === 'pro') || plans.find((p) => p.price_cents > 0)
-      if (!pro) {
-        message.warning('暂无付费档')
-        return
-      }
-      await createOrder(pro.id)
-      message.success(APPLY_SUCCESS)
-      setOrderHint('submitted')
-    } catch (e) {
-      const code = (e as ApiErr)?.response?.data?.code || ''
-      if (code === 'ORDER_PENDING_EXISTS') {
-        message.warning(PENDING_EXISTS)
-        setOrderHint('pending')
-        return
-      }
-      message.error(ORDER_ERROR_TEXT[code] || apiErrorMessage(e, '提交升级申请失败'))
-    } finally {
-      setOrdering(false)
-    }
-  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -176,48 +122,26 @@ const Usage: React.FC = () => {
               {unused && !anyFull && !nearLimit && (
                 <Alert type="info" showIcon style={{ marginBottom: 16 }}
                        title="还没有用量。完成第一次采集后这里会显示配额进度。"
-                       action={<a href="/spiders/tasks">去采集</a>} />
+                       action={<Button size="small" href="/spiders/tasks">{GO_SUBMIT_COLLECT}</Button>} />
               )}
               {nearLimit && (
-                <Alert type="warning" showIcon style={{ marginBottom: 16 }} title={NEAR_LIMIT} />
+                <Alert type="warning" showIcon style={{ marginBottom: 16 }} title={NEAR_LIMIT_COPY} />
               )}
               {anyFull && (
                 <Alert
                   type="error"
                   showIcon
                   style={{ marginBottom: 16 }}
-                  title={taskFull && !tokenFull ? TASK_FULL : PLAN_FULL}
+                  title={PLAN_FULL_COPY}
                   description={
                     <span>
                       {storageFull && (
                         <Button size="small" href="/data" style={{ marginRight: 8 }}>{STORAGE_CTA}</Button>
                       )}
-                      {needApply && canOrder && (
-                        <Button type="primary" size="small" style={{ marginRight: 8 }} loading={ordering}
-                                onClick={submitUpgrade}>
-                          {APPLY_UPGRADE}
-                        </Button>
-                      )}
-                      {needApply && !canOrder && (
-                        <Text type="secondary" style={{ marginRight: 8 }}>{CONTACT_ADMIN}</Text>
-                      )}
-                      {tokenFull && (
-                        <Button size="small" style={{ marginRight: 8 }}
-                                onClick={() => setContactOpen(true)}>
-                          {PLAN_FULL_CTA}
-                        </Button>
-                      )}
+                      {needApply && <UpgradeIntentButton />}
                     </span>
                   }
                 />
-              )}
-              {orderHint === 'pending' && (
-                <Alert type="warning" showIcon style={{ marginBottom: 16 }} title={PENDING_EXISTS}
-                       action={<Button size="small" onClick={goMyOrders}>{GO_MY_ORDERS}</Button>} />
-              )}
-              {orderHint === 'submitted' && (
-                <Alert type="success" showIcon style={{ marginBottom: 16 }} title={APPLY_SUCCESS}
-                       action={<Button size="small" onClick={goMyOrders}>{GO_MY_ORDERS}</Button>} />
               )}
               <Row gutter={16}>
                 {METRICS.map(({ key, label, unit }) => {
@@ -264,17 +188,6 @@ const Usage: React.FC = () => {
                   ]}
                 />
               </Card>
-              <Modal
-                title={PLAN_FULL_CTA}
-                open={contactOpen}
-                onCancel={() => setContactOpen(false)}
-                footer={[
-                  <Button key="ok" type="primary" onClick={() => setContactOpen(false)}>知道了</Button>,
-                ]}
-              >
-                <Paragraph>本波不提供自助改套餐或支付。请通过联系说明申请提升配额。</Paragraph>
-                <a href={`mailto:${CONTACT_MAIL}`}>联系说明（{CONTACT_MAIL}）</a>
-              </Modal>
             </div>
           ),
         },

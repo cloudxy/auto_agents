@@ -1,20 +1,25 @@
 /**
- * T-10 渠道组页：GWT-60.1 签发明文一次+同屏 Base URL/三步；60.2 只读见用量；
- * 60.4 无令牌空态句（信封 message 单一来源）；60.7 经办找管理员句非空表；
- * 60.11 再进页只见前缀+状态；GWT-84.1 失败≠空表；签发失败内联可见。
+ * T-20 我的渠道组：SKU none/active/expired + T-10 签发一次明文。
+ * 读 T-18 /relay/sku。租户不得当值班页。禁 FR-U24 四字。
  */
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom'
 
 import RelayGroups from './RelayGroups'
 
 jest.mock('../services/relay', () => ({
   fetchRelayPage: jest.fn(),
+  fetchRelaySku: jest.fn(),
   createRelayGroup: jest.fn(),
   patchRelayGroup: jest.fn(),
   issueRelayToken: jest.fn(),
   revokeRelayToken: jest.fn(),
+}))
+
+jest.mock('../services/billing', () => ({
+  listMyOrders: jest.fn(),
 }))
 
 // babel-jest 工厂引用 mock* 前缀变量（render 时才读取，无 TDZ）
@@ -27,7 +32,9 @@ jest.mock('../store/useAuthStore', () => ({
     sel({ user: mockUserState.current }),
 }))
 
-import { fetchRelayPage, issueRelayToken } from '../services/relay'
+import { fetchRelayPage, fetchRelaySku, issueRelayToken } from '../services/relay'
+import { listMyOrders } from '../services/billing'
+import { CHECKOUT_PAID_PENDING_COPY, CONTACT_ADMIN_COPY } from '../constants/collectCopy'
 
 const OWNER = { tenant_id: 1, tenant_role: 'owner', is_platform_admin: false }
 const OPERATOR = { tenant_id: 1, tenant_role: 'operator', is_platform_admin: false }
@@ -48,7 +55,38 @@ const EMPTY_PAGE = {
   groups: [],
   tokens: [],
   groupsMessage: '操作成功',
-  tokensMessage: '还没有令牌。签发后才能按下方用法调用平台网关。',
+  tokensMessage: '还没有令牌',
+}
+
+const SKU_ACTIVE = {
+  status: 'active', can_issue: true, empty_title: '', empty_hint: '', upgrade: null,
+}
+const SKU_NONE = {
+  status: 'none', can_issue: false, empty_title: '未开通中转',
+  empty_hint: '开通后才能查看本企业用量并签发令牌。',
+  upgrade: {
+    action: 'checkout', product: 'relay',
+    checkout_path: '/billing/checkout?product=relay', message: '去升级',
+  },
+}
+const SKU_EXPIRED = {
+  status: 'expired', can_issue: false, empty_title: '中转已到期',
+  empty_hint: '到期后不能签发新令牌，已签发的令牌也不能再用。',
+  upgrade: {
+    action: 'checkout', product: 'relay',
+    checkout_path: '/billing/checkout?product=relay', message: '去升级',
+  },
+}
+const SKU_NONE_OPERATOR = {
+  ...SKU_NONE,
+  upgrade: {
+    action: 'contact_admin', product: 'relay', checkout_path: null, message: CONTACT_ADMIN_COPY,
+  },
+}
+
+function CheckoutProbe() {
+  const [params] = useSearchParams()
+  return <div data-testid="checkout-probe">{params.get('product')}</div>
 }
 const OPERATOR_PAGE = {
   ...PAGE_WITH_TOKEN,
@@ -61,13 +99,20 @@ function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <RelayGroups />
+      <MemoryRouter initialEntries={['/relay']}>
+        <Routes>
+          <Route path="/relay" element={<RelayGroups />} />
+          <Route path="/billing/checkout" element={<CheckoutProbe />} />
+          <Route path="/register" element={<div>register-probe</div>} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
 
 async function issueFlow() {
-  fireEvent.click(await screen.findByRole('button', { name: ISSUE_BUTTON }))
+  const buttons = await screen.findAllByRole('button', { name: ISSUE_BUTTON })
+  fireEvent.click(buttons[0])
   fireEvent.change(screen.getByLabelText('备注名'), { target: { value: 'prod' } })
   fireEvent.click(screen.getByRole('button', { name: MODAL_OK_ISSUE }))
 }
@@ -75,6 +120,12 @@ async function issueFlow() {
 beforeEach(() => {
   jest.clearAllMocks()
   mockUserState.current = OWNER
+  ;(fetchRelaySku as jest.Mock).mockResolvedValue(SKU_ACTIVE)
+  ;(listMyOrders as jest.Mock).mockResolvedValue([])
+  Object.defineProperty(window.navigator, 'onLine', {
+    configurable: true,
+    get: () => true,
+  })
 })
 
 test('shows tenant groups copy and not platform channel controls', async () => {
@@ -118,7 +169,10 @@ test('gwt_60_11: after closing plaintext modal only prefix and status remain', a
   await waitFor(() => {
     expect(screen.queryByText(/sk-RelaySecret123/)).not.toBeInTheDocument()
   })
-  expect(screen.getByText('已签发')).toBeInTheDocument()
+  // toast 句与行状态同文案「已签发」；钉令牌表，避免无动画时 toast 未卸导致 getByText 多匹配
+  const tokenTable = screen.getAllByRole('table').find((t) => within(t).queryByText(/sk-AbCd/))
+  expect(tokenTable).toBeTruthy()
+  expect(within(tokenTable as HTMLElement).getByText('已签发')).toBeInTheDocument()
 })
 
 test('gwt_60_2: viewer sees usage number and cannot-issue note', async () => {
@@ -132,13 +186,12 @@ test('gwt_60_2: viewer sees usage number and cannot-issue note', async () => {
   expect(screen.queryByRole('button', { name: '吊销' })).not.toBeInTheDocument()
 })
 
-test('gwt_60_4: no tokens empty sentence with issue entry; usage area still rendered', async () => {
+test('gwt_60_4 / GWT-U20.2: no tokens empty sentence with issue entry; usage area still rendered', async () => {
   ;(fetchRelayPage as jest.Mock).mockResolvedValue(EMPTY_PAGE)
   renderPage()
-  expect(await screen.findByText('还没有令牌。签发后才能按下方用法调用平台网关。')).toBeInTheDocument()
+  expect(await screen.findByText('还没有令牌')).toBeInTheDocument()
   expect(screen.getByText('还没有渠道组。创建后才能签发令牌。')).toBeInTheDocument()
   expect(screen.getByTestId('relay-usage')).toBeInTheDocument()
-  // 有权者看见签发（工具栏 + 空态动作）；不是默认「暂无数据」
   expect(screen.queryByText('暂无数据')).not.toBeInTheDocument()
   expect(screen.getAllByRole('button', { name: ISSUE_BUTTON }).length).toBeGreaterThan(0)
 })
@@ -179,12 +232,11 @@ test('issue failure stays visible inline and modal stays open, no fake success',
 
 test('issue offline shows offline sentence and no plaintext', async () => {
   ;(fetchRelayPage as jest.Mock).mockResolvedValue({ ...PAGE_WITH_TOKEN, tokens: [] })
-  const onlineSpy = jest.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(false)
+  Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => false })
   renderPage()
   await issueFlow()
   expect(await screen.findByText('网络不可用，没有产生令牌。')).toBeInTheDocument()
   expect(screen.queryByTestId('issued-plaintext')).not.toBeInTheDocument()
-  onlineSpy.mockRestore()
 })
 
 test('usage unknown renders placeholder not zero', async () => {
@@ -199,3 +251,57 @@ test('usage unknown renders placeholder not zero', async () => {
   })
   expect(screen.getByText('—')).toBeInTheDocument()
 })
+
+test('GWT-U21.1 SKU none shows 未开通中转 and buyer 去升级 product=relay', async () => {
+  ;(fetchRelaySku as jest.Mock).mockResolvedValue(SKU_NONE)
+  renderPage()
+  expect(await screen.findByText('未开通中转')).toBeInTheDocument()
+  expect(screen.queryByText('default')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: ISSUE_BUTTON })).not.toBeInTheDocument()
+  expect(screen.queryByText('已开通')).not.toBeInTheDocument()
+  expect(screen.queryByText('使用中')).not.toBeInTheDocument()
+  expect(document.body.textContent).not.toContain('当前可买')
+  fireEvent.click(screen.getByRole('button', { name: '去升级' }))
+  expect(await screen.findByTestId('checkout-probe')).toHaveTextContent('relay')
+  expect(screen.queryByText('register-probe')).toBeNull()
+  expect(fetchRelayPage).not.toHaveBeenCalled()
+})
+
+test('GWT-U35.7 operator 去升级 is contact admin, not checkout', async () => {
+  mockUserState.current = OPERATOR
+  ;(fetchRelaySku as jest.Mock).mockResolvedValue(SKU_NONE_OPERATOR)
+  renderPage()
+  fireEvent.click(await screen.findByRole('button', { name: '去升级' }))
+  expect(await screen.findByText(CONTACT_ADMIN_COPY)).toBeInTheDocument()
+  expect(screen.queryByTestId('checkout-probe')).toBeNull()
+})
+
+test('GWT-U23.4 SKU expired shows 中转已到期, no issue', async () => {
+  ;(fetchRelaySku as jest.Mock).mockResolvedValue(SKU_EXPIRED)
+  renderPage()
+  expect(await screen.findByText('中转已到期')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: ISSUE_BUTTON })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '去升级' })).toBeInTheDocument()
+})
+
+test('GWT-U20.1 active lists own usage, no upstream key, not duty page', async () => {
+  ;(fetchRelayPage as jest.Mock).mockResolvedValue(PAGE_WITH_TOKEN)
+  renderPage()
+  expect(await screen.findByText('1,200')).toBeInTheDocument()
+  expect(screen.getByTestId('relay-active')).toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain('master')
+  expect(screen.queryByText('中转站管控')).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /newapi/i })).not.toBeInTheDocument()
+})
+
+test('relay paid_pending banner keeps none content', async () => {
+  ;(fetchRelaySku as jest.Mock).mockResolvedValue(SKU_NONE)
+  ;(listMyOrders as jest.Mock).mockResolvedValue([
+    { id: 3, status: 'paid_pending_fulfillment', product_code: 'relay', channel: 'alipay', amount_cents: 9900 },
+  ])
+  renderPage()
+  expect(await screen.findByText(CHECKOUT_PAID_PENDING_COPY)).toBeInTheDocument()
+  expect(screen.getByText('未开通中转')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: ISSUE_BUTTON })).not.toBeInTheDocument()
+})
+

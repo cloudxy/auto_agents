@@ -113,21 +113,23 @@ def test_gwt_50_2_owner_offline_pro_creates_single_pending(db_client, db_session
 
 
 def test_gwt_50_5_online_channel_creates_no_order(db_client, db_session, db_engine):
+    """PIT-2：未配通道 POST /billing/checkout 不建单（作废 alipay 经 /orders 零新行）。"""
     from conftest import make_tenant_owner_headers
 
     _seed_plans(db_session)
     owner, tid = make_tenant_owner_headers(db_session, slug="t01-505a")
 
     resp = db_client.post(
-        "/api/v1/billing/orders", headers=owner,
-        json={"plan_id": _pro_plan_id(db_client), "channel": "alipay"},
+        "/api/v1/billing/checkout", headers=owner,
+        json={"product": "plan_pro", "channel": "alipay"},
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 422, resp.text
     body = resp.json()
-    assert "在线支付尚未开通，请改用线下对公。" in body["message"]
+    assert "收款通道未开通" in body["message"]
+    assert body["code"] == "BILLING_CHANNELS_UNCONFIGURED"
     assert "PAYMENT_NOT_CONFIGURED" not in body["message"]
-    assert body["code"] != "PAYMENT_NOT_CONFIGURED"
-    assert _orders_of(db_session, tid) == []  # 含不产生 pending
+    assert "当前可买" not in str(body)
+    assert _orders_of(db_session, tid) == []
 
 
 def test_gwt_50_5_online_keeps_existing_pending(db_client, db_session, db_engine):
@@ -302,3 +304,25 @@ def test_pending_slot_released_after_confirm(db_client, db_session, db_engine):
     assert rows[0]["status"] == "paid"
     assert rows[1]["status"] == "pending"
     assert rows[1]["key"] == f"pending:{tid}"
+
+
+def test_gwt_50_verify_fail_keeps_checkout_pending(db_client, db_session, monkeypatch):
+    """PIT-2：伪造成功通知（缺通道校验）保持未开通，不履约。"""
+    from backend.tests.payment_notify_support import (
+        checkout, install_fernet, order_row, post_notify, sub_plan_slug,
+    )
+
+    install_fernet(monkeypatch)
+    fx = checkout(db_client, db_session, slug="t01-vfail")
+    o = fx["order"]
+    forged = {
+        "order_no": o["order_no"], "merchant_no": o["merchant_id_snapshot"],
+        "amount_cents": o["amount_cents"], "trade_status": "success",
+    }
+    resp = post_notify(db_client, "alipay", forged)
+    assert resp.status_code == 200, resp.text
+    assert "HMAC" not in resp.text
+    assert "当前可买" not in resp.text
+    row = order_row(db_session, fx["tid"])
+    assert row["status"] == "checkout_pending"
+    assert sub_plan_slug(db_session, fx["tid"]) is None

@@ -52,6 +52,8 @@ def test_gwt_60_4_viewer_get_groups_inserts_nothing(db_client, db_session, db_en
     from conftest import make_tenant_owner_headers
 
     owner, tid = make_tenant_owner_headers(db_session, slug="t07-604")
+    from backend.tests.relay_sku_support import seed_relay_sku
+    seed_relay_sku(db_session, tid)
     viewer = _make_member_headers(db_session, tid, "viewer", "t07-viewer-604")
 
     assert _group_count(db_session, tid) == 0
@@ -75,6 +77,8 @@ def test_gwt_60_7_operator_readonly_no_write_faces(db_client, db_session, db_eng
     from conftest import make_tenant_owner_headers
 
     owner, tid = make_tenant_owner_headers(db_session, slug="t07-607")
+    from backend.tests.relay_sku_support import seed_relay_sku
+    seed_relay_sku(db_session, tid)
     operator = _make_member_headers(db_session, tid, "operator", "t07-operator-607")
 
     created = db_client.post(

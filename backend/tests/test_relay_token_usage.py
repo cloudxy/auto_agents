@@ -229,7 +229,10 @@ def _make_member_headers(db_session, tid: int, tenant_role: str, username: str) 
     return {"Authorization": f"Bearer {asyncio.run(_go())}"}
 
 
-def _create_group(db_client, owner) -> int:
+def _create_group(db_client, owner, db_session, tid) -> int:
+    from backend.tests.relay_sku_support import seed_relay_sku
+
+    seed_relay_sku(db_session, tid)
     created = db_client.post(
         "/api/v1/relay/groups", headers=owner,
         json={"name": "vip", "rpm_limit": 60, "tpm_limit": 10000, "models": ["gpt-4o"]},
@@ -296,7 +299,7 @@ def test_gwt_60_3_chat_authed_usage_moves_and_event(
     )
     try:
         owner, tid = make_tenant_owner_headers(db_session, slug="t09-603")
-        gid = _create_group(db_client, owner)
+        gid = _create_group(db_client, owner, db_session, tid)
         token_id, plaintext = _issue(db_client, owner, gid)
 
         # Given：该令牌用量为 0（签发即 0）
@@ -364,7 +367,7 @@ def test_gwt_60_2_viewer_sees_usage_list_reads_local_column_only(
     try:
         owner, tid = make_tenant_owner_headers(db_session, slug="t09-602")
         viewer = _make_member_headers(db_session, tid, "viewer", "t09-viewer-602")
-        gid = _create_group(db_client, owner)
+        gid = _create_group(db_client, owner, db_session, tid)
         token_id, plaintext = _issue(db_client, owner, gid)
         assert gw.chat(plaintext).status_code == 200
 
@@ -403,7 +406,7 @@ def test_qa_20_revoked_token_rejected_on_chat(
     )
     try:
         owner, tid = make_tenant_owner_headers(db_session, slug="t09-qa20")
-        gid = _create_group(db_client, owner)
+        gid = _create_group(db_client, owner, db_session, tid)
         token_id, plaintext = _issue(db_client, owner, gid)
         assert gw.chat(plaintext).status_code == 200
 
@@ -442,7 +445,7 @@ def test_gwt_60_5_gateway_unreachable_same_then_not_quota(
     )
     try:
         owner, tid = make_tenant_owner_headers(db_session, slug="t09-605")
-        gid = _create_group(db_client, owner)
+        gid = _create_group(db_client, owner, db_session, tid)
         token_id, plaintext = _issue(db_client, owner, gid)
         assert gw.chat(plaintext).status_code == 200
         seeded = db_client.get(f"/api/v1/relay/tokens/{token_id}", headers=owner)
@@ -495,8 +498,8 @@ def test_gwt_60_10_tenant_a_call_does_not_move_tenant_b(
     try:
         owner_a, tid_a = make_tenant_owner_headers(db_session, slug="t09-a")
         owner_b, tid_b = make_tenant_owner_headers(db_session, slug="t09-b")
-        gid_a = _create_group(db_client, owner_a)
-        gid_b = _create_group(db_client, owner_b)
+        gid_a = _create_group(db_client, owner_a, db_session, tid_a)
+        gid_b = _create_group(db_client, owner_b, db_session, tid_b)
         token_a, plain_a = _issue(db_client, owner_a, gid_a)
         token_b, plain_b = _issue(db_client, owner_b, gid_b)
         quota_b_before = _tenant_quota(db_session, tid_b)
@@ -544,7 +547,7 @@ def test_gwt_60_6_tenant_no_entry_to_platform_fuse_probe_window(
         resp = db_client.get(path, headers=owner)
         assert resp.status_code == 404, f"{path} -> {resp.status_code}"
 
-    # 改渠道窗口/冷却（熔断面）→ 既有写守卫拒绝（GWT-70.3 403 + 越权记录），窗口不变
+    # 改渠道窗口/冷却（熔断面）→ 404 同形（FR-U12）+ 越权记录，窗口不变
     spy = AsyncMock()
     monkeypatch.setattr(
         "backend.services.channel_config_service.ChannelConfigService.set_config", spy,
@@ -552,8 +555,8 @@ def test_gwt_60_6_tenant_no_entry_to_platform_fuse_probe_window(
     resp = db_client.put("/api/v1/newapi/channels/999999/config", headers=owner, json={
         "limit_quota": 10, "window_hours": 24, "cooldown_seconds": 60,
     })
-    assert resp.status_code == 403, resp.text
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["code"] == "HTTP_404"
     spy.assert_not_awaited()
 
     monkeypatch.setattr(
@@ -562,7 +565,7 @@ def test_gwt_60_6_tenant_no_entry_to_platform_fuse_probe_window(
     resp = db_client.put("/api/v1/newapi/models/some-ref/config", headers=owner, json={
         "limit_quota": 10, "window_hours": 24, "cooldown_seconds": 60,
     })
-    assert resp.status_code == 403, resp.text
+    assert resp.status_code == 404, resp.text
     spy.assert_not_awaited()
 
 
@@ -582,7 +585,7 @@ def test_gwt_60_8_cross_tenant_revoke_and_detail_404(
     try:
         owner_a, tid_a = make_tenant_owner_headers(db_session, slug="t09-xa")
         owner_b, _tid_b = make_tenant_owner_headers(db_session, slug="t09-xb")
-        gid = _create_group(db_client, owner_a)
+        gid = _create_group(db_client, owner_a, db_session, tid_a)
         token_a, _plain = _issue(db_client, owner_a, gid)
 
         stolen_revoke = db_client.delete(f"/api/v1/relay/tokens/{token_a}", headers=owner_b)
@@ -610,7 +613,7 @@ def test_outbound_style_key_rejected_on_chat(db_client, db_session, db_engine, m
     )
     try:
         owner, tid = make_tenant_owner_headers(db_session, slug="t09-outb")
-        gid = _create_group(db_client, owner)
+        gid = _create_group(db_client, owner, db_session, tid)
         _issue(db_client, owner, gid)  # 渠道组令牌在册（基线对照）
 
         # 出站钥匙（ok- 前缀）不是网关虚拟 Key → chat 拒绝

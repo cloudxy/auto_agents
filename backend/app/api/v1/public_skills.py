@@ -114,11 +114,12 @@ async def public_list_capabilities(
         asset_type=type, category=category, q=q, host=host,
         page=page, page_size=page_size,
     )
-    await emit_public_list(
-        market.session, asset_type=type, host=host, category=category,
-        q=q, total=data["total"],
-    )
-    await _emit_paged_event(market.session, page, data, anonymous_id)
+    if not data.get("market_closed"):
+        await emit_public_list(
+            market.session, asset_type=type, host=host, category=category,
+            q=q, total=data["total"],
+        )
+        await _emit_paged_event(market.session, page, data, anonymous_id)
     return ok(data=data)
 
 
@@ -152,6 +153,8 @@ async def public_get_capability(
     data = await market.get_public(asset_type, name)
     if data is None:
         return _store_not_found()
+    if data.get("market_closed"):
+        return ok(data=data)
     await emit_public_detail(market.session, data)
     return ok(data=data)
 
@@ -186,6 +189,8 @@ async def public_get_skill(
     data = await market.get_public("skill", name, default="skill")
     if data is None:
         return _store_not_found()
+    if data.get("market_closed"):
+        return ok(data=data)
     await emit_public_detail(market.session, data)
     return ok(data=data)
 
@@ -209,9 +214,10 @@ async def public_list_skills(
         asset_type=type, default="skill", category=category, q=q, host=host,
         page=page, page_size=page_size,
     )
-    await emit_public_list(
-        market.session, asset_type=type or "skill", host=host, category=category,
-        q=q, total=data["total"],
-    )
-    await _emit_paged_event(market.session, page, data, anonymous_id)
+    if not data.get("market_closed"):
+        await emit_public_list(
+            market.session, asset_type=type or "skill", host=host, category=category,
+            q=q, total=data["total"],
+        )
+        await _emit_paged_event(market.session, page, data, anonymous_id)
     return ok(data=data)

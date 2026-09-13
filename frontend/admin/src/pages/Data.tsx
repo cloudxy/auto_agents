@@ -27,16 +27,21 @@ import type { Task, SpiderMap } from '../components/spider/types'
 import { apiErrorMessage } from '../utils/errorMessage'
 import type { Dayjs } from 'dayjs'
 import { fetchAdminStats } from '../services/admin'
+import {
+  CLEAR_FILTERS,
+  EMPTY_RESULTS_COPY,
+  FILTERED_RESULTS_EMPTY,
+  GO_SUBMIT_COLLECT,
+} from '../constants/collectCopy'
 
 const { Text } = Typography
 
 /** RangePicker 值契约（antd 泛型缺失场景的手写对齐） */
 type RangeValue = [Dayjs | null, Dayjs | null] | null
 
-// T-17 / FR-84：失败≠空——失败句+重试；真 0 走「还没有…」+ 去采集；统计卡失败不得 ?? 0
+// T-17 / FR-84：失败≠空；T-04 / GWT-U01.2 真 0 锁句「还没有结果，去提交采集」
 const STATS_LOAD_FAILED = '统计数据加载失败。检查网络后重试。'
 const RESULTS_LOAD_FAILED = '结果加载失败。检查网络后重试。'
-const EMPTY_RESULTS = '还没有采集结果。完成一次采集后会显示在这里。'
 
 /** 已提交检索条件（草稿筛选只在点「查询/重置/翻页」时落到这里） */
 interface AppliedQuery {
@@ -118,6 +123,7 @@ const Data: React.FC = () => {
   })
   const rows = resultsQuery.data?.items || []
   const total = resultsQuery.data?.total || 0
+  const hasAppliedFilter = !!(applied.spider_name || applied.keyword || applied.start_time || applied.end_time)
 
   // 详情抽屉（复用 ResultDrawer）
   const [detailTask, setDetailTask] = useState<Task | null>(null)
@@ -191,7 +197,7 @@ const Data: React.FC = () => {
     {
       title: '采集方案', dataIndex: 'spider_name', key: 'spider_name', width: 160,
       render: (name: string) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text strong>{spiderMap[name]?.title || name}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>{name}</Text>
         </Space>
@@ -295,7 +301,7 @@ const Data: React.FC = () => {
             onSearch={onSearch}
             prefix={<SearchOutlined />}
           />
-          <Button type="primary" onClick={onSearch}>查询</Button>
+          <Button type="primary" onClick={onSearch} data-testid="apply-result-filters">查询</Button>
           <Button onClick={onReset}>重置</Button>
           <Select
             value={exportFmt}
@@ -319,8 +325,7 @@ const Data: React.FC = () => {
             刷新
           </Button>
         </Space>
-        {/* GWT-84.1：结果加载失败=失败句+重试（无旧数据时整表替换，不落「暂无数据」；
-            有旧数据时句置顶、旧表保留）；GWT-84.2 真 0=「还没有…」+ 去采集 */}
+        {/* GWT-84.1：结果加载失败≠0 条；GWT-U01.2 真 0=「还没有结果，去提交采集」 */}
         {resultsQuery.isError && rows.length === 0 ? (
           <LoadFailure title={RESULTS_LOAD_FAILED} onRetry={() => resultsQuery.refetch()} />
         ) : (
@@ -341,10 +346,19 @@ const Data: React.FC = () => {
                 showTotal: (t) => `共 ${t} 条结果`,
               }}
               locale={{
-                emptyText: (
+                emptyText: hasAppliedFilter ? (
                   <LoadEmpty
-                    title={EMPTY_RESULTS}
-                    action={<Button type="primary" size="small" onClick={() => navigate('/spiders/tasks')}>去采集</Button>}
+                    title={FILTERED_RESULTS_EMPTY}
+                    action={<Button size="small" onClick={onReset}>{CLEAR_FILTERS}</Button>}
+                  />
+                ) : (
+                  <LoadEmpty
+                    title={EMPTY_RESULTS_COPY}
+                    action={(
+                      <Button type="primary" size="small" onClick={() => navigate('/spiders/tasks')}>
+                        {GO_SUBMIT_COLLECT}
+                      </Button>
+                    )}
                   />
                 ),
               }}

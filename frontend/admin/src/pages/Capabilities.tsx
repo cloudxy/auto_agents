@@ -1,20 +1,21 @@
 /**
- * T-28 治理台七叶：源 | 目录 | 插件 | 技能 | 命令 | 智能体 | 专家团
- * 窄屏滚动不删叶。无「上架全部子资产」。无 enable-host。
- * T-36 页头动作行「导入资产」仅平台超管（GWT-100.6 无入口面）。
+ * 能力市场：租户货架（屏 15）vs 超管七叶+总开关（屏 24）。
+ * 租户无源/上架/扫描/总开关。无 enable-host。禁定价可买四字。
  */
 import React, { useEffect, useState } from 'react'
 import { Button, ConfigProvider, Tabs } from 'antd'
 import { ImportOutlined } from '@ant-design/icons'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import Skills from './Skills'
 import SubscribeModal from '../components/SubscribeModal'
 import CatalogTab from './market/CatalogTab'
 import ImportWizard from './market/ImportWizard'
 import PluginTab from './market/PluginTab'
+import PowerMarketSwitch from './market/PowerMarketSwitch'
 import SourceTab from './market/SourceTab'
 import TeamLeafTab from './market/TeamLeafTab'
+import TenantShelf from './market/TenantShelf'
 import TypeLeafTab from './market/TypeLeafTab'
 import { usePermission } from '../hooks/usePermission'
 import { IMPORT_ENTRY } from './market/importWizardCopy'
@@ -27,7 +28,8 @@ const COMMAND_TYPES = ['command']
 const AGENT_TYPES = ['agent', 'expert']
 
 const Capabilities: React.FC = () => {
-  const { isPlatformAdmin } = usePermission()
+  const { isPlatformAdmin, role } = usePermission()
+  const navigate = useNavigate()
   const [tab, setTab] = useState('catalog')
   const [params] = useSearchParams()
   const bounceType = params.get('subscribeType') || ''
@@ -48,7 +50,6 @@ const Capabilities: React.FC = () => {
     setTab('catalog')
   }
 
-  // T-36：导入成功后刷新目录；完成额外切到目录 tab（产物未上架，不跳公开商店）
   const closeImport = (imported: boolean) => {
     setImportOpen(false)
     if (imported) setCatalogRefresh((k) => k + 1)
@@ -59,16 +60,40 @@ const Capabilities: React.FC = () => {
     setImportOpen(false)
   }
 
+  const modal = target ? (
+    <SubscribeModal
+      open
+      assetType={target.type}
+      assetName={target.name}
+      onClose={() => setTarget(null)}
+      onSubscribed={() => {
+        setTarget(null)
+        navigate('/capabilities/installs')
+      }}
+    />
+  ) : null
+
+  if (!isPlatformAdmin) {
+    return (
+      <ConfigProvider button={{ autoInsertSpace: false }}>
+        <TenantShelf
+          canSubscribe={role !== 'viewer'}
+          onSubscribe={(type, name) => setTarget({ type, name })}
+        />
+        {modal}
+      </ConfigProvider>
+    )
+  }
+
   return (
     <ConfigProvider button={{ autoInsertSpace: false }}>
-    <div>
-      {isPlatformAdmin ? (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-          <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
-            {IMPORT_ENTRY}
-          </Button>
-        </div>
-      ) : null}
+    <div data-testid="governance-shell">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+        <PowerMarketSwitch />
+        <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+          {IMPORT_ENTRY}
+        </Button>
+      </div>
       <Tabs
         className="market-tabs"
         activeKey={tab}
@@ -106,14 +131,7 @@ const Capabilities: React.FC = () => {
       {importOpen ? (
         <ImportWizard open onCancel={closeImport} onFinished={finishImport} />
       ) : null}
-      {target ? (
-        <SubscribeModal
-          open
-          assetType={target.type}
-          assetName={target.name}
-          onClose={() => setTarget(null)}
-        />
-      ) : null}
+      {modal}
     </div>
     </ConfigProvider>
   )

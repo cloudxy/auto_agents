@@ -80,6 +80,8 @@ def _service() -> AiPlannerService:
                     "list_plans", "create", "claim_status"):
         setattr(svc.repo, _method, AsyncMock())
     svc.repo.claim_status.return_value = True  # 默认抢断成功
+    # FR-U02：launch_plan 规划前 token 闸走真 QuotaService；本模块 session 是 MagicMock。
+    svc._reject_if_token_quota_full = AsyncMock()
     return svc
 
 
