@@ -219,7 +219,8 @@ def test_gwt_102_3_platform_tenant_quota_not_bypassed(
     _assert_no_inner_code(resp)
     body = resp.json()
     assert "已达配额上限" in body["message"]
-    assert "请联系企业管理员" in body["message"]
+    assert "申请提升" in body["message"]
+    assert "采集未运行，不会出数" not in body["message"]
     assert len(_tasks_of(db_session, ptid)) == 1  # 拒绝路径零新任务
 
 

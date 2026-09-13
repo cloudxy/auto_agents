@@ -1,14 +1,7 @@
 """租户渠道组：分组 + 虚拟令牌。不改平台渠道、不打网关库。
 
-T-07（GWT-60.4/60.7）：GET 读路径禁止建 default 组——空态必须可达，默认组
-只许负责人显式建；经办/只读无签发/吊销/停用面，拒绝走可见找管理员句。
-T-08（ADR-0019）：签发先经 LiteLLM HTTP /key/generate 登记虚拟 Key（组
-models/rpm/tpm 映射限额），本地只落 hash + 网关引用；网关失败 = 签发失败
-可见，禁止本地假成功。吊销 = 网关 /key/delete + 本地 revoked。禁 DSN。
-T-09（GWT-60.2/60.3/60.5/60.10 + GWT-92.4）：用量观察 = 令牌详情 / 显式刷新
-（单次或按页批量）打网关 key info + spend HTTP，回写 used_tokens 本地缓存列；
-list_tokens 列表只读本地列（QA-08，禁止每行打网关）。0→≥1 跃迁上报
-relay_token_call_succeeded。网关不可达 = 60.5 句族（LLM_GATEWAY_UNREACHABLE）。
+T-18：读路径闸在 relay_sku_entitlements（缺行≡none），禁止 COUNT 组行。
+SKU≠active 隐藏骨架组/令牌；签发 422。明文只在当次签发。跨租户 404 同形。
 """
 import hashlib
 import uuid
@@ -20,13 +13,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.llm_gateway import admin as gateway_admin
-from backend.services.product_event_service import emit_product_event
 from backend.services.quota_service import GATEWAY_UNREACHABLE_USER
-from platform_core.exceptions import AuthorizationException, BusinessException, NotFoundException
+from backend.services.relay_sku_gate import (
+    load_sku_status, raise_missing, require_active_sku, sku_page as build_sku_page,
+)
+from backend.services.relay_usage import (
+    apply_usage, emit_usage_event, observe_gateway_usage, usage_snapshot,
+)
+from platform_core.exceptions import AuthorizationException, BusinessException
 from platform_core.logger import get_logger
 from platform_core.models.relay import RelayGroup, RelayToken
 from platform_core.schemas.relay import (
-    RelayGroupCreate, RelayGroupOut, RelayGroupUpdate, RelayTokenCreate, RelayTokenOut,
+    RelayGroupCreate, RelayGroupOut, RelayGroupUpdate, RelaySkuPageOut,
+    RelayTokenCreate, RelayTokenOut,
 )
 
 logger = get_logger("service.relay")
@@ -41,9 +40,6 @@ MSG_GATEWAY_REVOKE_FAILED = "平台网关暂时不可用，令牌吊销失败，
 # GWT-60.5 句族（spec §7.1：用量观察面网关不可达——同一 Then，非套餐句）。
 # 句子单一真相在 quota_service（已兑 FR-74 同句），此处只别名不另造。
 MSG_GATEWAY_UNREACHABLE = GATEWAY_UNREACHABLE_USER
-# 用量观察 spend 日志翻页上限（防一次刷新拖死网关；正常单 Key 远达不到）
-_SPEND_LOGS_MAX_PAGES = 10
-
 # 渠道组写面 = 负责人 owner / 公司管理员 admin（contract §3：经办只看用法）
 _ISSUER_ROLES = ("owner", "admin")
 
@@ -106,37 +102,35 @@ def _token_status(row: RelayToken) -> str:
     return "active"
 
 
-def _parse_gateway_dt(raw: object) -> Optional[datetime]:
-    """网关 key info 的 last_active（ISO 8601 字符串）→ tz-aware datetime。
-
-    解析失败返回 None（观察字段缺省不影响 used_tokens 回写主路径）。
-    """
-    logger.debug("解析网关时间字段")
-    if not isinstance(raw, str) or not raw:
-        return None
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        logger.warning(f"网关时间字段不可解析 | raw={raw[:32]}")
-        return None
-
-
 class RelayService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def sku_status(self, tenant_id: int) -> str:
+        logger.info(f"渠道组 SKU 状态 | tenant={tenant_id}")
+        return await load_sku_status(self.session, tenant_id)
+
+    async def sku_page(self, tenant_id: int, tenant_role: Optional[str]) -> RelaySkuPageOut:
+        logger.info(f"渠道组 SKU 页 | tenant={tenant_id} role={tenant_role}")
+        return await build_sku_page(
+            self.session, tenant_id, tenant_role,
+            can_issue=is_issuer_role(tenant_role),
+        )
+
     async def list_groups(self, tenant_id: int) -> list[RelayGroupOut]:
         logger.info(f"列出渠道组 | tenant={tenant_id}")
+        if await load_sku_status(self.session, tenant_id) != "active":
+            return []
         rows = (await self.session.execute(
             select(RelayGroup).where(RelayGroup.tenant_id == tenant_id).order_by(RelayGroup.id.asc())
         )).scalars().all()
-        # T-07：读路径禁止建 default——无组就是空态（GWT-60.4），组只来自显式写
         return [_group_out(r) for r in rows]
 
     async def create_group(
         self, tenant_id: int, actor_tenant_role: Optional[str], payload: RelayGroupCreate,
     ) -> RelayGroupOut:
         logger.info(f"创建渠道组 | tenant={tenant_id} role={actor_tenant_role} name={payload.name}")
+        await require_active_sku(self.session, tenant_id)
         _require_group_writer_role(actor_tenant_role)
         existing = (await self.session.execute(
             select(RelayGroup).where(
@@ -163,8 +157,9 @@ class RelayService:
         payload: RelayGroupUpdate,
     ) -> RelayGroupOut:
         logger.info(f"更新渠道组 | tenant={tenant_id} role={actor_tenant_role} group={group_id}")
-        _require_group_writer_role(actor_tenant_role)
         row = await self._owned_group(tenant_id, group_id)
+        await require_active_sku(self.session, tenant_id)
+        _require_group_writer_role(actor_tenant_role)
         if payload.name is not None:
             row.name = payload.name.strip()
         if payload.rpm_limit is not None:
@@ -183,10 +178,14 @@ class RelayService:
 
     async def list_tokens(self, tenant_id: int) -> list[RelayTokenOut]:
         logger.info(f"列出令牌 | tenant={tenant_id}")
+        if await load_sku_status(self.session, tenant_id) != "active":
+            return []
         rows = (await self.session.execute(
-            select(RelayToken).where(RelayToken.tenant_id == tenant_id).order_by(RelayToken.id.desc())
+            select(RelayToken).where(
+                RelayToken.tenant_id == tenant_id, RelayToken.revoked_at.is_(None),
+            ).order_by(RelayToken.id.desc())
         )).scalars().all()
-        return [self._token_out(r) for r in rows]
+        return [self._token_out(r) for r in rows if _token_status(r) == "active"]
 
     async def issue_token(
         self, tenant_id: int, actor_tenant_role: Optional[str], payload: RelayTokenCreate,
@@ -194,6 +193,7 @@ class RelayService:
         logger.info(
             f"签发令牌 | tenant={tenant_id} role={actor_tenant_role} group={payload.group_id}"
         )
+        await require_active_sku(self.session, tenant_id)
         _require_issuer_role(actor_tenant_role)
         group = await self._owned_group(tenant_id, payload.group_id)
         if group.status != "enabled":
@@ -225,14 +225,15 @@ class RelayService:
         self, tenant_id: int, actor_tenant_role: Optional[str], token_id: int,
     ) -> RelayTokenOut:
         logger.info(f"吊销令牌 | tenant={tenant_id} role={actor_tenant_role} token={token_id}")
-        _require_issuer_role(actor_tenant_role)
         row = (await self.session.execute(
             select(RelayToken).where(
                 RelayToken.id == token_id, RelayToken.tenant_id == tenant_id,
             )
         )).scalar_one_or_none()
         if row is None:
-            raise NotFoundException("令牌")
+            raise_missing()
+        await require_active_sku(self.session, tenant_id)
+        _require_issuer_role(actor_tenant_role)
         if row.revoked_at is None:
             # ADR-0019 决策 4：吊销 = 网关作废在前 + 本地 revoked；网关失败不本地假吊销
             if row.gateway_key_id:
@@ -263,16 +264,18 @@ class RelayService:
         """
         logger.info(f"查看令牌详情 | tenant={tenant_id} token={token_id}")
         row = await self._owned_token(tenant_id, token_id)
+        if await load_sku_status(self.session, tenant_id) != "active":
+            raise_missing()
         degraded = False
         if row.gateway_key_id and row.revoked_at is None:
             try:
                 used, last_used = await self._observe_gateway_usage(row)
-                transitioned = self._apply_usage(row, used, last_used)
-                snap = self._usage_snapshot(row) if transitioned else None
+                transitioned = apply_usage(row, used, last_used)
+                snap = usage_snapshot(row) if transitioned else None
                 await self.session.commit()
                 await self.session.refresh(row)
                 if snap is not None:
-                    await self._emit_usage_event(snap)
+                    await emit_usage_event(self.session, snap)
             except httpx.HTTPError as exc:
                 logger.warning(
                     f"网关用量观察失败（详情降级本地缓存） | tenant={tenant_id} "
@@ -291,6 +294,7 @@ class RelayService:
         可见（502 LLM_GATEWAY_UNREACHABLE，60.5 句族，非套餐句），不落半批。
         """
         logger.info(f"刷新令牌用量 | tenant={tenant_id}")
+        await require_active_sku(self.session, tenant_id)
         rows = (await self.session.execute(
             select(RelayToken).where(
                 RelayToken.tenant_id == tenant_id,
@@ -318,12 +322,12 @@ class RelayService:
             ) from exc
         transitioned: list[tuple[RelayToken, dict[str, int]]] = []
         for row, used, last_used in observed:
-            if self._apply_usage(row, used, last_used):
-                transitioned.append((row, self._usage_snapshot(row)))
+            if apply_usage(row, used, last_used):
+                transitioned.append((row, usage_snapshot(row)))
         if observed:
             await self.session.commit()
             for _row, snap in transitioned:
-                await self._emit_usage_event(snap)
+                await emit_usage_event(self.session, snap)
             for row, _snap in transitioned:
                 await self.session.refresh(row)
         return [self._token_out(r) for r in
@@ -332,74 +336,25 @@ class RelayService:
                     .order_by(RelayToken.id.desc())
                 )).scalars().all()]
 
-    async def _observe_gateway_usage(self, row: RelayToken) -> tuple[int, Optional[datetime]]:
-        """只读观察网关用量：key info（last_active/存在性）+ spend 日志 token 累计。
-
-        v1.100.0 实读：key/info 的 key 收 sha256(明文)（== 本地 key_hash，明文
-        不出库）；info 行无 token 计数（只有 USD spend），token 口径在
-        /spend/logs/v2 rows 的 total_tokens。httpx 错误原样上抛由调用面定形。
-        """
-        logger.info(f"网关用量观察 | tenant={row.tenant_id} token={row.id}")
-        info = await gateway_admin.get_key_info(str(row.key_hash))
-        used = 0
-        page = 1
-        while page <= _SPEND_LOGS_MAX_PAGES:
-            logs = await gateway_admin.list_key_spend_logs(
-                str(row.gateway_key_id), page=page,
+    async def usage_by_plaintext(self, tenant_id: int, plaintext: str) -> RelayTokenOut:
+        """用本企业令牌读用量。他企/吊销/SKU≠active/过期 → 404 同形，无明文。"""
+        logger.info(f"令牌凭证读用量 | tenant={tenant_id}")
+        digest = _hash_key(plaintext or "")
+        row = (await self.session.execute(
+            select(RelayToken).where(
+                RelayToken.key_hash == digest, RelayToken.tenant_id == tenant_id,
             )
-            rows = (logs or {}).get("data") or []
-            for entry in rows:
-                used += int(entry.get("total_tokens") or 0)
-            total_pages = int((logs or {}).get("total_pages") or 1)
-            if page >= total_pages or not rows:
-                break
-            page += 1
-        last_used = _parse_gateway_dt(((info or {}).get("info") or {}).get("last_active"))
-        return used, last_used
+        )).scalar_one_or_none()
+        if row is None:
+            raise_missing()
+        if await load_sku_status(self.session, tenant_id) != "active":
+            raise_missing()
+        if _token_status(row) != "active":
+            raise_missing()
+        return self._token_out(row)
 
-    def _apply_usage(self, row: RelayToken, used: int, last_used: Optional[datetime]) -> bool:
-        """把观察结果写进本地缓存列（不 commit——由触发点统一定事务边界）。
-
-        返回是否发生 0→≥1 跃迁（GWT-92.4 事件条件，old 值在改写前捕获）。
-        """
-        old = int(row.used_tokens or 0)
-        row.used_tokens = max(0, int(used))
-        row.spend_synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        if last_used is not None:
-            row.last_used_at = last_used
-        logger.info(
-            f"回写令牌用量缓存 | tenant={row.tenant_id} token={row.id} used={row.used_tokens}"
-        )
-        return old == 0 and row.used_tokens >= 1
-
-    @staticmethod
-    def _usage_snapshot(row: RelayToken) -> dict[str, int]:
-        """commit 前取事件入参快照（P-BE-01：生产会话 expire_on_commit=True，
-        commit 后读过期属性抛 MissingGreenlet——发生在 emit_product_event
-        吞异常圈外，会把 fail-open 打穿成主路径 500，GWT-92.6 违约）。"""
-        return {
-            "token_id": int(row.id),
-            "tenant_id": int(row.tenant_id),
-            "group_id": int(row.group_id),
-            "used_tokens": int(row.used_tokens or 0),
-        }
-
-    async def _emit_usage_event(self, snap: dict[str, int]) -> None:
-        """GWT-92.4：上报 relay_token_call_succeeded（tenant_id；无明文）。
-
-        入参为 commit 前快照（见 _usage_snapshot）；调用面保证只在 0→≥1 跃迁
-        且本地已 commit 后进入；上报失败不挡主路径
-        （emit_product_event 内部 fail-open，GWT-92.6 同口径）。"""
-        await emit_product_event(
-            self.session,
-            "relay_token_call_succeeded",
-            tenant_id=snap["tenant_id"],
-            props={
-                "token_id": snap["token_id"],
-                "group_id": snap["group_id"],
-                "used_tokens": snap["used_tokens"],
-            },
-        )
+    async def _observe_gateway_usage(self, row: RelayToken) -> tuple[int, Optional[datetime]]:
+        return await observe_gateway_usage(row)
 
     async def _owned_token(self, tenant_id: int, token_id: int) -> RelayToken:
         row = (await self.session.execute(
@@ -408,7 +363,7 @@ class RelayService:
             )
         )).scalar_one_or_none()
         if row is None:
-            raise NotFoundException("令牌")
+            raise_missing()
         return row
 
     async def _register_gateway_key(
@@ -459,7 +414,7 @@ class RelayService:
     async def _owned_group(self, tenant_id: int, group_id: int) -> RelayGroup:
         row = await self.session.get(RelayGroup, group_id)
         if row is None or int(row.tenant_id or 0) != int(tenant_id):
-            raise NotFoundException("渠道组")
+            raise_missing()
         return row
 
     @staticmethod

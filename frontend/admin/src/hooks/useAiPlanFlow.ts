@@ -18,6 +18,7 @@ import type { AiPlan, AiPlanTestHistory, FlowConfig } from '../services/ai'
 import { fetchTaskLogs, runSpider } from '../services/spiders'
 import type { Task } from '../components/spider/types'
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
+import { parseCollectBlock, type CollectBlock } from '../utils/collectBlock'
 import { useQuery } from '@tanstack/react-query'
 
 /** 表单草稿行（antd validateFields 返回 any，显式窄化以通过 noImplicitAny） */
@@ -53,6 +54,8 @@ export interface AiPlanFlow {
   openPlanInWizard: (p: AiPlan) => void
   /** 带最近试采结果条数打开结果抽屉的载荷构造 */
   resultsTaskOf: (p: AiPlan) => Task
+  /** GWT-U02.4：规划配额拦住（非工人句） */
+  collectBlock: CollectBlock | null
 }
 
 export const useAiPlanFlow = (): AiPlanFlow => {
@@ -63,6 +66,7 @@ export const useAiPlanFlow = (): AiPlanFlow => {
   const [actionLoading, setActionLoading] = useState('')
   const [editedFlow, setEditedFlow] = useState<FlowConfig | null>(null)
   const [customTask, setCustomTask] = useState<Task | null>(null)
+  const [collectBlock, setCollectBlock] = useState<CollectBlock | null>(null)
   const [createForm] = Form.useForm()
   const [flowForm] = Form.useForm()
 
@@ -127,12 +131,17 @@ export const useAiPlanFlow = (): AiPlanFlow => {
       })
       setPlan(created)
       setStep(1)
-      // 创建后立即触发规划（后台执行，轮询推进状态机）
       const snapshot = await triggerAiPlan(created.id)
       setPlan(snapshot)
+      setCollectBlock(null)
       message.success(`计划 #${created.id} 已创建，LLM 正在规划采集方案`)
     } catch (error) {
       if (isFormValidateError(error)) return
+      const block = parseCollectBlock(error)
+      if (block?.kind === 'quota') {
+        setCollectBlock(block)
+        return
+      }
       message.error(apiErrorMessage(error, '创建计划失败'))
     } finally {
       setCreating(false)
@@ -144,6 +153,7 @@ export const useAiPlanFlow = (): AiPlanFlow => {
     setStep(0)
     setEditedFlow(null)
     setCustomTask(null)
+    setCollectBlock(null)
     createForm.resetFields()
     flowForm.resetFields()
   }, [createForm, flowForm])
@@ -156,8 +166,14 @@ export const useAiPlanFlow = (): AiPlanFlow => {
       setPlan(snapshot)
       setEditedFlow(null)
       setStep(1)
+      setCollectBlock(null)
       message.success('已重新触发规划')
     } catch (error) {
+      const block = parseCollectBlock(error)
+      if (block?.kind === 'quota') {
+        setCollectBlock(block)
+        return
+      }
       message.error(apiErrorMessage(error, '触发规划失败'))
     } finally {
       setActionLoading('')
@@ -271,6 +287,7 @@ export const useAiPlanFlow = (): AiPlanFlow => {
     setPlan(p)
     setEditedFlow(null)
     setCustomTask(null)
+    setCollectBlock(null)
     const hist = p.plan_json?.test_history || []
     if (p.status === 'testing' || p.status === 'registered' || (p.status === 'failed' && hist.length > 0)) {
       setStep(2)
@@ -290,6 +307,6 @@ export const useAiPlanFlow = (): AiPlanFlow => {
     step, plan, flow, history, latestPassed, creating, actionLoading, editedFlow, customTask,
     createForm, flowForm, setStep,
     onCreate, onReplan, onTest, onTestEdited, onApplyFlowEdit, onRegister,
-    resetWizard, openPlanInWizard, resultsTaskOf,
+    resetWizard, openPlanInWizard, resultsTaskOf, collectBlock,
   }
 }

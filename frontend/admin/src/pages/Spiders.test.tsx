@@ -76,7 +76,7 @@ function renderSpiders() {
   )
 }
 
-/** T-18 / GWT-85.1：以真实路由渲染，「去节点」跳 /spiders/nodes 由探针捕获 */
+/** T-18 / GWT-85.1：以真实路由渲染，「查看节点」跳 /spiders/nodes 由探针捕获 */
 function renderSpidersWithRoutes() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -158,7 +158,7 @@ test('test_task_page_offline_or_zero_copy', async () => {
   expect(screen.queryByText(ZERO_ITEMS_DONE_COPY)).toBeNull()
 })
 
-test('T-18 GWT-85.1：0 工人打开任务页——「不会出数」+「去节点」打开节点页（加载中不出横幅）', async () => {
+test('T-18 GWT-85.1：0 工人打开任务页——「不会出数」+「查看节点」打开节点页（加载中不出横幅）', async () => {
   ;(fetchTasks as jest.Mock).mockResolvedValue({
     items: [{ ...baseTask, status: 'completed', result_count: 0 }],
     total: 1,
@@ -176,7 +176,7 @@ test('T-18 GWT-85.1：0 工人打开任务页——「不会出数」+「去节�
   // 真 0（接口成功且 0 节点）：横幅句 + 去节点按钮，点击打开节点页
   await act(async () => { resolveNodes({ items: [], total: 0 }) })
   expect(await screen.findByText(SPIDER_WORKER_OFFLINE_COPY)).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: /去节点/ }))
+  fireEvent.click(screen.getByRole('button', { name: /查看节点/ }))
   expect(await screen.findByText('nodes-page-probe')).toBeInTheDocument()
 })
 

@@ -160,7 +160,65 @@ export interface PublicCapabilityCard {
   listing_state?: string
   subscribable?: boolean
   hosts?: string[]
+  market_closed?: boolean
+  message?: string | null
 }
+
+export type PublicListQuery = {
+  type?: string
+  q?: string
+  host?: string
+  category?: string
+  page?: number
+  page_size?: number
+}
+
+export type PublicShelfItem = {
+  asset_type: string
+  name: string
+  title?: string | null
+  description?: string | null
+  category?: string
+  listing_state?: string | null
+  subscribable?: boolean
+  hosts?: string[]
+  slash?: string | null
+  score?: number | null
+  tier?: string | null
+}
+
+export type PublicShelfList = {
+  items: PublicShelfItem[]
+  total?: number
+  page?: number
+  page_size?: number
+  has_more?: boolean
+  market_closed?: boolean
+  empty?: boolean
+  message?: string
+}
+
+const compactPublicQuery = (params: PublicListQuery): Record<string, string | number> => {
+  const page = params.page ?? 1
+  const query: Record<string, string | number> = { page_size: params.page_size ?? 20, page }
+  if (params.type) query.type = params.type
+  if (params.q) query.q = params.q
+  if (params.host) query.host = params.host
+  if (params.category) query.category = params.category
+  return query
+}
+
+export const listPublicAssets = (
+  params: PublicListQuery = {},
+): Promise<PublicShelfList> =>
+  api.get('/public/capabilities', { params: compactPublicQuery(params) })
+    .then((r) => unwrap<PublicShelfList>(r))
+
+export const getPowerMarket = (): Promise<{ enabled: boolean }> =>
+  api.get('/admin/power-market').then((r) => unwrap<{ enabled: boolean }>(r))
+
+export const putPowerMarket = (enabled: boolean): Promise<{ enabled: boolean }> =>
+  api.put('/admin/power-market', { enabled }).then((r) => unwrap<{ enabled: boolean }>(r))
 
 export interface InstallRow {
   id: number

@@ -10,6 +10,8 @@ export const CHANNEL_STATUS = {
 } as const
 
 export type ProbeVerdict = 'original' | 'spoofed' | 'offline'
+/** T-26 GET /newapi/overview 页级三态；缺省时 UI 回落本地派生 */
+export type DutyPageState = 'empty' | 'degrade' | 'live'
 
 export interface GatewayModel {
   gateway_ref: string
@@ -19,6 +21,8 @@ export interface GatewayModel {
   api_base?: string | null
   api_key_masked?: string | null
   extra?: Record<string, unknown>
+  duty_row_status?: string | null
+  duty_row_status_text?: string | null
 }
 
 export interface NewapiOverview {
@@ -26,6 +30,7 @@ export interface NewapiOverview {
   reason?: string | null
   empty_state?: string | null
   degrade_state?: string | null
+  duty_page_state?: DutyPageState | null
   models: GatewayModel[]
   deployments: GatewayModel[]
   channels: unknown[]

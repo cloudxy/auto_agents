@@ -2,6 +2,7 @@
  * T-30：治理台命令叶可订这一行；插件抽屉不是命令 JSON 货架。不砍命令叶。
  */
 import React from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -33,6 +34,9 @@ jest.mock('../services/capabilities', () => ({
   subscribeCapability: jest.fn(),
   listInstalls: jest.fn(),
   importAssets: jest.fn(),
+  listPublicAssets: jest.fn().mockResolvedValue({ items: [], total: 0, market_closed: false }),
+  getPowerMarket: jest.fn().mockResolvedValue({ enabled: true }),
+  putPowerMarket: jest.fn(),
 }))
 
 jest.mock('./Skills', () => () => <div>skills-tab</div>)
@@ -63,17 +67,20 @@ const row = (over: Partial<AssetRow> = {}): AssetRow => ({
 })
 
 function renderPage(path = '/capabilities') {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/capabilities" element={<Capabilities />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/capabilities" element={<Capabilities />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 
 beforeEach(() => {
-  perm.isPlatformAdmin = false
+  perm.isPlatformAdmin = true
   list.mockReset()
   pluginDetail.mockReset()
   subscribe.mockReset()

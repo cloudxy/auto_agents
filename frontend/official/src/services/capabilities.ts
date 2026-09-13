@@ -39,6 +39,8 @@ export type PublicAssetDetail = PublicListItem & {
   origin?: PublicOrigin | null
   origin_plugin_name?: string | null
   status?: string | null
+  market_closed?: boolean
+  message?: string | null
 }
 
 export type PublicListQuery = {
@@ -57,6 +59,9 @@ export type PublicListResult = {
   page?: number
   page_size?: number
   has_more?: boolean
+  market_closed?: boolean
+  empty?: boolean
+  message?: string
 }
 
 const compactQuery = (params: PublicListQuery): Record<string, string | number> => {

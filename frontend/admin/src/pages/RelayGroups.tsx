@@ -1,34 +1,43 @@
 /**
- * 渠道组令牌（FR-60 / T-10）：组 + 令牌 + Base URL 三步用法 + 用量。
- * GWT-60.1 签发明文一次 + 同屏 Base URL/三步；60.2 用量只读可见；
- * 60.4 无令牌空态句（走信封 message，单一来源在 relay_service）；
- * 60.7 经办能看不能签（藏控件 + 找管理员句，不是空表）；
- * 60.11 再进页只见前缀与状态。失败句走 FR-84 族（GWT-84.1：失败 ≠ 空表）。
- * 产品名「渠道组令牌」；v2 GWT-70.4「无我的中转令牌」不得进本页。
+ * 我的渠道组（T-20）：SKU none/active/expired；明文一次；租户 /newapi 仍 404。
+ * 读 T-18 GET /relay/sku，禁止 COUNT 组行当已买。禁 FR-U24 四字。
  */
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip, Typography, message,
+  Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Skeleton, Space, Table, Tag, Tooltip, Typography, message,
 } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 
+import RelaySkuEmpty from '../components/relay/RelaySkuEmpty'
 import RelayUsage from '../components/relay/RelayUsage'
+import { ContactAdminModal } from '../components/quota/ContactAdminModal'
 import TenantSpaceOnly from '../components/TenantSpaceOnly'
-import { useAuthStore } from '../store/useAuthStore'
-import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
 import {
-  createRelayGroup, fetchRelayPage, issueRelayToken, patchRelayGroup, revokeRelayToken,
+  RELAY_CANNOT_ISSUE,
+  RELAY_COPIED_TOAST,
+  RELAY_EMPTY_GROUPS,
+  RELAY_ISSUED_TOAST,
+  RELAY_LOAD_FAILED,
+  RELAY_OFFLINE_ISSUE,
+  RELAY_OFFLINE_UPGRADE,
+  RELAY_PLAINTEXT_ONCE,
+  RELAY_SKU_EXPIRED,
+  RELAY_SKU_INACTIVE,
+  RELAY_SKU_NONE,
+  RELAY_TOKENS_EMPTY,
+} from '../constants/relayCopy'
+import { listMyOrders } from '../services/billing'
+import {
+  createRelayGroup, fetchRelayPage, fetchRelaySku, issueRelayToken, patchRelayGroup, revokeRelayToken,
   type RelayGroupRow, type RelayTokenRow,
 } from '../services/relay'
+import { useAuthStore } from '../store/useAuthStore'
+import { apiErrorCode } from '../utils/collectBlock'
+import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
 
 const { Text, Paragraph } = Typography
-
-const LOAD_FAILED = '渠道组加载失败。检查网络后重试。'
-const OFFLINE_ISSUE = '网络不可用，没有产生令牌。'
-const EMPTY_GROUPS = '还没有渠道组。创建后才能签发令牌。'
-const CANNOT_ISSUE = '当前账号不能签发，请联系企业管理员'
-const PLAINTEXT_ONCE_WARN = '明文只显示这一次，关闭后无法再查看明文。'
 
 const GROUP_STATUS: Record<string, string> = { enabled: '启用', disabled: '停用' }
 const TOKEN_STATUS: Record<string, { label: string; color: string }> = {
@@ -42,35 +51,71 @@ const tokenStatusTag = (s: string) => {
   return <Tag color={meta.color}>{meta.label}</Tag>
 }
 
+const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false
+
 const RelayGroups: React.FC = () => {
   const user = useAuthStore((s) => s.user)
-  // GWT-82.4：平台超管无企业空间 → 「属于企业空间」说明态，不发空表请求
+  const navigate = useNavigate()
   const noTenantSpace = Boolean(user?.is_platform_admin) && user?.tenant_id == null
-  // 写权与后端 relay_service._ISSUER_ROLES 同口径（租户角色 owner/admin）
-  const canIssue = user?.tenant_role === 'owner' || user?.tenant_role === 'admin'
+  const buyer = user?.tenant_role === 'owner' || user?.tenant_role === 'admin'
 
   const queryClient = useQueryClient()
-  // react-query 托管读模型：刷新保留旧数据（用量数字不闪 0），失败可重试
+  const skuQuery = useQuery({
+    queryKey: ['relay-sku'],
+    queryFn: fetchRelaySku,
+    enabled: !noTenantSpace,
+    retry: false,
+  })
+  const sku = skuQuery.data
+  const skuActive = sku?.status === 'active'
   const pageQuery = useQuery({
     queryKey: ['relay-page'],
     queryFn: fetchRelayPage,
-    enabled: !noTenantSpace,
+    enabled: !noTenantSpace && skuActive,
+    retry: false,
   })
-  const groups = pageQuery.data?.groups ?? []
-  const tokens = pageQuery.data?.tokens ?? []
-  const cannotIssueNote = !canIssue
-    ? (pageQuery.data?.groupsMessage || CANNOT_ISSUE)
+  const ordersQuery = useQuery({
+    queryKey: ['my-orders'],
+    queryFn: listMyOrders,
+    enabled: !noTenantSpace && skuQuery.isSuccess && !skuActive,
+    retry: false,
+  })
+  const groups = skuActive ? (pageQuery.data?.groups ?? []) : []
+  const tokens = skuActive ? (pageQuery.data?.tokens ?? []) : []
+  const canIssue = Boolean(skuActive && buyer)
+  const cannotIssueNote = skuActive && !canIssue
+    ? (pageQuery.data?.groupsMessage || RELAY_CANNOT_ISSUE)
     : ''
+  const fulfillmentPending = (ordersQuery.data || []).some(
+    (row) => row.product_code === 'relay' && row.status === 'paid_pending_fulfillment',
+  )
 
   const [groupOpen, setGroupOpen] = useState(false)
   const [tokenOpen, setTokenOpen] = useState(false)
+  const [contactOpen, setContactOpen] = useState(false)
   const [issueError, setIssueError] = useState<string | null>(null)
   const [issued, setIssued] = useState<RelayTokenRow | null>(null)
   const [form] = Form.useForm()
   const [tokenForm] = Form.useForm()
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['relay-page'] })
-  const openIssue = () => { setIssueError(null); setTokenOpen(true) }
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['relay-page'] })
+    void queryClient.invalidateQueries({ queryKey: ['relay-sku'] })
+    void queryClient.invalidateQueries({ queryKey: ['my-orders'] })
+  }
+
+  const onUpgrade = () => {
+    if (isOffline()) {
+      message.warning(RELAY_OFFLINE_UPGRADE)
+      return
+    }
+    const upgrade = sku?.upgrade
+    if (upgrade?.action === 'checkout' && upgrade.checkout_path) {
+      navigate(upgrade.checkout_path)
+      return
+    }
+    setContactOpen(true)
+  }
 
   const createMutation = useMutation({
     mutationFn: createRelayGroup,
@@ -81,16 +126,20 @@ const RelayGroups: React.FC = () => {
   const issueMutation = useMutation({
     mutationFn: issueRelayToken,
     onSuccess: (row) => {
-      // GWT-60.1：明文只在本弹窗显示一次；GWT-60.11：列表侧永远只有前缀+状态
       setIssued(row)
       setTokenOpen(false)
       setIssueError(null)
       tokenForm.resetFields()
+      message.success(RELAY_ISSUED_TOAST)
       invalidate()
     },
     onError: (e) => {
       if (isFormValidateError(e)) return
-      // 内联可见失败（60.5 族：网关不可达句由信封 message 下发），弹窗不关、无假成功
+      const code = apiErrorCode(e)
+      if (code === RELAY_SKU_INACTIVE) {
+        setIssueError(apiErrorMessage(e, sku?.status === 'expired' ? RELAY_SKU_EXPIRED : RELAY_SKU_NONE))
+        return
+      }
       setIssueError(apiErrorMessage(e, '签发失败'))
     },
   })
@@ -121,8 +170,8 @@ const RelayGroups: React.FC = () => {
   }
 
   const onIssue = async () => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      setIssueError(OFFLINE_ISSUE) // 离线：弹窗不关、无明文
+    if (isOffline()) {
+      setIssueError(RELAY_OFFLINE_ISSUE)
       return
     }
     let values: { group_id?: number; name?: string; quota_tokens?: number }
@@ -136,21 +185,40 @@ const RelayGroups: React.FC = () => {
 
   if (noTenantSpace) return <TenantSpaceOnly what="渠道组" />
 
-  // GWT-84.1：列表失败 = 失败句 + 可点重试；不得画成「暂无数据」空表
-  if (pageQuery.isError) {
+  if (skuQuery.isError || (skuActive && pageQuery.isError)) {
     return (
       <Alert
-        type="error" showIcon title={LOAD_FAILED}
-        action={<Button size="small" onClick={() => pageQuery.refetch()}>重试</Button>}
+        type="error" showIcon title={RELAY_LOAD_FAILED}
+        action={<Button size="small" onClick={() => { void skuQuery.refetch(); void pageQuery.refetch() }}>重试</Button>}
       />
     )
   }
 
+  if (skuQuery.isPending || (skuActive && pageQuery.isPending && !pageQuery.data)) {
+    return <Skeleton active paragraph={{ rows: 8 }} />
+  }
+
+  if (!skuActive) {
+    return (
+      <>
+        <RelaySkuEmpty
+          status={sku?.status || 'none'}
+          title={sku?.empty_title}
+          hint={sku?.empty_hint}
+          fulfillmentPending={fulfillmentPending}
+          onUpgrade={onUpgrade}
+          onRefresh={() => invalidate()}
+        />
+        <ContactAdminModal open={contactOpen} onClose={() => setContactOpen(false)} />
+      </>
+    )
+  }
+
   const loading = pageQuery.isPending
-  const emptyTokensSentence = pageQuery.data?.tokensMessage || '还没有令牌。签发后才能按下方用法调用平台网关。'
+  const openIssue = () => { setIssueError(null); setTokenOpen(true) }
 
   return (
-    <div>
+    <div data-testid="relay-active">
       <Alert
         type="info" showIcon style={{ marginBottom: 12 }}
         title="平台渠道窗口与熔断由平台值班维护。本页只管理本企业令牌。"
@@ -167,7 +235,7 @@ const RelayGroups: React.FC = () => {
       <Card title="渠道组" size="small" style={{ marginBottom: 16 }}>
         {groups.length === 0 && !loading ? (
           <Alert
-            type="info" showIcon title={EMPTY_GROUPS}
+            type="info" showIcon title={RELAY_EMPTY_GROUPS}
             action={canIssue
               ? <Button size="small" type="primary" onClick={() => setGroupOpen(true)}>创建渠道组</Button>
               : undefined}
@@ -197,7 +265,7 @@ const RelayGroups: React.FC = () => {
       <Card title="令牌（渠道组令牌）" size="small" style={{ marginBottom: 16 }}>
         {tokens.length === 0 && !loading ? (
           <Alert
-            type="info" showIcon title={emptyTokensSentence}
+            type="info" showIcon title={RELAY_TOKENS_EMPTY}
             action={canIssue
               ? <Button size="small" type="primary" onClick={openIssue}>签发令牌</Button>
               : undefined}
@@ -230,7 +298,6 @@ const RelayGroups: React.FC = () => {
         )}
       </Card>
 
-      {/* 用法区：空态仍渲染（有权者签发后立刻用；无权者也能看用法） */}
       <Card title="调用平台网关（用法）" size="small">
         <RelayUsage />
       </Card>
@@ -260,17 +327,16 @@ const RelayGroups: React.FC = () => {
       <Modal title="请立即复制渠道组令牌" open={Boolean(issued)} okText="我已保存，关闭"
              cancelButtonProps={{ style: { display: 'none' } }} destroyOnHidden
              onOk={() => setIssued(null)} onCancel={() => setIssued(null)}>
-        <Paragraph type="warning">{PLAINTEXT_ONCE_WARN}</Paragraph>
+        <Paragraph type="warning">{RELAY_PLAINTEXT_ONCE}</Paragraph>
         <Paragraph>
           <Text
             code copyable={{
-              onCopy: () => message.success('已复制渠道组令牌'),
+              onCopy: () => message.success(RELAY_COPIED_TOAST),
             }} style={{ wordBreak: 'break-all' }} data-testid="issued-plaintext"
           >
             {issued?.plaintext_key}
           </Text>
         </Paragraph>
-        {/* GWT-60.1：同一屏给出 Base URL 与三步用法 */}
         <RelayUsage />
       </Modal>
     </div>

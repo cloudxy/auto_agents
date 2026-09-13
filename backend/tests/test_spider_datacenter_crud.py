@@ -613,7 +613,7 @@ class TestSearchResults:
         kwargs = svc.result_repo.query_by_spider.await_args.kwargs
         assert kwargs.get("exclude_source") == "marketplace"
         assert resp.total == 0 and resp.items == []
-        assert EMPTY_DATACENTER_COPY == "还没有采集结果"
+        assert EMPTY_DATACENTER_COPY == "还没有结果，去提交采集"
 
     @pytest.mark.asyncio
     async def test_query_public_results_excludes_marketplace(self):

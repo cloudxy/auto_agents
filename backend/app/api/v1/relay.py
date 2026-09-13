@@ -1,13 +1,11 @@
 """租户渠道组 SKU：组 / 令牌。平台渠道与熔断仍只在 /newapi。
 
-T-07（GWT-60.4/60.7）：GET 不建组（空态可达）；经办/只读无签发/吊销/停用面
-——写拒绝走 Service 可见找管理员句，不挂 require_tenant_manager 的裸 403。
-T-09（GWT-60.2/60.3/60.5）：令牌详情 = 用量回写触发点（网关 key info + spend
-HTTP → 本地 used_tokens 缓存列；网关不可达 → 详情降级本地 + 60.5 句族 message）；
-显式刷新 = 按页批量触发点（网关不可达 → 502 LLM_GATEWAY_UNREACHABLE 句族）。
-列表读路径（list_tokens）只读本地列，禁止每行打网关（QA-08）。
+T-18：列表/签发闸在权益表，不是组行 COUNT。SKU≠active → 空态句 + 去升级
+product=relay；跨租户与令牌凭证失败 404 同形。明文只在当次签发。
 """
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
@@ -17,9 +15,11 @@ from backend.services.relay_service import (
     MSG_CANNOT_ISSUE, MSG_GATEWAY_UNREACHABLE, MSG_TOKENS_EMPTY, RelayService,
     is_issuer_role, require_tenant_id,
 )
+from backend.services.relay_sku_gate import empty_title
 from platform_core.db import get_async_db
 from platform_core.schemas.relay import (
-    RelayGroupCreate, RelayGroupOut, RelayGroupUpdate, RelayTokenCreate, RelayTokenOut,
+    RelayGroupCreate, RelayGroupOut, RelayGroupUpdate, RelaySkuPageOut,
+    RelayTokenCreate, RelayTokenOut,
 )
 
 router = APIRouter()
@@ -31,14 +31,27 @@ def _svc(session: AsyncSession = Depends(get_async_db)) -> RelayService:
     return RelayService(session)
 
 
+@router.get("/sku", response_model=ApiResponse[RelaySkuPageOut])
+async def get_sku_page(
+    user: CurrentUser = Depends(get_current_user),
+    service: RelayService = Depends(_svc),
+) -> ApiResponse[RelaySkuPageOut]:
+    tid = require_tenant_id(user.tenant_id)
+    page = await service.sku_page(tid, user.tenant_role)
+    message = page.empty_title or "操作成功"
+    return ok(page, message=message)
+
+
 @router.get("/groups", response_model=ApiResponse[list[RelayGroupOut]])
 async def list_groups(
     user: CurrentUser = Depends(get_current_user),
     service: RelayService = Depends(_svc),
 ) -> ApiResponse[list[RelayGroupOut]]:
     tid = require_tenant_id(user.tenant_id)
+    status = await service.sku_status(tid)
     groups = await service.list_groups(tid)
-    # GWT-60.7：无签发权者页入口可见找管理员句（不是空表也不是裸「操作成功」）
+    if status != "active":
+        return ok(groups, message=empty_title(status))
     if not is_issuer_role(user.tenant_role):
         return ok(groups, message=MSG_CANNOT_ISSUE)
     return ok(groups)
@@ -77,8 +90,10 @@ async def list_tokens(
     service: RelayService = Depends(_svc),
 ) -> ApiResponse[list[RelayTokenOut]]:
     tid = require_tenant_id(user.tenant_id)
+    status = await service.sku_status(tid)
     tokens = await service.list_tokens(tid)
-    # GWT-60.4：无令牌空态冻结句，不是默认「暂无数据」
+    if status != "active":
+        return ok(tokens, message=empty_title(status))
     if not tokens:
         return ok(tokens, message=MSG_TOKENS_EMPTY)
     return ok(tokens)
@@ -95,6 +110,18 @@ async def issue_token(
     out = await service.issue_token(tid, user.tenant_role, payload)
     await record_audit(session, user, "relay.token.issue", f"token#{out.id}")
     return created(out, message=TOKEN_ISSUED_MESSAGE)
+
+
+@router.get("/tokens/by-key", response_model=ApiResponse[RelayTokenOut])
+async def usage_by_plaintext(
+    user: CurrentUser = Depends(get_current_user),
+    service: RelayService = Depends(_svc),
+    x_relay_token: Optional[str] = Header(None, alias="X-Relay-Token"),
+) -> ApiResponse[RelayTokenOut]:
+    """令牌凭证读本企业用量。明文不回写；失败 404 同形。"""
+    tid = require_tenant_id(user.tenant_id)
+    out = await service.usage_by_plaintext(tid, x_relay_token or "")
+    return ok(out)
 
 
 @router.get("/tokens/{token_id}", response_model=ApiResponse[RelayTokenOut])

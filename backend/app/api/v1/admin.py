@@ -6,10 +6,12 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import (
-    CurrentUser, require_admin, require_login, require_platform_admin_or_404,
+    CurrentUser, require_admin, require_login, require_platform_admin,
+    require_platform_admin_or_404,
 )
 from platform_core.schemas.auth import AdminUserCreateRequest, AdminUserUpdateRequest
 from backend.app.responses import ok, created
@@ -188,6 +190,37 @@ async def patch_tenant(
     await service.patch_tenant(tenant_id, body)
     await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
     return ok(data={"id": tenant_id, "updated": True})
+
+
+class PowerMarketSwitchBody(BaseModel):
+    enabled: bool
+
+
+@router.get("/power-market")
+async def get_power_market_switch(
+    _user: CurrentUser = Depends(require_platform_admin),
+):
+    """市场总开关（超管可读；租户公司管理员拒绝且开关不变，GWT-U11.3）。"""
+    from backend.services.power_market.flag import is_power_market_enabled
+
+    return ok(data={"enabled": is_power_market_enabled()})
+
+
+@router.put("/power-market")
+async def put_power_market_switch(
+    body: PowerMarketSwitchBody,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """超管打开/关闭能力市场总开关。yaml 默认 false；本写覆盖运行时。"""
+    from backend.services.power_market.flag import set_power_market_enabled
+
+    enabled = set_power_market_enabled(body.enabled)
+    await record_audit(
+        session, user, "power_market.switch", "POWER_MARKET.ENABLED",
+        detail={"enabled": enabled},
+    )
+    return ok(data={"enabled": enabled})
 
 
 # ---------------- 死信队列（B6 工单 91：排障刚需，admin 专属） ----------------

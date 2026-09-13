@@ -21,6 +21,13 @@ from backend.services.power_market.listing import ListingWriter
 from backend.services.power_market.sources import SourceRegistry
 from backend.services.power_market.sync import SourceSync
 from backend.services.power_market.references import list_runtime_refs
+from backend.services.power_market.flag import (
+    MSG_EMPTY_SHELF,
+    closed_detail_payload,
+    closed_list_payload,
+    is_power_market_enabled,
+    require_power_market_open,
+)
 from backend.services.power_market.types import (
     DEFAULT_ALLOWED_LICENSES,
     GOVERNANCE_PUBLIC,
@@ -200,13 +207,15 @@ class PowerMarketService:
         )
         page_size = self._page_size(page_size)
         page = max(int(page or 1), 1)
+        if not is_power_market_enabled():
+            return closed_list_payload(page=page, page_size=page_size)
         public = self.parse_asset_type(asset_type, default=default)
         stored = None if public is None else _stored_types_for(public)
         rows, total = await self._list_fr33(
             stored, category, q, page, page_size, host=host,
         )
         sides = await self._command_sides(rows)
-        return {
+        payload = {
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -214,12 +223,19 @@ class PowerMarketService:
             "items": [
                 self._project(row, command=sides.get(row.id)) for row in rows
             ],
+            "market_closed": False,
         }
+        if total == 0:
+            payload["empty"] = True
+            payload["message"] = MSG_EMPTY_SHELF
+        return payload
 
     async def get_public(
         self, asset_type: Optional[str], name: str, *, default: Optional[str] = None,
     ) -> Optional[dict]:
         logger.info(f"power_market.get_public | type={asset_type} name={name}")
+        if not is_power_market_enabled():
+            return closed_detail_payload()
         public = self.parse_asset_type(asset_type, default=default)
         row = await self._load_named(public, name)
         if row is None or not _row_is_fr33(row):
@@ -244,6 +260,7 @@ class PowerMarketService:
         default: Optional[str] = None,
     ) -> dict:
         logger.info(f"power_market.subscribe_public | type={asset_type} name={name}")
+        require_power_market_open()
         public = self.parse_asset_type(asset_type, default=default)
         row = await self._load_named(public, name)
         if row is None or not _row_is_fr33(row):

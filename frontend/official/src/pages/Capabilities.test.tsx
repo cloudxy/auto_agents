@@ -17,7 +17,8 @@ import Capabilities from './Capabilities'
 
 const fetchList = listPublicAssets as jest.MockedFunction<typeof listPublicAssets>
 
-const EMPTY = '还没有上架的能力'
+const EMPTY = '暂无已上架能力'
+const CLOSED = '能力市场未开放'
 const FILTER_EMPTY = '没有符合条件的能力'
 const FAIL = '市场列表加载失败'
 const FAIL_HINT = '检查网络后重试'
@@ -97,15 +98,18 @@ test('search box writes q into the URL', async () => {
   expect(decodeURIComponent(screen.getByTestId('loc').textContent || '')).toContain('q=代码审查')
 })
 
-test('GWT-31.2 unfiltered empty is 还没有上架的能力, not 暂无已发布', async () => {
-  fetchList.mockResolvedValue({ items: [] })
+test('GWT-31.2 / GWT-U10.2 unfiltered empty is 暂无已上架能力, not closed or load-fail', async () => {
+  fetchList.mockResolvedValue({ items: [], total: 0, market_closed: false, message: EMPTY })
   renderMarket('/capabilities')
   expect(await screen.findByText(EMPTY)).toBeInTheDocument()
   expect(screen.getByText(/已上架且过许可的能力会出现在这里/)).toBeInTheDocument()
   expect(screen.queryByText(FILTER_EMPTY)).not.toBeInTheDocument()
   expect(screen.queryByText(FAIL)).not.toBeInTheDocument()
+  expect(screen.queryByText(CLOSED)).not.toBeInTheDocument()
   expect(screen.queryByText(ILLEGAL)).not.toBeInTheDocument()
   expect(screen.queryByTestId('filter-echo')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('market-closed')).not.toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain('当前可买')
 })
 
 test('GWT-31.3 filtered empty is 没有符合条件的能力 plus 清除筛选', async () => {
@@ -123,6 +127,7 @@ test('GWT-31.3 filtered empty is 没有符合条件的能力 plus 清除筛选',
   expect(echo).toHaveTextContent('分类')
   expect(echo).toHaveTextContent('none')
   expect(screen.queryByText(EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(CLOSED)).not.toBeInTheDocument()
   expect(screen.queryByText(FAIL)).not.toBeInTheDocument()
   expect(screen.queryByText(ILLEGAL)).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '清除筛选' }))
@@ -138,6 +143,7 @@ test('GWT-31.4 load failure is 市场列表加载失败, not empty stock', async
   expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
   expect(screen.queryByText(EMPTY)).not.toBeInTheDocument()
   expect(screen.queryByText(FILTER_EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(CLOSED)).not.toBeInTheDocument()
   expect(screen.queryByText(ILLEGAL)).not.toBeInTheDocument()
   expect(screen.queryByTestId('filter-echo')).not.toBeInTheDocument()
 })
@@ -292,4 +298,38 @@ test('GWT-92.5 paging request goes out with page 2; filter change resets page', 
   await screen.findByText('夹具0') // 重置回第 1 页
   expect(fetchList).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 }))
   expect(screen.getByTestId('loc').textContent).not.toContain('page=')
+})
+
+test('GWT-U11.2 closed market is 能力市场未开放, not empty shelf', async () => {
+  fetchList.mockResolvedValue({
+    items: [], total: 0, market_closed: true, empty: true, message: CLOSED,
+  })
+  renderMarket('/capabilities')
+  expect(await screen.findByText(CLOSED)).toBeInTheDocument()
+  expect(screen.getByText('开放后，已上架的能力会出现在这里。')).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute('href', '/')
+  expect(screen.queryByText(EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(FILTER_EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(FAIL)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /订阅/ })).not.toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain('当前可买')
+})
+
+test('GWT-U11.2 closed plus filters still uses closed copy, not filter-empty', async () => {
+  fetchList.mockResolvedValue({
+    items: [], total: 0, market_closed: true, message: CLOSED,
+  })
+  renderMarket('/capabilities?type=skill&q=没有这货')
+  expect(await screen.findByText(CLOSED)).toBeInTheDocument()
+  expect(screen.queryByText(EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(FILTER_EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '清除筛选' })).not.toBeInTheDocument()
+})
+
+test('GWT-U10.2 load failure is not empty shelf or closed', async () => {
+  fetchList.mockRejectedValue(new Error('boom'))
+  renderMarket('/capabilities')
+  expect(await screen.findByText(FAIL)).toBeInTheDocument()
+  expect(screen.queryByText(EMPTY)).not.toBeInTheDocument()
+  expect(screen.queryByText(CLOSED)).not.toBeInTheDocument()
 })

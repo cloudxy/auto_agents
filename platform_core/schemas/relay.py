@@ -53,3 +53,21 @@ class RelayTokenOut(BaseModel):
     revoked_at: Optional[datetime] = None
     created_at: datetime
     plaintext_key: Optional[str] = None
+
+
+class RelayUpgradeOut(BaseModel):
+    action: str
+    product: str
+    checkout_path: Optional[str] = None
+    message: str
+
+
+class RelaySkuPageOut(BaseModel):
+    """「我的渠道组」SKU 闸读模型。status 来自权益表，不是组行 COUNT。"""
+
+    status: str
+    period_end: Optional[datetime] = None
+    can_issue: bool
+    empty_title: str = ""
+    empty_hint: str = ""
+    upgrade: Optional[RelayUpgradeOut] = None

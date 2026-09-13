@@ -434,9 +434,23 @@ def _reset_db_manager():
 
 
 @pytest.fixture(autouse=True)
+def _power_market_enabled_for_tests():
+    """公开/订阅测默认打开总开关；关闭路径在用例里 settings.set False（FR-U11）。"""
+    from config import settings
+
+    original = settings.get("POWER_MARKET.ENABLED")
+    settings.set("POWER_MARKET.ENABLED", True)
+    try:
+        yield
+    finally:
+        settings.set("POWER_MARKET.ENABLED", original)
+
+
+@pytest.fixture(autouse=True)
 def _workers_online_unless_offline_node(request, monkeypatch):
-    """入队闸默认报告工人在线；GWT-18.2/18.4 离线节点走真心跳扫描。"""
-    if "test_spider_worker_offline.py" in request.node.nodeid:
+    """入队闸默认报告工人在线；离线节点（GWT-18.2/18.4 / FR-U02.1）走真心跳扫描。"""
+    nodeid = request.node.nodeid
+    if "test_spider_worker_offline.py" in nodeid or "test_fr_u01_enqueue.py" in nodeid:
         return
 
     async def _online(_client) -> int:
