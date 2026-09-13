@@ -25,6 +25,7 @@ WAVE0_EVENT_NAMES = (
     "login_failed",
     "task_run_submitted",
     "task_completed",
+    "task_blocked",
     "results_exported",
     "quota_exceeded",
 )
@@ -65,6 +66,7 @@ class ProductEventOut(BaseModel):
     role: Optional[str] = None
     props: Optional[dict[str, Any]] = None
     created_at: datetime
+    is_internal_fixture: Optional[bool] = None
 
 
 class ProductEventListOut(BaseModel):

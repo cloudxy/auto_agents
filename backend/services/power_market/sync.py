@@ -87,25 +87,32 @@ class SourceSync:
         packages = _iter_packages(root)
         succeeded, failed = 0, 0
         failed_items: list[dict] = []
+        keeps: dict[str, dict[str, set[str]]] = {}
         for pkg in packages:
             try:
-                await self._sync_package(source, pkg)
+                keeps[pkg.name] = await self._sync_package(source, pkg)
                 succeeded += 1
             except Exception as exc:  # noqa: BLE001 单包失败不中断
                 failed += 1
                 failed_items.append({"name": pkg.name, "reason": str(exc)})
                 logger.warning(f"源同步包失败 | source={source.name} pkg={pkg.name} err={exc}")
+        retracted = await self._retract_missing_rows(
+            source, {pkg.name for pkg in packages}, keeps,
+        )
         return {
             "total": len(packages), "succeeded": succeeded, "failed": failed,
-            "failed_items": failed_items,
+            "failed_items": failed_items, "retracted": retracted,
         }
 
-    async def _sync_package(self, source: CapabilitySource, pkg: Path) -> None:
+    async def _sync_package(
+        self, source: CapabilitySource, pkg: Path,
+    ) -> dict[str, set[str]]:
         manifest = _read_manifest(pkg)
         plugin_name = pkg.name
         await self._upsert_plugin(source, pkg, plugin_name, manifest)
-        await self._upsert_skills(source, pkg, plugin_name)
-        await self._upsert_commands(source, pkg, plugin_name, manifest)
+        skill_keep = await self._upsert_skills(source, pkg, plugin_name)
+        command_keep = await self._upsert_commands(source, pkg, plugin_name, manifest)
+        return {"skill": skill_keep, "command": command_keep}
 
     async def _load_named(self, asset_type: str, name: str) -> CapabilityAsset | None:
         return (await self.session.execute(
@@ -182,8 +189,9 @@ class SourceSync:
 
     async def _upsert_skills(
         self, source: CapabilitySource, pkg: Path, plugin_name: str,
-    ) -> None:
+    ) -> set[str]:
         seen_locals: dict[str, str] = {}
+        keep: set[str] = set()
         for item in _fold_skills(pkg):
             local = item["origin_local_name"]
             if local in seen_locals and seen_locals[local] != item["content_hash"]:
@@ -191,7 +199,9 @@ class SourceSync:
             else:
                 name = _bundled_slug(plugin_name, local)
                 seen_locals[local] = item["content_hash"]
+            keep.add(name)
             await self._upsert_skill_row(source, plugin_name, name, item)
+        return keep
 
     async def _upsert_skill_row(
         self, source: CapabilitySource, plugin_name: str, name: str, item: dict,
@@ -220,10 +230,61 @@ class SourceSync:
 
     async def _upsert_commands(
         self, source: CapabilitySource, pkg: Path, plugin_name: str, manifest: dict,
-    ) -> None:
+    ) -> set[str]:
+        keep: set[str] = set()
         for item in _fold_commands(pkg, manifest):
             name = _bundled_slug(plugin_name, item["origin_local_name"])
+            keep.add(name)
             await self._upsert_command_row(source, plugin_name, name, item)
+        return keep
+
+    async def _retract_missing_rows(
+        self, source: CapabilitySource, package_names: set[str],
+        keeps: dict[str, dict[str, set[str]]],
+    ) -> dict[str, int]:
+        """源里已经没有的行：软删收回，不再出现在治理目录/公开商店（FR-88）。
+
+        命令同构扩到技能/插件；整包删除时包内技能/命令随包收回（不残留
+        孤儿行）。包还在但同步失败的（在 package_names、不在 keeps）保留
+        不动——失败是解析/DB 问题，不是源删除，不能借同步失败收回活行。
+        """
+        counts = {"plugin": 0, "skill": 0, "command": 0}
+        now = _utcnow()
+        plugin_rows = (await self.session.execute(
+            select(CapabilityAsset).where(
+                CapabilityAsset.asset_type == "plugin",
+                CapabilityAsset.source_id == source.id,
+                CapabilityAsset.deleted_at.is_(None),
+            )
+        )).scalars().all()
+        for row in plugin_rows:
+            if row.name in package_names:
+                continue
+            row.deleted_at = now
+            row.sync_state = "gone"
+            counts["plugin"] += 1
+        child_rows = (await self.session.execute(
+            select(CapabilityAsset).where(
+                CapabilityAsset.asset_type.in_(("skill", "command")),
+                CapabilityAsset.source_id == source.id,
+                CapabilityAsset.deleted_at.is_(None),
+            )
+        )).scalars().all()
+        for row in child_rows:
+            parent = row.origin_plugin_name or ""
+            if not parent:
+                continue  # 无父行不属包收回范围
+            if parent in keeps:
+                if row.name in keeps[parent].get(row.asset_type, set()):
+                    continue
+            elif parent in package_names:
+                continue
+            row.deleted_at = now
+            row.sync_state = "gone"
+            counts[row.asset_type] += 1
+        if any(counts.values()):
+            logger.info(f"src_sync 收回缺失行: source={source.name} counts={counts}")
+        return counts
 
     async def _upsert_command_row(
         self, source: CapabilitySource, plugin_name: str, name: str, item: dict,

@@ -47,6 +47,11 @@ ALL_ORM_TABLES = {
     "capability_sources",
     "capability_aliases",
     "product_events",
+    # T-01 内部测试企业名单（upgrade-four-pillars N1，迁移 045）
+    "internal_fixture_tenants",
+    # T-35 能力资产导入两表（迁移 043）
+    "asset_import_batches",
+    "asset_import_items",
     # DB 升级 2026-09 Phase B/C 横切功能表（13 张）
     "tags",
     "taggings",
@@ -67,10 +72,17 @@ ALL_ORM_TABLES = {
     "menus",
     "permissions",
     "api_keys",
-    # 订阅计费（迁移 029）
+    # 账务/渠道组骨架（018c369，迁移 040）
     "plans",
     "tenant_subscriptions",
     "orders",
+    "relay_groups",
+    "relay_tokens",
+    # T-14 N3 结账 widen + 凭据 + 中转 SKU 权益（迁移 046）
+    "payment_channel_credentials",
+    "relay_sku_entitlements",
+    # 出站拉数钥匙（feat-product-complete T-04，迁移 041）
+    "outbound_keys",
 }
 
 

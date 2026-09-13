@@ -103,6 +103,22 @@ class AiPlannerService:
     # ------------------------------------------------------------------
     # 后台任务触发（API 端点内 create_task，立即返回快照）
     # ------------------------------------------------------------------
+    async def _reject_if_token_quota_full(self, tenant_id: int | None) -> None:
+        """规划点击 3 秒内可见配额句（GWT-U02.4）；不建单、不混工人句。"""
+        logger.info(f"规划前 token 配额闸 | tenant={tenant_id}")
+        if tenant_id is None:
+            return
+        from backend.services.quota_service import (
+            QuotaExceededException, QuotaService, shanghai_year_month,
+            wrap_quota_exceeded,
+        )
+        try:
+            await QuotaService(self.session).check_llm_tokens_month(
+                int(tenant_id), shanghai_year_month(),
+            )
+        except QuotaExceededException as exc:
+            raise wrap_quota_exceeded(exc) from exc
+
     async def launch_plan(self, plan_id: int) -> AiPlanResponse:
         """触发后台规划：原子抢断置 planning → asyncio.create_task 执行，立即返回快照"""
         plan = await self.repo.get_by_id(plan_id)
@@ -110,6 +126,8 @@ class AiPlannerService:
             raise NotFoundException("AI 采集计划")
         if plan.status in _seam()._BUSY_STATUSES:
             raise BusinessException(f"计划当前状态为 {plan.status}，不允许触发规划")
+        owner_id = int(plan.tenant_id) if getattr(plan, "tenant_id", None) else None
+        await self._reject_if_token_quota_full(owner_id)
         # M5：check-then-act 非原子，并发触发会双跑双 LLM 调用；
         # 条件 UPDATE（status NOT IN busy）一次语句抢断，rowcount=0 即已被并发占用。
         claimed = await self.repo.claim_status(

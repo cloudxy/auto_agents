@@ -13,7 +13,7 @@ import { apiErrorMessage } from '../../utils/errorMessage'
 import HostRuntimeNote from './HostRuntimeNote'
 import ListingControls from './ListingControls'
 import {
-  DETAIL, HEALTH_UNKNOWN, LIST_CHILD, LISTED_NE_VERIFY,
+  DETAIL, GOVERNANCE_PAGINATION, HEALTH_UNKNOWN, LIST_CHILD, LISTED_NE_VERIFY,
   NEED_PLATFORM_ADMIN, OPEN_IN_CATALOG, VERIFY, healthLabel, loadFail,
 } from './marketCopy'
 
@@ -85,7 +85,8 @@ const PluginTab: React.FC<Props> = ({ onSubscribe, onOpenCatalog }) => {
         <Text type="secondary">{LISTED_NE_VERIFY}</Text>
       </Space>
       {empty ? <Empty description="还没有插件。扫描或同步源后会出现在这里。" /> : (
-        <Table rowKey="id" size="middle" loading={loading} dataSource={rows} pagination={false}
+        <Table rowKey="id" size="middle" loading={loading} dataSource={rows}
+               pagination={GOVERNANCE_PAGINATION}
                columns={[
                  { title: '名称', dataIndex: 'name', render: (v: string) => <Text code>{v}</Text> },
                  { title: '描述', dataIndex: 'title', ellipsis: true },

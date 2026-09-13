@@ -118,8 +118,8 @@ def test_gwt_38_3_tenant_cannot_register(db_client, db_session, library_root):
     resp = db_client.post(_SRC, json={
         "name": "tenant-src", "source_kind": "local", "uri": str(library_root),
     }, headers=tenant)
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     after = db_client.get(_SRC, headers=pa)
     assert after.status_code == 200
     assert before.json()["data"]["items"] == after.json()["data"]["items"]
@@ -348,7 +348,8 @@ def test_gwt_41_3_tenant_cannot_list_third_party(
     resp = admin_client.patch(
         _LISTING.format("skill", "third-list"), json={"listing_state": "listed"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     row = _query(db_session, select(CapabilityAsset).where(
         CapabilityAsset.name == "third-list",
     ))[0]
@@ -533,3 +534,50 @@ def test_src_sync_plugin_json_commands_creates_unlisted_command_adr0012_slug(
     ))
     assert len(kept) == 1
     assert kept[0].listing_state == "unlisted"
+
+
+def test_src_sync_retracts_commands_removed_from_manifest(
+    db_client, platform_admin_client, db_session, library_root,
+):
+    """C35-QA-04：manifest 去掉命令后，再同步必须软删，不得残留治理行。"""
+    tree = library_root / "src-cmd-retract"
+    plugin = _write_plugin(tree, "retract-pack", ["leaf"])
+    manifest_path = plugin / "plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["commands"] = {
+        "/keep-me": {"name": "keep-me", "description": "留"},
+        "/drop-me": {"name": "drop-me", "description": "删"},
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    cmd_dir = plugin / "commands"
+    cmd_dir.mkdir()
+    (cmd_dir / "keep-me.md").write_text("---\nname: keep-me\n---\n# keep\n", encoding="utf-8")
+    (cmd_dir / "drop-me.md").write_text("---\nname: drop-me\n---\n# drop\n", encoding="utf-8")
+    created = _register(platform_admin_client, "src-cmd-retract", str(tree))
+    assert created.status_code in (200, 201), created.text
+    first = _sync(platform_admin_client, "src-cmd-retract")
+    assert first.status_code == 200, first.text
+    names = {
+        r.name for r in _query(db_session, select(CapabilityAsset).where(
+            CapabilityAsset.asset_type == "command",
+            CapabilityAsset.deleted_at.is_(None),
+        ))
+    }
+    assert names == {"retract-pack__keep-me", "retract-pack__drop-me"}
+
+    (cmd_dir / "drop-me.md").unlink()
+    manifest["commands"] = {"/keep-me": {"name": "keep-me", "description": "留"}}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    second = _sync(platform_admin_client, "src-cmd-retract")
+    assert second.status_code == 200, second.text
+    alive = _query(db_session, select(CapabilityAsset).where(
+        CapabilityAsset.asset_type == "command",
+        CapabilityAsset.deleted_at.is_(None),
+    ))
+    assert [r.name for r in alive] == ["retract-pack__keep-me"]
+    gone = _query(db_session, select(CapabilityAsset).where(
+        CapabilityAsset.name == "retract-pack__drop-me",
+    ))
+    assert len(gone) == 1
+    assert gone[0].deleted_at is not None
+    assert gone[0].sync_state == "gone"

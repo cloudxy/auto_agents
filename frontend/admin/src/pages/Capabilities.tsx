@@ -1,18 +1,24 @@
 /**
- * T-28 治理台七叶：源 | 目录 | 插件 | 技能 | 命令 | 智能体 | 专家团
- * 窄屏滚动不删叶。无「上架全部子资产」。无 enable-host。
+ * 能力市场：租户货架（屏 15）vs 超管七叶+总开关（屏 24）。
+ * 租户无源/上架/扫描/总开关。无 enable-host。禁定价可买四字。
  */
 import React, { useEffect, useState } from 'react'
-import { ConfigProvider, Tabs } from 'antd'
-import { useSearchParams } from 'react-router-dom'
+import { Button, ConfigProvider, Tabs } from 'antd'
+import { ImportOutlined } from '@ant-design/icons'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import Skills from './Skills'
 import SubscribeModal from '../components/SubscribeModal'
 import CatalogTab from './market/CatalogTab'
+import ImportWizard from './market/ImportWizard'
 import PluginTab from './market/PluginTab'
+import PowerMarketSwitch from './market/PowerMarketSwitch'
 import SourceTab from './market/SourceTab'
 import TeamLeafTab from './market/TeamLeafTab'
+import TenantShelf from './market/TenantShelf'
 import TypeLeafTab from './market/TypeLeafTab'
+import { usePermission } from '../hooks/usePermission'
+import { IMPORT_ENTRY } from './market/importWizardCopy'
 import {
   AGENT_EMPTY, COMMAND_EMPTY, TABS,
 } from './market/marketCopy'
@@ -22,6 +28,8 @@ const COMMAND_TYPES = ['command']
 const AGENT_TYPES = ['agent', 'expert']
 
 const Capabilities: React.FC = () => {
+  const { isPlatformAdmin, role } = usePermission()
+  const navigate = useNavigate()
   const [tab, setTab] = useState('catalog')
   const [params] = useSearchParams()
   const bounceType = params.get('subscribeType') || ''
@@ -29,19 +37,63 @@ const Capabilities: React.FC = () => {
   const [target, setTarget] = useState<{ type: string; name: string } | null>(
     bounceType && bounceName ? { type: bounceType, name: bounceName } : null,
   )
+  const [catalogFocus, setCatalogFocus] = useState<string | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [catalogRefresh, setCatalogRefresh] = useState(0)
 
   useEffect(() => {
     if (bounceType && bounceName) setTarget({ type: bounceType, name: bounceName })
   }, [bounceType, bounceName])
 
   const openCatalog = (name: string) => {
+    setCatalogFocus(name)
     setTab('catalog')
-    void name
+  }
+
+  const closeImport = (imported: boolean) => {
+    setImportOpen(false)
+    if (imported) setCatalogRefresh((k) => k + 1)
+  }
+  const finishImport = () => {
+    setCatalogRefresh((k) => k + 1)
+    setTab('catalog')
+    setImportOpen(false)
+  }
+
+  const modal = target ? (
+    <SubscribeModal
+      open
+      assetType={target.type}
+      assetName={target.name}
+      onClose={() => setTarget(null)}
+      onSubscribed={() => {
+        setTarget(null)
+        navigate('/capabilities/installs')
+      }}
+    />
+  ) : null
+
+  if (!isPlatformAdmin) {
+    return (
+      <ConfigProvider button={{ autoInsertSpace: false }}>
+        <TenantShelf
+          canSubscribe={role !== 'viewer'}
+          onSubscribe={(type, name) => setTarget({ type, name })}
+        />
+        {modal}
+      </ConfigProvider>
+    )
   }
 
   return (
     <ConfigProvider button={{ autoInsertSpace: false }}>
-    <div>
+    <div data-testid="governance-shell">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+        <PowerMarketSwitch />
+        <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+          {IMPORT_ENTRY}
+        </Button>
+      </div>
       <Tabs
         className="market-tabs"
         activeKey={tab}
@@ -51,7 +103,9 @@ const Capabilities: React.FC = () => {
         destroyOnHidden={false}
         items={[
           { key: TABS[0].key, label: TABS[0].label, children: <SourceTab /> },
-          { key: TABS[1].key, label: TABS[1].label, children: <CatalogTab /> },
+          { key: TABS[1].key, label: TABS[1].label, children: (
+            <CatalogTab focusName={catalogFocus} refreshKey={catalogRefresh} />
+          ) },
           { key: TABS[2].key, label: TABS[2].label, children: (
             <PluginTab
               onSubscribe={(name) => setTarget({ type: 'plugin', name })}
@@ -74,14 +128,10 @@ const Capabilities: React.FC = () => {
           ) },
         ]}
       />
-      {target ? (
-        <SubscribeModal
-          open
-          assetType={target.type}
-          assetName={target.name}
-          onClose={() => setTarget(null)}
-        />
+      {importOpen ? (
+        <ImportWizard open onCancel={closeImport} onFinished={finishImport} />
       ) : null}
+      {modal}
     </div>
     </ConfigProvider>
   )

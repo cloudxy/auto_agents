@@ -13,13 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.external_api.v1.webhooks import bound_tenant_id, validate_api_key
 from backend.services.api_key_service import ApiKeyService
+from backend.services.outbound_key_service import OutboundKeyService
 from backend.services.spider_query_service import SpiderQueryService
 from platform_core.db import get_async_db
 from platform_core.logger import get_logger
 from platform_core.schemas.spider import SpiderTaskResponse
 
 router = APIRouter()
-_log = get_logger("external.api")
+logger = get_logger("api")
 
 
 # ---------------------------------------------------------------------------
@@ -33,17 +34,35 @@ async def _resolve_tenant_key(request: Request, session: AsyncSession) -> Option
     if tenant_id is not None:
         return tenant_id
     if validate_api_key(api_key):
-        _log.warning("外部 API 使用已退役的平台静态 Key，过渡期允许且无租户过滤")
+        logger.warning("外部 API 使用已退役的平台静态 Key，过渡期允许且无租户过滤")
         return None
     raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
-def _require_bound_tenant(request: Request) -> int:
-    """出站拉数：钥匙必须绑恰好一家企业，否则 401 且不查库（0 行）。"""
-    tenant_id = bound_tenant_id(request.headers.get("X-API-Key", ""))
-    if tenant_id is None:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
-    return tenant_id
+async def _require_bound_tenant(request: Request, session: AsyncSession) -> int:
+    """出站拉数查找链：出站钥匙表 → 租户 API Key → KEY_BINDINGS → 401。
+
+    第一环：本企业 active 出站拉数钥匙（SHA-256 指纹 + compare_digest，
+    Service 内执法；revoked / 渠道组 sk- / 乱填一律不命中，GWT-51.3/6/7）；
+    第二环：L1 租户 API Key（api_keys 表）；
+    第三环：既有 KEY_BINDINGS 配置绑定（FR-13 平台钥匙行为保持，不放宽）；
+    三环都未命中 → 401 且不查结果库（0 行）。明文不落日志。
+    """
+    api_key = request.headers.get("X-API-Key", "")
+    tenant_id = await OutboundKeyService(session).resolve_active_tenant(api_key)
+    if tenant_id is not None:
+        logger.info("出站拉数鉴权命中 | 链=出站钥匙表")
+        return int(tenant_id)
+    tenant_id = await ApiKeyService(session).authenticate(api_key)
+    if tenant_id is not None:
+        logger.info("出站拉数鉴权命中 | 链=租户 API Key")
+        return int(tenant_id)
+    tenant_id = bound_tenant_id(api_key)
+    if tenant_id is not None:
+        logger.info("出站拉数鉴权命中 | 链=KEY_BINDINGS")
+        return int(tenant_id)
+    logger.warning("出站拉数鉴权拒绝 | 链=三环未命中（未绑定/已吊销/他形态）")
+    raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
 def _clamp_page(page: int, page_size: int, default_size: int = 20) -> tuple[int, int]:
@@ -69,14 +88,12 @@ async def get_spider_data(
 ):
     """公开数据查询 — 按爬虫名分页拉本企业非候选结果
 
-    认证：X-API-Key 须在 KEY_BINDINGS 绑恰好一个 tenant_id（FR-13）。
-    未绑定 / 旧字符串列表钥匙 → 401，响应不含结果行。
+    认证：X-API-Key 先查出站钥匙表（本企业 active 出站
+    拉数钥匙，FR-51），再查租户 API Key，未命中再查 KEY_BINDINGS。
+    三环都未命中 / 旧字符串列表钥匙 → 401，响应不含结果行。
     可选参数：page / page_size / start_time / end_time / fields。
     """
-    api_key = request.headers.get("X-API-Key", "")
-    tenant_id = await ApiKeyService(session).authenticate(api_key)
-    if tenant_id is None:
-        tenant_id = _require_bound_tenant(request)
+    tenant_id = await _require_bound_tenant(request, session)
     page, page_size = _clamp_page(page, page_size)
 
     items, total = await SpiderQueryService(session).query_public_results(

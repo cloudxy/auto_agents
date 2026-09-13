@@ -12,13 +12,19 @@
   _SPIDERS_DIR（测试 patch 目标：backend.services.spider_registry_service.<name>）。
 """
 import os
+from urllib.parse import urlparse
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.repositories.spider_definition_repository import SpiderDefinitionRepository
 from backend.repositories.spider_task_repository import SpiderTaskRepository
 from backend.repositories.task_template_repository import TaskTemplateRepository
-from backend.services.spider_common import _SPIDERS_DIR, require_enqueue_tenant
+from backend.services.spider_common import (
+    _INTERNAL_SPIDERS,
+    _SPIDERS_DIR,
+    require_enqueue_tenant,
+)
 from config import settings
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
@@ -81,27 +87,31 @@ class SpiderRegistryService:
                 SpiderTypeInfo(type=type_key, label=tcfg.get("label", type_key), fields=fields)
             )
 
-        # 爬虫清单：DB 优先，查询失败或空表回退配置种子
+        # 爬虫清单：DB 优先；查询失败回退配置种子（成功而可见方案为 0 → 空清单，
+        # 不用种子充数——GWT-103.4/104.3 空态可达）
         spiders: list[SpiderInfo] | None = None
         try:
             definitions = await SpiderDefinitionRepository(self.session).list_enabled()
-            if definitions:
-                spiders = [
-                    SpiderInfo(
-                        name=d.name,
-                        title=d.title,
-                        type=d.type,
-                        description=d.description or "",
-                    )
-                    for d in definitions
-                ]
+            # T-41 / FR-104：demo/收割器/flow 引擎伪爬虫不下发（只滤视图，行不动）
+            definitions = [d for d in definitions if d.name not in _INTERNAL_SPIDERS]
+            spiders = [
+                SpiderInfo(
+                    name=d.name,
+                    title=d.title,
+                    type=d.type,
+                    description=d.description or "",
+                    params=d.params if isinstance(d.params, dict) else None,
+                )
+                for d in definitions
+            ]
         except Exception as e:  # noqa: BLE001
             logger.warning(f"注册表 DB 读取失败，回退配置: {e}")
 
         if spiders is None:
             spiders = []
             for name, scfg in spiders_cfg.items():
-                if name.startswith("_"):
+                # 回退种子同口径过滤（GWT-104.1：demo/内部项不因兜底混入）
+                if name.startswith("_") or name in _INTERNAL_SPIDERS:
                     continue
                 spiders.append(
                     SpiderInfo(
@@ -117,14 +127,14 @@ class SpiderRegistryService:
     # 代码爬虫文件管理（4.4）
     # ------------------------------------------------------------------
     async def spider_files(self) -> SpiderFileListResponse:
-        """扫描 scrapy/spiders/*.py 文件清单，关联启停状态"""
-        logger.info("扫描代码爬虫文件清单")
+        """已登记代码爬虫文件清单（T-41 / FR-104：未登记源码文件与内部项不并入方案视图；不删文件）"""
+        logger.info("扫描已登记代码爬虫文件清单（方案视图纯净口径）")
         definitions: dict = {}
         try:
             defs = await SpiderDefinitionRepository(self.session).get_all(limit=500)
             definitions = {d.name: d for d in defs}
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"爬虫定义读取失败，文件清单不含启停状态: {e}")
+            logger.warning(f"爬虫定义读取失败，文件清单收敛为空（不并入方案视图）: {e}")
 
         items: list[SpiderFileResponse] = []
         spiders_dir = _SPIDERS_DIR
@@ -133,8 +143,11 @@ class SpiderRegistryService:
                 if not fname.endswith(".py") or fname == "__init__.py":
                     continue
                 name = fname[: -len(".py")]
-                path = os.path.join(spiders_dir, fname)
                 definition = definitions.get(name)
+                # GWT-104.1：无登记行不并入；内部/演示项（_INTERNAL_SPIDERS）同滤
+                if definition is None or name in _INTERNAL_SPIDERS:
+                    continue
+                path = os.path.join(spiders_dir, fname)
                 try:
                     size = os.path.getsize(path)
                 except OSError:
@@ -144,9 +157,9 @@ class SpiderRegistryService:
                         name=name,
                         file=f"scrapy/spiders/{fname}",
                         size_bytes=size,
-                        registered=definition is not None,
-                        enabled=definition.enabled if definition else None,
-                        title=definition.title if definition else None,
+                        registered=True,
+                        enabled=definition.enabled,
+                        title=definition.title,
                     )
                 )
         else:
@@ -192,19 +205,128 @@ class SpiderRegistryService:
     async def update_definition_meta(
         self, name: str, payload: DefinitionUpdateMetaRequest
     ) -> SpiderDefinitionResponse:
-        """编辑爬虫定义元信息（标题/描述，不含启停与名称）"""
-        logger.info(f"编辑爬虫定义元信息: name={name}, fields={list(payload.model_dump(exclude_unset=True).keys())}")
+        """编辑采集方案（元信息 + 定义参数，FR-103 / GWT-103.1）
+
+        定义参数按类型分派：api 型校验后落定义行；flow 型落注册来源 ai_plans
+        （plan_json.flow + generated_params 再生）并镜像到定义行；代码型
+        （web/custom）仅元信息，params 编辑拒绝。名称/类型不可改（稳定标识，
+        既有语义保持）。存量任务 params 在入队时已快照，编辑不影响在跑任务。
+        """
+        logger.info(
+            f"编辑采集方案: name={name}, fields={sorted(payload.model_dump(exclude_unset=True).keys())}"
+        )
         repo = SpiderDefinitionRepository(self.session)
         definition = await repo.get_by_name(name)
         if definition is None:
             raise NotFoundException("爬虫定义")
-        changes = payload.model_dump(exclude_unset=True, exclude_none=True)
+        set_fields = payload.model_dump(exclude_unset=True)
+        changes = {k: v for k, v in set_fields.items() if k != "params" and v is not None}
+        if set_fields.get("params") is not None:
+            changes["params"] = await self._resolve_definition_params(
+                definition, set_fields["params"]
+            )
         if not changes:
             return SpiderDefinitionResponse.model_validate(definition)
         updated = await repo.update(definition.id, **changes)
         await self.session.commit()
         await self.session.refresh(updated)
         return SpiderDefinitionResponse.model_validate(updated)
+
+    # ------------------------------------------------------------------
+    # 定义参数编辑分派（T-39 / FR-103：按资产类型最小集）
+    # ------------------------------------------------------------------
+    async def _resolve_definition_params(self, definition, params: dict) -> dict:
+        """定义参数分派：api 型校验直存；flow 型落计划并镜像；代码型拒绝"""
+        if definition.type == "flow":
+            return await self._flow_definition_params(definition, params)
+        if definition.type == "api":
+            return self._api_definition_params(params)
+        raise BusinessException(
+            f"爬虫 {definition.name} 为代码型爬虫，仅支持编辑标题与描述；"
+            f"代码型爬虫请在源码中修改"
+        )
+
+    def _api_definition_params(self, params: dict) -> dict:
+        """api 型定义参数校验（字段集 = yml SPIDER_TYPES.api.fields；URL 形态）"""
+        allowed = self._api_param_keys()
+        unknown = sorted(k for k in params if k not in allowed)
+        if unknown:
+            raise BusinessException(
+                f"定义参数不支持的参数字段: {'、'.join(unknown)}"
+                f"（api 型可编辑字段: {'、'.join(allowed)}）"
+            )
+        normalized: dict = {}
+        if "urls" in params:
+            normalized["urls"] = self._require_http_urls(params["urls"])
+        if "headers" in params:
+            headers = params["headers"]
+            if not isinstance(headers, dict) or not all(
+                isinstance(k, str) and isinstance(v, str) for k, v in headers.items()
+            ):
+                raise BusinessException("定义参数 headers 必须是字符串键值的 JSON 对象")
+            normalized["headers"] = headers
+        return normalized
+
+    @staticmethod
+    def _api_param_keys() -> tuple:
+        """api 型可编辑字段集（yml SPIDER_TYPES.api.fields 的 name 集合）"""
+        types_cfg = settings.get("SPIDER_TYPES", {}) or {}
+        fields = (types_cfg.get("api") or {}).get("fields") or []
+        names = tuple(
+            f.get("name") for f in fields if isinstance(f, dict) and f.get("name")
+        )
+        return names or ("urls", "headers")
+
+    @staticmethod
+    def _require_http_urls(raw: object) -> list:
+        """入口地址形态校验：非空字符串列表，每条为 http(s) URL"""
+        if isinstance(raw, str) or not isinstance(raw, (list, tuple)) or not raw:
+            raise BusinessException("入口地址 urls 必须是非空字符串列表")
+        urls = []
+        for item in raw:
+            if not isinstance(item, str):
+                raise BusinessException("入口地址 urls 必须是非空字符串列表")
+            parsed = urlparse(item)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise BusinessException(f"入口地址必须是 http(s) URL: {item}")
+            urls.append(item)
+        return urls
+
+    async def _flow_definition_params(self, definition, params: dict) -> dict:
+        """flow 型：流程字段落到注册来源 ai_plans，返回镜像参数（GWT-103.1）
+
+        plan_json.flow 更新 + generated_params 按新流程再生（后续试采取新定义）；
+        入口地址（urls[0]）同步为计划 target_url。局部 import 断开
+        ai_planner → spider_service → 本模块 的 import 环（同 create_task_from_template 先例）。
+        """
+        from backend.repositories.ai_plan_repository import AiPlanRepository
+        from backend.services.ai_planner.prompting import _build_generated_params
+        from platform_core.schemas.ai_plan import FlowConfig
+
+        plan_repo = AiPlanRepository(self.session)
+        plan = await plan_repo.get_by_registered_definition(definition.name)
+        if plan is None:
+            raise BusinessException(
+                f"流程方案 {definition.name} 未关联 AI 采集计划，无法编辑流程参数"
+            )
+        plan_id = int(plan.id)  # commit 前捕获（P-BE-01）
+        target_url = str(plan.target_url)
+        if params.get("urls") is not None:
+            target_url = self._require_http_urls(params["urls"])[0]
+        try:
+            flow = FlowConfig.model_validate(params)
+        except ValidationError as e:
+            first = e.errors()[0]
+            field = ".".join(str(part) for part in first.get("loc", ()))
+            raise BusinessException(f"流程参数不合法（{field}）: {first.get('msg')}")
+        plan_json = dict(plan.plan_json or {})
+        plan_json["flow"] = flow.model_dump()
+        generated = _build_generated_params(target_url, flow)
+        await plan_repo.update(
+            plan_id, target_url=target_url, plan_json=plan_json,
+            generated_params=generated,
+        )
+        return generated
 
     async def delete_definition(self, name: str) -> dict:
         """删除爬虫定义（原子条件删除，存在历史任务引用时拒绝，防统计断链）
@@ -223,8 +345,11 @@ class SpiderRegistryService:
         if definition is None:
             raise NotFoundException("爬虫定义")
         task_count = await self.repo.count_by_spider(name)
+        task_ids = await self.repo.list_ids_by_spider(name, limit=5)
+        refs = "、".join(f"#{tid}" for tid in task_ids)
+        hint = f"（如 {refs}）" if refs else ""
         raise BusinessException(
-            f"爬虫 {name} 存在 {task_count} 条历史任务记录，拒绝删除；"
+            f"爬虫 {name} 存在 {task_count} 条历史任务记录{hint}，拒绝删除；"
             f"可先停用（enabled=false）保留下线痕迹"
         )
 

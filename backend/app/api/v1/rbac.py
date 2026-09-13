@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_admin, require_platform_admin
+from backend.app.api.deps import CurrentUser, require_admin, require_platform_admin_or_404
 from backend.app.responses import created, ok, updated
 from backend.services.rbac_service import RbacService
 from platform_core.db import get_async_db
@@ -87,7 +87,7 @@ class DepartmentUpdateRequest(RequestBody):
 
 @router.get("/roles")
 async def list_roles(
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
     service: RbacService = Depends(_service),
 ):
     """角色列表 + 权限码目录（DB 单源：roles/permissions 表；miss 回退内置）"""
@@ -112,7 +112,7 @@ async def list_roles(
 @router.post("/roles", status_code=201)
 async def create_role(
     payload: RoleCreateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
@@ -125,7 +125,7 @@ async def create_role(
 @router.delete("/roles/{role_key}")
 async def delete_role(
     role_key: str,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
@@ -139,7 +139,7 @@ async def delete_role(
 async def update_role(
     role_key: str,
     payload: RoleUpdateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
@@ -228,7 +228,7 @@ class MenuUpdateRequest(RequestBody):
 
 @router.get("/menus/tree")
 async def menu_tree(
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
     service: RbacService = Depends(_service),
 ):
     """菜单管理树（管理视角：含隐藏项，运营面全量编辑）"""
@@ -247,7 +247,7 @@ async def menu_tree(
 @router.post("/menus", status_code=201)
 async def create_menu(
     payload: MenuCreateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
@@ -260,7 +260,7 @@ async def create_menu(
 async def update_menu(
     menu_id: int,
     payload: MenuUpdateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
@@ -273,7 +273,7 @@ async def update_menu(
 @router.delete("/menus/{menu_id}")
 async def delete_menu(
     menu_id: int,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
@@ -301,7 +301,7 @@ class PermissionUpdateRequest(RequestBody):
 
 @router.get("/permissions")
 async def list_permissions(
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
     service: RbacService = Depends(_service),
 ):
     """权限资源清单（DB 单源；miss 回退内置目录）"""
@@ -317,7 +317,7 @@ async def list_permissions(
 @router.post("/permissions", status_code=201)
 async def create_permission(
     payload: PermissionCreateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
@@ -330,7 +330,7 @@ async def create_permission(
 async def update_permission(
     permission_id: int,
     payload: PermissionUpdateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
@@ -343,7 +343,7 @@ async def update_permission(
 @router.delete("/permissions/{permission_id}")
 async def delete_permission(
     permission_id: int,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):

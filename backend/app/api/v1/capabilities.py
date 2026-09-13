@@ -6,12 +6,18 @@
 当第一段吞掉，三条静态详情路由恒 404（B5 修复 B1c F-1）。
 新增二段式路由一律置于 get_capability_detail（本文件末尾）之前。
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import omit_local_abs_paths_for_non_platform_admin
-from backend.app.api.deps import CurrentUser, require_login, require_platform_admin
+from backend.app.api.deps import (
+    CurrentUser,
+    require_login,
+    require_platform_admin,
+    require_platform_admin_or_404,
+)
 from backend.app.responses import ok
+from platform_core.exceptions import ValidationException
 from backend.services.capability_service import CapabilityService
 from backend.services.market_events import run_subscribe
 from backend.services.power_market import (
@@ -81,7 +87,7 @@ async def list_capabilities(
 
 @router.get("/sources")
 async def list_capability_sources(
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     market: PowerMarketService = Depends(_market),
 ):
     """源列表。仅超管。"""
@@ -91,7 +97,7 @@ async def list_capability_sources(
 @router.post("/sources")
 async def register_capability_source(
     payload: CreateSourceRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
@@ -106,7 +112,7 @@ async def register_capability_source(
 @router.post("/sources/{name}/sync")
 async def sync_capability_source(
     name: str,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
@@ -123,7 +129,7 @@ async def sync_capability_source(
 
 @router.post("/backfill-first-party")
 async def backfill_first_party_listing(
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
@@ -137,7 +143,7 @@ async def backfill_first_party_listing(
 
 @router.post("/scan-plugins")
 async def scan_plugins(
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
 ):
     """扫描 capability-library/plugins/（plugin.json 解析入库；仅平台超管）"""
@@ -183,7 +189,7 @@ async def verify_plugin(
 
 @router.post("/scan-experts")
 async def scan_experts(
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
 ):
     """扫描 capability-library/experts/（subagent 格式解析入库；仅平台超管）"""
@@ -211,17 +217,21 @@ async def get_expert(
 @router.post("/teams")
 async def upsert_team(
     body: dict,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """专家团定义（团长/成员引用校验；执行引擎二期）"""
+    """专家团定义（团长=专家；成员=专家∪智能体，T-37 / GWT-101；执行引擎不做）。
+
+    越权 404 同形（GWT-101.5：租户直打与「页面不存在」同形，不走 403 信封）。
+    members 兼容两种形态：名称字符串（按专家）或 {"type": "expert"|"agent", "name"}。
+    """
     from backend.app.api._helpers import record_audit
     from backend.services.expert_service import TeamService
 
     team = await TeamService(session).upsert_team(
         name=str(body.get("name") or ""),
         leader=str(body.get("leader") or ""),
-        members=[str(m) for m in (body.get("members") or [])],
+        members=body.get("members") or [],
         workflow_md=str(body.get("workflow_md") or ""),
         title=str(body.get("title") or ""),
     )
@@ -251,6 +261,46 @@ async def export_team(
     from backend.services.expert_service import TeamService
 
     return ok(data={"markdown": await TeamService(session).export_team_md(name)})
+
+
+# ---------- 能力资产一键导入（FR-100 / ADR-0023，静态段先于动态段） ----------
+
+
+@router.post("/import")
+async def import_assets(
+    file: list[UploadFile] = File(None),
+    directory: str = Form(None),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """统一导入通道（仅平台超管；非超管直打 404 同形，GWT-100.6）。
+
+    multipart 文件（单 .md 或 zip 包，可多选）**或**服务器本地目录路径；
+    沙箱解包 + 四类判定分发（skill/agent/command/plugin，GWT-100.4）；
+    部分成功逐条中文原因（100.2/100.3）；超大拒绝含上限数字（100.5）；
+    路径逃逸条目拒绝且资产目录外零新文件（100.7，NFR-04/SEC-11）；
+    幂等=类型+名称（100.8）；产物未上架、不触发执行（PC-2）；完成上报
+    asset_imported（GWT-92.9）。
+    """
+    from backend.app.api._helpers import record_audit
+    from backend.services.asset_import_service import AssetImportService
+
+    payloads = [(f.filename or "upload", await f.read()) for f in (file or [])]
+    if directory and payloads:
+        raise ValidationException(message="文件与目录只能二选一", field="import")
+    service = AssetImportService(session)
+    if directory:
+        data = await service.import_directory(directory, actor=user.username, actor_id=user.id)
+    elif payloads:
+        data = await service.import_files(payloads, actor=user.username, actor_id=user.id)
+    else:
+        raise ValidationException(message="未提供导入文件或目录", field="import")
+    await record_audit(
+        session, user, "asset.import", f"batch#{data['batch_id']}",
+        detail={"origin": data["origin"], "succeeded": data["succeeded"],
+                "failed": data["failed"], "skipped": data["skipped"]},
+    )
+    return ok(data=data)
 
 
 # ---------- 订阅 / 安装行（静态段必须先于 /{asset_type}/{name}） ----------
@@ -309,7 +359,7 @@ async def patch_capability_listing(
     asset_type: str,
     name: str,
     payload: PatchListingRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):

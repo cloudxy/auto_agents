@@ -17,6 +17,8 @@ export interface UserItem {
   department_name?: string | null
   is_platform_admin?: boolean
   created_at?: string | null
+  /** 已删除标记（T-24 / GWT-93.1）：非空=软删行，仅「已删除」筛选出现 */
+  deleted_at?: string | null
 }
 
 export interface UserCreatePayload {
@@ -42,6 +44,10 @@ export const updateUser = (id: number, payload: UserUpdatePayload): Promise<User
 
 export const deleteUser = (id: number): Promise<void> =>
   api.delete(`/admin/users/${id}`).then(() => undefined)
+
+/** 恢复软删用户（T-25 / FR-93）：成功回默认列表；占用冲突 400 中文句；重复恢复 no-op */
+export const restoreUser = (id: number): Promise<UserItem> =>
+  api.post(`/admin/users/${id}/restore`).then((r) => unwrap<UserItem>(r))
 
 export interface NotifyChannelConfig {
   webhook_url: string

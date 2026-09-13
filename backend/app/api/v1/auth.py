@@ -102,12 +102,13 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
 _ROLE_PERMISSIONS = {
     "viewer": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
-        'menu:spiders.nodes', 'menu:ai', 'menu:skills',
+        'menu:spiders.nodes', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
+        'menu:relay',
     ],
     "operator": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
         'menu:spiders.nodes', 'menu:data', 'menu:ai', 'menu:skills',
-        'menu:members', 'menu:usage', 'menu:llm',
+        'menu:members', 'menu:usage', 'menu:llm', 'menu:relay',
         'btn:create', 'btn:skill:edit',
     ],
     "admin": [
@@ -115,7 +116,7 @@ _ROLE_PERMISSIONS = {
         'menu:spiders.nodes',
         'menu:users', 'menu:data', 'menu:settings', 'menu:ai', 'menu:skills',
         'menu:members', 'menu:usage', 'menu:platform-ops', 'menu:logs',
-        'menu:llm', 'menu:newapi',
+        'menu:llm', 'menu:newapi', 'menu:relay',
         'btn:create', 'btn:delete', 'btn:schedule', 'btn:skill:edit', 'btn:skill:admin',
     ],
 }

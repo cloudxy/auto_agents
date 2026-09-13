@@ -1,11 +1,11 @@
 """B1c 零 HTTP 覆盖路由清剿——爬虫注册表面（定义 CRUD/文件/节点/代理）+ 结果面（11 条）
 
 覆盖路由清单：
-定义子域（/api/v1/spiders/definitions*，写操作 require_admin）：
-- POST   /api/v1/spiders/definitions            手动登记（source=manual）
-- PATCH  /api/v1/spiders/definitions/{name}     启停代码爬虫
-- PATCH  /api/v1/spiders/definitions/{name}/meta 编辑元信息（标题/描述）
-- DELETE /api/v1/spiders/definitions/{name}     删除（历史任务引用时拒绝，m1 原子条件删）
+定义子域（/api/v1/spiders/definitions*；写操作守卫见 T-39 注记）：
+- POST   /api/v1/spiders/definitions            手动登记（source=manual；require_admin）
+- PATCH  /api/v1/spiders/definitions/{name}     启停代码爬虫（require_admin）
+- PATCH  /api/v1/spiders/definitions/{name}/meta 编辑采集方案（require_operator，T-39/FR-103 经办可编辑）
+- DELETE /api/v1/spiders/definitions/{name}     删除（require_operator，T-39；历史任务引用时拒绝，m1 原子条件删）
 注册表只读（require_login）：
 - GET    /api/v1/spiders/files                  代码爬虫文件清单（关联启停状态）
 - GET    /api/v1/spiders/nodes                  Worker 节点心跳列表（Redis 数据源）
@@ -182,8 +182,22 @@ def test_definition_patch_meta_anonymous_401(client):
     assert client.patch(f"{DEFS_URL}/b1c-spider/meta", json={"title": "x"}).status_code == 401
 
 
-def test_definition_patch_meta_operator_403(operator_client):
-    assert operator_client.patch(f"{DEFS_URL}/b1c-spider/meta", json={"title": "x"}).status_code == 403
+def test_definition_patch_meta_operator_ok(db_client, operator_client, db_engine, db_session):
+    """T-39 / GWT-103.1：经办（operator）可编辑（原 require_admin 403 钉已随 FR-103 放开）"""
+    _seed(db_session, build_spider_definition(name="b1c-spider", title="旧标题"))
+    resp = operator_client.patch(f"{DEFS_URL}/b1c-spider/meta", json={"title": "新标题"})
+    assert resp.status_code == 200, resp.text
+    rows = _fetch(db_session, select(SpiderDefinition).where(
+        SpiderDefinition.name == "b1c-spider"))
+    assert rows[0].title == "新标题"
+
+
+def test_definition_patch_meta_viewer_403(db_client, viewer_client, db_engine, db_session):
+    """T-39 / GWT-103.5：只读直打编辑 → 403（FR-89 保持）"""
+    _seed(db_session, build_spider_definition(name="b1c-spider", title="不变"))
+    assert viewer_client.patch(
+        f"{DEFS_URL}/b1c-spider/meta", json={"title": "x"}
+    ).status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -224,8 +238,21 @@ def test_definition_delete_anonymous_401(client):
     assert client.delete(f"{DEFS_URL}/b1c-spider").status_code == 401
 
 
-def test_definition_delete_operator_403(operator_client):
-    assert operator_client.delete(f"{DEFS_URL}/b1c-spider").status_code == 403
+def test_definition_delete_operator_ok(db_client, operator_client, db_engine, db_session):
+    """T-39 / GWT-103.2：经办可删未引用方案（原 require_admin 403 钉已随 FR-103 放开）"""
+    _seed(db_session, build_spider_definition(name="b1c-spider", title="t"))
+    resp = operator_client.delete(f"{DEFS_URL}/b1c-spider")
+    assert resp.status_code == 200, resp.text
+    assert _fetch(db_session, select(SpiderDefinition).where(
+        SpiderDefinition.name == "b1c-spider")) == []
+
+
+def test_definition_delete_viewer_403(db_client, viewer_client, db_engine, db_session):
+    """T-39 / GWT-103.5：只读直打删除 → 403（FR-89 保持）"""
+    _seed(db_session, build_spider_definition(name="b1c-spider", title="t"))
+    assert viewer_client.delete(f"{DEFS_URL}/b1c-spider").status_code == 403
+    assert len(_fetch(db_session, select(SpiderDefinition).where(
+        SpiderDefinition.name == "b1c-spider"))) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +260,7 @@ def test_definition_delete_operator_403(operator_client):
 # ---------------------------------------------------------------------------
 
 def test_spider_files_ok(db_client, viewer_client, db_engine, db_session, tmp_path, monkeypatch):
-    """文件清单：仅 *.py（排除 __init__.py），关联定义启停状态；viewer 可读"""
+    """文件清单（T-41 口径）：仅已登记且非内部项；未登记文件不并入；viewer 可读"""
     spiders_dir = tmp_path / "spiders"
     spiders_dir.mkdir()
     (spiders_dir / "alpha.py").write_text("# alpha\n")
@@ -246,11 +273,10 @@ def test_spider_files_ok(db_client, viewer_client, db_engine, db_session, tmp_pa
     assert resp.status_code == 200, resp.text
     items = resp.json()["data"]["items"]
     by_name = {i["name"]: i for i in items}
-    assert set(by_name) == {"alpha", "beta"}          # __init__.py 不入清单
+    # T-41 / GWT-104.1 钉改写：beta 未登记 → 不并入方案视图（源码清单下架）
+    assert set(by_name) == {"alpha"}
     assert by_name["alpha"]["registered"] is True
     assert by_name["alpha"]["enabled"] is True
-    assert by_name["beta"]["registered"] is False
-    assert by_name["beta"]["enabled"] is None         # 未登记无启停态
     assert by_name["alpha"]["file"] == "scrapy/spiders/alpha.py"
 
 

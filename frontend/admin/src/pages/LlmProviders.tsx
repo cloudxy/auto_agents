@@ -1,13 +1,16 @@
 /**
  * LLM 供应商管理页（工单 80 拆分后页面壳）
  *
- * 职责：列表加载/激活/供应商级测试/删除 + 平台预设；新建向导与模型集管理在
+ * 职责：列表加载/设默认/供应商级测试/删除 + 平台预设；新建向导与模型集管理在
  * components/llm/{ProviderWizardModal,ModelSetDrawer}。
+ *
+ * FR-97（T-30）：该页配置「未指定模型时默认用哪一个」——用户可见词只有
+ * 「默认 / 设为默认」，不出现「激活」指代该动作；后端 is_active 机制与
+ * activate/deactivate 端点不动（内部字段名可留，edge-states §LLM 配置）。
  */
-import React, { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Switch, Select,
-  Alert, Button, Card, message, Popconfirm, Space, Table, Tag, Tooltip, Typography,
+import React, { useCallback, useEffect, useState } from 'react'
+import { Alert, Button, message, Modal, Popconfirm, Select,
+  Space, Table, Tag, Tooltip, Typography,
 } from 'antd'
 import {
   CheckCircleOutlined, CloudDownloadOutlined, EditOutlined, PlusOutlined,
@@ -20,6 +23,7 @@ import {
   type LlmProvider, type LlmTestResult, type PlatformPreset, type ProviderModelRow,
 } from '../services/llm'
 import { usePermission } from '../hooks/usePermission'
+import { useAuthStore } from '../store/useAuthStore'
 import { apiErrorMessage } from '../utils/errorMessage'
 import { PROTOCOL_NAMES } from '../components/llm/llmShared'
 import ProviderWizardModal from '../components/llm/ProviderWizardModal'
@@ -27,37 +31,38 @@ import ModelSetDrawer from '../components/llm/ModelSetDrawer'
 
 const { Text } = Typography
 
+// FR-97 文案（edge-states 钉句；全页用户可见面不得出现「激活」）
+const DEFAULT_EXPLAIN = '未指定模型时，默认使用该模型，可按需更换。'
+const NO_DEFAULT_HINT = '还没有默认供应商。未指定模型的请求将使用平台公共模型。'
+const EMPTY_PROVIDERS = '还没有模型供应商。'
+const LIST_LOAD_FAILED = '供应商列表加载失败。检查网络后重试。'
+const CANNOT_SET_DEFAULT = '当前账号不能设置默认，请联系企业管理员'
+const MODEL_TAG_HINT = '未指定模型时使用'
+const OFFLINE_DEFAULT = '网络不可用，默认没有更改。'
+
 const LlmProviders: React.FC = () => {
+  const user = useAuthStore((s) => s.user)
   const { hasPermission, isPlatformAdmin } = usePermission()
   const canOperate = hasPermission('btn:create')
   const canDelete = hasPermission('btn:delete')
   const canWriteRow = (row: LlmProvider) =>
     canOperate && (isPlatformAdmin || row.tenant_id !== null)
+  // GWT-97.1/97.2 主语=租户负责人/公司管理员（tenant_role owner/admin，
+  // 与 relay _ISSUER_ROLES 同口径）；平台超管在平台行沿用既有写面
+  const isIssuer = user?.tenant_role === 'owner' || user?.tenant_role === 'admin'
+  const canSetDefaultRow = (row: LlmProvider) => canWriteRow(row) && (isPlatformAdmin || isIssuer)
 
-  const qc = useQueryClient()
-  const listQ = useQuery({ queryKey: ['llm-providers'], queryFn: fetchLlmProviders })
-  const activeQ = useQuery({ queryKey: ['llm-active'], queryFn: fetchActiveLlmProvider })
-  const presetsQ = useQuery({ queryKey: ['llm-presets'], queryFn: getPlatformPresets })
-  const rows = listQ.data ?? []
-  const loading = listQ.isLoading
-  const activeProvider = activeQ.data ?? null
-  const activeLoaded = !activeQ.isLoading
-  const presets: PlatformPreset[] = presetsQ.data ?? []
-  const [activatingId, setActivatingId] = useState<number | null>(null)
+  const [rows, setRows] = useState<LlmProvider[]>([])
+  const [loading, setLoading] = useState(false)
+  const [listError, setListError] = useState(false)
+  const [activeProvider, setActiveProvider] = useState<LlmProvider | null>(null)
+  const [activeLoaded, setActiveLoaded] = useState(false)
+  const [presets, setPresets] = useState<PlatformPreset[]>([])
+  const [settingId, setSettingId] = useState<number | null>(null)
   const [testingId, setTestingId] = useState<number | null>(null)
   const [testResults, setTestResults] = useState<Record<number, LlmTestResult>>({})
-  const providerIds = rows.map((row) => row.id)
-  const modelsQ = useQuery({
-    queryKey: ['llm-provider-models', providerIds],
-    queryFn: async () => {
-      const entries = await Promise.all(
-        providerIds.map(async (id) => [id, await getLlmProviderModels(id)] as const),
-      )
-      return Object.fromEntries(entries) as Record<number, ProviderModelRow[]>
-    },
-    enabled: canOperate && providerIds.length > 0,
-  })
-  const modelsMap: Record<number, ProviderModelRow[]> = modelsQ.data ?? {}
+  // 列表模型计数（模型列多 Tag：默认金色 +N）
+  const [modelsMap, setModelsMap] = useState<Record<number, ProviderModelRow[]>>({})
   // 向导 / Drawer 由子组件托管，页面只持有开关态
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<LlmProvider | null>(null)
@@ -66,19 +71,53 @@ const LlmProviders: React.FC = () => {
   const [filterProtocol, setFilterProtocol] = useState<string>('all')
   const [filterEnabled, setFilterEnabled] = useState<string>('all')
   const [filterActive, setFilterActive] = useState<string>('all')
+  // 「设为默认」确认弹窗（GWT-97.2 切换确认；失败内联、弹窗不关）
+  const [defaultTarget, setDefaultTarget] = useState<LlmProvider | null>(null)
+  const [setting, setSetting] = useState(false)
+  const [setDefaultError, setSetDefaultError] = useState<string | null>(null)
 
-  const loadList = async (_showSpin = true) => {
-    await qc.invalidateQueries({ queryKey: ['llm-providers'] })
-  }
+  const loadList = useCallback(async (showSpin = true) => {
+    if (showSpin) setLoading(true)
+    try {
+      setRows(await fetchLlmProviders())
+      setListError(false)
+    } catch {
+      // 失败句不走空态（GWT-97.3）：置错误态，旧行保留（刷新保留行）
+      setListError(true)
+    } finally {
+      if (showSpin) setLoading(false)
+    }
+  }, [])
 
-  const loadActive = async () => {
-    await qc.invalidateQueries({ queryKey: ['llm-active'] })
-  }
+  const loadActive = useCallback(async () => {
+    try {
+      setActiveProvider(await fetchActiveLlmProvider())
+    } catch {
+      setActiveProvider(null)
+    } finally {
+      setActiveLoaded(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadList()
+    loadActive()
+    getPlatformPresets().then(setPresets).catch(() => setPresets([]))
+  }, [loadList, loadActive])
+
+  // 列表加载后补各供应商模型集（仅 admin 需要展示模型列计数）
+  useEffect(() => {
+    rows.forEach(async (row) => {
+      try {
+        const models = await getLlmProviderModels(row.id)
+        setModelsMap((prev) => ({ ...prev, [row.id]: models }))
+      } catch { /* 忽略单行失败 */ }
+    })
+  }, [rows])
 
   const refreshAll = () => {
     loadList(false)
     loadActive()
-    void qc.invalidateQueries({ queryKey: ['llm-provider-models'] })
   }
 
   // ---------------- 行操作 ----------------
@@ -114,6 +153,45 @@ const LlmProviders: React.FC = () => {
     }
   }
 
+  const offline = () => typeof navigator !== 'undefined' && !navigator.onLine
+
+  // 设为默认（后端 activate 端点不动）：成功关弹窗刷新；失败/离线内联、弹窗不关
+  const applySetDefault = async (row: LlmProvider) => {
+    if (offline()) {
+      setSetDefaultError(OFFLINE_DEFAULT)
+      return
+    }
+    try {
+      setSetting(true)
+      await activateLlmProvider(row.id)
+      message.success(`已将“${row.name}”设为默认。`)
+      setDefaultTarget(null)
+      setSetDefaultError(null)
+      refreshAll()
+    } catch (e) {
+      setSetDefaultError(`设置默认失败。${apiErrorMessage(e, '检查网络后重试')}。原默认保持不变。`)
+    } finally {
+      setSetting(false)
+    }
+  }
+
+  const onCancelDefault = async (row: LlmProvider) => {
+    if (offline()) {
+      message.error(OFFLINE_DEFAULT)
+      return
+    }
+    try {
+      setSettingId(row.id)
+      await deactivateLlmProvider(row.id)
+      message.success(`已取消“${row.name}”的默认。未指定模型的请求将使用平台公共模型。`)
+      refreshAll()
+    } catch (e) {
+      message.error(apiErrorMessage(e, '取消默认失败'))
+    } finally {
+      setSettingId(null)
+    }
+  }
+
   // ---------------- 表格列 ----------------
   const columns: ColumnsType<LlmProvider> = [
     { title: '名称', dataIndex: 'name', key: 'name', width: 140, render: (v: string, record: LlmProvider) => (
@@ -137,7 +215,11 @@ const LlmProviders: React.FC = () => {
         const extra = models.filter((m) => m.model_id !== v).length
         return (
           <Space size={4} wrap>
-            {v && <Tag color="gold" style={{ marginInlineEnd: 0 }}>{v}</Tag>}
+            {v && (
+              <Tooltip title={MODEL_TAG_HINT}>
+                <Tag color="gold" style={{ marginInlineEnd: 0 }}>{v}</Tag>
+              </Tooltip>
+            )}
             {extra > 0 && <Tag style={{ marginInlineEnd: 0 }}>+{extra}</Tag>}
             {!v && <Text type="secondary">-</Text>}
           </Space>
@@ -146,22 +228,22 @@ const LlmProviders: React.FC = () => {
     },
     { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 80, render: (v: boolean) => (v ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>) },
     {
-      title: '激活', dataIndex: 'is_active', key: 'is_active', width: 90,
-      render: (v: boolean, record: LlmProvider) => (canWriteRow(record) ? (
-        <Switch
-          checked={v} checkedChildren="已激活" unCheckedChildren="未激活"
-          loading={activatingId === record.id}
-          onChange={async (checked) => {
-            try {
-              setActivatingId(record.id)
-              await (checked ? activateLlmProvider(record.id) : deactivateLlmProvider(record.id))
-              message.success(checked ? `已激活「${record.name}」` : `已取消激活「${record.name}」（运行时回退默认配置）`)
-              refreshAll()
-            } catch (e) { message.error(apiErrorMessage(e, checked ? '激活失败' : '取消激活失败')) }
-            finally { setActivatingId(null) }
-          }}
-        />
-      ) : (v ? <Tag color="gold" icon={<CheckCircleOutlined />}>已激活</Tag> : <Text type="secondary">-</Text>)),
+      title: '默认', dataIndex: 'is_active', key: 'is_active', width: 140,
+      render: (v: boolean, record: LlmProvider) => (
+        <Space size={4}>
+          {v ? <Tag color="gold" icon={<CheckCircleOutlined />} style={{ marginInlineEnd: 0 }}>默认</Tag> : null}
+          {canSetDefaultRow(record) && (v ? (
+            <Popconfirm title={`取消默认“${record.name}”？`} description="取消后未指定模型的请求将使用平台公共模型。"
+                        okText="取消默认" okButtonProps={{ danger: true }} cancelText="再想想"
+                        onConfirm={() => onCancelDefault(record)}>
+              <Button type="link" size="small" loading={settingId === record.id}>取消默认</Button>
+            </Popconfirm>
+          ) : (
+            <Button type="link" size="small"
+                    onClick={() => { setSetDefaultError(null); setDefaultTarget(record) }}>设为默认</Button>
+          ))}
+        </Space>
+      ),
     },
     { title: '备注', dataIndex: 'remark', key: 'remark', ellipsis: true, render: (v: string | null) => v || '-' },
     {
@@ -199,74 +281,105 @@ const LlmProviders: React.FC = () => {
     },
   ]
 
+  const hasDefaultRow = rows.some((r) => r.is_active)
+  const showCannotSetDefaultNote = canOperate && !isPlatformAdmin && !isIssuer
+  const emptyText = canOperate ? (
+    <Space orientation="vertical" size={8} style={{ padding: 8 }}>
+      <Text>{EMPTY_PROVIDERS}</Text>
+      <Button type="primary" icon={<PlusOutlined />}
+              onClick={() => { setEditing(null); setModalOpen(true) }}>添加供应商</Button>
+    </Space>
+  ) : EMPTY_PROVIDERS
+
   return (
     <>
-      <h1 style={{ marginTop: 0, fontSize: 20, fontWeight: 600 }}>LLM 配置</h1>
+      {/* §0.10 / GWT-99.1：页名唯一标题在顶栏；无页内标题卡与装饰横幅。
+          原 Card extra 的筛选/新建/刷新保留为内容区动作行（GWT-99.3 动作等价） */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <Space wrap>
+          <Select size="small" style={{ width: 140 }} value={filterProtocol}
+                  onChange={setFilterProtocol}
+                  options={[
+                    { value: 'all', label: '全部协议' },
+                    { value: 'openai_compatible', label: 'OpenAI 兼容' },
+                    { value: 'anthropic', label: 'Anthropic' },
+                    { value: 'google_gemini', label: 'Gemini' },
+                  ]} />
+          <Select size="small" style={{ width: 110 }} value={filterEnabled}
+                  onChange={setFilterEnabled}
+                  options={[
+                    { value: 'all', label: '全部状态' },
+                    { value: 'enabled', label: '启用' },
+                    { value: 'disabled', label: '停用' },
+                  ]} />
+          <Select size="small" style={{ width: 110 }} value={filterActive}
+                  onChange={setFilterActive}
+                  options={[
+                    { value: 'all', label: '全部' },
+                    { value: 'active', label: '已设默认' },
+                    { value: 'inactive', label: '未设默认' },
+                  ]} />
+          {canOperate && <Button type="primary" icon={<PlusOutlined />}
+                                 onClick={() => { setEditing(null); setModalOpen(true) }}>新建供应商</Button>}
+          <Button icon={<ReloadOutlined />} onClick={refreshAll}>刷新</Button>
+        </Space>
+      </div>
+
       {!canOperate && (
         <Alert type="info" showIcon style={{ marginBottom: 16 }} title="当前账号不能管理供应商"
                description="需要经办或企业负责人权限。" />
       )}
-      {listQ.isError ? (
-        <Alert type="error" showIcon style={{ marginBottom: 16 }}
-               title={apiErrorMessage(listQ.error, '供应商列表加载失败')} />
-      ) : null}
 
-      {activeLoaded && (activeProvider ? (
-        <Alert type="success" showIcon style={{ marginBottom: 16 }}
-               title={`当前激活供应商：${activeProvider.name}（${activeProvider.model || '-'}）`} />
-      ) : (
-        <Alert type="warning" showIcon style={{ marginBottom: 16 }} title="尚未激活任何 LLM 供应商"
-               description="AI 采集等功能依赖已激活的 LLM 供应商，请在列表中选择一个并点击「激活」。" />
-      ))}
-
-      <Card title="LLM 供应商配置"
-            extra={
-              <Space wrap>
-                <Select size="small" style={{ width: 140 }} value={filterProtocol}
-                        onChange={setFilterProtocol}
-                        options={[
-                          { value: 'all', label: '全部协议' },
-                          { value: 'openai_compatible', label: 'OpenAI 兼容' },
-                          { value: 'anthropic', label: 'Anthropic' },
-                          { value: 'google_gemini', label: 'Gemini' },
-                        ]} />
-                <Select size="small" style={{ width: 110 }} value={filterEnabled}
-                        onChange={setFilterEnabled}
-                        options={[
-                          { value: 'all', label: '全部状态' },
-                          { value: 'enabled', label: '启用' },
-                          { value: 'disabled', label: '停用' },
-                        ]} />
-                <Select size="small" style={{ width: 110 }} value={filterActive}
-                        onChange={setFilterActive}
-                        options={[
-                          { value: 'all', label: '全部激活位' },
-                          { value: 'active', label: '已激活' },
-                          { value: 'inactive', label: '未激活' },
-                        ]} />
-                {canOperate && <Button type="primary" icon={<PlusOutlined />}
-                                       onClick={() => { setEditing(null); setModalOpen(true) }}>新建供应商</Button>}
-                <Button icon={<ReloadOutlined />} onClick={refreshAll}>刷新</Button>
-              </Space>
-            }>
+      {/* T-30 说明句行；绿色「当前默认供应商」横幅（§0.10 装饰横幅）移除，
+          其信息量并入本行首行（GWT-99.4 信息不丢） */}
+      <Space orientation="vertical" size={2} style={{ display: 'flex', marginBottom: 12 }}>
+        {activeLoaded && activeProvider && (
+          <Text type="secondary">当前默认供应商：{activeProvider.name}（{activeProvider.model || '-'}）</Text>
+        )}
+        <Text type="secondary">{DEFAULT_EXPLAIN}</Text>
+        {!hasDefaultRow && rows.length > 0 && <Text type="warning">{NO_DEFAULT_HINT}</Text>}
+        {showCannotSetDefaultNote && <Text type="warning">{CANNOT_SET_DEFAULT}</Text>}
+      </Space>
+      {listError && (
+        <Alert type="error" showIcon style={{ marginBottom: 16 }} title={LIST_LOAD_FAILED}
+               action={<Button size="small" onClick={refreshAll}>重试</Button>} />
+      )}
+      {(!listError || rows.length > 0) && (
         <Table columns={columns} dataSource={rows.filter((r) =>
           (filterProtocol === 'all' || (r.provider_type || 'openai_compatible') === filterProtocol) &&
           (filterEnabled === 'all' || (filterEnabled === 'enabled') === r.enabled) &&
           (filterActive === 'all' || (filterActive === 'active') === r.is_active)
         )} rowKey="id" loading={loading}
                pagination={false} scroll={{ x: 1400 }}
-               locale={{ emptyText: canOperate ? '暂无 LLM 供应商，点击右上角「新建供应商」添加' : '暂无 LLM 供应商' }} />
-      </Card>
+               locale={{ emptyText }} />
+      )}
 
-      {modalOpen ? (
-        <ProviderWizardModal
-          open={modalOpen} editing={editing} presets={presets}
-          onClose={() => setModalOpen(false)} onSaved={refreshAll} />
-      ) : null}
-      {drawerProvider ? (
-        <ModelSetDrawer
-          provider={drawerProvider} onClose={() => setDrawerProvider(null)} onSaved={refreshAll} />
-      ) : null}
+      <Modal
+        open={defaultTarget !== null}
+        title="设为默认"
+        okText={setting ? '设置中…' : '设为默认'}
+        cancelText="取消"
+        confirmLoading={setting}
+        cancelButtonProps={{ disabled: setting }}
+        onOk={() => { if (defaultTarget) applySetDefault(defaultTarget) }}
+        onCancel={() => { if (!setting) { setDefaultTarget(null); setSetDefaultError(null) } }}>
+        {defaultTarget && (
+          <Space orientation="vertical" size={8} style={{ display: 'flex' }}>
+            <Text>
+              {hasDefaultRow
+                ? `将“${defaultTarget.name}”设为默认？未指定模型的请求将默认使用它；“${rows.find((r) => r.is_active)?.name ?? ''}”不再默认。`
+                : `将“${defaultTarget.name}”设为默认？未指定模型的请求将默认使用它。`}
+            </Text>
+            {setDefaultError && <Text type="danger">{setDefaultError}</Text>}
+          </Space>
+        )}
+      </Modal>
+
+      <ProviderWizardModal
+        open={modalOpen} editing={editing} presets={presets}
+        onClose={() => setModalOpen(false)} onSaved={refreshAll} />
+      <ModelSetDrawer
+        provider={drawerProvider} onClose={() => setDrawerProvider(null)} onSaved={refreshAll} />
     </>
   )
 }

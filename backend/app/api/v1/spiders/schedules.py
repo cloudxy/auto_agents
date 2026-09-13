@@ -49,7 +49,9 @@ async def create_schedule(
     user: CurrentUser = Depends(require_admin),
 ) -> ApiResponse[SpiderScheduleResponse]:
     """创建调度计划（校验爬虫注册表 / cron 合法性 / 同爬虫唯一；仅管理员）"""
-    schedule = await service.create_schedule(payload, tenant_id=task_actor_tenant_id(user))
+    schedule = await service.create_schedule(
+        payload, tenant_id=await task_actor_tenant_id(user, session),
+    )
     await record_audit(session, user, "schedule.create", payload.spider_name,
                  {"cron": payload.cron_expr, "enabled": payload.enabled})
     return created(schedule)

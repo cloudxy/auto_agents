@@ -2,7 +2,8 @@
 
 职责：
 - 告警规则的增删改查
-- 任务终态后评估所有活跃规则
+- 任务终态后评估所有活跃规则（consecutive_failures / result_drop / task_timeout）
+- 调度器周期评估 queue_depth 规则（T-42 / FR-105 接通：通知 + notifications 命中行）
 - 触发时通过 NotifyService 发送告警
 
 约束：
@@ -17,10 +18,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.repositories.alert_rule_repository import AlertRuleRepository
+from backend.repositories.spider_task_repository import SpiderTaskRepository
+from backend.repositories.user_repository import UserRepository
 from backend.services.notify_service import NotifyService
 from platform_core.exceptions import NotFoundException
 from platform_core.logger import get_logger
 from platform_core.models.alert_rule import AlertRule
+from platform_core.models.notification import Notification
 from platform_core.models.spider_task import SpiderTask
 
 logger = get_logger("api")
@@ -32,6 +36,8 @@ class AlertService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repo = AlertRuleRepository(session)
+        self._tasks = SpiderTaskRepository(session)
+        self._users = UserRepository(session)
         self._notify = NotifyService()
 
     # --- CRUD ---
@@ -73,7 +79,7 @@ class AlertService:
         await self.session.commit()
         return {"rule_id": rule_id, "deleted": True}
 
-    # --- 规则评估 ---
+    # --- 规则评估（任务终态路径）---
     async def evaluate(self, task_info: dict) -> None:
         """任务终态后评估所有活跃规则
 
@@ -86,7 +92,8 @@ class AlertService:
                 # 跳过不匹配的规则（spider_name 为 NULL 表示全局规则）
                 if rule.spider_name and rule.spider_name != task_info.get("spider_name"):
                     continue
-                # 跳过 queue_depth 类型（由调度器侧处理）
+                # 跳过 queue_depth 类型（非任务终态口径；由调度器周期评估
+                # —— evaluate_queue_depth，GWT-105.1 触发路径）
                 if rule.rule_type == "queue_depth":
                     continue
                 # 检查静默窗口
@@ -114,6 +121,75 @@ class AlertService:
                     await self.session.commit()
         except Exception as e:  # noqa: BLE001 告警评估失败不影响主流程
             logger.warning(f"告警评估失败（不影响主流程）: {e}")
+
+    async def evaluate_queue_depth(self) -> int:
+        """调度器周期评估 queue_depth 规则（FR-105 接通，GWT-105.1/105.3；db-spec §16.6）
+
+        逐条评估全部租户启用的 queue_depth 规则（静默窗→深度→命中落库见
+        _trigger_queue_depth_rule）；命中记录写面仅本调度器路径。任何失败只记
+        日志不挡调度循环，返回本轮触发条数。
+        """
+        triggered = 0
+        try:
+            rules = await self.repo.list_queue_depth_rules()
+            for rule in rules:
+                if await self._trigger_queue_depth_rule(rule):
+                    triggered += 1
+        except Exception as e:  # noqa: BLE001 评估失败不挡调度循环
+            logger.warning(f"queue_depth 规则评估失败（不影响调度循环）: {e}")
+        return triggered
+
+    async def _trigger_queue_depth_rule(self, rule: AlertRule) -> bool:
+        """单条 queue_depth 规则评估：规则所属租户的排队任务深度超阈值则触发
+
+        口径（db-spec §16.6）：经 NotifyService 已配置渠道发送 + notifications
+        落命中行（type='alert'，resource_type='alert_rule'，user_id=规则创建者，
+        content 含深度数字）+ last_triggered_at 推进（静默窗判据，与命中行同
+        事务提交）。创建者软删/解析不出在册行 → 不落命中行、不发送、不静默
+        改投（改投口径归 /pm）。
+        """
+        if await self._is_in_silence(rule):
+            return False
+        depth = await self._tasks.count_pending_by_tenant(rule.tenant_id)
+        if depth <= rule.threshold:
+            return False
+        recipient_id = await self._users.get_active_id_by_username_in_tenant(
+            rule.tenant_id, rule.created_by
+        )
+        if recipient_id is None:
+            logger.warning(
+                f"queue_depth 命中但创建者不可解析，跳过（不落命中行、不改投）: "
+                f"rule_id={rule.id}, tenant_id={rule.tenant_id}, "
+                f"created_by={rule.created_by}, depth={depth}"
+            )
+            return False
+        severity = rule.severity or "warning"
+        message = f"本企业排队任务数 {depth} 已超过阈值 {int(rule.threshold)}"
+        # 渠道发送：NotifyService 内部逐渠道吞异常，失败不挡命中记录
+        await self._notify.notify_text(
+            event="alert.queue_depth",
+            text=f"[告警:{severity}] {rule.name}: {message}",
+        )
+        self.session.add(Notification(
+            tenant_id=rule.tenant_id,
+            user_id=recipient_id,
+            type="alert",
+            title=f"[告警:{severity}] {rule.name}",
+            content=(
+                f"{message}（规则 #{rule.id}，类型 queue_depth，"
+                f"静默窗 {rule.window_minutes or 60} 分钟）"
+            ),
+            resource_type="alert_rule",
+            resource_id=rule.id,
+        ))
+        rule.last_triggered_at = datetime.now()
+        await self.session.commit()
+        logger.info(
+            f"queue_depth 告警已触发: rule_id={rule.id}, "
+            f"tenant_id={rule.tenant_id}, depth={depth}, "
+            f"threshold={rule.threshold}, recipient={recipient_id}"
+        )
+        return True
 
     async def _check_consecutive_failures(self, rule: AlertRule, task_info: dict) -> bool:
         """查询该 spider 最近 N 条任务，连续失败次数 >= threshold 则触发"""

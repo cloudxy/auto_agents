@@ -15,11 +15,19 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.audit_service import record_authz_denied
+from backend.services.background_session import (
+    platform_tenant_id,
+    platform_tenant_id_or_none,
+)
 from backend.services.tenant_expiry_service import assert_tenant_active
 from backend.services.user_service import load_auth_identity
 from backend.utils.auth import decode_access_token
 from platform_core.db import get_async_db
-from platform_core.exceptions import AuthenticationException, AuthorizationException
+from platform_core.exceptions import (
+    AuthenticationException,
+    AuthorizationException,
+    BusinessException,
+)
 from platform_core.logger import get_logger
 
 logger = get_logger("api")
@@ -124,10 +132,25 @@ require_operator = require_role("admin", "operator")
 require_admin = require_role("admin")
 
 
-def task_actor_tenant_id(user: CurrentUser) -> int | None:
-    """租户任务路径的入队企业：超管无企业空间 → None（enqueue 拒绝，GWT-09.4）。"""
+async def task_actor_tenant_id(user: CurrentUser, session: AsyncSession) -> int | None:
+    """租户任务路径的入队企业（FR-102 / T-38 改造；解析点单一——契约 §8）
+
+    - 平台超管 → 平台租户（slug=platform 种子行；行缺失 = 配置错误、入队失败
+      可见：fail loud，不静默回退 None、不临时建租户）
+    - 非超管但挂平台租户 → 拒绝（GWT-102.5 冒名直打；中文可见句，无内部码）
+    - 其余普通用户 → user.tenant_id（GWT-102.4 解析不变，零回退）
+    边界（GWT-82.4 / QA-07）：本身份仅用于采集入队与 AI 方案归属，不给超管
+    开渠道组/我的安装等企业产品空间。
+    """
+    logger.info(f"入队企业解析 | user={user.username} platform_admin={user.is_platform_admin}")
     if user.is_platform_admin:
-        return None
+        return await platform_tenant_id(session)
+    platform_tid = await platform_tenant_id_or_none(session)
+    if platform_tid is not None and user.tenant_id == platform_tid:
+        logger.warning(f"非超管以平台租户身份入队被拒绝 | user={user.username}")
+        raise BusinessException(
+            "当前账号不能以平台租户身份提交采集任务，请联系平台管理员"
+        )
     return user.tenant_id
 
 

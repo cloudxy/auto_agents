@@ -394,9 +394,21 @@ async def _notify_degrade(cfg, fallback_model: str) -> None:
         logger.warning(f"降质告警发送失败（忽略）: {exc}")
 
 
+async def _check_llm_tokens(session, tenant_id: int, year_month: str) -> None:
+    from backend.services.quota_service import (
+        QuotaExceededException, QuotaService, wrap_quota_exceeded,
+    )
+
+    logger.debug(f"月度 token 闸 | tenant={tenant_id} month={year_month}")
+    try:
+        await QuotaService(session).check_llm_tokens_month(int(tenant_id), year_month)
+    except QuotaExceededException as exc:
+        raise wrap_quota_exceeded(exc) from exc
+
+
 async def _enforce_tenant_token_quota() -> None:
     """企业月度 token 闸：真正打模型 / 出站 HTTP 之前。无租户上下文跳过。"""
-    from backend.services.quota_service import QuotaService, shanghai_year_month
+    from backend.services.quota_service import shanghai_year_month
     from platform_core.tenant_context import current_tenant_id as _cur_tid
 
     tid = _cur_tid()
@@ -408,11 +420,11 @@ async def _enforce_tenant_token_quota() -> None:
     factory = getattr(_seam(), "quota_session_factory", None)
     if factory is not None:
         async with factory() as session:
-            await QuotaService(session).check_llm_tokens_month(int(tid), year_month)
+            await _check_llm_tokens(session, int(tid), year_month)
         return
     manager = _seam().get_manager()
     async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
-        await QuotaService(session).check_llm_tokens_month(int(tid), year_month)
+        await _check_llm_tokens(session, int(tid), year_month)
 
 
 async def llm_chat(

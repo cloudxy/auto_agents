@@ -50,6 +50,37 @@ from platform_core.schemas.product_event import (
     CTA_BYPASS,
     WAVE0_EVENT_NAMES,
 )
+from platform_core.schemas.internal_fixture_tenant import (
+    InternalFixtureTenantCreate,
+    InternalFixtureTenantOut,
+    InternalFixtureTenantListOut,
+)
+from platform_core.schemas.billing import (
+    ChannelNotifyIn,
+    CheckoutCreate,
+    CheckoutPreviewOut,
+    OrderCreate,
+    OrderOut,
+    PlanOut,
+    SubscriptionOut,
+)
+from platform_core.schemas.payment_channel_credential import (
+    PaymentChannelCredentialCreate,
+    PaymentChannelCredentialListOut,
+    PaymentChannelCredentialOut,
+    PaymentChannelCredentialPut,
+    PaymentChannelCredentialUpdate,
+    PaymentChannelCredentialView,
+)
+from platform_core.schemas.relay_sku_entitlement import (
+    RelaySkuEntitlementCreate,
+    RelaySkuEntitlementOut,
+    RelaySkuEntitlementUpdate,
+)
+from platform_core.schemas.relay import (
+    RelayGroupCreate, RelayGroupOut, RelayGroupUpdate, RelaySkuPageOut, RelayTokenCreate,
+    RelayTokenOut, RelayUpgradeOut,
+)
 from platform_core.schemas.newapi import (
     ProbeVerdict,
     ChannelEventAction,
@@ -105,7 +136,19 @@ __all__ = [
     "PublicEventIn",
     "ProductEventOut",
     "ProductEventListOut",
+    "InternalFixtureTenantCreate",
+    "InternalFixtureTenantOut",
+    "InternalFixtureTenantListOut",
     "CTA_FUNNEL",
     "CTA_BYPASS",
     "WAVE0_EVENT_NAMES",
+    "PlanOut", "OrderCreate", "OrderOut", "SubscriptionOut",
+    "CheckoutCreate", "CheckoutPreviewOut",
+    "PaymentChannelCredentialCreate", "PaymentChannelCredentialUpdate",
+    "PaymentChannelCredentialOut", "PaymentChannelCredentialPut",
+    "PaymentChannelCredentialView", "PaymentChannelCredentialListOut",
+    "RelaySkuEntitlementCreate", "RelaySkuEntitlementUpdate", "RelaySkuEntitlementOut",
+    "RelayGroupCreate", "RelayGroupUpdate", "RelayGroupOut",
+    "RelaySkuPageOut", "RelayUpgradeOut",
+    "RelayTokenCreate", "RelayTokenOut",
 ]

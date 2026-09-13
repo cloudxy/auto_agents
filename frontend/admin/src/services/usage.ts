@@ -45,3 +45,14 @@ export const fetchDeliveryWebhook = (): Promise<DeliveryWebhook> =>
 
 export const putDeliveryWebhook = (url: string | null): Promise<DeliveryWebhook> =>
   api.put('/tenants/me/delivery-webhook', { url }).then((r) => unwrap<DeliveryWebhook>(r))
+
+export interface UpgradeIntent {
+  action: 'checkout' | 'contact_admin' | string
+  product: string
+  checkout_path: string | null
+  message: string
+}
+
+/** T-03 GET /tenants/me/quota/upgrade-intent：分角色着陆，不建单。 */
+export const fetchUpgradeIntent = (product = 'plan_pro'): Promise<UpgradeIntent> =>
+  api.get('/tenants/me/quota/upgrade-intent', { params: { product } }).then((r) => unwrap<UpgradeIntent>(r))

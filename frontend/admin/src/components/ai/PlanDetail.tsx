@@ -22,6 +22,8 @@ import { STATUS_META } from '../spider/types'
 import type { Task } from '../spider/types'
 import { FilterRuleList, FlowPreview } from './PlanForm'
 import type { AiPlanFlow } from '../../hooks/useAiPlanFlow'
+import { QuotaBlockAlert } from '../quota/QuotaBlockAlert'
+import { PLANNING_COPY } from '../../constants/collectCopy'
 
 const { Text } = Typography
 
@@ -68,7 +70,7 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
     step, plan, editedFlow, creating, actionLoading, customTask,
     createForm, flowForm, history, latestPassed,
     setStep, onCreate, onReplan, onTest, onTestEdited, onApplyFlowEdit, onRegister,
-    resetWizard, resultsTaskOf,
+    resetWizard, resultsTaskOf, collectBlock,
   } = flow
 
   if (!plan && step > 0) return null
@@ -99,7 +101,7 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
       </Form.Item>
       {canOperate && (
         <Button type="primary" icon={<ThunderboltOutlined />} loading={creating} onClick={onCreate}>
-          创建并开始规划
+          {creating ? PLANNING_COPY : '创建并开始规划'}
         </Button>
       )}
     </Form>
@@ -200,7 +202,7 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
               disabled={plan.status === 'planning'}
               onClick={onReplan}
             >
-              重新规划
+              {actionLoading === 'plan' ? PLANNING_COPY : '重新规划'}
             </Button>
             {svcFlow && (
               <Button
@@ -346,6 +348,9 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
 
   return (
     <>
+      {collectBlock?.kind === 'quota' && (
+        <QuotaBlockAlert cta={collectBlock.cta} style={{ marginBottom: 16 }} />
+      )}
       <Steps current={step} items={stepItems} style={{ marginBottom: 24, maxWidth: 860 }} />
       {step > 0 && plan && (
         <div style={{ marginBottom: 16 }}>

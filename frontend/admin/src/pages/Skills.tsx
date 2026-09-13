@@ -177,7 +177,7 @@ const Skills: React.FC<{ onSubscribe?: (name: string) => void }> = ({ onSubscrib
       />
 
       <Drawer
-        title={detail ? `${detail.title || detail.name}` : ''} width={640} open={detailOpen}
+        title={detail ? `${detail.title || detail.name}` : ''} size={640} open={detailOpen}
         onClose={() => setDetailOpen(false)}
       >
         {detail && (
@@ -188,7 +188,7 @@ const Skills: React.FC<{ onSubscribe?: (name: string) => void }> = ({ onSubscrib
               {detail.source_url && <> · <a href={detail.source_url} target="_blank" rel="noreferrer">来源地址</a></>}
             </Paragraph>
             <Typography.Title level={5}>SKILL.md</Typography.Title>
-            <pre style={{ maxHeight: 260, overflow: 'auto', background: '#fafafa', padding: 12, fontSize: 12 }}>{detail.skill_md || '（无内容）'}</pre>
+            <pre data-testid="skill-md" style={{ maxHeight: 260, overflow: 'auto', background: '#fafafa', padding: 12, fontSize: 12 }}>{detail.skill_md || '（无内容）'}</pre>
             <Typography.Title level={5}>评分历史</Typography.Title>
             {detail.reviews.length === 0 && <Text type="secondary">暂无评审记录</Text>}
             {detail.reviews.map((rv) => (
@@ -206,7 +206,7 @@ const Skills: React.FC<{ onSubscribe?: (name: string) => void }> = ({ onSubscrib
 
       <Modal
         title={`人工矫正：${correctTarget?.name ?? ''}`} open={!!correctTarget}
-        onOk={submitCorrection} onCancel={() => setCorrectTarget(null)} destroyOnClose
+        onOk={submitCorrection} onCancel={() => setCorrectTarget(null)} destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item name="category" label="分类" initialValue={correctTarget?.category}>

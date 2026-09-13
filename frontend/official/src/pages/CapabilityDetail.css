@@ -35,6 +35,11 @@
   margin: 0 0 var(--space-inset-sm);
 }
 
+.capability-detail__body-empty {
+  color: var(--color-text-secondary);
+  margin: var(--space-stack-md) 0;
+}
+
 .capability-detail__body {
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);

@@ -522,15 +522,17 @@ def test_post_plan_quota_full_gateway_reachable_only_12_3(
     )
     _seed_quota_full(db_session, tid)
     pid = _create_plan(db_client, headers)
-    db_client.post(f"/api/v1/ai/plans/{pid}/plan", headers=headers)
-    data = _get_plan(db_client, headers, pid)
-    assert data["status"] == "failed"
-    msg = data["error_message"] or ""
+    resp = db_client.post(f"/api/v1/ai/plans/{pid}/plan", headers=headers)
+    assert resp.status_code == 400, resp.text
+    msg = resp.json()["message"]
     assert PLAN_FULL_USER in msg and PLAN_FULL_CTA in msg
     assert GATEWAY_UNREACHABLE_USER not in msg
     assert NO_MODEL_USER not in msg
     assert "QUOTA_EXCEEDED" not in msg
+    assert "采集未运行，不会出数" not in msg
     assert outbound == []
+    data = _get_plan(db_client, headers, pid)
+    assert data["status"] == "draft"
 
 
 def test_post_plan_quota_full_gateway_unreachable_only_12_3(
@@ -544,12 +546,14 @@ def test_post_plan_quota_full_gateway_unreachable_only_12_3(
     )
     _seed_quota_full(db_session, tid)
     pid = _create_plan(db_client, headers)
-    db_client.post(f"/api/v1/ai/plans/{pid}/plan", headers=headers)
-    data = _get_plan(db_client, headers, pid)
-    assert data["status"] == "failed"
-    msg = data["error_message"] or ""
+    resp = db_client.post(f"/api/v1/ai/plans/{pid}/plan", headers=headers)
+    assert resp.status_code == 400, resp.text
+    msg = resp.json()["message"]
     assert PLAN_FULL_USER in msg and PLAN_FULL_CTA in msg
     assert GATEWAY_UNREACHABLE_USER not in msg
     assert NO_MODEL_USER not in msg
     assert "QUOTA_EXCEEDED" not in msg
+    assert "采集未运行，不会出数" not in msg
     assert outbound == []
+    data = _get_plan(db_client, headers, pid)
+    assert data["status"] == "draft"

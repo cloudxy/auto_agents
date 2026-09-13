@@ -10,6 +10,8 @@ export const CHANNEL_STATUS = {
 } as const
 
 export type ProbeVerdict = 'original' | 'spoofed' | 'offline'
+/** T-26 GET /newapi/overview 页级三态；缺省时 UI 回落本地派生 */
+export type DutyPageState = 'empty' | 'degrade' | 'live'
 
 export interface GatewayModel {
   gateway_ref: string
@@ -19,6 +21,8 @@ export interface GatewayModel {
   api_base?: string | null
   api_key_masked?: string | null
   extra?: Record<string, unknown>
+  duty_row_status?: string | null
+  duty_row_status_text?: string | null
 }
 
 export interface NewapiOverview {
@@ -26,6 +30,7 @@ export interface NewapiOverview {
   reason?: string | null
   empty_state?: string | null
   degrade_state?: string | null
+  duty_page_state?: DutyPageState | null
   models: GatewayModel[]
   deployments: GatewayModel[]
   channels: unknown[]
@@ -86,6 +91,19 @@ export const fetchNewapiProbeResults = (
   api
     .get('/newapi/probe-results', { params })
     .then((res) => unwrap<PagedResponse<ChannelProbeResultItem>>(res))
+
+/** T-33 / GWT-98.4：立即探测回执（触发即返回 accepted + batch_id，不阻塞轮询循环） */
+export interface ProbeTriggerResult {
+  accepted: boolean
+  gateway_ref: string
+  batch_id: string
+  reason?: string | null
+}
+
+export const triggerNewapiProbe = (gatewayRef: string): Promise<ProbeTriggerResult> =>
+  api
+    .post('/newapi/probe', { gateway_ref: gatewayRef })
+    .then((res) => unwrap<ProbeTriggerResult>(res))
 
 export interface ChannelConfigInfo {
   limit_quota: number
