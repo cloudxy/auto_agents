@@ -71,7 +71,7 @@ export const TaskList: React.FC<TaskListProps> = ({
       dataIndex: 'spider_name',
       key: 'spider_name',
       render: (name: string) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text strong>{spiderMap[name]?.title || name}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>{name}</Text>
         </Space>
@@ -122,7 +122,7 @@ export const TaskList: React.FC<TaskListProps> = ({
         )
         // 失败原因直显（U1-6）：不再只藏 Tag 的 hover 里
         return record.error_message ? (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Tooltip title={record.error_message}>{tag}</Tooltip>
             <Text type="danger" ellipsis style={{ maxWidth: 150, fontSize: 12 }} title={record.error_message}>
               {record.error_message}
