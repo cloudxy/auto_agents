@@ -7,8 +7,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import {
-  EMPTY_SHELF, EMPTY_SHELF_HINT, FILTER_EMPTY, LOAD_FAIL,
-  MARKET_CLOSED, MARKET_CLOSED_HINT, READONLY_SUBSCRIBE,
+  EMPTY_SHELF, FILTER_EMPTY, LOAD_FAIL,
+  MARKET_CLOSED, READONLY_SUBSCRIBE,
 } from './shelfCopy'
 import type { InstallRow, PublicShelfItem } from '../../services/capabilities'
 
@@ -117,7 +117,7 @@ test('GWT-U11.2 closed flag copy is 能力市场未开放, not empty shelf', asy
   })
   renderShelf()
   expect(await screen.findByText(MARKET_CLOSED)).toBeInTheDocument()
-  expect(screen.getByText(MARKET_CLOSED_HINT)).toBeInTheDocument()
+  expect(screen.queryByText('开放后，已上架的能力会出现在这里。')).not.toBeInTheDocument()
   expect(screen.queryByText(EMPTY_SHELF)).not.toBeInTheDocument()
   expect(screen.queryByText(LOAD_FAIL)).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '订阅' })).not.toBeInTheDocument()
@@ -142,7 +142,7 @@ test('GWT-U10.2 open plus 0 listed is 暂无已上架能力, not blank or load-f
   })
   renderShelf()
   expect(await screen.findByText(EMPTY_SHELF)).toBeInTheDocument()
-  expect(screen.getByText(EMPTY_SHELF_HINT)).toBeInTheDocument()
+  expect(screen.queryByText('已上架且过许可的能力会出现在这里。')).not.toBeInTheDocument()
   expect(screen.queryByText(MARKET_CLOSED)).not.toBeInTheDocument()
   expect(screen.queryByText(LOAD_FAIL)).not.toBeInTheDocument()
   expect(screen.getByTestId('tenant-shelf')).toBeInTheDocument()
@@ -220,4 +220,16 @@ test('tenant company admin has no market switch and no listing tabs', async () =
   expect(screen.queryByRole('tab', { name: '源' })).not.toBeInTheDocument()
   expect(screen.queryByRole('tab', { name: '目录' })).not.toBeInTheDocument()
   expect(screen.queryByText('上架')).not.toBeInTheDocument()
+})
+
+test('GWT-M40 tenant shelf has no author portal and no seven-leaf', async () => {
+  fetchList.mockResolvedValue({ items: [item()], total: 1, market_closed: false })
+  renderShelf()
+  expect(await screen.findByRole('button', { name: '订阅' })).toBeInTheDocument()
+  expect(screen.queryByText('投稿')).not.toBeInTheDocument()
+  expect(screen.queryByText('成为作者')).not.toBeInTheDocument()
+  expect(screen.queryByText('发布到能力市场')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('governance-shell')).not.toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: '源' })).not.toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain('当前可买')
 })

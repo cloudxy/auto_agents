@@ -6,6 +6,8 @@ import asyncio
 
 import pytest
 
+pytestmark = pytest.mark.mysql_fidelity
+
 
 @pytest.fixture(autouse=True)
 def _seed(db_session):

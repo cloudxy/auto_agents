@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { withQuery } from '../testUtils';
 import Skills from './Skills';
 import { getSkillDetail } from '../services/skills';
 
@@ -33,7 +34,7 @@ jest.mock('../hooks/usePermission', () => ({
 
 
 test('renders skill list with dual score columns', async () => {
-  render(<Skills />);
+  render(withQuery(<Skills />));
   expect(await screen.findByText('阿尔法')).toBeInTheDocument();
   await waitFor(() => expect(screen.getByText('8.6')).toBeInTheDocument());
   expect(screen.getByText('贝塔')).toBeInTheDocument();
@@ -42,7 +43,7 @@ test('renders skill list with dual score columns', async () => {
 });
 
 test('readonly mode hides correction column and shows hint', () => {
-  render(<Skills />);
+  render(withQuery(<Skills />));
   expect(screen.getByText(/当前角色只读/)).toBeInTheDocument();
   expect(screen.queryByText('矫正')).toBeNull();
 });
@@ -61,7 +62,7 @@ test('GWT-U13.1 admin SKILL.md is text: <script>alert(1)</script> visible, no sc
     skill_md: payload,
     reviews: [],
   });
-  render(<Skills />);
+  render(withQuery(<Skills />));
   fireEvent.click(await screen.findByText('阿尔法'));
   const body = await screen.findByTestId('skill-md');
   expect(body.textContent).toContain('<script>alert(1)</script>');

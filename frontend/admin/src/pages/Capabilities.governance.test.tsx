@@ -3,7 +3,7 @@
  */
 import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import {
@@ -33,6 +33,7 @@ jest.mock('../services/capabilities', () => ({
   createTeam: jest.fn(),
   verifyPlugin: jest.fn(),
   patchListing: jest.fn(),
+  uninstallInstall: jest.fn(),
   getPlugin: jest.fn(),
   fetchPublicCapability: jest.fn(),
   subscribeCapability: jest.fn(),
@@ -50,10 +51,11 @@ jest.mock('../hooks/usePermission', () => ({
 }))
 
 import Capabilities from './Capabilities'
-import { getPlugin, listAssets, patchListing } from '../services/capabilities'
+import { getPlugin, listAssets, patchListing, uninstallInstall } from '../services/capabilities'
 
 const list = listAssets as jest.Mock
 const patch = patchListing as jest.Mock
+const uninstall = uninstallInstall as jest.Mock
 const pluginDetail = getPlugin as jest.Mock
 
 const row = (over: Partial<AssetRow> = {}): AssetRow => ({
@@ -274,4 +276,28 @@ test('agent leaf empty is 智能体 not 专家', async () => {
   fireEvent.click(screen.getByRole('tab', { name: '智能体' }))
   expect(await screen.findByText(AGENT_EMPTY)).toBeInTheDocument()
   expect(screen.queryByRole('columnheader', { name: '专家' })).not.toBeInTheDocument()
+})
+
+test('GWT-M41 unlist one row does not uninstall existing installs', async () => {
+  perm.isPlatformAdmin = true
+  uninstall.mockReset()
+  list.mockResolvedValue({ total: 1, items: [row({ listing_state: 'listed' })] })
+  patch.mockResolvedValue({ listing_state: 'unlisted' })
+  renderPage()
+  const group = await screen.findByRole('group', { name: '上架 demo-skill' })
+  fireEvent.click(within(group).getByText('未上架'))
+  await waitFor(() => expect(patch).toHaveBeenCalledWith('skill', 'demo-skill', 'unlisted', false))
+  expect(uninstall).not.toHaveBeenCalled()
+  expect(document.body.textContent || '').not.toContain('当前可买')
+})
+
+test('GWT-M41 tenant has no author-submit CTA', async () => {
+  perm.isPlatformAdmin = false
+  list.mockResolvedValue({ total: 0, items: [] })
+  renderPage()
+  expect(await screen.findByTestId('tenant-shelf')).toBeInTheDocument()
+  expect(screen.queryByText('投稿')).not.toBeInTheDocument()
+  expect(screen.queryByText('成为作者')).not.toBeInTheDocument()
+  expect(screen.queryByText('发布到能力市场')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('governance-shell')).not.toBeInTheDocument()
 })

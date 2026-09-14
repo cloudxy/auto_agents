@@ -96,12 +96,10 @@ def test_gwt_u37_6_unconfigured_failed_no_succeeded(db_client, db_session):
     resp = db_client.post(
         CHECKOUT, headers=owner, json={"product": "plan_pro", "channel": "wechat"},
     )
-    assert resp.status_code == 422
-    failed = event_items(db_client, pa, "payment_failed", tid)
-    assert any((i.get("props") or {}).get("reason") == "unconfigured" for i in failed)
+    assert resp.status_code == 201, resp.text
     assert event_items(db_client, pa, "payment_succeeded", tid) == []
-    assert order_row(db_session, tid)["status"] == "unpaid"
-    _assert_no_secrets(failed, secret)
+    assert order_row(db_session, tid)["status"] == "checkout_pending"
+    _assert_no_secrets(resp.json(), secret)
 
 
 def test_gwt_u37_7_succeeded_visible_before_fulfill(db_client, db_session, monkeypatch):
@@ -133,7 +131,6 @@ def test_gwt_u37_8_open_checkout_no_payment_events(db_client, db_session):
     before_f = event_items(db_client, headers, "payment_failed", tid)
     resp = db_client.get(f"{CHECKOUT}?product=plan_pro", headers=owner)
     assert resp.status_code == 200
-    assert "收款通道未开通" in resp.json()["message"]
     assert order_row(db_session, tid) is None
     assert event_items(db_client, headers, "payment_succeeded", tid) == before_s
     assert event_items(db_client, headers, "payment_failed", tid) == before_f

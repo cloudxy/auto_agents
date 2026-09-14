@@ -28,7 +28,7 @@ export interface MenuItem {
 }
 
 /** 平台写面路由（导航隐藏 + 直打 404；与 /llm 无关） */
-export const PLATFORM_WRITE_KEYS = ['/newapi', '/platform-ops', '/users'] as const
+export const PLATFORM_WRITE_KEYS = ['/newapi', '/platform-ops', '/users', '/settings'] as const
 
 export const isPlatformWritePath = (pathname: string): boolean =>
   PLATFORM_WRITE_KEYS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
@@ -89,7 +89,7 @@ export const menuConfig: MenuItem[] = [
       { key: '/llm', label: 'LLM 配置', permission: 'menu:llm' },
       { key: '/newapi', label: '中转站管控', permission: 'menu:newapi', platformOnly: true },
       { key: '/users', label: '用户管理', permission: 'menu:users', platformOnly: true },
-      { key: '/settings', label: '系统设置', permission: 'menu:settings' },
+      { key: '/settings', label: '系统设置', permission: 'menu:settings', platformOnly: true },
     ],
   },
 ]

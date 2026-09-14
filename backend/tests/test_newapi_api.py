@@ -53,7 +53,10 @@ def _patch_gateway(monkeypatch, models=None, error: Exception | None = None,
 
 @pytest.fixture
 def api_client(platform_admin_client, app):
-    """平台超管特权 client + get_async_db override（mock session）"""
+    """平台超管特权 client + get_async_db override（mock session，Repository 不落真库）
+
+    T10：原依赖 conftest 全局兜底 admin，兜底收紧后显式声明 admin 特权。
+    """
     from platform_core.db import get_async_db
 
     session = MagicMock()

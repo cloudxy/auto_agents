@@ -9,6 +9,7 @@
 - 通知失败仅记日志，绝不向上抛异常（不影响任务主流程）；渠道互不影响
 - 渠道与目标地址全部来自配置（config/default/notify.yml，可被 .env 覆盖）
 """
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -221,15 +222,21 @@ class NotifyService:
         if not url:
             logger.debug("NOTIFY.WEBHOOK_URL 未配置，跳过 webhook 渠道")
             return
-        async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
-            resp = await client.post(url, json=payload)
-            if resp.status_code >= 400:
-                logger.warning(
-                    f"webhook 通知返回异常状态: task_id={payload['task_id']}, "
-                    f"http={resp.status_code}, body={resp.text[:200]}"
-                )
-            else:
-                logger.info(f"webhook 通知已发送: task_id={payload['task_id']}")
+        last_err = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
+                    resp = await client.post(url, json=payload)
+                if resp.status_code < 400:
+                    logger.info(f"webhook 通知已发送: task_id={payload['task_id']}")
+                    return
+                last_err = f"http={resp.status_code}"
+            except Exception as e:  # noqa: BLE001
+                last_err = str(e)
+            await asyncio.sleep(min(8, 2 ** attempt))
+        logger.warning(
+            f"webhook 通知最终失败: task_id={payload['task_id']}, error={last_err}"
+        )
 
     async def _notify_email(self, payload: dict) -> None:
         """Email 渠道：SMTP 发送（aiosmtplib）；SMTP_HOST/MAIL_TO 缺失时跳过"""

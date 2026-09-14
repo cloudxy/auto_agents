@@ -238,3 +238,49 @@ test('success unwraps once (no nested .data empty names)', async () => {
   expect(screen.queryByText(/企业「undefined」/)).not.toBeInTheDocument()
   await waitFor(() => expect(signup).toHaveBeenCalledTimes(1))
 })
+
+test('GWT-M51.1 primary is 创建企业 and success is company admin, not personal space', async () => {
+  signup.mockResolvedValue({
+    tenant: { name: 'Acme Corp', slug: 'acme-corp' },
+    owner: { username: 'boss', email: 'boss@acme.com' },
+  })
+  renderRegister()
+  expect(screen.getByRole('button', { name: '创建企业' })).toBeInTheDocument()
+  expect(document.body.textContent || '').not.toMatch(/个人空间/)
+  expect(document.body.textContent || '').not.toMatch(/去掉企业/)
+  fillForm()
+  submit()
+  const login = await screen.findByRole('link', { name: '登录管理后台' })
+  expect(decodeURIComponent(login.getAttribute('href') || '')).toContain('/dashboard')
+  expect(decodeURIComponent(login.getAttribute('href') || '')).not.toMatch(/personal|me\/home|个人/)
+  expect(document.body.textContent || '').not.toMatch(/个人空间/)
+  expect(document.body.textContent || '').not.toContain('当前可买')
+})
+
+test('GWT-M51.2 empty company name: 请填写企业名, does not create', async () => {
+  renderRegister()
+  fillForm({ company: '' })
+  submit()
+  expect(await screen.findByText('请填写企业名')).toBeInTheDocument()
+  expect(signup).not.toHaveBeenCalled()
+  expect(screen.queryByRole('link', { name: '登录管理后台' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '创建企业' })).toBeInTheDocument()
+})
+
+test('GWT-M51.4 company name of 1 char: 企业名至少 2 个字符, does not create', async () => {
+  renderRegister()
+  fillForm({ company: '甲' })
+  submit()
+  expect(await screen.findByText('企业名至少 2 个字符')).toBeInTheDocument()
+  expect(signup).not.toHaveBeenCalled()
+  expect(screen.queryByRole('link', { name: '登录管理后台' })).not.toBeInTheDocument()
+})
+
+test('GWT-M51.3 no personal-space CTA on the register form', () => {
+  renderRegister()
+  const copy = document.body.textContent || ''
+  expect(copy).not.toMatch(/开通个人空间/)
+  expect(copy).not.toMatch(/去掉企业只用个人账号/)
+  expect(copy).not.toMatch(/个人空间/)
+})
+

@@ -233,6 +233,12 @@ const Register: React.FC = () => {
             >
               <Input.Password placeholder="至少 8 位" autoComplete="new-password" />
             </Form.Item>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+              创建即表示已阅读{' '}
+              <a href="/terms" target="_blank" rel="noreferrer">服务条款</a>
+              {' '}与{' '}
+              <a href="/privacy" target="_blank" rel="noreferrer">隐私政策</a>
+            </Text>
             <Button
               type="primary"
               htmlType="submit"

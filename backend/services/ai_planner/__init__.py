@@ -20,6 +20,9 @@ T6 解环后的两条硬约束：
    均单向依赖之；本包不再回引 llm_provider_service。
 """
 from backend.services.ai_planner.llm_client import (
+    PLANNING_DISABLED_CODE,
+    PLANNING_DISABLED_COPY,
+    PLANNING_READONLY_COPY,
     _CLIENT_CONNECT_TIMEOUT,
     _CLIENT_KEEPALIVE_EXPIRY,
     _CLIENT_MAX_CONNECTIONS,
@@ -81,7 +84,7 @@ from backend.services.ai_planner.state import (
     _spawn,
     reconcile_interrupted_plans,
 )
-from backend.services.ai_planner.orchestrator import AiPlannerService
+from backend.services.ai_planner.orchestrator import AiPlannerService, planning_is_open
 
 # ----------------------------------------------------------------------
 # 旧单文件命名空间的依赖绑定（兼容层）：存量单测 patch 目标 + 历史路径
@@ -127,7 +130,8 @@ logger = get_logger("api")  # noqa: F401  兼容旧命名空间 logger 绑定
 
 __all__ = [
     # orchestrator
-    "AiPlannerService",
+    "AiPlannerService", "planning_is_open",
+    "PLANNING_DISABLED_CODE", "PLANNING_DISABLED_COPY", "PLANNING_READONLY_COPY",
     # llm_client
     "_CLIENT_CONNECT_TIMEOUT", "_CLIENT_KEEPALIVE_EXPIRY", "_CLIENT_MAX_CONNECTIONS",
     "_CLIENT_MAX_KEEPALIVE_CONNECTIONS", "_RETRY_BASE_DELAY", "_TOKEN_USAGE",

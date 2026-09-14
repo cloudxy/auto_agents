@@ -28,6 +28,13 @@ WAVE0_EVENT_NAMES = (
     "task_blocked",
     "results_exported",
     "quota_exceeded",
+    "llm_planning_blocked",
+    "data_export_completed",
+    "checkout_story_started",
+    "order_status_reached",
+    "second_checkout_story_submitted",
+    "outbound_wrong_plane_rejected",
+    "duty_entry_opened",
 )
 LOGIN_FAIL_REASONS = ("credential", "expired", "locked")
 QUOTA_DIMENSIONS = ("concurrency", "storage", "llm_tokens")

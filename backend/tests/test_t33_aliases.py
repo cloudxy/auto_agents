@@ -135,12 +135,12 @@ def test_gwt_45_3_tenant_operator_cannot_set_alias(
     tid = seed_tenant(db_session, "t33-op")
     bind_actor(app, role="operator", tenant_id=tid, tenant_role="operator")
     denied_op = _put_alias(db_client, "skill", "g453-row", "经办短名")
-    assert denied_op.status_code == 403
-    assert denied_op.json()["code"] == "FORBIDDEN"
+    assert denied_op.status_code == 404
+    assert denied_op.json()["code"] == "HTTP_404"
     bind_actor(app, role="admin", tenant_id=tid, tenant_role="admin")
     denied_admin = _put_alias(db_client, "skill", "g453-row", "经办短名")
-    assert denied_admin.status_code == 403
-    assert denied_admin.json()["code"] == "FORBIDDEN"
+    assert denied_admin.status_code == 404
+    assert denied_admin.json()["code"] == "HTTP_404"
     assert _public_url_set(db_client, pairs) == before_urls
     assert _catalog_names(db_session) == before_names
     assert _alias_snapshot(db_session) == before_alias

@@ -7,9 +7,11 @@
  */
 import React, { useEffect } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
+import { track } from '../../utils/track'
 import { Button } from 'antd'
 import { RocketOutlined, ArrowRightOutlined } from '@ant-design/icons'
 import { trackCta, trackPageView } from '../../services/beacon'
+import { DUTY_CONTACT, DUTY_CONTACT_LABEL } from '../../dutyContact'
 
 const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
 
@@ -30,6 +32,16 @@ const linkStyle: React.CSSProperties = {
 }
 const linkActiveStyle: React.CSSProperties = { ...linkStyle, color: '#fff', fontWeight: 600 }
 
+const TITLES: Record<string, string> = {
+  '/': 'AutoAgents · 智能数据采集',
+  '/skills': '能力市场 · AutoAgents',
+  '/capabilities': '能力市场 · AutoAgents',
+  '/pricing': '定价 · AutoAgents',
+  '/register': '注册 · AutoAgents',
+  '/terms': '服务条款 · AutoAgents',
+  '/privacy': '隐私政策 · AutoAgents',
+}
+
 const PAGE_BY_PATH: Record<string, string> = {
   '/': 'home',
   '/pricing': 'pricing',
@@ -41,6 +53,8 @@ const PAGE_BY_PATH: Record<string, string> = {
 const SiteLayout: React.FC = () => {
   const { pathname } = useLocation()
   useEffect(() => {
+    document.title = TITLES[pathname] || SITE_NAME
+    track('view', { path: pathname })
     const page = PAGE_BY_PATH[pathname]
     if (page) trackPageView(page)
   }, [pathname])
@@ -136,6 +150,11 @@ const SiteLayout: React.FC = () => {
                 {l.label}
               </Link>
             ))}
+            <Link to="/terms" style={linkStyle}>服务条款</Link>
+            <Link to="/privacy" style={linkStyle}>隐私政策</Link>
+            {DUTY_CONTACT ? (
+              <a href={`mailto:${DUTY_CONTACT}`} style={linkStyle}>{DUTY_CONTACT_LABEL}</a>
+            ) : null}
           </nav>
         </div>
         <div

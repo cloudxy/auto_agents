@@ -6,10 +6,18 @@ export interface PlanRow {
   name: string
   price_cents: number
   period: string
+  quota_json?: string | null
+  is_public?: number
 }
 
-export type PayChannel = 'alipay' | 'wechat'
+export type PayChannel = 'offline' | 'alipay' | 'wechat'
 export type CheckoutProduct = 'plan_pro' | 'plan_enterprise' | 'relay'
+
+export const CHANNEL_LABEL: Record<string, string> = {
+  offline: '线下转账',
+  alipay: '支付宝',
+  wechat: '微信支付',
+}
 
 export interface OrderRow {
   id: number
@@ -17,6 +25,9 @@ export interface OrderRow {
   amount_cents: number
   status: string
   channel: string
+  paid_at?: string | null
+  created_at?: string
+  tenant_id?: number | null
   /** T-02 读模型：档位名（如「专业档」） */
   plan_name?: string
   /** T-02 读模型：金额（元，与定价页同一数字）。渲染用它，不做分→元心算 */
@@ -25,19 +36,31 @@ export interface OrderRow {
   product_code?: string | null
 }
 
+export interface SubscriptionRow {
+  id: number
+  plan_id: number
+  status: string
+  current_period_end: string | null
+  tenant_id: number | null
+}
+
 export interface CheckoutChannel {
-  channel: PayChannel
+  channel: Exclude<PayChannel, 'offline'>
   configured: boolean
   selectable: boolean
 }
 
 export const listPlans = (): Promise<PlanRow[]> =>
-  api.get('/billing/plans').then((r) => unwrap<PlanRow[]>(r))
+  api.get('/billing/plans').then((r) => unwrap<PlanRow[]>(r) ?? [])
+
+export const fetchSubscription = (): Promise<SubscriptionRow | null> =>
+  api.get('/billing/subscription').then((r) => unwrap<SubscriptionRow | null>(r) ?? null)
 
 export interface CheckoutPreview {
   product: string
   channels: CheckoutChannel[]
   empty_state: string | null
+  notice?: string | null
   can_pay: boolean
   order_id: number | null
   amount_cents?: number | null
@@ -47,21 +70,21 @@ export interface CheckoutPreview {
 export const previewCheckout = (product = 'plan_pro'): Promise<CheckoutPreview> =>
   api.get('/billing/checkout', { params: { product } }).then((r) => unwrap<CheckoutPreview>(r))
 
-/** T-16 POST /billing/checkout：买方占坑。channel 闭集 alipay|wechat。 */
+/** POST /billing/checkout：W2 不要求已选通道。 */
 export const createCheckout = (body: {
   product: string
-  channel: PayChannel
+  channel?: Exclude<PayChannel, 'offline'>
 }): Promise<OrderRow> =>
   api.post('/billing/checkout', body).then((r) => unwrap<OrderRow>(r))
 
 export const listMyOrders = (): Promise<OrderRow[]> =>
-  api.get('/billing/orders').then((r) => unwrap<OrderRow[]>(r))
+  api.get('/billing/orders').then((r) => unwrap<OrderRow[]>(r) ?? [])
 
-export const createOrder = (plan_id: number): Promise<OrderRow> =>
-  api.post('/billing/orders', { plan_id, channel: 'offline' }).then((r) => unwrap<OrderRow>(r))
+export const createOrder = (plan_id: number, channel: PayChannel = 'offline'): Promise<OrderRow> =>
+  api.post('/billing/orders', { plan_id, channel }).then((r) => unwrap<OrderRow>(r))
 
 export const listPendingOrders = (): Promise<OrderRow[]> =>
-  api.get('/billing/admin/orders').then((r) => unwrap<OrderRow[]>(r))
+  api.get('/billing/admin/orders').then((r) => unwrap<OrderRow[]>(r) ?? [])
 
 export const confirmOrder = (orderId: number): Promise<OrderRow> =>
   api.post(`/billing/orders/${orderId}/confirm`).then((r) => unwrap<OrderRow>(r))

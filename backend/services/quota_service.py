@@ -35,9 +35,17 @@ PROVIDER_ERROR_USER = "本企业供应商调用失败"
 STORAGE_CLEANUP_CTA = "去结果库"
 CONTACT_ADMIN_UPGRADE = "请联系本企业管理员开通"
 CHECKOUT_EMPTY_USER = "收款通道未开通"
+CHECKOUT_UNCONFIGURED_SUBMIT_USER = "收款通道未开通，提交后等待平台确认开通"
+CHECKOUT_PENDING_EXISTS_USER = "已有待支付"
+ORDER_STORY_CLOSED_USER = "请从结账页提交开通"
 CHECKOUT_PRODUCTS = frozenset({"plan_pro", "plan_enterprise", "relay"})
 DEFAULT_UPGRADE_PRODUCT = "plan_pro"
 BUYER_TENANT_ROLES = frozenset({"owner", "admin"})
+PRO_TIER_QUOTA = {
+    "task_concurrency": 50,
+    "result_storage": 200000,
+    "llm_tokens_month": 5000000,
+}
 SHANGHAI_TZ = "Asia/Shanghai"
 
 
@@ -149,6 +157,7 @@ DEFAULT_QUOTA = {
     "task_concurrency": 5,
     "result_storage": 10000,
     "llm_tokens_month": 200000,
+    "result_retention_days": 90,
 }
 
 
@@ -255,20 +264,24 @@ class QuotaService:
         """LLM 调用前：本租户当月 total_tokens 合计 < llm_tokens_month"""
         tenant = await self._tenant(tenant_id)
         limit = int(quota_of(tenant)["llm_tokens_month"])
-        month_prefix = f"{year_month}-"
-        used = (await self.session.execute(
-            select(func.coalesce(func.sum(LlmTokenUsage.total_tokens), 0)).where(
-                LlmTokenUsage.tenant_id == tenant_id,
-                func.cast(LlmTokenUsage.stat_date, String).like(month_prefix + "%"),
-            )
-        )).scalar_one()
-        if int(used) >= limit:
+        from backend.services.llm_usage_service import get_tenant_month_used
+
+        redis_used = await get_tenant_month_used(tenant_id)
+        if redis_used is None:
+            month_prefix = f"{year_month}-"
+            redis_used = int((await self.session.execute(
+                select(func.coalesce(func.sum(LlmTokenUsage.total_tokens), 0)).where(
+                    LlmTokenUsage.tenant_id == tenant_id,
+                    func.cast(LlmTokenUsage.stat_date, String).like(month_prefix + "%"),
+                )
+            )).scalar_one())
+        if int(redis_used) >= limit:
             await self._emit_quota(tenant_id, "llm_tokens")
             raise QuotaExceededException(
-                f"本月 LLM token 用量{PLAN_FULL_USER}（{used}/{limit}）。{PLAN_FULL_CTA}",
+                f"本月 LLM token 用量{PLAN_FULL_USER}（{redis_used}/{limit}）。{PLAN_FULL_CTA}",
                 dimension="llm_tokens",
             )
-        logger.debug(f"配额检查·LLM 月度 | tenant={tenant_id} {used}/{limit}")
+        logger.debug(f"配额检查·LLM 月度 | tenant={tenant_id} {redis_used}/{limit}")
 
     async def usage_by_member(self, tenant_id: int) -> list[dict]:
         """成员维度用量分摊（B6 工单 91）：spider_tasks 按 created_by 聚合
@@ -310,8 +323,11 @@ class QuotaService:
         )
         month_prefix = f"{year_month}-"
         tokens_row = (await self.session.execute(
-            select(LlmTokenUsage.provider_name,
-                   func.sum(LlmTokenUsage.total_tokens).label("tokens"))
+            select(
+                LlmTokenUsage.provider_name,
+                func.sum(LlmTokenUsage.total_tokens).label("tokens"),
+                func.sum(LlmTokenUsage.cost_cents).label("cost"),
+            )
             .where(
                 LlmTokenUsage.tenant_id == tenant_id,
                 func.cast(LlmTokenUsage.stat_date, String).like(month_prefix + "%"),
@@ -319,6 +335,7 @@ class QuotaService:
             .group_by(LlmTokenUsage.provider_name)
         )).all()
         tokens_total = sum(int(r.tokens or 0) for r in tokens_row)
+        cost_by_provider = {r.provider_name: int(r.cost or 0) for r in tokens_row}
         usage = {
             "task_concurrency": int(active_tasks),
             "result_storage": int(stored_results),
@@ -329,6 +346,8 @@ class QuotaService:
             "quota": quota,
             "usage": usage,
             "llm_by_provider": {r.provider_name: int(r.tokens or 0) for r in tokens_row},
+            "cost_by_provider": cost_by_provider,
+            "cost_cents_total": sum(cost_by_provider.values()),
             "timezone": SHANGHAI_TZ,
             "year_month": year_month,
             "alerts": build_usage_alerts(usage, quota),

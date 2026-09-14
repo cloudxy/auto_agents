@@ -28,6 +28,7 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "jest --maxWorkers=2",
+    "e2e": "NO_PROXY=127.0.0.1,localhost,::1 no_proxy=127.0.0.1,localhost,::1 playwright test",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
@@ -96,10 +97,12 @@
     "@babel/preset-env": "^7.29.7",
     "@babel/preset-react": "^7.29.7",
     "@babel/preset-typescript": "^7.29.7",
+    "@playwright/test": "^1.63.0",
     "@types/jest": "^29.5.14",
     "babel-jest": "^29.7.0",
     "identity-obj-proxy": "^3.0.0",
     "jest": "^29.7.0",
-    "jest-environment-jsdom": "^29.7.0"
+    "jest-environment-jsdom": "^29.7.0",
+    "serve": "^14.2.6"
   }
 }

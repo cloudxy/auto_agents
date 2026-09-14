@@ -201,13 +201,33 @@ export const updateDefinition = (name: string, enabled: boolean): Promise<Spider
 
 /** 结果导出（blob 下载，自动携带鉴权 Token；二进制流白名单，不解信封） */
 export const exportResults = async (taskId: number, format: 'csv' | 'json'): Promise<Blob> => {
+  const wrapMessage = (msg: string) => {
+    const wrapped = new Error(msg) as Error & { response: { data: { message: string } } }
+    wrapped.response = { data: { message: msg } }
+    return wrapped
+  }
   try {
     const res = await api.get(`/spiders/results/${taskId}/export`, {
       params: { format },
       responseType: 'blob',
     })
-    return res as unknown as Blob
+    const blob = res as unknown as Blob
+    const ctype = (blob as Blob & { type?: string }).type || ''
+    if (ctype.includes('application/json')) {
+      const text = await blob.text()
+      let msg = text.slice(0, 200) || '导出失败'
+      try {
+        msg = (JSON.parse(text) as { message?: string }).message || msg
+      } catch {
+        /* keep slice */
+      }
+      throw wrapMessage(msg)
+    }
+    return blob
   } catch (error) {
+    if ((error as { response?: { data?: { message?: string } } })?.response?.data?.message) {
+      throw error
+    }
     const data = (error as { response?: { data?: unknown } })?.response?.data
     if (typeof Blob !== 'undefined' && data instanceof Blob) {
       const text = await data.text()
@@ -217,11 +237,7 @@ export const exportResults = async (taskId: number, format: 'csv' | 'json'): Pro
       } catch {
         msg = undefined
       }
-      if (msg) {
-        const wrapped = new Error(msg) as Error & { response: { data: { message: string } } }
-        wrapped.response = { data: { message: msg } }
-        throw wrapped
-      }
+      if (msg) throw wrapMessage(msg)
     }
     throw error
   }

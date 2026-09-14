@@ -51,6 +51,8 @@ from platform_core.models.role import Role
 from platform_core.models.department import Department
 from platform_core.models.menu import Menu
 from platform_core.models.permission import Permission
+from platform_core.models.api_key import ApiKey
+from platform_core.models.billing import Order, Plan, TenantSubscription
 
 __all__ = [
     "Base", "SpiderTask", "SpiderResult", "SpiderSchedule", "SpiderDefinition",
@@ -67,5 +69,6 @@ __all__ = [
     "Tag", "Tagging", "Attachment", "Notification", "ResourceVersion",
     "WorkflowDefinition", "WorkflowInstance", "WorkflowStep", "WorkflowTransition",
     "ArchiveRecord", "I18nLocale", "I18nTranslation", "SystemCache",
-    "Role", "Department", "Menu", "Permission",
+    "Role", "Department", "Menu", "Permission", "ApiKey",
+    "Plan", "TenantSubscription", "Order",
 ]

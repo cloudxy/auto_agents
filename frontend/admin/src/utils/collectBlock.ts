@@ -1,5 +1,6 @@
 import {
   PLAN_FULL_COPY,
+  PLANNING_DISABLED_CODE,
   SPIDER_WORKER_OFFLINE_CODE,
   STORAGE_CTA,
   TASK_QUOTA_LIMIT_CODE,
@@ -34,6 +35,13 @@ export function parseCollectBlock(e: unknown): CollectBlock | null {
     return { kind: 'quota', cta, dimension: payload?.dimension }
   }
   return null
+}
+
+/** FR-M01：未开放只认 code（及 expand 旧句），不用 message 当业务分支。 */
+export function isPlanningDisabledError(e: unknown): boolean {
+  if (apiErrorCode(e) === PLANNING_DISABLED_CODE) return true
+  const msg = (e as EnvelopeLike).response?.data?.message || ''
+  return typeof msg === 'string' && msg.startsWith('LLM 功能未启用')
 }
 
 export function quotaTitle(): string {

@@ -100,7 +100,7 @@ async def record_usage(dim: str, model: str, prompt_tokens: int = 0, completion_
             await redis.hincrby(daily, f"{tkey}|{dim}|{model}|requests", 1)
             # 月度汇总（预算读数口径）
             monthly = _monthly_key(today)
-            await redis.hincrby(monthly, f"{dim}|total", total)
+            await redis.hincrby(monthly, f"{tkey}|{dim}|total", total)
             await redis.expire(monthly, _MONTHLY_TTL)
         if failed:
             await redis.hincrby(daily, f"{tkey}|{dim}|{model}|failed", 1)
@@ -124,6 +124,26 @@ async def get_month_used(dim: str, tenant_id: Optional[int] = None) -> Optional[
         return int(raw) if raw else 0
     except Exception as e:  # noqa: BLE001
         logger.debug(f"LLM 月度用量读取失败（回退内存读数）: dim={dim}, error={e}")
+        return None
+
+
+async def get_tenant_month_used(tenant_id: int) -> Optional[int]:
+    logger.info(f"读取租户月度 LLM 用量: tenant={tenant_id}")
+    if _IN_PYTEST:
+        return None
+    try:
+        redis = get_async_redis()
+        tkey = str(tenant_id)
+        data = await redis.hgetall(_monthly_key(_today()))
+        total = 0
+        prefix = f"{tkey}|"
+        for field, val in (data or {}).items():
+            name = field.decode() if isinstance(field, bytes) else str(field)
+            if name.startswith(prefix) and name.endswith("|total"):
+                total += int(val)
+        return total
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"租户月度用量读取失败: tenant={tenant_id}, error={e}")
         return None
 
 
@@ -237,6 +257,7 @@ class LlmUsageFlushService:
                             row["tenant_id"] = int(row["tenant_key"])
                         except (TypeError, ValueError):
                             row["tenant_id"] = default_tid or await default_tenant_id(session)
+                await self._attach_cost(session, rows)
                 await LlmTokenUsageRepository(session).upsert_daily(rows)
                 await session.commit()
             row_count = len(rows)
@@ -272,6 +293,7 @@ class LlmUsageFlushService:
                     "total_tokens": 0,
                     "request_count": 0,
                     "failed_count": 0,
+                    "cost_cents": 0,
                 },
             )
             try:
@@ -289,6 +311,37 @@ class LlmUsageFlushService:
             elif metric == "failed":
                 row["failed_count"] += amount
         return list(grouped.values())
+
+    @staticmethod
+    def _cost_cents(total_tokens: int, unit_price_per_1k_cents: int | None) -> int:
+        if not unit_price_per_1k_cents:
+            return 0
+        return (int(total_tokens) * int(unit_price_per_1k_cents) + 999) // 1000
+
+    async def _attach_cost(self, session: AsyncSession, rows: list[dict]) -> None:
+        """按供应商单价把本行 token 换成分；读失败则 cost=0，不阻断 flush。"""
+        ids = {r.get("provider_id") for r in rows if r.get("provider_id")}
+        prices: dict[int, int] = {}
+        if ids:
+            try:
+                from sqlalchemy import select
+
+                from platform_core.models.llm_provider import LlmProvider
+
+                result = await session.execute(
+                    select(LlmProvider.id, LlmProvider.unit_price_per_1k_cents).where(
+                        LlmProvider.id.in_(ids)
+                    )
+                )
+                for pid, price in result.all():
+                    prices[int(pid)] = int(price or 0)
+            except Exception as e:  # noqa: BLE001 单价缺失不阻断落库
+                logger.debug(f"LLM 单价读取失败（cost=0）: {e}")
+        for row in rows:
+            row["cost_cents"] = self._cost_cents(
+                int(row.get("total_tokens") or 0),
+                prices.get(int(row["provider_id"])) if row.get("provider_id") else None,
+            )
 
     @staticmethod
     def _engine():

@@ -7,19 +7,16 @@
 > 每行 ≤ 150 字符，总行数 ≤ 200（超出请用 `/memory-curator` 归并）。
 >
 > 条目格式见 `.claude/memory/README.md`。
+> 已执行计划不进 memory（清出工作区）。宣称对账见 `docs/claims.md`。
+> 架构事实以 `project_rule.md` + `scripts/check-arch.sh`（13 红线 + 3 边界）为准。
 
 ## 索引
 
 | 条目 | 类型 | 摘要 |
 |------|------|------|
-| _暂无_ | _-_ | 后续随项目演进追加 |
-
-<!--
-示例：
-| [redis-queue-contract](memory/redis-queue-contract.md) | reference | 爬虫→backend 通过 Redis key `auto_agents:items:<spider>` 单向投递，禁止双向 |
-| [uv-workspace-pitfalls](memory/uv-workspace-pitfalls.md) | troubleshooting | 子包加依赖必须 `uv add --package`，不能 cd 进去 |
-| [alembic-flow](memory/alembic-flow.md) | playbook | 模型改→`alembic revision --autogenerate`→人工 review→`alembic upgrade head` |
--->
+| [frontend-query-testing](memory/frontend-query-testing.md) | troubleshooting | useQuery 测试/构建：withQuery、queryFn 可选参、antd Alert/message |
+| [playwright-admin-e2e](memory/playwright-admin-e2e.md) | playbook | admin E2E：build→e2e、NO_PROXY、端口 46112、记住我 |
+| [litellm-billing-defaults](memory/litellm-billing-defaults.md) | decision | LiteLLM 默认全关；计费人工确认；webhook 租户 opt-in |
 
 ## 类型枚举
 
@@ -30,6 +27,7 @@
 
 ## 维护规则
 
-- 新条目由 `memory-curator` agent 产出 diff，**用户 review + apply** 后才入库（hook 半自动进化）
-- 重复 / 过时条目通过 `/loop 1w /memory-curator` 周期归并
-- 条目失效时打 `STATUS: deprecated` 而非直接删，保留历史
+- 新条目由 `memory-curator` 产出；主对话明确要求整理/写入时落盘
+- 重复 / 过时条目归并；失效打 `STATUS: deprecated` 而非直接删
+- 不写会话流水、不重复 `project_rule.md` / AGENTS.md 已有红线
+- 个人 IDE 偏好留在 `~/.claude/projects/.../memory/`（如 PyCharm 模块依赖）

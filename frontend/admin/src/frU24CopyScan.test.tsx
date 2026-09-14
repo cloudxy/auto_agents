@@ -37,12 +37,11 @@ jest.mock('./store/useAuthStore', () => ({
 import { previewCheckout, listMyOrders } from './services/billing'
 import { fetchRelayPage, fetchRelaySku } from './services/relay'
 import { listPublicAssets } from './services/capabilities'
-import { CHECKOUT_EMPTY_COPY } from './constants/collectCopy'
 import Checkout from './pages/Checkout'
 import RelayGroups from './pages/RelayGroups'
 import TenantShelf from './pages/market/TenantShelf'
 
-const NEEDLE = '当前可买'
+const NEEDLES = ['当前可买', '支付已通'] as const
 const SRC_ROOT = __dirname
 const SURFACES = [
   'pages/Checkout.tsx',
@@ -73,8 +72,8 @@ function walkTs(dir: string): string[] {
   return out
 }
 
-function filesWithNeedle(root: string): string[] {
-  return walkTs(root).filter((file) => fs.readFileSync(file, 'utf8').includes(NEEDLE))
+function filesWithNeedle(root: string, needle: string): string[] {
+  return walkTs(root).filter((file) => fs.readFileSync(file, 'utf8').includes(needle))
 }
 
 function wrap(ui: React.ReactElement, url: string, route: string) {
@@ -99,9 +98,10 @@ beforeEach(() => {
   ;(previewCheckout as jest.Mock).mockResolvedValue({
     product: 'plan_pro',
     channels: [],
-    empty_state: CHECKOUT_EMPTY_COPY,
+    empty_state: null,
     can_pay: false,
     order_id: null,
+    amount_cents: 29900,
   })
   ;(fetchRelaySku as jest.Mock).mockResolvedValue({
     status: 'none', can_issue: false, empty_title: '未开通中转',
@@ -120,26 +120,26 @@ beforeEach(() => {
   })
 })
 
-test('GWT-U24 mechanical nail: checkout/relay/capabilities source+render have no 当前可买', async () => {
-  expect(filesWithNeedle(SRC_ROOT)).toEqual([])
+test('GWT-M50/M15 mechanical nail: tenant surfaces have no 当前可买 or 支付已通', async () => {
+  NEEDLES.forEach((needle) => expect(filesWithNeedle(SRC_ROOT, needle)).toEqual([]))
   SURFACES.forEach((rel) => {
     const full = path.join(SRC_ROOT, rel)
     expect(fs.existsSync(full)).toBe(true)
     const src = fs.readFileSync(full, 'utf8')
-    expect(src).not.toContain(NEEDLE)
+    NEEDLES.forEach((needle) => expect(src).not.toContain(needle))
     expect(src).not.toMatch(/编辑定价|改定价文案/)
   })
   const checkoutSrc = fs.readFileSync(path.join(SRC_ROOT, 'pages/Checkout.tsx'), 'utf8')
   expect(checkoutSrc).not.toMatch(/payment_succeeded|\/billing\/notify/)
 
   wrap(<Checkout />, '/billing/checkout?product=plan_pro', '/billing/checkout')
-  expect(await screen.findByText(CHECKOUT_EMPTY_COPY)).toBeInTheDocument()
-  expect(document.body.textContent || '').not.toContain(NEEDLE)
+  expect(await screen.findByRole('button', { name: '提交开通' })).toBeInTheDocument()
+  NEEDLES.forEach((needle) => expect(document.body.textContent || '').not.toContain(needle))
   cleanup()
 
   wrap(<RelayGroups />, '/relay', '/relay')
   expect(await screen.findByText('未开通中转')).toBeInTheDocument()
-  expect(document.body.textContent || '').not.toContain(NEEDLE)
+  NEEDLES.forEach((needle) => expect(document.body.textContent || '').not.toContain(needle))
   cleanup()
 
   wrap(
@@ -148,5 +148,5 @@ test('GWT-U24 mechanical nail: checkout/relay/capabilities source+render have no
     '/capabilities',
   )
   expect(await screen.findByText('暂无已上架能力')).toBeInTheDocument()
-  expect(document.body.textContent || '').not.toContain(NEEDLE)
+  NEEDLES.forEach((needle) => expect(document.body.textContent || '').not.toContain(needle))
 })

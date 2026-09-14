@@ -112,6 +112,7 @@ def test_public_fields_whitelist_enforced(db_client, db_engine, db_session, libr
     allowed = {
         "name", "title", "description", "category", "industries", "tier",
         "score", "status", "source_url", "source_author", "updated_at", "skill_md",
+        "download_count",
         "asset_type", "listing_state", "license", "subscribable", "hosts", "includes",
     }
     assert set(data.keys()) <= allowed, f"越界字段: {set(data.keys()) - allowed}"

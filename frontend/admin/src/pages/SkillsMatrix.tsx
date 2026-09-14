@@ -2,7 +2,8 @@
  * 适配器矩阵 Tab（方案 A · A-P3-2）：行=skill、列=tool 的勾选矩阵 + 触发 sync。
  * 数据源：技能名来自技能库列表；工具列来自 manifests 文件名。
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Checkbox, message, Space, Spin, Table, Tag, Typography } from 'antd'
 import { SyncOutlined } from '@ant-design/icons'
 
@@ -12,23 +13,13 @@ import { apiErrorMessage } from '../utils/errorMessage'
 const { Text } = Typography
 
 const SkillsMatrix: React.FC<{ skillNames: string[]; canAdmin?: boolean }> = ({ skillNames, canAdmin = false }) => {
-  const [manifests, setManifests] = useState<Record<string, string[]>>({})
-  const [loading, setLoading] = useState(false)
   const [savingTool, setSavingTool] = useState<string | null>(null)
   const [syncOutput, setSyncOutput] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      setManifests(await listManifests())
-    } catch (e) {
-      message.error(apiErrorMessage(e, '矩阵加载失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { load() }, [load])
+  const qc = useQueryClient()
+  const manQ = useQuery({ queryKey: ['skill-manifests'], queryFn: listManifests })
+  const manifests = manQ.data ?? {}
+  const loading = manQ.isLoading
+  const load = () => { qc.invalidateQueries({ queryKey: ['skill-manifests'] }) }
 
   const toggle = async (tool: string, name: string, checked: boolean) => {
     const current = manifests[tool] ?? []
@@ -36,7 +27,7 @@ const SkillsMatrix: React.FC<{ skillNames: string[]; canAdmin?: boolean }> = ({ 
     setSavingTool(tool)
     try {
       await updateManifest(tool, next)
-      setManifests((m) => ({ ...m, [tool]: next }))
+      qc.setQueryData(['skill-manifests'], (m: Record<string, string[]> | undefined) => ({ ...(m || {}), [tool]: next }))
     } catch (e) {
       message.error(apiErrorMessage(e, '保存失败'))
       load()
@@ -59,7 +50,7 @@ const SkillsMatrix: React.FC<{ skillNames: string[]; canAdmin?: boolean }> = ({ 
 
   return (
     <div>
-      {!canAdmin && <Alert type="info" showIcon style={{ marginBottom: 12 }} message="矩阵编辑与同步需 admin 权限" />}
+      {!canAdmin && <Alert type="info" showIcon style={{ marginBottom: 12 }} title="矩阵编辑与同步需 admin 权限" />}
       <Space style={{ marginBottom: 12 }}>
         <Button onClick={load}>刷新矩阵</Button>
         {canAdmin && <Button type="primary" icon={<SyncOutlined />} onClick={runSync}>触发 sync.sh 分发</Button>}
@@ -86,7 +77,7 @@ const SkillsMatrix: React.FC<{ skillNames: string[]; canAdmin?: boolean }> = ({ 
         />
       )}
       {syncOutput && (
-        <Alert type="success" style={{ marginTop: 12, whiteSpace: 'pre-wrap', fontFamily: 'monospace' }} message={syncOutput} />
+        <Alert type="success" style={{ marginTop: 12, whiteSpace: 'pre-wrap', fontFamily: 'monospace' }} title={syncOutput} />
       )}
     </div>
   )

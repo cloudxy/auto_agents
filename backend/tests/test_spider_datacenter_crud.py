@@ -48,10 +48,16 @@ OLD_PARAMS = '{"urls": ["https://a.b"]}'
 NEW_PARAMS = '{"urls": ["https://c.d"]}'
 
 
-def _msg(task_id: int, spider_name: str, params: str) -> str:
+def _msg(task_id: int, spider_name: str, params: str, tenant_id=None, priority="normal") -> str:
     """构造与 enqueue/_relocate_queue_message 完全一致的任务消息"""
     return json.dumps(
-        {"task_id": task_id, "spider_name": spider_name, "params": params},
+        {
+            "task_id": task_id,
+            "spider_name": spider_name,
+            "params": params,
+            "tenant_id": tenant_id,
+            "priority": priority,
+        },
         ensure_ascii=False,
     )
 
@@ -166,6 +172,7 @@ def _task(**overrides) -> MagicMock:
         id=9, spider_name="example", status="pending", priority="normal",
         result_count=0, retry_count=0, error_message=None,
         params='{"urls": ["https://a.b"]}',
+        tenant_id=None,
         created_at=None, updated_at=None, started_at=None, completed_at=None,
     )
     defaults.update(overrides)
@@ -392,14 +399,8 @@ class TestUpdateTask:
 
         assert resp.priority == "high"
         svc.repo.update.assert_awaited_once_with(12, priority="high")
-        old_msg = json.dumps(
-            {"task_id": 12, "spider_name": "example", "params": '{"urls": ["https://a.b"]}'},
-            ensure_ascii=False,
-        )
-        new_msg = json.dumps(
-            {"task_id": 12, "spider_name": "example", "params": '{"urls": ["https://a.b"]}'},
-            ensure_ascii=False,
-        )
+        old_msg = _msg(12, "example", '{"urls": ["https://a.b"]}', priority="normal")
+        new_msg = _msg(12, "example", '{"urls": ["https://a.b"]}', priority="high")
         fake_redis.lrem.assert_called_once_with("spider:task_queue:normal", 1, old_msg)
         fake_redis.rpush.assert_called_once_with("spider:task_queue:high", new_msg)
 
@@ -502,7 +503,9 @@ class TestUpdateTask:
             await svc.update_task(12, params=NEW_PARAMS, priority="high")
 
         assert fake_redis.items("spider:task_queue:normal") == []
-        assert fake_redis.items("spider:task_queue:high") == [_msg(12, "example", NEW_PARAMS)]
+        assert fake_redis.items("spider:task_queue:high") == [
+            _msg(12, "example", NEW_PARAMS, priority="high")
+        ]
 
     @pytest.mark.asyncio
     async def test_rpush_failure_compensates_back_to_source_queue(self):

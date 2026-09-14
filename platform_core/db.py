@@ -222,5 +222,17 @@ async def get_async_db(key: str = "DEFAULT"):
     async for session in get_manager().get_async_session(key):
         yield session
 
+
+async def get_async_readonly_db(key: str = "DEFAULT"):
+    """分析读路径（H1）：MySQL 会话 READ ONLY；SQLite 测试态原样。"""
+    async for session in get_manager().get_async_session(key):
+        try:
+            bind = session.bind
+            if bind is not None and getattr(bind.dialect, "name", "") == "mysql":
+                await session.execute(text("SET SESSION TRANSACTION READ ONLY"))
+        except Exception:  # noqa: BLE001 只读提示失败不阻断查询
+            pass
+        yield session
+
 def redis_client(key: str = "DEFAULT", db: int = None):
     return get_manager().get_redis(key, db)

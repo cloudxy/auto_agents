@@ -97,19 +97,11 @@ def test_gwt_50_2_owner_offline_pro_creates_single_pending(db_client, db_session
         "/api/v1/billing/orders", headers=owner,
         json={"plan_id": _pro_plan_id(db_client), "channel": "offline"},
     )
-    assert resp.status_code == 201, resp.text
-    data = resp.json()["data"]
-    assert data["status"] == "pending"
-    assert "等待管理员确认收款" in resp.json()["message"]
-
-    rows = _orders_of(db_session, tid)
-    assert len(rows) == 1
-    assert rows[0]["status"] == "pending"
-    assert rows[0]["channel"] == "offline"
-    assert rows[0]["plan_id"] == _pro_plan_id(db_client)  # 档位=pro，不是企业档
-    assert rows[0]["key"] == f"pending:{tid}"  # 唯一约束业务键
-    assert not [r for r in rows if r["status"] == "paid"]  # 不产生已支付在线单
-    assert _tenant_quota(db_session, tid) == quota_before  # 提交不改配额
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["code"] == "ORDER_STORY_CLOSED"
+    assert "请从结账页提交开通" in resp.json()["message"]
+    assert _orders_of(db_session, tid) == []
+    assert _tenant_quota(db_session, tid) == quota_before
 
 
 def test_gwt_50_5_online_channel_creates_no_order(db_client, db_session, db_engine):
@@ -123,13 +115,14 @@ def test_gwt_50_5_online_channel_creates_no_order(db_client, db_session, db_engi
         "/api/v1/billing/checkout", headers=owner,
         json={"product": "plan_pro", "channel": "alipay"},
     )
-    assert resp.status_code == 422, resp.text
+    assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert "收款通道未开通" in body["message"]
-    assert body["code"] == "BILLING_CHANNELS_UNCONFIGURED"
+    assert "收款通道未开通，提交后等待平台确认开通" in body["message"]
     assert "PAYMENT_NOT_CONFIGURED" not in body["message"]
     assert "当前可买" not in str(body)
-    assert _orders_of(db_session, tid) == []
+    rows = _orders_of(db_session, tid)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "checkout_pending"
 
 
 def test_gwt_50_5_online_keeps_existing_pending(db_client, db_session, db_engine):
@@ -138,28 +131,27 @@ def test_gwt_50_5_online_keeps_existing_pending(db_client, db_session, db_engine
     _seed_plans(db_session)
     owner, tid = make_tenant_owner_headers(db_session, slug="t01-505b")
     first = db_client.post(
-        "/api/v1/billing/orders", headers=owner,
-        json={"plan_id": _pro_plan_id(db_client), "channel": "offline"},
+        "/api/v1/billing/checkout", headers=owner, json={"product": "plan_pro"},
     )
-    assert first.status_code == 201
+    assert first.status_code == 201, first.text
 
     resp = db_client.post(
         "/api/v1/billing/orders", headers=owner,
         json={"plan_id": _pro_plan_id(db_client), "channel": "wechat"},
     )
-    assert resp.status_code == 400
-    assert "在线支付尚未开通" in resp.json()["message"]
+    assert resp.status_code == 422
+    assert "请从结账页提交开通" in resp.json()["message"]
     rows = _orders_of(db_session, tid)
-    assert len(rows) == 1  # 原 pending 保持、不新开一张
+    assert len(rows) == 1
     assert rows[0]["id"] == first.json()["data"]["id"]
-    assert rows[0]["status"] == "pending"
+    assert rows[0]["status"] == "checkout_pending"
 
 
 def _assert_contact_admin_no_inner_code(resp) -> None:
     assert resp.status_code != 429  # 无裸 429
     body = resp.json()
     assert body["code"] not in _FORBIDDEN_CODES
-    assert "请联系企业管理员" in body["message"]
+    assert "请从结账页提交开通" in body["message"] or "请联系企业管理员" in body["message"]
     for token in ("FORBIDDEN", "QUOTA_EXCEEDED", "QUOTA_PLAN_LOCKED"):
         assert token not in body["message"]
 
@@ -215,14 +207,14 @@ def test_gwt_50_14_enterprise_no_sku_no_order(db_client, db_session, db_engine):
         "/api/v1/billing/orders", headers=owner,
         json={"plan_id": ent_id, "channel": "offline"},
     )
-    assert resp.status_code == 404
-    assert _orders_of(db_session, tid) == []  # 不产生申请、不假装第三档
+    assert resp.status_code == 422
+    assert _orders_of(db_session, tid) == []
 
     ghost = db_client.post(
         "/api/v1/billing/orders", headers=owner,
         json={"plan_id": 999999, "channel": "offline"},
     )
-    assert ghost.status_code == 404
+    assert ghost.status_code == 422
     assert _orders_of(db_session, tid) == []
 
 
@@ -233,24 +225,22 @@ def test_gwt_50_15_second_pending_rejected(db_client, db_session, db_engine):
     owner, tid = make_tenant_owner_headers(db_session, slug="t01-515")
     quota_before = _tenant_quota(db_session, tid)
     first = db_client.post(
-        "/api/v1/billing/orders", headers=owner,
-        json={"plan_id": _pro_plan_id(db_client), "channel": "offline"},
+        "/api/v1/billing/checkout", headers=owner, json={"product": "plan_pro"},
     )
-    assert first.status_code == 201
+    assert first.status_code == 201, first.text
 
     resp = db_client.post(
-        "/api/v1/billing/orders", headers=owner,
-        json={"plan_id": _pro_plan_id(db_client), "channel": "offline"},
+        "/api/v1/billing/checkout", headers=owner, json={"product": "plan_pro"},
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 409
     body = resp.json()
     assert body["code"] == "ORDER_PENDING_EXISTS"
-    assert "已有待确认的升级申请" in body["message"]
+    assert "已有待支付" in body["message"]
     rows = _orders_of(db_session, tid)
-    assert len(rows) == 1  # 不产生第二张
+    assert len(rows) == 1
     assert rows[0]["id"] == first.json()["data"]["id"]
-    assert rows[0]["status"] == "pending"  # 原单保持 pending
-    assert _tenant_quota(db_session, tid) == quota_before  # 配额不变
+    assert rows[0]["status"] == "checkout_pending"
+    assert _tenant_quota(db_session, tid) == quota_before
 
 
 def test_free_plan_order_rejected(db_client, db_session, db_engine):
@@ -269,10 +259,9 @@ def test_free_plan_order_rejected(db_client, db_session, db_engine):
         "/api/v1/billing/orders", headers=owner,
         json={"plan_id": asyncio.run(_free_id()), "channel": "offline"},
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 422
     body = resp.json()
-    assert body["code"] == "ORDER_FREE_PLAN"
-    assert "免费档无需下单" in body["message"]
+    assert body["code"] == "ORDER_STORY_CLOSED"
     assert _orders_of(db_session, tid) == []
 
 
@@ -284,26 +273,23 @@ def test_pending_slot_released_after_confirm(db_client, db_session, db_engine):
     owner, tid = make_tenant_owner_headers(db_session, slug="t01-rel")
     pa = make_platform_admin_headers(db_session)
     first = db_client.post(
-        "/api/v1/billing/orders", headers=owner,
-        json={"plan_id": _pro_plan_id(db_client), "channel": "offline"},
+        "/api/v1/billing/checkout", headers=owner, json={"product": "plan_pro"},
     )
-    assert first.status_code == 201
+    assert first.status_code == 201, first.text
     order_id = first.json()["data"]["id"]
 
     confirmed = db_client.post(f"/api/v1/billing/orders/{order_id}/confirm", headers=pa)
     assert confirmed.status_code == 200
-    assert confirmed.json()["data"]["status"] == "paid"
+    assert confirmed.json()["data"]["status"] == "fulfilled"
 
     again = db_client.post(
-        "/api/v1/billing/orders", headers=owner,
-        json={"plan_id": _pro_plan_id(db_client), "channel": "offline"},
+        "/api/v1/billing/checkout", headers=owner, json={"product": "plan_pro"},
     )
-    assert again.status_code == 201, again.text  # 确认后可再提交新申请
+    assert again.status_code == 201, again.text
     rows = _orders_of(db_session, tid)
     assert len(rows) == 2
-    assert rows[0]["status"] == "paid"
-    assert rows[1]["status"] == "pending"
-    assert rows[1]["key"] == f"pending:{tid}"
+    assert rows[0]["status"] == "fulfilled"
+    assert rows[1]["status"] == "checkout_pending"
 
 
 def test_gwt_50_verify_fail_keeps_checkout_pending(db_client, db_session, monkeypatch):

@@ -223,6 +223,7 @@ const Users: React.FC = () => {
         return (
           <Space size={0}>
             <Button type="link" size="small" onClick={() => openEdit(record)}>编辑</Button>
+            {record.username !== 'admin' && (
             <Popconfirm
               title={`确认删除用户「${record.username}」？`}
               description="软删除，操作审计可追溯。"
@@ -231,6 +232,7 @@ const Users: React.FC = () => {
             >
               <Button type="link" danger size="small">删除</Button>
             </Popconfirm>
+            )}
           </Space>
         )
       },
@@ -291,7 +293,7 @@ const Users: React.FC = () => {
                     options={[
                       { value: 'all', label: '在职（全部）' },
                       { value: 'active', label: '在职·激活' },
-                      { value: 'disabled', label: '在职·停用' },
+                      { value: 'disabled', label: '已停用' },
                       { value: 'deleted', label: '已删除' },
                     ]} />
           </span>

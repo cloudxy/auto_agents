@@ -8,8 +8,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { listPublicAssets, type PublicShelfItem } from '../../services/capabilities'
 import {
-  EMPTY_SHELF, EMPTY_SHELF_HINT, FILTER_EMPTY, HOST_OPTIONS, LOAD_FAIL,
-  LOAD_FAIL_HINT, MARKET_CLOSED, MARKET_CLOSED_HINT, PUBLIC_TYPES,
+  EMPTY_SHELF, FILTER_EMPTY, HOST_OPTIONS, LOAD_FAIL,
+  LOAD_FAIL_HINT, MARKET_CLOSED, PUBLIC_TYPES,
   READONLY_SUBSCRIBE, activeFilterEcho, cardTitle, hasActiveFilters,
   resolveType, type ShelfFilterValues,
 } from './shelfCopy'
@@ -50,7 +50,6 @@ const MarketEmpty: React.FC<{
     return (
       <div className="tenant-shelf__empty" data-testid="market-closed">
         <p>{MARKET_CLOSED}</p>
-        <p>{MARKET_CLOSED_HINT}</p>
       </div>
     )
   }
@@ -63,10 +62,7 @@ const MarketEmpty: React.FC<{
           <Button onClick={onClear} autoInsertSpace={false}>清除筛选</Button>
         </>
       ) : (
-        <>
-          <p>{EMPTY_SHELF}</p>
-          <p>{EMPTY_SHELF_HINT}</p>
-        </>
+        <p>{EMPTY_SHELF}</p>
       )}
     </div>
   )

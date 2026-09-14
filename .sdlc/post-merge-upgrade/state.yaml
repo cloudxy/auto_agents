@@ -1,0 +1,129 @@
+# state.yaml — post-merge-upgrade 进度唯一事实源
+feature: post-merge-upgrade
+lane: L3
+appetite: "program; 端态四角色完备；施工分波链帽；单波超 50% 停下；采集与 live 支付不得同一 2 人周"
+current_hat: deliver
+hats_done: [define, shape, implement, verify, review, qc, deliver]
+phase: HatDone
+env_gates:
+  C2: {status: pass, at: "2026-09-14", evidence: "litellm-proxy :4000 healthy; token_id=2 chat 200 total_tokens=39 model=deepseek-pro/deepseek-v4-flash; used_tokens 0→39; 1 relay_token_call_succeeded; outbound ok- → 401 usage unchanged"}
+  C4: {status: pass, at: "2026-09-14", evidence: "spider example task id=3 completed result_count=1 in ~4s via httpbin; Homebrew Redis+MySQL; not FakeRedis"}
+path: default
+intent:
+  class: new-feature
+  quote: "六个开放问一次全部处理完。平台/租户管理员所有功能做完。买方必须功能做完。经办功能必须完备全面。冲突由 AI 判断缺块然后执行。"
+  skip_shape: false
+  skip_discover: false
+  at: "2026-09-13"
+discovery:
+  status: done
+  skip_why: ""
+  briefing: 00-discover/briefing.md
+  tracks:
+    discuss: done
+    compete: done
+    market: done
+    falsify: done
+  at: "2026-09-13"
+operator_override:
+  at: "2026-09-13"
+  action: "close all six Q-*; complete all four role surfaces; AI ranks missing modules; chain hats; do not wait 继续; do not mark four-pillar GA; do not print 当前可买 until live C2"
+  intent_quote: "一次全部处理完。如果有冲突，通过Ai判断，当前缺失的功能模块哪一个更好，然后执行。"
+  r4_authorize:
+    at: "2026-09-13"
+    quote: "按照建议执行"
+    action: "operator authorized 4th define rework after r3 stop: apply reviewer suggestion on GWT-M12.8 (constructible When or drop from W2 release); then G-fresh r4 and continue shape if pass"
+  r7_authorize:
+    at: "2026-09-13"
+    quote: "继续"
+    action: "planning-success copy = 可见方案 only; NFR-M01 split collect vs plan; then G-fresh; pass → shape"
+  implement_review_authorize:
+    at: "2026-09-14"
+    quote: "继续审查，如果存在问题，按照ai推荐解决问题。"
+    action: "implement G-fresh; rework per reviewer suggestion without waiting"
+roles_skipped: []
+roles_skipped_why: {}
+q_security: yes
+tickets:
+  - {id: T-01, title: "智能规划未开放", status: done, evidence: 03-impl/T-01-evidence.md}
+  - {id: T-02, title: "数据中心导出", status: done, evidence: 03-impl/T-02-evidence.md}
+  - {id: T-03, title: "第一次采集无付费前置", status: done, evidence: 03-impl/T-03-evidence.md}
+  - {id: T-04, title: "规划拦住与导出埋点", status: done, evidence: 03-impl/T-04-evidence.md}
+  - {id: T-24, title: "注册创建企业", status: done, evidence: 03-impl/T-24-evidence.md}
+  - {id: T-05, title: "拆用量页第二套订购", status: done, evidence: 03-impl/T-05-evidence.md}
+  - {id: T-06, title: "未配通道可待支付", status: done, evidence: 03-impl/T-06-evidence.md}
+  - {id: T-07, title: "确认收款接结账单", status: done, evidence: 03-impl/T-07-evidence.md}
+  - {id: T-08, title: "按商品码履约", status: done, evidence: 03-impl/T-08-evidence.md}
+  - {id: T-09, title: "订单闭集两态", status: done, evidence: 03-impl/T-09-evidence.md}
+  - {id: T-10, title: "结账埋点", status: done, evidence: 03-impl/T-10-evidence.md}
+  - {id: T-11, title: "禁当前可买", status: done, evidence: 03-impl/T-11-evidence.md}
+  - {id: T-12, title: "出站查找只认出站钥匙", status: done, evidence: 03-impl/T-12-evidence.md}
+  - {id: T-13, title: "出站页单一产品名", status: done, evidence: 03-impl/T-13-evidence.md}
+  - {id: T-14, title: "成员故事可走完", status: done, evidence: 03-impl/T-14-evidence.md}
+  - {id: T-15, title: "用量看板三数字", status: done, evidence: 03-impl/T-15-evidence.md}
+  - {id: T-16, title: "渠道组未开通vs零令牌", status: done, evidence: 03-impl/T-16-evidence.md}
+  - {id: T-17, title: "我的安装可走完", status: done, evidence: 03-impl/T-17-evidence.md}
+  - {id: T-18, title: "值班单一入口", status: done, evidence: 03-impl/T-18-evidence.md}
+  - {id: T-19, title: "运营台确认收款", status: done, evidence: 03-impl/T-19-evidence.md}
+  - {id: T-20, title: "用户停用恢复", status: done, evidence: 03-impl/T-20-evidence.md}
+  - {id: T-21, title: "联系空不展示与设置不说谎", status: done, evidence: 03-impl/T-21-evidence.md}
+  - {id: T-22, title: "货架与我的安装", status: done, evidence: 03-impl/T-22-evidence.md}
+  - {id: T-23, title: "超管上架下架", status: done, evidence: 03-impl/T-23-evidence.md}
+gates:
+  - {name: check-sdlc-market, kind: script, result: pass, cmd: "bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat market .sdlc/post-merge-upgrade", exit_code: 0, at: "2026-09-13"}
+  - {name: check-sdlc-compete, kind: script, result: pass, cmd: "bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat compete .sdlc/post-merge-upgrade", exit_code: 0, at: "2026-09-13"}
+  - {name: check-sdlc-define, kind: script, result: pass, cmd: "bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat define .sdlc/post-merge-upgrade", exit_code: 0, at: "2026-09-13"}
+  - {name: define-g-fresh-r1, kind: fresh-context, stage: define, result: fail, findings_total: 10, blocker: 0, major: 6, minor: {fixed: 0, waived: 0}, at: "2026-09-13"}
+  - {name: define-g-fresh-r2, kind: fresh-context, stage: define, result: fail, findings_total: 5, blocker: 0, major: 2, minor: {fixed: 0, waived: 0}, root_cause: "状态词表未废上游 GWT-U30.2；W2 放行 Given 依赖未冻结的企业档/中转确认路径", at: "2026-09-13"}
+  - {name: define-g-fresh-r3, kind: fresh-context, stage: define, result: fail, findings_total: 4, blocker: 0, major: 1, minor: {fixed: 0, waived: 0}, root_cause: "W2 放行 GWT-M12.8 When（不走规划叶却耗 token）与 FR-M01/M03 可构造路径互否", at: "2026-09-13"}
+  - {name: define-g-fresh-r4, kind: fresh-context, stage: define, result: fail, findings_total: 3, blocker: 0, major: 1, minor: {fixed: 0, waived: 0}, root_cause: "数据中心空态 GWT-M02.2 与仍有效 GWT-84.2 同一 When 两套 Then", at: "2026-09-13"}
+  - {name: define-g-fresh-r5, kind: fresh-context, stage: define, result: fail, findings_total: 3, blocker: 0, major: 1, minor: {fixed: 0, waived: 0}, root_cause: "FR-60/GWT-60.4 零令牌空态与未开通中转（U21/M23）同一打开动作两套 Then", at: "2026-09-13"}
+  - {name: define-g-fresh-r6, kind: fresh-context, stage: define, result: fail, findings_total: 3, blocker: 0, major: 1, minor: {fixed: 0, waived: 0}, root_cause: "提交规划即时 Then 三套并存：NFR-M01 已入队 / M01.4 可见方案 / M12.8 可见方案或规划已受理", at: "2026-09-13"}
+  - {name: define-g-fresh-r7, kind: fresh-context, stage: define, result: fail, findings_total: 4, blocker: 0, major: 1, minor: {fixed: 0, waived: 0}, root_cause: "M01.4/M12.8 未收口 FR-70/73/74：未登记模型与网关不可达仍与「可见方案」抢同一提交规划", at: "2026-09-13"}
+  - {name: define-g-fresh-r8, kind: fresh-context, stage: define, result: pass, findings_total: 3, blocker: 0, major: 0, minor: {fixed: 0, waived: 0}, at: "2026-09-13"}
+  - {name: check-sdlc-shape, kind: script, result: pass, cmd: "bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat shape .sdlc/post-merge-upgrade", exit_code: 0, at: "2026-09-13"}
+  - {name: check-sdlc-implement, kind: script, result: pass, cmd: "bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat implement .sdlc/post-merge-upgrade", exit_code: 0, at: "2026-09-14"}
+  - {name: implement-g-fresh-r1, kind: fresh-context, stage: implement, result: fail, findings_total: 5, blocker: 0, major: 1, minor: {fixed: 0, waived: 0}, at: "2026-09-14"}
+  - {name: implement-g-fresh-r2, kind: fresh-context, stage: implement, result: pass, findings_total: 2, blocker: 0, major: 0, minor: {fixed: 2, waived: 0}, at: "2026-09-14"}
+  - {name: check-sdlc-verify, kind: script, result: pass, cmd: "bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat verify .sdlc/post-merge-upgrade", exit_code: 0, at: "2026-09-14"}
+  - {name: verify-g-fresh-r1, kind: fresh-context, stage: verify, result: fail, findings_total: 3, blocker: 0, major: 2, minor: {fixed: 0, waived: 0}, at: "2026-09-14"}
+  - {name: verify-g-fresh-r2, kind: fresh-context, stage: verify, result: pass, findings_total: 1, blocker: 0, major: 0, minor: {fixed: 0, waived: 0}, at: "2026-09-14"}
+  - {name: postqa-g-fresh, kind: fresh-context, stage: review, result: pass, findings_total: 1, blocker: 0, major: 0, minor: {fixed: 0, waived: 0}, at: "2026-09-14"}
+  - {name: qc-self, kind: self-review, stage: qc, result: pass, reason: "有条件放行；环境闸不宣称完成；合入前重跑四闸", at: "2026-09-14"}
+  - {name: check-sdlc-deliver, kind: script, result: pass, cmd: "bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat deliver .sdlc/post-merge-upgrade", exit_code: 0, at: "2026-09-14"}
+  - {name: check-sdlc-enablement, kind: script, result: pass, cmd: "bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat enablement .sdlc/post-merge-upgrade", exit_code: 0, at: "2026-09-14"}
+  - {name: check-sdlc-dba, kind: script, result: pass, cmd: "bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat dba .sdlc/post-merge-upgrade", exit_code: 0, at: "2026-09-13"}
+  - {name: check-sdlc-designer, kind: script, result: pass, cmd: "bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat designer .sdlc/post-merge-upgrade", exit_code: 0, at: "2026-09-13"}
+  - {name: shape-g-fresh-r1, kind: fresh-context, stage: shape, result: fail, findings_total: 5, blocker: 0, major: 2, minor: {fixed: 0, waived: 0}, at: "2026-09-13"}
+  - {name: shape-g-fresh-r2, kind: fresh-context, stage: shape, result: pass, findings_total: 0, blocker: 0, major: 0, minor: {fixed: 0, waived: 0}, at: "2026-09-13"}
+review_findings:
+  - {id: QA-01, severity: minor, status: open, reason: "define r8: 70.2/73.6 Given 未显式钉规划已开放"}
+  - {id: QA-02, severity: minor, status: open, reason: "define r8: 越权 Then 仍「或」两套 UI"}
+  - {id: QA-03, severity: minor, status: open, reason: "define r8: 用户管理/上架治理空态句未钉"}
+stale_artifacts: []
+open_questions:
+  - {id: Q-VOICE, status: answered, owner: operator}
+  - {id: Q-PRICE, status: answered, owner: operator}
+  - {id: Q-MARKET-USER, status: answered, owner: operator}
+  - {id: Q-AGPL, status: answered, owner: operator}
+  - {id: Q-OPS-COLLECT, status: answered, owner: operator}
+  - {id: Q-C-REG, status: answered, owner: operator}
+lane_changes: []
+lane_judge:
+  Q1_schema: true
+  Q2_auth_tenant: true
+  Q3_external_contract: true
+  Q4_irreversible: true
+  Q5_new_dependency: false
+  Q6_files_or_subprojects: true
+  reason: >
+    四角色完备触及用量/钥匙/结账/值班/市场；租户隔离与 404 同形；支付与 LiteLLM 外部合同；
+    收款单向门。无新供应商。跨 backend + admin + official，文件必超 20。
+rework_rounds: 1   # shape 帽计数（define 已过闸，从 0 起算）
+supersedes: null
+upstream:
+  closed_features:
+    - feat-four-pillars-v2
+    - feat-product-complete
+    - upgrade-four-pillars
+  just_merged: "feat/litellm-l1 merged origin/main (1db6a47)"

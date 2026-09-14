@@ -3,7 +3,7 @@
 与 SpiderTask 的关系：一次任务（spider_tasks）产出多条结果（spider_results）。
 字段与 scrapy/items 的 BaseItem 及其子类对齐，未映射字段进 extra（JSON）。
 """
-from sqlalchemy import Column, Float, ForeignKey, Index, Integer, String, Text, DateTime
+from sqlalchemy import Column, Float, ForeignKey, Index, Integer, String, Text, DateTime, UniqueConstraint
 from sqlalchemy.sql import func
 from .base import Base
 from .mixins import AuditMixin, SoftDeleteMixin, TenantMixin
@@ -13,6 +13,10 @@ class SpiderResult(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
     __tablename__ = "spider_results"
     __table_args__ = (
         Index("ix_spider_results_name_created", "spider_name", "created_at"),
+        UniqueConstraint(
+            "tenant_id", "spider_name", "content_hash",
+            name="uq_spider_results_tenant_spider_hash",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -27,4 +31,5 @@ class SpiderResult(TenantMixin, SoftDeleteMixin, AuditMixin, Base):
     extra = Column(Text)             # 未映射字段的 JSON 字符串
     quality_score = Column(Float, nullable=True)  # 数据质量评分（0-100）
     content_hash = Column(String(32), nullable=True, index=True)  # md5(url + title + content)，增量去重
+    fetched_at = Column(DateTime(timezone=True), nullable=True, comment="采集时刻")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

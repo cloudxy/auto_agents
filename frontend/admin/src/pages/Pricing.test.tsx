@@ -45,6 +45,7 @@ test('GWT-U35.1 buyer 专业档 去结账 product=plan_pro, not register', () =>
   expect(screen.queryByText('register-probe')).toBeNull()
   expect(screen.queryByRole('link', { name: /免费注册/ })).toBeNull()
   expect(document.body.textContent).not.toContain('当前可买')
+  expect(document.body.textContent).not.toContain('支付已通')
   expect(document.body.textContent).not.toContain('预告不可购买')
 })
 

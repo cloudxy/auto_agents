@@ -14,7 +14,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.utils.auth import get_password_hash
-from platform_core.exceptions import NotFoundException, ValidationException
+from platform_core.exceptions import BusinessException, ValidationException
 from platform_core.logger import get_logger
 from platform_core.models.notification import Notification
 from platform_core.models.operation_log import OperationLog
@@ -23,6 +23,25 @@ from platform_core.models.user import User
 logger = get_logger("service.member")
 
 TENANT_ROLES = ("owner", "admin", "operator", "viewer")
+_PLATFORM_ROLES = frozenset({
+    "platform_admin", "superadmin", "platform", "超管", "平台超管",
+})
+_USERNAME_MAX = 50
+MSG_NEED_USERNAME = "请填写登录名"
+MSG_USERNAME_LONG = "登录名最多 50 个字符"
+MSG_NO_PLATFORM_ADMIN = "不能设为平台超管"
+
+
+def _member_missing() -> None:
+    raise BusinessException(message="Not Found", code="HTTP_404", status_code=404)
+
+
+def _reject_platform_role(tenant_role: str, payload: dict) -> None:
+    logger.debug("校验不得设平台超管")
+    if payload.get("is_platform_admin") is True:
+        raise ValidationException(message=MSG_NO_PLATFORM_ADMIN, field="is_platform_admin")
+    if str(tenant_role or "").strip().lower() in _PLATFORM_ROLES:
+        raise ValidationException(message=MSG_NO_PLATFORM_ADMIN, field="tenant_role")
 
 
 def _to_dict(user: User) -> dict:
@@ -41,6 +60,7 @@ class MemberService:
         self.session = session
 
     async def list_members(self, tenant_id: int) -> list[dict]:
+        logger.info(f"列出成员 | tenant={tenant_id}")
         rows = (await self.session.execute(
             select(User).where(User.tenant_id == tenant_id, User.deleted_at.is_(None))
             .order_by(User.id.asc())
@@ -50,12 +70,17 @@ class MemberService:
     async def create_member(self, tenant_id: int, payload: dict) -> dict:
         logger.info(f"创建成员 | tenant={tenant_id} username={payload.get('username')}")
         tenant_role = str(payload.get("tenant_role") or "viewer")
+        _reject_platform_role(tenant_role, payload)
         if tenant_role not in TENANT_ROLES:
             raise ValidationException(message=f"租户角色不合法: {tenant_role}", field="tenant_role")
         username = str(payload.get("username") or "").strip()
         email = str(payload.get("email") or "").strip()
         password = str(payload.get("password") or "")
-        if not username or not email or len(password) < 6:
+        if not username:
+            raise ValidationException(message=MSG_NEED_USERNAME, field="username")
+        if len(username) > _USERNAME_MAX:
+            raise ValidationException(message=MSG_USERNAME_LONG, field="username")
+        if not email or len(password) < 6:
             raise ValidationException(message="username/email 必填，密码至少 6 位", field="payload")
 
         # 唯一性检查含软删行（租户自助口径，与用户管理超管路径的「在册释放」
@@ -99,9 +124,10 @@ class MemberService:
                                User.deleted_at.is_(None))
         )).scalar_one_or_none()
         if user is None:
-            raise NotFoundException(resource=f"成员 {member_id}")
+            _member_missing()
         if "tenant_role" in payload:
             role = str(payload["tenant_role"])
+            _reject_platform_role(role, payload)
             if role not in TENANT_ROLES:
                 raise ValidationException(message=f"租户角色不合法: {role}", field="tenant_role")
             if user.tenant_role == "owner":
@@ -128,7 +154,7 @@ class MemberService:
                                User.deleted_at.is_(None))
         )).scalar_one_or_none()
         if user is None:
-            raise NotFoundException(resource=f"成员 {member_id}")
+            _member_missing()
         user.password_hash = await asyncio.to_thread(get_password_hash, new_password)
         await self.session.flush()
         await self.session.commit()
@@ -150,7 +176,7 @@ class MemberService:
                                User.deleted_at.is_(None))
         )).scalar_one_or_none()
         if user is None:
-            raise NotFoundException(resource=f"成员 {member_id}")
+            _member_missing()
         if user.tenant_role == "owner":
             raise ValidationException(message="不可删除租户 owner（租户唯一所有者）", field="member_id")
         if user.id == actor_id:
@@ -165,7 +191,7 @@ class MemberService:
             .values(deleted_at=func.now(), is_active=False)
         ))
         if result.rowcount == 0:
-            raise NotFoundException(resource=f"成员 {member_id}")
+            _member_missing()
         # 收件箱清理 + 软删同一事务（ADR-0007：service 方法 = 业务不可分割操作）
         await self.session.commit()
         return {"id": member_id, "deleted": True}

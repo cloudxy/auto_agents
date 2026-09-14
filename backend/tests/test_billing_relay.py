@@ -42,26 +42,18 @@ def test_list_plans_and_offline_order(
         headers=owner,
         json={"plan_id": pro_id, "channel": "alipay"},
     )
-    assert blocked.status_code == 400
-    # T-01（FR-50 GWT-50.5）：在线通道零新行，可见句不带 PAYMENT_NOT_CONFIGURED 内码
-    assert "在线支付尚未开通" in blocked.json()["message"]
+    assert blocked.status_code == 422
+    assert "请从结账页提交开通" in blocked.json()["message"]
     assert blocked.json()["code"] != "PAYMENT_NOT_CONFIGURED"
 
-    async def _order_count():
-        async with db_session() as s:
-            rows = (await s.execute(select(Order).where(Order.tenant_id == tid))).scalars().all()
-            return len(rows)
-
-    assert asyncio.run(_order_count()) == 0
-
     created = db_client.post(
-        "/api/v1/billing/orders",
+        "/api/v1/billing/checkout",
         headers=owner,
-        json={"plan_id": pro_id, "channel": "offline"},
+        json={"product": "plan_pro"},
     )
     assert created.status_code == 201, created.text
     order_id = created.json()["data"]["id"]
-    assert created.json()["data"]["status"] == "pending"
+    assert created.json()["data"]["status"] == "checkout_pending"
 
     pa = make_platform_admin_headers(db_session)
     pending = db_client.get("/api/v1/billing/admin/orders", headers=pa)
@@ -70,7 +62,7 @@ def test_list_plans_and_offline_order(
 
     paid = db_client.post(f"/api/v1/billing/orders/{order_id}/confirm", headers=pa)
     assert paid.status_code == 200, paid.text
-    assert paid.json()["data"]["status"] == "paid"
+    assert paid.json()["data"]["status"] == "fulfilled"
 
     async def _quota():
         async with db_session() as s:
@@ -80,7 +72,7 @@ def test_list_plans_and_offline_order(
             )).scalar_one()
             return t.quota, sub.plan_id
     quota, plan_id = asyncio.run(_quota())
-    assert quota["task_concurrency"] == 20
+    assert quota["task_concurrency"] == 50
     assert plan_id == pro_id
 
 
@@ -113,7 +105,7 @@ def test_viewer_cannot_create_order_or_token(db_client, db_session, db_engine):
     resp = db_client.post("/api/v1/billing/orders", headers=headers, json={"plan_id": pro["id"]})
     # T-01（FR-50 GWT-50.7）：只读下单 → 找管理员句，非 403 FORBIDDEN 内码
     assert resp.status_code != 403
-    assert "请联系企业管理员" in resp.json()["message"]
+    assert "请从结账页提交开通" in resp.json()["message"] or "请联系企业管理员" in resp.json()["message"]
     assert resp.json()["code"] not in ("FORBIDDEN", "QUOTA_EXCEEDED")
 
     async def _no_orders():

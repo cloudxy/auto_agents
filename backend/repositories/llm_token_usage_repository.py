@@ -8,7 +8,11 @@ from platform_core.models.llm_token_usage import LlmTokenUsage
 from platform_core.repository import BaseRepository
 
 # upsert 必备列（行构造方 llm_usage_service 保证齐全且类型正确）
-_UPSERT_COLS = ("prompt_tokens", "completion_tokens", "total_tokens", "request_count", "failed_count")
+_UPSERT_COLS = (
+    "prompt_tokens", "completion_tokens", "total_tokens",
+    "request_count", "failed_count", "cost_cents",
+)
+_STRIP_KEYS = ("tenant_key",)
 
 
 class LlmTokenUsageRepository(BaseRepository[LlmTokenUsage]):
@@ -26,7 +30,8 @@ class LlmTokenUsageRepository(BaseRepository[LlmTokenUsage]):
         """
         if not rows:
             return 0
-        stmt = mysql_insert(LlmTokenUsage).values(rows)
+        payload = [{k: v for k, v in row.items() if k not in _STRIP_KEYS} for row in rows]
+        stmt = mysql_insert(LlmTokenUsage).values(payload)
         update_cols = {
             col: getattr(LlmTokenUsage, col) + getattr(stmt.inserted, col)
             for col in _UPSERT_COLS

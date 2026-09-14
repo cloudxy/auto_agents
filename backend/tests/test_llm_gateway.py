@@ -137,3 +137,36 @@ async def test_admin_http_models_deployments_spend_budget(monkeypatch):
     assert ("POST", "http://gw.test/budget/new") in seen
     assert any(m == "GET" and u.startswith("http://gw.test/budget/info") for m, u in seen)
     assert ("POST", "http://gw.test/budget/update") in seen
+
+
+@pytest.mark.asyncio
+async def test_list_key_spend_logs_filters_v1_api_key_and_wraps_list(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.llm_gateway._settings._base_url", lambda: "http://gw.test",
+    )
+    monkeypatch.setattr(
+        "backend.services.llm_gateway._settings._auth_headers",
+        lambda: {"Authorization": "Bearer sk-virt", "Content-Type": "application/json"},
+    )
+    monkeypatch.setattr(
+        "backend.services.llm_gateway._settings._timeout_sec", lambda: 5.0,
+    )
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(
+            200,
+            json=[{"total_tokens": 39, "api_key": "abc"}],
+            request=request,
+        )
+
+    data = await admin_mod.list_key_spend_logs(
+        "abc", transport=httpx.MockTransport(handler),
+    )
+    assert len(seen) == 1
+    assert seen[0].startswith("http://gw.test/spend/logs")
+    assert "api_key=abc" in seen[0]
+    assert "/spend/logs/v2" not in seen[0]
+    assert data["data"][0]["total_tokens"] == 39
+    assert data["total_pages"] == 1

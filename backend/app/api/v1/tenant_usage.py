@@ -16,9 +16,11 @@ from backend.services.quota_service import (
     resolve_upgrade_intent,
     shanghai_year_month,
 )
+from backend.services.tenant_settings_service import TenantSettingsService
 from platform_core.db import get_async_db
 from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
+from pydantic import BaseModel, Field
 
 logger = get_logger("api.tenant_usage")
 
@@ -61,6 +63,33 @@ async def tenant_usage_by_member(
     """成员维度用量分摊（任务创建数按成员聚合；只读可见）"""
     tid = _require_tenant_space(user)
     return ok(data=await service.usage_by_member(tid))
+
+
+class DeliveryWebhookIn(BaseModel):
+    url: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/delivery-webhook")
+async def get_delivery_webhook(
+    user: CurrentUser = Depends(require_tenant_manager),
+    session: AsyncSession = Depends(get_async_db),
+):
+    if user.tenant_id is None:
+        raise BusinessException("需要租户上下文")
+    url = await TenantSettingsService(session).get_delivery_webhook(user.tenant_id)
+    return ok(data={"delivery_webhook_url": url})
+
+
+@router.put("/delivery-webhook")
+async def put_delivery_webhook(
+    payload: DeliveryWebhookIn,
+    user: CurrentUser = Depends(require_tenant_manager),
+    session: AsyncSession = Depends(get_async_db),
+):
+    if user.tenant_id is None:
+        raise BusinessException("需要租户上下文")
+    data = await TenantSettingsService(session).set_delivery_webhook(user.tenant_id, payload.url)
+    return ok(data=data)
 
 
 @router.get("/quota/upgrade-intent")

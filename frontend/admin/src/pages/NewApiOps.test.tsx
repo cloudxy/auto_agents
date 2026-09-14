@@ -12,6 +12,11 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import AdminLayout from '../components/AdminLayout'
 import { useAuthStore } from '../store/useAuthStore'
 
+jest.mock('../services/litellmKeys', () => ({
+  listLitellmKeys: jest.fn().mockResolvedValue([]),
+  createLitellmKey: jest.fn(),
+}))
+
 jest.mock('../services/newapi', () => ({
   fetchNewapiOverview: jest.fn(),
   fetchChannelsWithConfig: jest.fn(),
@@ -205,6 +210,7 @@ test('GWT-98.1 page tabs sit in the header row with the welcome text; content st
   await within(header).findByRole('tab', { name: /总览/ })
   expect(within(header).getByRole('tab', { name: /探针/ })).toBeInTheDocument()
   expect(within(header).getByRole('tab', { name: /事件/ })).toBeInTheDocument()
+  expect(within(header).getByRole('tab', { name: /钥匙/ })).toBeInTheDocument()
   expect(within(header).getByText('中转站管控')).toBeInTheDocument()
   expect(within(header).getByText(/欢迎回来/)).toBeInTheDocument()
 
