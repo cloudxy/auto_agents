@@ -50,7 +50,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -109,7 +109,7 @@ jobs:
       AUTO_AGENTS_JWT__SECRET_KEY: ci-test-secret-key-not-for-production
       AUTO_AGENTS_WEBHOOK__SECRET_KEY: ci-test-webhook-secret
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -147,7 +147,7 @@ jobs:
     name: DB Migration Gate (check-db-ir + check-db-migrations)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 纯静态检查（AST + grep，仅需 runner 自带的 python3 与 git），无 DB 依赖，
       # 故不挂 MySQL service 容器。脚本退出码 = 违规数，非零即红。
@@ -169,7 +169,7 @@ jobs:
       AUTO_AGENTS_WEBHOOK__SECRET_KEY: ci-test-webhook-secret
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -219,7 +219,7 @@ jobs:
     name: Docker Validate (build + compose)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate docker-compose.yml syntax
         run: docker compose config --quiet
