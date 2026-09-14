@@ -55,6 +55,30 @@ beforeEach(() => {
     p?.status === 'deleted' ? page([DELETED_USER]) : page([ACTIVE_USER]));
 });
 
+test('GWT-M32 filter 已停用 shows inactive row only', async () => {
+  const DISABLED = { ...ACTIVE_USER, id: 3, username: 'op-off', is_active: false }
+  ;(fetchUsersPage as jest.Mock).mockImplementation((p: { status?: string }) =>
+    p?.status === 'deleted' ? page([]) : page([ACTIVE_USER, DISABLED]))
+  render(<Users />)
+  await waitFor(() => expect(screen.getByText('op-active')).toBeInTheDocument())
+  fireEvent.mouseDown(within(screen.getByTestId('status-filter')).getByRole('combobox'))
+  fireEvent.click(await screen.findByTitle('已停用'))
+  await waitFor(() => expect(screen.getByText('op-off')).toBeInTheDocument())
+  expect(screen.queryByText('op-active')).toBeNull()
+})
+
+test('GWT-M32 seed admin cannot be deleted', async () => {
+  const SEED = {
+    id: 1, username: 'admin', email: 'admin@x.com', is_active: true, is_admin: true,
+    role: 'admin', tenant_id: null, tenant_name: null, deleted_at: null, is_platform_admin: true,
+  }
+  ;(fetchUsersPage as jest.Mock).mockResolvedValue({ items: [SEED, ACTIVE_USER], total: 2 })
+  render(<Users />)
+  await waitFor(() => expect(screen.getByText('admin')).toBeInTheDocument())
+  expect(screen.getByText('op-active')).toBeInTheDocument()
+  expect(screen.getAllByRole('button', { name: /删\s*除/ })).toHaveLength(1)
+})
+
 test('GWT-93.2 默认视图：请求 status=active，已删行不出现', async () => {
   render(<Users />);
   await waitFor(() => expect(screen.getByText('op-active')).toBeInTheDocument());

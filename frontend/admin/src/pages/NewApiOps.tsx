@@ -11,6 +11,7 @@ import ProbeResults from '../components/newapi/ProbeResults'
 import EventsList from '../components/newapi/EventsList'
 import Overview3q from '../components/newapi/Overview3q'
 import PageHeaderTabs, { pageTabPaneStyle } from '../components/layout/PageHeaderTabs'
+import DutyKeysTab from '../components/newapi/DutyKeysTab'
 import { Button, Form, InputNumber, Modal, Popconfirm, message } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { clearModelConfig, setModelConfig } from '../services/newapi'
@@ -21,6 +22,7 @@ const PAGE_TAB_ITEMS = [
   { key: 'overview', label: '总览' },
   { key: 'probes', label: '探针' },
   { key: 'events', label: '事件' },
+  { key: 'keys', label: '钥匙' },
 ]
 
 const NewApiOps: React.FC = () => {
@@ -125,6 +127,11 @@ const NewApiOps: React.FC = () => {
             configSaved={configSaved}
             highlightId={highlightEventId}
           />
+        </div>
+      )}
+      {visitedTabs.keys && (
+        <div style={pageTabPaneStyle(activeTab === 'keys')}>
+          <DutyKeysTab />
         </div>
       )}
 

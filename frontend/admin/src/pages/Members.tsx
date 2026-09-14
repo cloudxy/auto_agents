@@ -15,7 +15,9 @@ import {
   type MemberAuditRow, type MemberRow,
 } from '../services/members'
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
+import { isNotFoundError } from '../utils/httpError'
 import { useAuthStore } from '../store/useAuthStore'
+import NotFound from './NotFound'
 
 const { Text } = Typography
 
@@ -53,13 +55,20 @@ const Members: React.FC = () => {
   const [form] = Form.useForm()
   const [resetTarget, setResetTarget] = useState<MemberRow | null>(null)
   const [resetForm] = Form.useForm()
+  const [notFound, setNotFound] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       setRows(await listMembers())
+      setNotFound(false)
     } catch (e) {
-      message.error(apiErrorMessage(e, '成员加载失败'))
+      if (isNotFoundError(e)) {
+        setNotFound(true)
+        setRows([])
+      } else {
+        message.error(apiErrorMessage(e, '成员加载失败'))
+      }
     } finally {
       setLoading(false)
     }
@@ -72,7 +81,7 @@ const Members: React.FC = () => {
     try {
       const values = await form.validateFields()
       const created = await createMember(values)
-      message.success(`成员「${created.username}」已创建`)
+      message.success('已添加成员')
       setCreateOpen(false)
       form.resetFields()
       load()
@@ -96,7 +105,7 @@ const Members: React.FC = () => {
   const onRoleChange = async (row: MemberRow, role: string) => {
     try {
       await patchMember(row.id, { tenant_role: role })
-      message.success(`${row.username} → ${role}`)
+      message.success('已保存角色')
       load()
     } catch (e) {
       message.error(apiErrorMessage(e, '角色变更失败'))
@@ -120,7 +129,7 @@ const Members: React.FC = () => {
   const onDelete = async (row: MemberRow) => {
     try {
       await deleteMember(row.id)
-      message.success(`成员「${row.username}」已删除`)
+      message.success('已移除成员')
       load()
     } catch (e) {
       message.error(apiErrorMessage(e, '删除失败'))
@@ -174,6 +183,8 @@ const Members: React.FC = () => {
     },
   ]
 
+  if (notFound) return <NotFound />
+
   return (
     <div>
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
@@ -188,7 +199,14 @@ const Members: React.FC = () => {
 
       <Modal title="添加成员" open={createOpen} onOk={onCreate} onCancel={() => setCreateOpen(false)} okText="创建">
         <Form form={form} layout="vertical">
-          <Form.Item name="username" label="用户名" rules={[{ required: true }]}>
+          <Form.Item
+            name="username"
+            label="登录名"
+            rules={[
+              { required: true, message: '请填写登录名' },
+              { max: 256, message: '登录名过长' },
+            ]}
+          >
             <Input placeholder="3-50 字符" />
           </Form.Item>
           <Form.Item name="email" label="邮箱" rules={[{ required: true, type: 'email' }]}>

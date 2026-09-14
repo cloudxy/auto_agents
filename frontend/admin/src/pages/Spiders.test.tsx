@@ -198,4 +198,21 @@ test('T-18 GWT-85.3：只读成员打开采集任务——无提交入口（既�
   expect(screen.queryByRole('button', { name: /收\s*藏/ })).toBeNull()
   // 读操作仍在（页面本身可用，失败≠空）
   expect(screen.getByRole('button', { name: /刷\s*新/ })).toBeInTheDocument()
+  expect(screen.getByText('当前账号不能提交采集')).toBeInTheDocument()
 })
+
+test('GWT-M03.2 empty free tenant: submit entry visible, no paywall/subscribe/relay gate', async () => {
+  ;(fetchNodesPage as jest.Mock).mockResolvedValue({
+    items: [{ worker_id: 'w1' }],
+    total: 1,
+  })
+  ;(fetchTasks as jest.Mock).mockResolvedValue({ items: [], total: 0 })
+  renderSpiders()
+  expect((await screen.findAllByRole('button', { name: /新增任务/ })).length).toBeGreaterThan(0)
+  const copy = document.body.textContent || ''
+  expect(copy).not.toContain('请先开通专业档')
+  expect(copy).not.toContain('请先订阅能力')
+  expect(copy).not.toContain('请先开通中转')
+  expect(copy).not.toContain('当前可买')
+})
+

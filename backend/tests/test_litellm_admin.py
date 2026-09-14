@@ -73,7 +73,8 @@ def test_main_async_session_uses_default_engine_not_newapi_db():
 
 def test_tenant_admin_cannot_list_litellm_keys(admin_client):
     resp = admin_client.get("/api/v1/litellm/keys")
-    assert resp.status_code in (401, 403)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
 
 
 def test_apply_proxy_route_off_by_default():

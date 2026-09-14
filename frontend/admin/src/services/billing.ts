@@ -60,6 +60,7 @@ export interface CheckoutPreview {
   product: string
   channels: CheckoutChannel[]
   empty_state: string | null
+  notice?: string | null
   can_pay: boolean
   order_id: number | null
   amount_cents?: number | null
@@ -69,10 +70,10 @@ export interface CheckoutPreview {
 export const previewCheckout = (product = 'plan_pro'): Promise<CheckoutPreview> =>
   api.get('/billing/checkout', { params: { product } }).then((r) => unwrap<CheckoutPreview>(r))
 
-/** T-16 POST /billing/checkout：买方占坑。channel 闭集 alipay|wechat。 */
+/** POST /billing/checkout：W2 不要求已选通道。 */
 export const createCheckout = (body: {
   product: string
-  channel: Exclude<PayChannel, 'offline'>
+  channel?: Exclude<PayChannel, 'offline'>
 }): Promise<OrderRow> =>
   api.post('/billing/checkout', body).then((r) => unwrap<OrderRow>(r))
 

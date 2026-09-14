@@ -7,6 +7,8 @@ import { Alert, Button, ConfigProvider, Empty, Modal, Switch, Table, Tag, Typogr
 import SubscribeModal from '../components/SubscribeModal'
 import TenantSpaceOnly from '../components/TenantSpaceOnly'
 import { useAuthStore } from '../store/useAuthStore'
+import { isNotFoundError } from '../utils/httpError'
+import NotFound from './NotFound'
 import {
   listInstalls, patchInstall, uninstallInstall, type InstallRow,
 } from '../services/capabilities'
@@ -42,13 +44,20 @@ const MyInstalls: React.FC = () => {
   const [busy, setBusy] = useState(false)
   const [trustRow, setTrustRow] = useState<InstallRow | null>(null)
   const [subscribe, setSubscribe] = useState<InstallRow | null>(null)
+  const [notFound, setNotFound] = useState(false)
 
   const load = useCallback(async () => {
     if (noTenantSpace) return
     setLoadError(null)
     try {
       setItems((await listInstalls()).items)
+      setNotFound(false)
     } catch (e) {
+      if (isNotFoundError(e)) {
+        setNotFound(true)
+        setItems(null)
+        return
+      }
       setItems(null)
       setLoadError(loadErrorCopy(e))
     }
@@ -96,6 +105,7 @@ const MyInstalls: React.FC = () => {
   const empty = !loadError && items !== null && items.length === 0
 
   if (noTenantSpace) return <TenantSpaceOnly what="安装" />
+  if (notFound) return <NotFound />
 
   return (
     <ConfigProvider button={{ autoInsertSpace: false }}>

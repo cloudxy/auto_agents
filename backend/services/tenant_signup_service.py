@@ -61,8 +61,10 @@ class TenantSignupService:
         logger.info(f"企业注册 | company={company} email={admin_email}")
         company = (company or "").strip()
         admin_email = (admin_email or "").strip().lower()
-        if not company or len(company) < 2:
-            raise ValidationException(message="公司名至少 2 个字符", field="company")
+        if not company:
+            raise ValidationException(message="请填写企业名", field="company")
+        if len(company) < 2:
+            raise ValidationException(message="企业名至少 2 个字符", field="company")
         if "@" not in admin_email:
             raise ValidationException(message="管理员邮箱不合法", field="admin_email")
         if len(admin_password or "") < 8:

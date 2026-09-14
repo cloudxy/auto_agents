@@ -23,7 +23,7 @@ import Home, { HERO_FIRST_SENTENCE } from './pages/Home'
 import Pricing from './pages/Pricing'
 import Capabilities from './pages/Capabilities'
 
-const NEEDLE = '当前可买'
+const NEEDLES = ['当前可买', '支付已通'] as const
 const SRC_ROOT = __dirname
 const SHARED_SRC = path.join(__dirname, '../../shared/src')
 const SURFACES = [
@@ -53,8 +53,8 @@ function walkTs(dir: string): string[] {
   return out
 }
 
-function filesWithNeedle(root: string): string[] {
-  return walkTs(root).filter((file) => fs.readFileSync(file, 'utf8').includes(NEEDLE))
+function filesWithNeedle(root: string, needle: string): string[] {
+  return walkTs(root).filter((file) => fs.readFileSync(file, 'utf8').includes(needle))
 }
 
 function wrap(ui: React.ReactElement, url: string) {
@@ -79,14 +79,16 @@ beforeEach(() => {
   })
 })
 
-test('GWT-U24 mechanical nail: homepage/pricing/capabilities source+render have no 当前可买', async () => {
-  expect(filesWithNeedle(SRC_ROOT)).toEqual([])
-  expect(filesWithNeedle(SHARED_SRC)).toEqual([])
+test('GWT-M50/M15 mechanical nail: visitor surfaces have no 当前可买 or 支付已通', async () => {
+  NEEDLES.forEach((needle) => {
+    expect(filesWithNeedle(SRC_ROOT, needle)).toEqual([])
+    expect(filesWithNeedle(SHARED_SRC, needle)).toEqual([])
+  })
   SURFACES.forEach((rel) => {
     const full = path.join(SRC_ROOT, rel)
     expect(fs.existsSync(full)).toBe(true)
     const src = fs.readFileSync(full, 'utf8')
-    expect(src).not.toContain(NEEDLE)
+    NEEDLES.forEach((needle) => expect(src).not.toContain(needle))
   })
   const pricingSrc = fs.readFileSync(path.join(SRC_ROOT, 'pages/Pricing.tsx'), 'utf8')
   expect(pricingSrc).not.toMatch(/payment_succeeded|\/billing\/notify/)
@@ -94,15 +96,15 @@ test('GWT-U24 mechanical nail: homepage/pricing/capabilities source+render have 
 
   wrap(<Home />, '/')
   expect(await screen.findByTestId('hero-first-sentence')).toHaveTextContent(HERO_FIRST_SENTENCE)
-  expect(document.body.textContent || '').not.toContain(NEEDLE)
+  NEEDLES.forEach((needle) => expect(document.body.textContent || '').not.toContain(needle))
   cleanup()
 
   wrap(<Pricing />, '/pricing')
   expect(screen.getByRole('link', { name: /免费注册/ })).toBeInTheDocument()
-  expect(document.body.textContent || '').not.toContain(NEEDLE)
+  NEEDLES.forEach((needle) => expect(document.body.textContent || '').not.toContain(needle))
   cleanup()
 
   wrap(<Capabilities />, '/capabilities')
   expect(await screen.findByText('暂无已上架能力')).toBeInTheDocument()
-  expect(document.body.textContent || '').not.toContain(NEEDLE)
+  NEEDLES.forEach((needle) => expect(document.body.textContent || '').not.toContain(needle))
 })

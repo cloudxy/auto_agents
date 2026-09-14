@@ -75,6 +75,7 @@ GET /api/v1/product-events
 GET /api/v1/public/capabilities
 GET /api/v1/public/capabilities/aliases
 GET /api/v1/public/capabilities/{asset_type}/{name}
+GET /api/v1/public/ops-contact
 GET /api/v1/public/skills
 GET /api/v1/public/skills/{name}
 GET /api/v1/rbac/departments

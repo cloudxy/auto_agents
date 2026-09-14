@@ -10,14 +10,12 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { listPublicAssets, type PublicListItem } from '../services/capabilities'
 import {
   EMPTY_SHELF,
-  EMPTY_SHELF_HINT,
   FILTER_EMPTY,
   HOST_OPTIONS,
   LEGACY_MAP,
   LOAD_FAIL,
   LOAD_FAIL_HINT,
   MARKET_CLOSED,
-  MARKET_CLOSED_HINT,
   PUBLIC_TYPES,
   TYPE_LABELS,
   activeFilterEcho,
@@ -73,7 +71,6 @@ const MarketEmpty: React.FC<{
     return (
       <div className="capability-market__empty" data-testid="market-closed">
         <p>{MARKET_CLOSED}</p>
-        <p>{MARKET_CLOSED_HINT}</p>
         <Link to="/">返回首页</Link>
       </div>
     )
@@ -89,7 +86,6 @@ const MarketEmpty: React.FC<{
       ) : (
         <>
           <p>{EMPTY_SHELF}</p>
-          <p>{EMPTY_SHELF_HINT}</p>
           <a href="#capability-filters">了解类型</a>
         </>
       )}

@@ -11,9 +11,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.external_api.v1.webhooks import bound_tenant_id, validate_api_key
+from backend.app.external_api.v1.webhooks import validate_api_key
 from backend.services.api_key_service import ApiKeyService
 from backend.services.outbound_key_service import OutboundKeyService
+from backend.services.outbound_pull_auth import record_wrong_plane_rejected
 from backend.services.spider_query_service import SpiderQueryService
 from platform_core.db import get_async_db
 from platform_core.logger import get_logger
@@ -40,28 +41,16 @@ async def _resolve_tenant_key(request: Request, session: AsyncSession) -> Option
 
 
 async def _require_bound_tenant(request: Request, session: AsyncSession) -> int:
-    """出站拉数查找链：出站钥匙表 → 租户 API Key → KEY_BINDINGS → 401。
+    """出站拉数只命中本企业未吊销出站钥匙。sk- / api_keys / KEY_BINDINGS / 乱填 → 401。
 
-    第一环：本企业 active 出站拉数钥匙（SHA-256 指纹 + compare_digest，
-    Service 内执法；revoked / 渠道组 sk- / 乱填一律不命中，GWT-51.3/6/7）；
-    第二环：L1 租户 API Key（api_keys 表）；
-    第三环：既有 KEY_BINDINGS 配置绑定（FR-13 平台钥匙行为保持，不放宽）；
-    三环都未命中 → 401 且不查结果库（0 行）。明文不落日志。
+    FR-13 平台 KEY_BINDINGS 仍用于 /spider/status|results|stats，不走进本函数。
     """
     api_key = request.headers.get("X-API-Key", "")
     tenant_id = await OutboundKeyService(session).resolve_active_tenant(api_key)
     if tenant_id is not None:
         logger.info("出站拉数鉴权命中 | 链=出站钥匙表")
         return int(tenant_id)
-    tenant_id = await ApiKeyService(session).authenticate(api_key)
-    if tenant_id is not None:
-        logger.info("出站拉数鉴权命中 | 链=租户 API Key")
-        return int(tenant_id)
-    tenant_id = bound_tenant_id(api_key)
-    if tenant_id is not None:
-        logger.info("出站拉数鉴权命中 | 链=KEY_BINDINGS")
-        return int(tenant_id)
-    logger.warning("出站拉数鉴权拒绝 | 链=三环未命中（未绑定/已吊销/他形态）")
+    await record_wrong_plane_rejected(session, api_key)
     raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
@@ -88,9 +77,8 @@ async def get_spider_data(
 ):
     """公开数据查询 — 按爬虫名分页拉本企业非候选结果
 
-    认证：X-API-Key 先查出站钥匙表（本企业 active 出站
-    拉数钥匙，FR-51），再查租户 API Key，未命中再查 KEY_BINDINGS。
-    三环都未命中 / 旧字符串列表钥匙 → 401，响应不含结果行。
+    认证：X-API-Key 只命中本企业未吊销出站拉数钥匙（FR-M20）。
+    sk- / 租户 API Key / KEY_BINDINGS / 乱填 → 401，响应不含结果行。
     可选参数：page / page_size / start_time / end_time / fields。
     """
     tenant_id = await _require_bound_tenant(request, session)

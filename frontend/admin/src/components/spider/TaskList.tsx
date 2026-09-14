@@ -13,7 +13,7 @@ import { STATUS_META, PRIORITY_META } from './types'
 import type { Task, SpiderMap } from './types'
 import { SPIDER_WORKER_OFFLINE_COPY, STILL_RUNNING_COPY, ZERO_ITEMS_DONE_COPY } from './copy'
 import { LoadEmpty } from '../LoadState'
-import { CLEAR_FILTERS, EMPTY_TASKS_COPY, FILTERED_TASKS_EMPTY } from '../../constants/collectCopy'
+import { CANNOT_SUBMIT_COLLECT, CLEAR_FILTERS, EMPTY_TASKS_COPY, FILTERED_TASKS_EMPTY } from '../../constants/collectCopy'
 
 const { Text } = Typography
 
@@ -308,6 +308,7 @@ export const TaskList: React.FC<TaskListProps> = ({
               新增任务
             </Button>
           )}
+          {!canCreate && <Text type="secondary">{CANNOT_SUBMIT_COLLECT}</Text>}
           <Button icon={<ReloadOutlined />} onClick={onRefresh}>刷新</Button>
         </Space>
       </div>

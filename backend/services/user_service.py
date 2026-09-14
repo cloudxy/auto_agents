@@ -22,6 +22,24 @@ SEED_ADMIN_USERNAME = "admin"
 USER_RESTORED_EVENT = "user_restored"
 
 
+def _list_users_where(status: str, q: str | None):
+    """列表谓词：active=未删；deleted=已删；disabled=未删且停用；q=登录名包含。"""
+    from sqlalchemy import and_
+
+    from platform_core.models.user import User
+
+    if status == "deleted":
+        cond = User.deleted_at.isnot(None)
+    elif status == "disabled":
+        cond = and_(User.deleted_at.is_(None), User.is_active.is_(False))
+    else:
+        cond = User.deleted_at.is_(None)
+    needle = (q or "").strip()
+    if needle:
+        cond = and_(cond, User.username.contains(needle))
+    return cond
+
+
 @dataclass(frozen=True)
 class AuthIdentity:
     """鉴权身份 DB 快照（F-01 单一事实源载荷）
@@ -72,36 +90,32 @@ class UserService:
         self.repo = UserRepository(session)
 
     async def list_users(self, skip: int = 0, limit: int = 20,
-                         status: str = "active") -> UserListResponse:
+                         status: str = "active", q: str | None = None
+                         ) -> UserListResponse:
         """分页查询用户（JOIN tenants 带归属公司名；不含密码哈希）
 
-        status 筛选（T-24 / GWT-93.1/93.2）：active=默认视图（不含已删，
-        既有行为保持）；deleted=已删筛选（只含软删行，行带 deleted_at 标记，
-        恢复动作的入口读模型）。
+        status：active=未删（含停用）；deleted=已删；disabled=未删且停用。
+        q：按登录名包含筛选（FR-M32）。
         """
-        logger.info(f"查询用户列表: skip={skip} limit={limit} status={status}")
+        logger.info(f"查询用户列表: skip={skip} limit={limit} status={status} q={q}")
         from sqlalchemy import func, select
 
         from platform_core.models.department import Department
         from platform_core.models.tenant import Tenant
         from platform_core.models.user import User
 
-        if status == "deleted":
-            alive_cond = User.deleted_at.isnot(None)
-        else:
-            alive_cond = User.deleted_at.is_(None)  # 软删除行不陈列（回收站语义见操作审计）
-
+        cond = _list_users_where(status, q)
         rows = (await self.session.execute(
             select(User, Tenant.name.label("tenant_name"),
                    Department.name.label("department_name"))
             .outerjoin(Tenant, Tenant.id == User.tenant_id)
             .outerjoin(Department, Department.id == User.department_id)
-            .where(alive_cond)
+            .where(cond)
             .order_by(User.id.asc())
             .offset(skip).limit(limit)
         )).all()
         total = (await self.session.execute(
-            select(func.count()).select_from(User).where(alive_cond)
+            select(func.count()).select_from(User).where(cond)
         )).scalar_one()
         items = []
         for user, tenant_name, department_name in rows:
@@ -317,7 +331,9 @@ class UserService:
         if user is None:
             raise BusinessException(f"用户不存在: {user_id}")
         if user.deleted_at is None:
-            # GWT-93.9：已在册（含已恢复）= no-op，状态保持、无事件、无副作用
+            if not user.is_active:
+                return await self._reactivate_disabled(user, actor_id)
+            # GWT-93.9：已在册且启用 = no-op，状态保持、无事件、无副作用
             return UserResponse.model_validate(user)
 
         # 占用预检（同事务；在册口径——目标行本身已删，不参与判重）
@@ -358,4 +374,23 @@ class UserService:
         else:
             # rowcount=0：预检后、UPDATE 前被并发恢复抢先 → no-op、不重复上报
             logger.info(f"恢复软删用户 no-op（并发已恢复） | id={user_id}")
+        return resp
+
+    async def _reactivate_disabled(self, user, actor_id: int) -> UserResponse:
+        """停用（未软删）恢复：置回启用并上报 user_restored（GWT-M32.4）。"""
+        logger.info(f"恢复已停用用户 | id={user.id} actor={actor_id}")
+        from backend.services.product_event_service import emit_product_event
+
+        uid = int(user.id)
+        tenant_id_snapshot = int(user.tenant_id) if user.tenant_id is not None else None
+        user.is_active = True
+        await self.session.flush()
+        await self.session.refresh(user)
+        resp = UserResponse.model_validate(user)
+        await self.session.commit()
+        await emit_product_event(
+            self.session, USER_RESTORED_EVENT,
+            tenant_id=tenant_id_snapshot, actor_user_id=actor_id,
+            props={"restored_user_id": uid},
+        )
         return resp

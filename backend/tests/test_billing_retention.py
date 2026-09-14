@@ -74,12 +74,14 @@ async def test_attach_free_plan_writes_subscription(db_session):
 
 def test_tenant_admin_cannot_confirm_order(admin_client):
     resp = admin_client.post("/api/v1/billing/orders/1/confirm")
-    assert resp.status_code in (401, 403)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
 
 
 def test_tenant_admin_cannot_list_pending_orders(admin_client):
     resp = admin_client.get("/api/v1/billing/admin/orders")
-    assert resp.status_code in (401, 403)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
 
 
 def test_create_order_rejects_unknown_channel():
@@ -104,12 +106,12 @@ async def test_create_order_service(db_session):
         plan = Plan(slug="pro-ord", name="专业档", price_cents=29900, period="month", is_public=1)
         s.add_all([tenant, plan])
         await s.commit()
-        out = await BillingService(s).create_order(
-            tenant.id, "owner", OrderCreate(plan_id=plan.id, channel="offline"),
-        )
-        assert out.status == "pending"
-        assert out.amount_cents == 29900
-        assert out.channel == "offline"
+        from platform_core.exceptions import BusinessException
+        with pytest.raises(BusinessException) as ei:
+            await BillingService(s).create_order(
+                tenant.id, "owner", OrderCreate(plan_id=plan.id, channel="offline"),
+            )
+        assert ei.value.code == "ORDER_STORY_CLOSED"
 
 
 @pytest.mark.asyncio

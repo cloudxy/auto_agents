@@ -318,3 +318,46 @@ test('GWT-U15.3 tenant company admin /capabilities is shelf not 404', async () =
   expect(screen.queryByRole('tab', { name: '源' })).not.toBeInTheDocument()
   expect(screen.queryByTestId('governance-shell')).not.toBeInTheDocument()
 })
+
+test('GWT-M20 second key URL /api-keys is 404 same-shape, no redirect', async () => {
+  login(TENANT_OWNER)
+  renderApp('/api-keys')
+  expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /返回工作台/ })).toBeInTheDocument()
+  expect(screen.queryByText(/抱歉/)).not.toBeInTheDocument()
+  expect(screen.queryByText('签发出站拉数钥匙')).not.toBeInTheDocument()
+  expect(window.location.pathname).toBe('/api-keys')
+})
+
+test('GWT-M20 second key URL /api_keys is 404 same-shape, no redirect', async () => {
+  login(TENANT_OWNER)
+  renderApp('/api_keys')
+  expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
+  expect(window.location.pathname).toBe('/api_keys')
+  expect(screen.queryByText('签发出站拉数钥匙')).not.toBeInTheDocument()
+})
+
+test('GWT-M30 tenant /litellm leftover is 404 same-shape, no redirect to duty', async () => {
+  login(TENANT_OWNER)
+  renderApp('/litellm')
+  expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
+  expect(window.location.pathname).toBe('/litellm')
+  expect(screen.queryByText('中转站管控')).not.toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: /钥匙/ })).not.toBeInTheDocument()
+})
+
+test('GWT-M33 tenant /settings is 404 same-shape, no settings form', async () => {
+  login(TENANT_COMPANY_ADMIN)
+  renderApp('/settings')
+  expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /返回工作台/ })).toBeInTheDocument()
+  expect(screen.queryByText('当前账号不能改系统设置')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /保存并发布/ })).not.toBeInTheDocument()
+})
+
+test('GWT-M32 tenant /users is 404 same-shape', async () => {
+  login(TENANT_COMPANY_ADMIN)
+  renderApp('/users')
+  expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
+  expect(screen.queryByText('新建用户')).not.toBeInTheDocument()
+})

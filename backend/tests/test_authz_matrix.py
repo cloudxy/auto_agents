@@ -17,6 +17,7 @@ def test_anonymous_is_401(client, method, path):
 
 def test_tenant_admin_forbidden_on_platform_litellm(admin_client):
     resp = admin_client.get("/api/v1/litellm/keys")
-    assert resp.status_code == 403
+    assert resp.status_code == 404
     body = resp.json()
-    assert body.get("success") is False or body.get("code")
+    assert body.get("code") == "HTTP_404"
+    assert body.get("message") == "Not Found"

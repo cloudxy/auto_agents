@@ -68,7 +68,10 @@ class Order(TenantMixin, Base):
         String(32), nullable=False, default="pending", server_default="pending",
         comment="旧 pending/paid/cancelled；新 checkout_pending/paid_pending_fulfillment/fulfilled/unpaid",
     )
-    channel = Column(String(16), nullable=False, default="offline", server_default="offline", comment="offline/alipay/wechat")
+    channel = Column(
+        String(16), nullable=True,
+        comment="alipay/wechat；NULL=W2 未选通道。禁止新写 offline",
+    )
     idempotency_key = Column(String(64), nullable=True, unique=True, comment="防重复下单")
     paid_at = Column(DateTime(timezone=True), nullable=True, comment="确认收款时间")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")

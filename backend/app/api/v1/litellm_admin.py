@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from backend.app.api.deps import require_platform_admin
+from backend.app.api.deps import require_platform_admin_or_404
 from backend.app.responses import ApiResponse, created, ok
 from backend.services.litellm.admin_service import LiteLlmAdminService
 from platform_core.schemas.litellm import LitellmKeyCreate, LitellmKeyOut
@@ -17,7 +17,7 @@ def _svc() -> LiteLlmAdminService:
 
 @router.get("/keys", response_model=ApiResponse[list[dict[str, Any]]])
 async def list_litellm_keys(
-    _user=Depends(require_platform_admin),
+    _user=Depends(require_platform_admin_or_404),
     service: LiteLlmAdminService = Depends(_svc),
 ) -> ApiResponse[list[dict[str, Any]]]:
     return ok(await service.list_keys())
@@ -26,16 +26,19 @@ async def list_litellm_keys(
 @router.post("/keys", response_model=ApiResponse[LitellmKeyOut], status_code=201)
 async def create_litellm_key(
     payload: LitellmKeyCreate,
-    _user=Depends(require_platform_admin),
+    _user=Depends(require_platform_admin_or_404),
     service: LiteLlmAdminService = Depends(_svc),
 ) -> ApiResponse[LitellmKeyOut]:
-    return created(await service.create_key(payload))
+    return created(
+        await service.create_key(payload),
+        message="平台网关钥匙已签发。签发成功不代表已对租户开通。",
+    )
 
 
 @router.delete("/keys", response_model=ApiResponse[None])
 async def delete_litellm_key(
     key: str,
-    _user=Depends(require_platform_admin),
+    _user=Depends(require_platform_admin_or_404),
     service: LiteLlmAdminService = Depends(_svc),
 ) -> ApiResponse[None]:
     await service.delete_key(key)
@@ -44,7 +47,7 @@ async def delete_litellm_key(
 
 @router.get("/spend", response_model=ApiResponse[list[dict[str, Any]]])
 async def litellm_spend(
-    _user=Depends(require_platform_admin),
+    _user=Depends(require_platform_admin_or_404),
     service: LiteLlmAdminService = Depends(_svc),
 ) -> ApiResponse[list[dict[str, Any]]]:
     return ok(await service.spend_logs())

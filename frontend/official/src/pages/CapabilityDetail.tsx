@@ -11,7 +11,7 @@ import {
   type PublicAssetDetail,
   type PublicOrigin,
 } from '../services/capabilities'
-import { displaySlash, MARKET_CLOSED, MARKET_CLOSED_HINT } from './capabilityMarket'
+import { displaySlash, MARKET_CLOSED } from './capabilityMarket'
 import NotFound from './NotFound'
 import './CapabilityDetail.css'
 
@@ -216,7 +216,6 @@ const CapabilityDetail: React.FC = () => {
       <div className="capability-detail" data-testid="market-closed">
         <p><Link to="/capabilities">返回市场</Link></p>
         <h1>{MARKET_CLOSED}</h1>
-        <p>{MARKET_CLOSED_HINT}</p>
       </div>
     )
   }

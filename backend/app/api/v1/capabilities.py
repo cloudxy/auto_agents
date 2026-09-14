@@ -13,7 +13,6 @@ from backend.app.api._helpers import omit_local_abs_paths_for_non_platform_admin
 from backend.app.api.deps import (
     CurrentUser,
     require_login,
-    require_platform_admin,
     require_platform_admin_or_404,
 )
 from backend.app.responses import ok
@@ -51,35 +50,20 @@ async def list_capabilities(
     q: str = Query(None, max_length=100),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    _user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_login),
     service: CapabilityService = Depends(_service),
+    market: PowerMarketService = Depends(_market),
 ):
-    """统一资产列表（管理端）"""
-    rows, total = await service.list_assets(
+    """超管=治理目录；租户=货架（关旗「能力市场未开放」，不含未上架）。"""
+    if not user.is_platform_admin:
+        return ok(data=await market.list_public(
+            asset_type=type, category=category, q=q, page=page, page_size=page_size,
+        ))
+    return ok(data=await service.list_catalog(
         asset_type=type, category=category, status=status, q=q,
         listing_state=listing_state,
         offset=(page - 1) * page_size, limit=page_size,
-    )
-    items = [
-        {
-            "id": r.id, "asset_type": r.asset_type, "name": r.name,
-            "title": r.title or "", "description": r.description,
-            "category": r.category, "status": r.status, "tier": r.tier,
-            "score": float(r.score) if r.score is not None else None,
-            "ai_suggested_score": float(r.ai_suggested_score) if r.ai_suggested_score is not None else None,
-            "sync_state": r.sync_state,
-            "listing_state": r.listing_state,
-            "listed_at": r.listed_at.isoformat() if r.listed_at else None,
-            "source_type": r.source_type,
-            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-        }
-        for r in rows
-    ]
-    payload: dict = {"total": total, "items": items}
-    if total == 0:
-        payload["empty"] = True
-        payload["message"] = "还没有目录项。同步源或扫描后会出现在这里。"
-    return ok(data=payload)
+    ))
 
 
 # ---------- P6 C3/C4：插件域（扫描/详情/验证） ----------
@@ -171,7 +155,7 @@ async def get_plugin(
 @router.post("/plugins/{name}/verify")
 async def verify_plugin(
     name: str,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
 ):
     """插件验证管线（ADR-0001）：MCP 连接→tools/list→抽样 call→健康落库"""
@@ -341,7 +325,7 @@ async def correct_capability_asset(
     asset_type: str,
     name: str,
     payload: CorrectRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
@@ -379,7 +363,7 @@ async def patch_license_override(
     asset_type: str,
     name: str,
     payload: PatchLicenseOverrideRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
@@ -399,7 +383,7 @@ async def put_capability_alias(
     asset_type: str,
     name: str,
     payload: PutAliasRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
@@ -434,7 +418,7 @@ async def subscribe_capability(
 async def list_capability_references(
     asset_type: str,
     name: str,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     market: PowerMarketService = Depends(_market),
 ):
     """超管/系统引用列表（FR-36）。忽略子行 listing；黑名单/软删跳过并审计。"""

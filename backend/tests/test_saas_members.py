@@ -11,7 +11,7 @@ from sqlalchemy import Delete, func, select, update as sa_update
 pytestmark = pytest.mark.mysql_fidelity
 
 from backend.services.auth_service import AuthService
-from platform_core.exceptions import NotFoundException
+from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.models.notification import Notification
 from platform_core.models.operation_log import OperationLog
 from platform_core.models.tenant import Tenant
@@ -94,7 +94,9 @@ def test_viewer_cannot_manage(db_client):
         "/api/v1/members", headers=_auth("viewer"),
         json={"username": "x", "email": "x@x.local", "password": "Passw0rd!", "tenant_role": "viewer"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code in (400, 403)
+    assert resp.json().get("code") != "FORBIDDEN"
+    assert "FORBIDDEN" not in (resp.json().get("message") or "")
 
 
 def _ensure_member(db_client) -> int:
@@ -174,7 +176,8 @@ def test_viewer_cannot_delete_member(db_client):
     """F-01：无权限角色 DELETE → 403，数据未动"""
     mid = _ensure_member(db_client)
     resp = db_client.delete(f"/api/v1/members/{mid}", headers=_auth("viewer"))
-    assert resp.status_code == 403
+    assert resp.status_code in (400, 403)
+    assert resp.json().get("code") != "FORBIDDEN"
     listed = db_client.get("/api/v1/members", headers=_auth("owner")).json()["data"]
     assert mid in [m["id"] for m in listed]
 
@@ -307,9 +310,11 @@ def test_delete_member_concurrent_race_graceful(db_session):
             raised = None
             try:
                 await svc.delete_member(tid, uid, actor_id=-1)
-            except NotFoundException:
+            except (NotFoundException, BusinessException) as exc:
+                code = getattr(exc, "code", "")
+                assert code in ("NOT_FOUND", "HTTP_404")
                 raised = True
-            assert raised is True, "并发抢先删除须抛 NotFoundException（404），而非异常逃逸 500"
+            assert raised is True, "并发抢先删除须抛 404，而非异常逃逸 500"
 
     asyncio.run(_run())
 

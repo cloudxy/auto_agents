@@ -10,8 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import (
-    CurrentUser, require_admin, require_login, require_platform_admin,
-    require_platform_admin_or_404,
+    CurrentUser, require_admin, require_login,
+    require_platform_admin, require_platform_admin_or_404,
 )
 from platform_core.schemas.auth import AdminUserCreateRequest, AdminUserUpdateRequest
 from backend.app.responses import ok, created
@@ -64,20 +64,21 @@ async def get_stats(
 async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    status: str = Query("active", pattern="^(active|deleted)$",
-                        description="active=默认（不含已删）；deleted=已删除筛选（T-24/FR-93）"),
+    status: str = Query("active", pattern="^(active|deleted|disabled)$",
+                        description="active=默认（不含已删）；deleted=已删除；disabled=已停用"),
+    q: Optional[str] = Query(None, max_length=50, description="按登录名筛选"),
     service: UserService = Depends(_user_service),
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
 ):
     """用户列表（用户管理页陈列，不含密码哈希；status=deleted 为已删筛选）"""
-    data = await service.list_users(skip=skip, limit=limit, status=status)
+    data = await service.list_users(skip=skip, limit=limit, status=status, q=q)
     return ok(data=data.model_dump())
 
 
 @router.post("/users", status_code=201)
 async def admin_create_user(
     payload: AdminUserCreateRequest,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: UserService = Depends(_user_service),
 ):
@@ -92,7 +93,7 @@ async def admin_create_user(
 async def admin_update_user(
     user_id: int,
     payload: AdminUserUpdateRequest,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: UserService = Depends(_user_service),
 ):
@@ -105,7 +106,7 @@ async def admin_update_user(
 @router.delete("/users/{user_id}")
 async def admin_delete_user(
     user_id: int,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: UserService = Depends(_user_service),
 ):

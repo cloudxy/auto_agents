@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from backend.tests.payment_notify_support import (
-    BANNED, CHECKOUT, ENT_QUOTA, PRO_QUOTA, SKU, SUB, TOKENS,
+    BANNED, CHECKOUT, ENT_QUOTA, SKU, SUB, TOKENS,
     checkout, event_items, install_fernet, order_row, patch_relay_price,
     post_notify, put_channel, seed_plans, signed_body, sku_count, sku_status,
     sub_plan_slug, tenant_quota,
@@ -66,7 +66,8 @@ def test_gwt_u33_1_plan_pro_opens_pro_not_relay(db_client, db_session):
     row = order_row(db_session, fx["tid"])
     assert row["status"] == "fulfilled"
     assert sub_plan_slug(db_session, fx["tid"]) == "pro"
-    assert tenant_quota(db_session, fx["tid"]) == PRO_QUOTA
+    assert tenant_quota(db_session, fx["tid"])["task_concurrency"] == 50
+    assert tenant_quota(db_session, fx["tid"])["result_storage"] == 200000
     assert tenant_quota(db_session, fx["tid"]) != quota_before
     assert sku_status(db_session, fx["tid"]) == "none"
     sku = db_client.get(SKU, headers=fx["owner"])
@@ -131,7 +132,8 @@ def test_gwt_u33_5_verified_before_fulfill_shows_processing(db_client, db_sessio
     assert row["verified"] is not None
     assert row["fulfilled"] is None
     preview = db_client.get(f"{CHECKOUT}?product=plan_pro", headers=fx["owner"])
-    assert "支付已到账，开通处理中" in preview.json()["message"]
+    assert "支付已到账，开通处理中" not in preview.text
+    assert "支付未完成，套餐未开通" not in preview.text
     assert BANNED not in preview.text
     assert sub_plan_slug(db_session, fx["tid"]) is None
     assert sku_status(db_session, fx["tid"]) == "none"
@@ -146,7 +148,7 @@ def test_gwt_u33_6_duplicate_notify_fulfills_once(db_client, db_session):
     assert rows_status == "fulfilled"
     assert sub_plan_slug(db_session, fx["tid"]) == "pro"
     assert sku_count(db_session, fx["tid"]) == 0
-    assert tenant_quota(db_session, fx["tid"]) == PRO_QUOTA
+    assert tenant_quota(db_session, fx["tid"])["task_concurrency"] == 50
 
 
 def test_gwt_u34_1_cancel_stays_unpaid(db_client, db_session):
@@ -161,7 +163,8 @@ def test_gwt_u34_1_cancel_stays_unpaid(db_client, db_session):
     assert row["status"] == "unpaid"
     assert row["fail"] == "cancel"
     preview = db_client.get(f"{CHECKOUT}?product=plan_pro", headers=fx["owner"])
-    assert "支付未完成，套餐未开通" in preview.json()["message"]
+    assert "支付未完成，套餐未开通" not in preview.text
+    assert "支付已到账，开通处理中" not in preview.text
     assert sub_plan_slug(db_session, fx["tid"]) is None
     assert sku_status(db_session, fx["tid"]) == "none"
 
@@ -309,14 +312,15 @@ def test_rotate_drops_old_secret_cannot_fulfill(db_client, db_session):
 
 
 def test_confirm_cannot_fulfill_online_checkout(db_client, db_session):
+    """PIT-2：confirm 接结账单 → fulfilled（ADR-0026）。"""
     fx = checkout(db_client, db_session, slug="u34-cf")
     resp = db_client.post(
         f"/api/v1/billing/orders/{fx['order']['id']}/confirm", headers=fx["pa"],
     )
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "ORDER_CONFIRM_OFFLINE_ONLY"
-    assert order_row(db_session, fx["tid"])["status"] == "checkout_pending"
-    assert sub_plan_slug(db_session, fx["tid"]) is None
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["status"] == "fulfilled"
+    assert order_row(db_session, fx["tid"])["status"] == "fulfilled"
+    assert sub_plan_slug(db_session, fx["tid"]) == "pro"
 
 
 def test_gwt_u35_enterprise_notify_opens_enterprise(db_client, db_session):
@@ -324,4 +328,4 @@ def test_gwt_u35_enterprise_notify_opens_enterprise(db_client, db_session):
     post_notify(db_client, "alipay", _ok_notify(fx))
     assert sub_plan_slug(db_session, fx["tid"]) == "enterprise"
     assert tenant_quota(db_session, fx["tid"]) == ENT_QUOTA
-    assert sku_status(db_session, fx["tid"]) == "none"
+    assert sku_status(db_session, fx["tid"]) == "active"

@@ -17,7 +17,6 @@ import TenantSpaceOnly from '../components/TenantSpaceOnly'
 import {
   RELAY_CANNOT_ISSUE,
   RELAY_COPIED_TOAST,
-  RELAY_EMPTY_GROUPS,
   RELAY_ISSUED_TOAST,
   RELAY_LOAD_FAILED,
   RELAY_OFFLINE_ISSUE,
@@ -28,7 +27,6 @@ import {
   RELAY_SKU_NONE,
   RELAY_TOKENS_EMPTY,
 } from '../constants/relayCopy'
-import { listMyOrders } from '../services/billing'
 import {
   createRelayGroup, fetchRelayPage, fetchRelaySku, issueRelayToken, patchRelayGroup, revokeRelayToken,
   type RelayGroupRow, type RelayTokenRow,
@@ -74,21 +72,13 @@ const RelayGroups: React.FC = () => {
     enabled: !noTenantSpace && skuActive,
     retry: false,
   })
-  const ordersQuery = useQuery({
-    queryKey: ['my-orders'],
-    queryFn: listMyOrders,
-    enabled: !noTenantSpace && skuQuery.isSuccess && !skuActive,
-    retry: false,
-  })
   const groups = skuActive ? (pageQuery.data?.groups ?? []) : []
   const tokens = skuActive ? (pageQuery.data?.tokens ?? []) : []
   const canIssue = Boolean(skuActive && buyer)
   const cannotIssueNote = skuActive && !canIssue
     ? (pageQuery.data?.groupsMessage || RELAY_CANNOT_ISSUE)
     : ''
-  const fulfillmentPending = (ordersQuery.data || []).some(
-    (row) => row.product_code === 'relay' && row.status === 'paid_pending_fulfillment',
-  )
+
 
   const [groupOpen, setGroupOpen] = useState(false)
   const [tokenOpen, setTokenOpen] = useState(false)
@@ -101,7 +91,6 @@ const RelayGroups: React.FC = () => {
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['relay-page'] })
     void queryClient.invalidateQueries({ queryKey: ['relay-sku'] })
-    void queryClient.invalidateQueries({ queryKey: ['my-orders'] })
   }
 
   const onUpgrade = () => {
@@ -205,9 +194,7 @@ const RelayGroups: React.FC = () => {
           status={sku?.status || 'none'}
           title={sku?.empty_title}
           hint={sku?.empty_hint}
-          fulfillmentPending={fulfillmentPending}
           onUpgrade={onUpgrade}
-          onRefresh={() => invalidate()}
         />
         <ContactAdminModal open={contactOpen} onClose={() => setContactOpen(false)} />
       </>
@@ -233,16 +220,9 @@ const RelayGroups: React.FC = () => {
       </Space>
 
       <Card title="渠道组" size="small" style={{ marginBottom: 16 }}>
-        {groups.length === 0 && !loading ? (
-          <Alert
-            type="info" showIcon title={RELAY_EMPTY_GROUPS}
-            action={canIssue
-              ? <Button size="small" type="primary" onClick={() => setGroupOpen(true)}>创建渠道组</Button>
-              : undefined}
-          />
-        ) : (
-          <Table rowKey="id" size="middle" loading={loading} dataSource={groups}
+        <Table rowKey="id" size="middle" loading={loading} dataSource={groups}
                  pagination={{ pageSize: 20, hideOnSinglePage: true }}
+                 locale={{ emptyText: ' ' }}
                  columns={[
                    { title: '组名', dataIndex: 'name', ellipsis: true },
                    { title: 'RPM', dataIndex: 'rpm_limit', width: 100, render: (v: number) => (v ? v : '不限') },
@@ -259,7 +239,6 @@ const RelayGroups: React.FC = () => {
                      ),
                    }] : []),
                  ]} />
-        )}
       </Card>
 
       <Card title="令牌（渠道组令牌）" size="small" style={{ marginBottom: 16 }}>

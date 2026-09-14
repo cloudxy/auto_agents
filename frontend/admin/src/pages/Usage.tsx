@@ -1,13 +1,12 @@
 /**
  * 用量看板（T-04 / FR-U02）：将满≠已尽；申请提升分角色（upgrade-intent，不建单）。
  * 内部码 QUOTA_EXCEEDED / 裸 429 禁止渲染给租户。禁 FR-U24 四字。
- * L1：成本分摊 + 交付 Webhook + 套餐订购。
+ * T-05：拆套餐与订购；升级出口只「去结账」/满额「申请提升」。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, Col, Progress, Row, Spin, Table, Tabs, Typography } from 'antd'
 
 import DeliveryWebhookCard from '../components/usage/DeliveryWebhookCard'
-import BillingPanel from '../components/usage/BillingPanel'
 import { usePermission } from '../hooks/usePermission'
 import { fetchUsageByMember, fetchUsageOverview, type MemberUsageRow, type UsageOverview } from '../services/usage'
 import { apiErrorMessage } from '../utils/errorMessage'
@@ -16,9 +15,11 @@ import {
   GO_SUBMIT_COLLECT,
   NEAR_LIMIT_COPY,
   PLAN_FULL_COPY,
+  PRICING_CTA_CHECKOUT,
   STORAGE_CTA,
 } from '../constants/collectCopy'
 import MyOrders from './MyOrders'
+import { useAuthStore } from '../store/useAuthStore'
 
 const { Title, Text } = Typography
 
@@ -47,7 +48,9 @@ function tenantVisibleLoadError(e: unknown): string {
 
 const Usage: React.FC = () => {
   const { role, isAdmin } = usePermission()
+  const user = useAuthStore((s) => s.user)
   const readonly = role === 'viewer' || (!isAdmin && role !== 'operator' && role !== 'admin')
+  const buyer = user?.tenant_role === 'owner' || user?.tenant_role === 'admin'
 
   const [data, setData] = useState<UsageOverview | null>(null)
   const [loading, setLoading] = useState(false)
@@ -118,6 +121,11 @@ const Usage: React.FC = () => {
               <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
                 本月按 Asia/Shanghai 日历{data.year_month ? `（${data.year_month}）` : ''}
               </Text>
+              {buyer ? (
+                <div style={{ marginBottom: 16 }}>
+                  <UpgradeIntentButton label={PRICING_CTA_CHECKOUT} />
+                </div>
+              ) : null}
               {readonly && (
                 <Alert type="info" showIcon style={{ marginBottom: 16 }}
                        title="只读可见进度，不能改套餐" />
@@ -197,7 +205,6 @@ const Usage: React.FC = () => {
                 />
               </Card>
               <DeliveryWebhookCard />
-              <BillingPanel />
             </div>
           ),
         },

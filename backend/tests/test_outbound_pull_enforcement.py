@@ -104,7 +104,7 @@ def test_gwt_51_1_latter_half_outbound_key_pulls_own_rows(db_client, db_session,
 
 
 def test_chain_fallback_key_bindings_still_works(db_client, db_session, db_engine):
-    """FR-13 不放宽：无出站钥匙时，配置绑定钥匙（KEY_BINDINGS）仍可拉数。"""
+    """FR-M20：KEY_BINDINGS 不得拉租户出站数据（平台绑定只留 /spider/*）。"""
     from config import settings
 
     from conftest import make_tenant_owner_headers
@@ -119,9 +119,8 @@ def test_chain_fallback_key_bindings_still_works(db_client, db_session, db_engin
         resp = _pull(db_client, "alpha", "cfg-bound-platform-key")
     finally:
         settings.set("EXTERNAL_API.KEY_BINDINGS", original)
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["total"] >= 1
-    assert any("fr13-owned" in (item.get("url") or "") for item in resp.json()["items"])
+    assert resp.status_code == 401, resp.text
+    assert resp.json().get("items") in (None, [])
 
 
 # ---------------------------------------------------------------------------

@@ -288,7 +288,8 @@ def test_gwt_38_7_tenant_correct_rejected(db_client, admin_client, db_session, l
     resp = admin_client.post(
         _CORRECT.format("skill", "pack-t__leaf"), json={"category": "nope"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     assert skill_md.read_bytes() == before
     row_after = _query(db_session, select(CapabilityAsset).where(
         CapabilityAsset.name == "pack-t__leaf",
