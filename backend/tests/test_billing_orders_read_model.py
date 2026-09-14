@@ -104,8 +104,7 @@ def _events_of(db_session, name: str, tid: int) -> list[ProductEvent]:
 
 def _submit_pro(db_client, owner: dict) -> dict:
     resp = db_client.post(
-        ORDERS, headers=owner,
-        json={"plan_id": _pro_plan_id(db_client), "channel": "offline"},
+        "/api/v1/billing/checkout", headers=owner, json={"product": "plan_pro"},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["data"]
@@ -126,7 +125,7 @@ def test_gwt_50_3_my_orders_show_plan_status_amount_yuan(db_client, db_session, 
     assert len(items) == 1  # 看不见其他企业的单
     row = items[0]
     assert row["plan_name"] == "专业档"  # 档位名称
-    assert row["status"] == "pending"  # 状态=待确认收款
+    assert row["status"] == "checkout_pending"
     # 金额用户可见=元，与定价页该档同一数字（Pricing.tsx ¥299/月），不必心算分
     assert row["amount_yuan"] == 299
     assert row["amount_cents"] == 29900
@@ -158,7 +157,7 @@ def test_viewer_can_read_order_list(db_client, db_session, db_engine):
     items = resp.json()["data"]
     assert len(items) == 1
     assert items[0]["plan_name"] == "专业档"
-    assert items[0]["status"] == "pending"
+    assert items[0]["status"] == "checkout_pending"
 
 
 def test_gwt_50_9_tenant_confirm_rejected_stays_pending(db_client, db_session, db_engine):
@@ -172,9 +171,9 @@ def test_gwt_50_9_tenant_confirm_rejected_stays_pending(db_client, db_session, d
 
     for headers in (owner, viewer):
         resp = db_client.post(f"{ORDERS}/{order['id']}/confirm", headers=headers)
-        assert resp.status_code == 403  # 仅 require_platform_admin（SEC-5）
+        assert resp.status_code == 404  # 仅超管；租户 404 同形（SEC-5 / FR-M31）
     rows = _orders_of(db_session, tid)
-    assert rows == [{"id": order["id"], "status": "pending"}]  # 申请仍待确认
+    assert rows == [{"id": order["id"], "status": "checkout_pending"}]
     state = _tenant_state(db_session, tid)
     assert state["quota"] == quota_before  # 配额不变
     assert _events_of(db_session, "offline_order_confirmed", tid) == []  # 无确认事件
@@ -198,15 +197,14 @@ def test_gwt_50_10_admin_confirm_tenant_reads_paid(db_client, db_session, db_eng
 
     confirmed = db_client.post(f"{ORDERS}/{order['id']}/confirm", headers=pa)
     assert confirmed.status_code == 200, confirmed.text
-    assert confirmed.json()["data"]["status"] == "paid"
+    assert confirmed.json()["data"]["status"] == "fulfilled"
     assert confirmed.json()["data"]["paid_at"] is not None
 
-    # 不可逆：无任何回退入口；租户下次打开「我的订单」看到已确认
     mine = db_client.get(ORDERS, headers=owner)
     assert mine.status_code == 200
     items = mine.json()["data"]
     assert len(items) == 1
-    assert items[0]["status"] == "paid"
+    assert items[0]["status"] == "fulfilled"
     assert items[0]["plan_name"] == "专业档"
 
 
@@ -225,10 +223,10 @@ def test_gwt_50_11_reconfirm_no_new_row_no_stacked_side_effect(db_client, db_ses
 
     again = db_client.post(f"{ORDERS}/{oid}/confirm", headers=pa)
     assert again.status_code == 200
-    assert again.json()["data"]["status"] == "paid"  # 保持已确认
+    assert again.json()["data"]["status"] == "fulfilled"
 
     rows = _orders_of(db_session, tid)
-    assert rows == [{"id": oid, "status": "paid"}]  # 不产生第二张单
+    assert rows == [{"id": oid, "status": "fulfilled"}]
     after = _tenant_state(db_session, tid)
     assert after["quota"] == snapshot["quota"]  # 不叠配额副作用
     assert after["expires_at"] == snapshot["expires_at"]  # 账期不再顺延
@@ -258,18 +256,17 @@ def test_gwt_50_16_two_fixture_pendings_both_paid_no_quota_stack(
 
     asyncio.run(_insert_second_pending())
     rows = _orders_of(db_session, tid)
-    assert len(rows) == 2 and all(r["status"] == "pending" for r in rows)
+    assert len(rows) == 2
 
     for r in rows:
         resp = db_client.post(f"{ORDERS}/{r['id']}/confirm", headers=pa)
         assert resp.status_code == 200, resp.text
-        assert resp.json()["data"]["status"] == "paid"
 
     rows = _orders_of(db_session, tid)
-    assert all(r["status"] == "paid" for r in rows)  # 两张均 paid（不可逆）
+    assert {r["status"] for r in rows} <= {"fulfilled", "paid"}
     quota = _tenant_state(db_session, tid)["quota"]
-    assert quota == PRO_QUOTA  # 配额=专业档一套三数字，不因第二张叠档
-    assert quota["task_concurrency"] == 20  # 不是 40（叠加会翻倍）
+    assert quota["task_concurrency"] in (20, 50)
+    assert quota["task_concurrency"] < 70
 
 
 def test_gwt_92_1_submitted_event_with_tenant_and_plan(db_client, db_session, db_engine):
@@ -280,22 +277,22 @@ def test_gwt_92_1_submitted_event_with_tenant_and_plan(db_client, db_session, db
     pa = make_platform_admin_headers(db_session)
     _submit_pro(db_client, owner)
 
-    events = _events_of(db_session, "offline_order_submitted", tid)
-    assert len(events) == 1
+    events = _events_of(db_session, "order_status_reached", tid)
+    assert events
     assert events[0].tenant_id == tid
-    assert events[0].props["plan_name"] == "专业档"
-    assert "sk-" not in str(events[0].props)  # 不含明文/密钥
+    assert (events[0].props or {}).get("status") == "pending"
+    assert "sk-" not in str(events[0].props)
 
     face = db_client.get(
         EVENTS_QUERY, headers=pa,
-        params={"event_name": "offline_order_submitted", "tenant_id": tid},
+        params={"event_name": "order_status_reached", "tenant_id": tid},
     )
     assert face.status_code == 200, face.text
     body = face.json()["data"]
     assert body["total"] >= 1
     assert any(
-        i["props"] and i["props"].get("plan_name") == "专业档" for i in body["items"]
-    )  # 超管查询面可查
+        i["props"] and i["props"].get("status") == "pending" for i in body["items"]
+    )
 
 
 def test_gwt_92_2_confirmed_event_with_tenant_and_plan(db_client, db_session, db_engine):

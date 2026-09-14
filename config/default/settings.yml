@@ -4,6 +4,10 @@
 APP_NAME: "Auto Agents"
 VERSION: "0.1.0"
 
+# 密码哈希轮次（测试经 BCRYPT_ROUNDS=4 覆盖）
+AUTH:
+  BCRYPT_ROUNDS: 12
+
 # === 启用闸（Q-OPS-DUTY 未关：不代填号码）===
 # LLM.ENABLED 或 POWER_MARKET.ENABLED 为 true 时必须非空，否则拒绝启动。
 OPS:

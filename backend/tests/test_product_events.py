@@ -444,14 +444,13 @@ def _t22_event_rows(db_session, *names: str) -> list:
 
 def test_gwt_92_6_offline_order_events_fail_open(db_client, db_session, events_channel_down):
     """下单/确认收款：事件通道故障 → 申请已挂上 + 确认 paid，零事件行（GWT-92.6）"""
-    from backend.tests.test_billing_orders_write_rules import _pro_plan_id, _seed_plans
+    from backend.tests.test_billing_orders_write_rules import _seed_plans
     from platform_core.models.billing import Order
 
     _seed_plans(db_session)
     owner, tid = make_tenant_owner_headers(db_session, slug="t22-926o")
     created = db_client.post(
-        "/api/v1/billing/orders", headers=owner,
-        json={"plan_id": _pro_plan_id(db_client), "channel": "offline"},
+        "/api/v1/billing/checkout", headers=owner, json={"product": "plan_pro"},
     )
     assert created.status_code == 201, created.text
     order_id = int(created.json()["data"]["id"])
@@ -459,22 +458,23 @@ def test_gwt_92_6_offline_order_events_fail_open(db_client, db_session, events_c
     async def _order_state():
         async with db_session() as s:
             row = await s.get(Order, order_id)
-            return row.status, row.idempotency_key
+            return row.status
 
-    assert asyncio.run(_order_state()) == ("pending", f"pending:{tid}")  # 申请已挂上
+    assert asyncio.run(_order_state()) == "checkout_pending"
 
     pa = make_platform_admin_headers(db_session)
     confirmed = db_client.post(f"/api/v1/billing/orders/{order_id}/confirm", headers=pa)
     assert confirmed.status_code == 200, confirmed.text
-    assert confirmed.json()["data"]["status"] == "paid"
+    assert confirmed.json()["data"]["status"] == "fulfilled"
 
     async def _paid_state():
         async with db_session() as s:
             return (await s.get(Order, order_id)).status
 
-    assert asyncio.run(_paid_state()) == "paid"
+    assert asyncio.run(_paid_state()) == "fulfilled"
     assert _t22_event_rows(
         db_session, "offline_order_submitted", "offline_order_confirmed",
+        "order_status_reached",
     ) == []
 
 

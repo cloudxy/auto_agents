@@ -5,6 +5,8 @@ export { DEFAULT_QUOTA, FREE_TIER_FEATURE_COPY, PRO_TIER_QUOTA, PRO_TIER_FEATURE
 export type { DefaultQuota, ProTierQuota } from './constants/quota'
 export { SkillBase, PublicSkill, PublicAsset } from './types/skills'
 export { apiErrorMessage, isFormValidateError } from './utils/errors'
+export { queryViewState } from './query/state'
+export type { QueryViewState } from './query/state'
 export { BRAND_TOKENS, BrandTokenKey } from './theme/tokens'
 // OpenAPI 生成类型（工单 81：后端改字段 → npm run gen:api 同步）
 export type { components, paths, operations } from './api/schema'

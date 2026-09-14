@@ -6,7 +6,7 @@
 （行级隔离生效）；无锚 → platform_scope（平台域全量，写豁免租户断言）。
 
 删除测试：删掉本模块，每个后台路径又要各自开 session + 手挂 scope——
-复杂度集中重现，确认为深模块（见 docs/plan/architecture-review 候选1）。
+复杂度集中重现，确认为深模块（禁止拆回各后台路径各自开 session）。
 """
 from contextlib import asynccontextmanager
 from typing import Any, Optional

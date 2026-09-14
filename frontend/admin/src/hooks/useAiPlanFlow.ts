@@ -12,14 +12,15 @@ import { Form, message } from 'antd'
 import type { FormInstance } from 'antd'
 import {
   isPlanPolling, isLatestTestPassed,
-  createAiPlan, fetchAiPlan, triggerAiPlan, triggerAiTest, registerAiPlan,
+  createAiPlan, fetchAiPlan, fetchAiPlans, triggerAiPlan, triggerAiTest, registerAiPlan,
 } from '../services/ai'
 import type { AiPlan, AiPlanTestHistory, FlowConfig } from '../services/ai'
 import { fetchTaskLogs, runSpider } from '../services/spiders'
 import type { Task } from '../components/spider/types'
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
-import { parseCollectBlock, type CollectBlock } from '../utils/collectBlock'
-import { useQuery } from '@tanstack/react-query'
+import { isPlanningDisabledError, parseCollectBlock, type CollectBlock } from '../utils/collectBlock'
+import { PLANNING_OFFLINE_COPY } from '../constants/collectCopy'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 /** 表单草稿行（antd validateFields 返回 any，显式窄化以通过 noImplicitAny） */
 interface SelectorRowDraft { name?: unknown; type?: string; expr?: unknown }
@@ -56,6 +57,8 @@ export interface AiPlanFlow {
   resultsTaskOf: (p: AiPlan) => Task
   /** GWT-U02.4：规划配额拦住（非工人句） */
   collectBlock: CollectBlock | null
+  /** FR-M01：智能规划未开放（打开或提交同一句） */
+  planningDisabled: boolean
 }
 
 export const useAiPlanFlow = (): AiPlanFlow => {
@@ -67,8 +70,16 @@ export const useAiPlanFlow = (): AiPlanFlow => {
   const [editedFlow, setEditedFlow] = useState<FlowConfig | null>(null)
   const [customTask, setCustomTask] = useState<Task | null>(null)
   const [collectBlock, setCollectBlock] = useState<CollectBlock | null>(null)
+  const [blockedPlanning, setBlockedPlanning] = useState(false)
   const [createForm] = Form.useForm()
   const [flowForm] = Form.useForm()
+  const queryClient = useQueryClient()
+
+  const gateQuery = useQuery({
+    queryKey: ['ai-planning-gate'],
+    queryFn: () => fetchAiPlans({ skip: 0, limit: 1 }),
+  })
+  const planningDisabled = blockedPlanning || gateQuery.data?.planning_disabled === true
 
   const flow = plan?.plan_json?.flow || null
   const history: AiPlanTestHistory[] = plan?.plan_json?.test_history || []
@@ -124,19 +135,36 @@ export const useAiPlanFlow = (): AiPlanFlow => {
   const onCreate = async () => {
     try {
       const values = await createForm.validateFields()
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        message.error(PLANNING_OFFLINE_COPY)
+        return
+      }
       setCreating(true)
       const created = await createAiPlan({
         target_url: values.target_url.trim(),
         ...(values.html_snippet ? { html_snippet: values.html_snippet } : {}),
       })
-      setPlan(created)
-      setStep(1)
-      const snapshot = await triggerAiPlan(created.id)
-      setPlan(snapshot)
-      setCollectBlock(null)
-      message.success(`计划 #${created.id} 已创建，LLM 正在规划采集方案`)
+      try {
+        const snapshot = await triggerAiPlan(created.id)
+        setPlan(snapshot)
+        setStep(1)
+        setCollectBlock(null)
+        setBlockedPlanning(false)
+        queryClient.invalidateQueries({ queryKey: ['ai-plans'] })
+        queryClient.invalidateQueries({ queryKey: ['ai-planning-gate'] })
+      } catch (error) {
+        if (isPlanningDisabledError(error)) {
+          setBlockedPlanning(true)
+          return
+        }
+        throw error
+      }
     } catch (error) {
       if (isFormValidateError(error)) return
+      if (isPlanningDisabledError(error)) {
+        setBlockedPlanning(true)
+        return
+      }
       const block = parseCollectBlock(error)
       if (block?.kind === 'quota') {
         setCollectBlock(block)
@@ -154,6 +182,7 @@ export const useAiPlanFlow = (): AiPlanFlow => {
     setEditedFlow(null)
     setCustomTask(null)
     setCollectBlock(null)
+    setBlockedPlanning(false)
     createForm.resetFields()
     flowForm.resetFields()
   }, [createForm, flowForm])
@@ -167,8 +196,12 @@ export const useAiPlanFlow = (): AiPlanFlow => {
       setEditedFlow(null)
       setStep(1)
       setCollectBlock(null)
-      message.success('已重新触发规划')
+      setBlockedPlanning(false)
     } catch (error) {
+      if (isPlanningDisabledError(error)) {
+        setBlockedPlanning(true)
+        return
+      }
       const block = parseCollectBlock(error)
       if (block?.kind === 'quota') {
         setCollectBlock(block)
@@ -307,6 +340,6 @@ export const useAiPlanFlow = (): AiPlanFlow => {
     step, plan, flow, history, latestPassed, creating, actionLoading, editedFlow, customTask,
     createForm, flowForm, setStep,
     onCreate, onReplan, onTest, onTestEdited, onApplyFlowEdit, onRegister,
-    resetWizard, openPlanInWizard, resultsTaskOf, collectBlock,
+    resetWizard, openPlanInWizard, resultsTaskOf, collectBlock, planningDisabled,
   }
 }

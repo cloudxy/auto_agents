@@ -93,11 +93,13 @@ class SpiderQueryService:
             items=[SpiderResultResponse.model_validate(r) for r in items],
         )
 
-    async def get_task(self, task_id: int):
+    async def get_task(self, task_id: int, tenant_id: Optional[int] = None):
         """按主键取任务行（miss 抛 404）——T7 跳层收口：external_api 状态查询改道本层"""
         logger.info(f"查询任务 | task_id={task_id}")
         task = await self.repo.get_by_id(task_id)
         if task is None:
+            raise NotFoundException("爬虫任务")
+        if tenant_id is not None and getattr(task, "tenant_id", None) != tenant_id:
             raise NotFoundException("爬虫任务")
         return task
 
@@ -194,10 +196,16 @@ class SpiderQueryService:
     async def _emit_exported(self, task, fmt: str, row_count: int) -> None:
         logger.info(f"导出成功事件 | task={getattr(task, 'id', None)} rows={row_count}")
         from backend.services.product_event_service import emit_product_event
+        tenant_id = getattr(task, "tenant_id", None)
         await emit_product_event(
             self.session, "results_exported",
-            tenant_id=getattr(task, "tenant_id", None),
+            tenant_id=tenant_id,
             props={"format": fmt, "row_count": row_count},
+        )
+        await emit_product_event(
+            self.session, "data_export_completed",
+            tenant_id=tenant_id,
+            props={"file_format": fmt, "row_count": row_count},
         )
 
     async def _iter_export_chunks(
@@ -263,7 +271,15 @@ class SpiderQueryService:
         result = await self.result_repo.get_by_id(result_id)
         if result is None:
             raise NotFoundException("采集结果")
+        task_id = result.task_id
         await self.result_repo.delete(result_id)
+        if task_id is not None:
+            try:
+                n = await self.result_repo.count_by_task(task_id)
+                if isinstance(n, int):
+                    await self.repo.update(task_id, result_count=n)
+            except Exception:  # noqa: BLE001 测试桩/计数失败不阻断删除
+                pass
         await self.session.commit()
         return {"id": result_id, "deleted": True}
 

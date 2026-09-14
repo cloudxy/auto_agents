@@ -13,6 +13,8 @@ import asyncio
 import pytest
 from sqlalchemy import select
 
+pytestmark = pytest.mark.mysql_fidelity
+
 from platform_core.models.tenant import Tenant
 from platform_core.models.user import User
 from platform_core.queues import LOGIN_FAIL_PREFIX, REGISTER_ATTEMPT_PREFIX

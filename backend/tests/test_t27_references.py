@@ -131,4 +131,5 @@ def test_gwt_36_3_tenant_unlisted_store_html_404(
     tid = seed_tenant(db_session, "t27-op")
     bind_actor(app, role="operator", tenant_id=tid, tenant_role="operator")
     denied = db_client.get(refs_url("agent", "g363-agent"))
-    assert denied.status_code == 403
+    assert denied.status_code == 404
+    assert denied.json()["code"] == "HTTP_404"

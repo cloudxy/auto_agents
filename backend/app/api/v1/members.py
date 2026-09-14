@@ -13,7 +13,7 @@ from backend.app.api.deps import CurrentUser, get_current_user
 from backend.app.responses import created, ok
 from backend.services.member_service import MemberService
 from platform_core.db import get_async_db
-from platform_core.exceptions import AuthorizationException
+from platform_core.exceptions import AuthorizationException, BusinessException
 from platform_core.logger import get_logger
 
 logger = get_logger("api.members")
@@ -24,9 +24,22 @@ router = APIRouter()
 async def require_tenant_manager(
     user: CurrentUser = Depends(get_current_user),
 ) -> CurrentUser:
-    """租户级管理守卫：owner/admin（平台超管不在此域——成员是租户内部事务）"""
+    """租户级管理守卫：owner/admin（用量写套餐等共用；403）。"""
     if user.tenant_role not in ("owner", "admin"):
         raise AuthorizationException(message="需要租户 owner/admin 权限")
+    return user
+
+
+async def require_member_writer(
+    user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """成员写面：只读拒绝不含 FORBIDDEN（GWT-M21.3）。"""
+    if user.tenant_role not in ("owner", "admin"):
+        logger.warning(f"只读成员写被拒绝 | user={user.username} role={user.tenant_role}")
+        raise BusinessException(
+            message="当前账号不能管理成员，请联系企业管理员",
+            code="MEMBER_ROLE_NOT_ALLOWED",
+        )
     return user
 
 
@@ -36,7 +49,7 @@ def _service(session: AsyncSession = Depends(get_async_db)) -> MemberService:
 
 @router.get("")
 async def list_members(
-    user: CurrentUser = Depends(require_tenant_manager),
+    user: CurrentUser = Depends(require_member_writer),
     service: MemberService = Depends(_service),
 ):
     """成员列表（本租户）"""
@@ -46,7 +59,7 @@ async def list_members(
 @router.post("")
 async def create_member(
     body: dict,
-    user: CurrentUser = Depends(require_tenant_manager),
+    user: CurrentUser = Depends(require_member_writer),
     service: MemberService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -60,7 +73,7 @@ async def create_member(
 async def patch_member(
     member_id: int,
     body: dict,
-    user: CurrentUser = Depends(require_tenant_manager),
+    user: CurrentUser = Depends(require_member_writer),
     service: MemberService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -73,7 +86,7 @@ async def patch_member(
 @router.delete("/{member_id}")
 async def delete_member(
     member_id: int,
-    user: CurrentUser = Depends(require_tenant_manager),
+    user: CurrentUser = Depends(require_member_writer),
     service: MemberService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -87,7 +100,7 @@ async def delete_member(
 async def reset_member_password(
     member_id: int,
     body: dict,
-    user: CurrentUser = Depends(require_tenant_manager),
+    user: CurrentUser = Depends(require_member_writer),
     service: MemberService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -100,7 +113,7 @@ async def reset_member_password(
 @router.get("/audit")
 async def member_audit_logs(
     limit: int = 50,
-    user: CurrentUser = Depends(require_tenant_manager),
+    user: CurrentUser = Depends(require_member_writer),
     service: MemberService = Depends(_service),
 ):
     """成员操作审计·租户视角（B6）：本租户成员的近期高危操作留痕

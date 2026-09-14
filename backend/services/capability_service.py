@@ -30,12 +30,50 @@ class CapabilityService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def list_catalog(
+        self, asset_type: Optional[str] = None, category: Optional[str] = None,
+        status: Optional[str] = None, q: Optional[str] = None,
+        listing_state: Optional[str] = None,
+        offset: int = 0, limit: int = 20,
+    ) -> dict:
+        """超管治理目录（含未上架）。空态不是货架关闭句。"""
+        logger.info(
+            f"查询治理目录: type={asset_type} status={status} listing={listing_state}"
+        )
+        rows, total = await self.list_assets(
+            asset_type=asset_type, category=category, status=status, q=q,
+            listing_state=listing_state, offset=offset, limit=limit,
+        )
+        items = [
+            {
+                "id": r.id, "asset_type": r.asset_type, "name": r.name,
+                "title": r.title or "", "description": r.description,
+                "category": r.category, "status": r.status, "tier": r.tier,
+                "score": float(r.score) if r.score is not None else None,
+                "ai_suggested_score": (
+                    float(r.ai_suggested_score) if r.ai_suggested_score is not None else None
+                ),
+                "sync_state": r.sync_state,
+                "listing_state": r.listing_state,
+                "listed_at": r.listed_at.isoformat() if r.listed_at else None,
+                "source_type": r.source_type,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in rows
+        ]
+        payload: dict = {"total": total, "items": items}
+        if total == 0:
+            payload["empty"] = True
+            payload["message"] = "还没有目录项。同步源或扫描后会出现在这里。"
+        return payload
+
     async def list_assets(
         self, asset_type: Optional[str] = None, category: Optional[str] = None,
         status: Optional[str] = None, q: Optional[str] = None,
         listing_state: Optional[str] = None,
         offset: int = 0, limit: int = 20,
     ) -> tuple[list[CapabilityAsset], int]:
+        logger.info(f"查询资产列表: type={asset_type} listing={listing_state}")
         # FR-88：软收行（deleted_at 非空）不进治理目录——可上架/可操作列表
         # 与 total 都不含已从源收回的行（GWT-88.1/88.2/88.3）。
         stmt = select(CapabilityAsset).where(CapabilityAsset.deleted_at.is_(None))

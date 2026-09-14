@@ -531,6 +531,14 @@ class SkillService:
         logger.info(f"查询技能 | name={name}")
         return await SkillRepository(self.session).get_by_name(name)
 
+    async def record_public_view(self, name: str) -> None:
+        logger.info(f"公开技能浏览计数 | name={name}")
+        row = await self.get_by_name(name)
+        if row is None:
+            return
+        row.download_count = int(getattr(row, "download_count", 0) or 0) + 1
+        await self.session.commit()
+
     async def list_reviews(self, skill_id: int, limit: int = 20) -> list:
         """技能最近评分历史（id 倒序）"""
         from backend.repositories.skill_repository import SkillReviewRepository

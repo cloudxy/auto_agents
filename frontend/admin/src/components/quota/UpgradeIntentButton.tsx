@@ -3,7 +3,9 @@ import { Button, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
 
 import {
+  CHECKOUT_OPENING,
   DEFAULT_UPGRADE_PRODUCT,
+  PRICING_CTA_CHECKOUT,
   UPGRADE_CTA,
   UPGRADE_OFFLINE_COPY,
 } from '../../constants/collectCopy'
@@ -14,12 +16,14 @@ import { ContactAdminModal } from './ContactAdminModal'
 interface UpgradeIntentButtonProps {
   product?: string
   size?: 'small' | 'middle'
+  label?: string
 }
 
-/** 「申请提升」：upgrade-intent 分角色（经办/只读→屏 10；买方→结账空态）。不建单。 */
+/** 「申请提升」/「去结账」：upgrade-intent 分角色。不建单。 */
 export const UpgradeIntentButton: React.FC<UpgradeIntentButtonProps> = ({
   product = DEFAULT_UPGRADE_PRODUCT,
   size = 'small',
+  label = UPGRADE_CTA,
 }) => {
   const navigate = useNavigate()
   const [contactOpen, setContactOpen] = useState(false)
@@ -48,7 +52,7 @@ export const UpgradeIntentButton: React.FC<UpgradeIntentButtonProps> = ({
   return (
     <>
       <Button type="primary" size={size} loading={loading} onClick={onClick}>
-        {UPGRADE_CTA}
+        {loading && label === PRICING_CTA_CHECKOUT ? CHECKOUT_OPENING : label}
       </Button>
       <ContactAdminModal open={contactOpen} onClose={() => setContactOpen(false)} />
     </>

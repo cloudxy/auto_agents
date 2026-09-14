@@ -30,7 +30,13 @@ OnlinePayChannel = Literal["alipay", "wechat"]
 
 class CheckoutCreate(BaseModel):
     product: CheckoutProduct
-    channel: OnlinePayChannel
+    channel: Optional[OnlinePayChannel] = None
+
+
+class OrderConfirmIn(BaseModel):
+    """超管确认收款。order_id 若出现必须等于路径 id（GWT-M31.5）。"""
+
+    order_id: Optional[int] = None
 
 
 class CheckoutChannelView(BaseModel):
@@ -71,7 +77,7 @@ class OrderOut(BaseModel):
     plan_id: Optional[int] = None
     amount_cents: int
     status: str
-    channel: str
+    channel: Optional[str] = None
     paid_at: Optional[datetime] = None
     created_at: datetime
     tenant_id: Optional[int] = None

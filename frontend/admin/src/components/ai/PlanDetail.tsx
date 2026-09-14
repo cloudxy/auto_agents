@@ -23,7 +23,8 @@ import type { Task } from '../spider/types'
 import { FilterRuleList, FlowPreview } from './PlanForm'
 import type { AiPlanFlow } from '../../hooks/useAiPlanFlow'
 import { QuotaBlockAlert } from '../quota/QuotaBlockAlert'
-import { PLANNING_COPY } from '../../constants/collectCopy'
+import { PlanningDisabledBanner } from './PlanningDisabled'
+import { CANNOT_PLAN_COPY, PLANNING_COPY } from '../../constants/collectCopy'
 
 const { Text } = Typography
 
@@ -70,7 +71,7 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
     step, plan, editedFlow, creating, actionLoading, customTask,
     createForm, flowForm, history, latestPassed,
     setStep, onCreate, onReplan, onTest, onTestEdited, onApplyFlowEdit, onRegister,
-    resetWizard, resultsTaskOf, collectBlock,
+    resetWizard, resultsTaskOf, collectBlock, planningDisabled,
   } = flow
 
   if (!plan && step > 0) return null
@@ -99,11 +100,18 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
       >
         <Input.TextArea rows={6} placeholder="粘贴目标页面的 HTML 片段（最多 200000 字符）" />
       </Form.Item>
-      {canOperate && (
-        <Button type="primary" icon={<ThunderboltOutlined />} loading={creating} onClick={onCreate}>
+      <Space wrap>
+        <Button
+          type="primary"
+          icon={<ThunderboltOutlined />}
+          loading={creating}
+          disabled={!canOperate}
+          onClick={onCreate}
+        >
           {creating ? PLANNING_COPY : '创建并开始规划'}
         </Button>
-      )}
+        {!canOperate && <Text type="secondary">{CANNOT_PLAN_COPY}</Text>}
+      </Space>
     </Form>
   )
 
@@ -348,6 +356,7 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
 
   return (
     <>
+      {planningDisabled && <PlanningDisabledBanner />}
       {collectBlock?.kind === 'quota' && (
         <QuotaBlockAlert cta={collectBlock.cta} style={{ marginBottom: 16 }} />
       )}

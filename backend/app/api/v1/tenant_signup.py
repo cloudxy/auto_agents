@@ -27,7 +27,7 @@ router = APIRouter()
 class TenantSignupRequest(BaseModel):
     """企业注册请求（与服务层校验对齐：公司名 ≥2 字符 / 邮箱合法 / 密码 ≥8 位）"""
 
-    company: str = Field(..., min_length=2, max_length=128, description="公司名")
+    company: str = Field(..., max_length=128, description="公司名")
     admin_email: str = Field(..., max_length=100, description="管理员邮箱")
     admin_password: str = Field(..., min_length=8, max_length=128, description="管理员密码（至少 8 位）")
     anonymous_id: str | None = Field(None, max_length=64, description="浏览会话匿名身份")

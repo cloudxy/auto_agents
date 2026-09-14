@@ -76,6 +76,8 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
         await record_login_failure(request.username)
         raise AuthenticationException(message="用户名或密码错误")
     
+    await auth_service.assert_tenant_login_allowed(user_data)
+
     token_response = await auth_service.create_token(user_data)
     
     return ok(
@@ -95,20 +97,23 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
 
 # 角色 → 权限映射（前端按此控制菜单/按钮可见性，后端守卫为最终防线）
 # 权限单真相源（R5）：前端登录后从 /permissions 读取，不再硬编码
+# F2：菜单码必须能对应到实际放行的端点。members/usage 守卫是租户 owner/admin，
+# viewer/operator 发这些码只会点进 403；nodes 端点是 require_login，应对齐下发。
 _ROLE_PERMISSIONS = {
     "viewer": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
-        'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
+        'menu:spiders.nodes', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
         'menu:relay',
     ],
     "operator": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
-        'menu:data', 'menu:ai', 'menu:skills', 'menu:members', 'menu:usage',
-        'menu:llm', 'menu:relay',
+        'menu:spiders.nodes', 'menu:data', 'menu:ai', 'menu:skills',
+        'menu:members', 'menu:usage', 'menu:llm', 'menu:relay',
         'btn:create', 'btn:skill:edit',
     ],
     "admin": [
         'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
+        'menu:spiders.nodes',
         'menu:users', 'menu:data', 'menu:settings', 'menu:ai', 'menu:skills',
         'menu:members', 'menu:usage', 'menu:platform-ops', 'menu:logs',
         'menu:llm', 'menu:newapi', 'menu:relay',

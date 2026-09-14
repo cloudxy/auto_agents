@@ -13,7 +13,8 @@ _OPEN = ("checkout_pending", "paid_pending_fulfillment", "pending")
 _VERIFY_FROM = ("checkout_pending",)
 _FULFILL_FROM = ("paid_pending_fulfillment",)
 _FAIL_FROM = ("checkout_pending",)
-_LATE_FROM = ("unpaid",)
+_LATE_FROM = ("unpaid", "fulfilled")
+_CONFIRM_FROM = ("checkout_pending",)
 
 
 class OrderRepository(BaseRepository[Order]):
@@ -57,15 +58,26 @@ class OrderRepository(BaseRepository[Order]):
 
     async def cas_status(
         self, order_id: int, from_statuses: tuple[str, ...], values: dict,
+        *, amount_cents: int | None = None,
     ) -> int:
+        cond = [Order.id == order_id, Order.status.in_(from_statuses)]
+        if amount_cents is not None:
+            cond.append(Order.amount_cents == amount_cents)
         stmt = (
             update(Order)
-            .where(Order.id == order_id, Order.status.in_(from_statuses))
+            .where(*cond)
             .values(**values)
             .execution_options(synchronize_session=False)
         )
         result = await self.session.execute(stmt)
         return int(result.rowcount or 0)
+
+    async def cas_confirm_checkout(
+        self, order_id: int, amount_cents: int, now: datetime,
+    ) -> int:
+        return await self.cas_status(order_id, _CONFIRM_FROM, {
+            "status": "fulfilled", "fulfilled_at": now, "paid_at": now,
+        }, amount_cents=amount_cents)
 
     async def cas_mark_verified(
         self, order_id: int, now: datetime, channel_trade_no: Optional[str],

@@ -37,6 +37,10 @@ from platform_core.logger import get_logger
 
 logger = get_logger("api")
 
+PLANNING_DISABLED_COPY = "智能规划未开放"
+PLANNING_DISABLED_CODE = "PLANNING_DISABLED"
+PLANNING_READONLY_COPY = "当前账号不能开始规划"
+
 # LLM 重试退避基数（指数：1s/2s/4s...）
 _RETRY_BASE_DELAY = 1.0
 
@@ -373,6 +377,9 @@ async def _failover(messages, *, usage_dim, budget_override, cfg, primary_error)
             return content
         except Exception as exc:  # noqa: BLE001 单候选失败继续下一候选
             failures.append(f"{model_id}: {type(exc).__name__}")
+            from backend.services.ai_planner._cooldown import record_failure as _rec_fail
+
+            await _rec_fail(cfg.provider_id, model_id)
     logger.warning(f"本企业供应商候选链耗尽 | n={len(failures)}")
     raise _provider_error(primary_error)
 
@@ -448,8 +455,9 @@ async def llm_chat(
     # ENABLED=false 须在网关探测前返回，避免与 74.1「平台 LLM 网关不可达」混句
     if not cfg.enabled:
         raise BusinessException(
-            "LLM 功能未启用（无激活供应商且 LLM.ENABLED=false）："
-            "请在 LLM 供应商管理中配置并激活，或开启 LLM.ENABLED 并配置 LLM_API_KEY"
+            PLANNING_DISABLED_COPY,
+            code=PLANNING_DISABLED_CODE,
+            status_code=422,
         )
     if _is_litellm_plane() and cfg.source == "gateway":
         await _enforce_tenant_token_quota()
@@ -518,6 +526,26 @@ async def llm_chat(
                 f"平台 LLM 成本熔断：token 预算已耗尽（{usage_dim} 本月累计 {used_total} >= {budget}）",
                 code="LLM_COST_FUSE",
             )
+        if isinstance(_tid, int):
+            try:
+                from datetime import date as _date
+
+                from sqlalchemy.ext.asyncio import AsyncSession as _AS
+
+                from backend.services.quota_service import QuotaExceededException, QuotaService
+                from platform_core.db import get_manager as _gm
+
+                _engines = getattr(_gm(), "async_engines", {}) or {}
+                _engine = next(iter(_engines.values()), None)
+                if _engine is not None:
+                    async with _AS(_engine) as _qs:
+                        await QuotaService(_qs).check_llm_tokens_month(
+                            _tid, _date.today().strftime("%Y-%m")
+                        )
+            except QuotaExceededException:
+                raise
+            except Exception as _qe:  # noqa: BLE001 配额检查基础设施失败不阻断（测试/无引擎）
+                logger.debug(f"租户 LLM 配额检查跳过: {_qe}")
         try:
             if cfg.provider_id is not None:
                 # provider 路径：模块级共享 client（连接池复用，变更时 invalidate 失效）
@@ -569,6 +597,10 @@ async def llm_chat(
             last_error = e
         except Exception as e:  # noqa: BLE001 超时/网络/解析失败均进入重试
             last_error = e
+            if cfg.provider_id and effective_model:
+                from backend.services.ai_planner._cooldown import record_failure as _rec_fail
+
+                await _rec_fail(cfg.provider_id, effective_model)
         delay = _RETRY_BASE_DELAY * (2 ** attempt)
         logger.warning(
             f"LLM 调用失败（第 {attempt + 1}/{cfg.max_retries} 次），"

@@ -6,7 +6,7 @@
 import { createApiClient } from '@auto-agents/frontend-shared'
 
 const api = createApiClient({
-  baseURL: process.env.REACT_APP_API_BASE_URL || 'http://localhost:9111/api/v1',
+  baseURL: process.env.REACT_APP_API_BASE_URL || '/api/v1',
 })
 
 export default api

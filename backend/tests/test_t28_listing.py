@@ -154,12 +154,13 @@ def test_gwt_40_1_no_mcp_unknown_can_list(
     assert detail.json()["data"]["health_status"] == "unknown"
 
 
-def test_gwt_40_3_tenant_verify_forbidden(
+def test_gwt_40_3_tenant_verify_404(
     db_client, admin_client, db_session,
 ):
     _seed_plugin(db_session, "g403-plug")
     resp = admin_client.post(_VERIFY.format("g403-plug"))
-    assert resp.status_code == 403
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     plugin = _query_all(db_session, select(CapabilityPlugin))[0]
     assert plugin.health_status == "unknown"
 

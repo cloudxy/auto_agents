@@ -11,6 +11,8 @@ import asyncio
 import pytest
 from sqlalchemy import func, inspect as sa_inspect, select
 
+pytestmark = pytest.mark.mysql_fidelity
+
 from platform_core.models.user import User
 
 # 独立事实源：platform_core/models/ 下模型文件的表名清单
@@ -69,6 +71,7 @@ ALL_ORM_TABLES = {
     "departments",
     "menus",
     "permissions",
+    "api_keys",
     # 账务/渠道组骨架（018c369，迁移 040）
     "plans",
     "tenant_subscriptions",
@@ -145,7 +148,7 @@ async def test_isolation_writer_b_same_unique_key_succeeds(db_session):
         assert stored.role == "viewer"
 
 
-def test_db_client_reads_seeded_data(db_engine, db_client, admin_client, db_session):
+def test_db_client_reads_seeded_data(db_engine, db_client, platform_admin_client, db_session):
     """端点与测试断言走同一引擎同一库：种子数据经真实 API 可见（含统一信封形状）"""
     asyncio.run(_seed_one(db_session, "endpoint-probe"))
 

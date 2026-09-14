@@ -200,31 +200,37 @@ def test_gwt_u02_4_token_full_planning_is_quota_copy_not_worker(
     db_client, db_session,
 ):
     """GWT-U02.4：token 已满、存储未满 → 规划可见已达配额上限 + 申请提升；非工人句。"""
+    from config import settings
     from conftest import make_tenant_owner_headers
 
-    _headers, tid = make_tenant_owner_headers(db_session, slug="u02-4")
-    op = _member_headers(db_session, tid, "operator", "u02-4-op")
-    _set_quota(db_session, tid, llm_tokens_month=100, result_storage=10000, task_concurrency=20)
-    _seed_token_usage(db_session, tid, 100)
+    prev = settings.get("LLM.ENABLED")
+    settings.set("LLM.ENABLED", True)
+    try:
+        _headers, tid = make_tenant_owner_headers(db_session, slug="u02-4")
+        op = _member_headers(db_session, tid, "operator", "u02-4-op")
+        _set_quota(db_session, tid, llm_tokens_month=100, result_storage=10000, task_concurrency=20)
+        _seed_token_usage(db_session, tid, 100)
 
-    created = db_client.post(
-        PLAN_URL, headers=op,
-        json={"target_url": "https://example.com/list", "html_snippet": "<html><h1>t</h1></html>"},
-    )
-    assert created.status_code in (200, 201), created.text
-    pid = created.json()["data"]["id"]
+        created = db_client.post(
+            PLAN_URL, headers=op,
+            json={"target_url": "https://example.com/list", "html_snippet": "<html><h1>t</h1></html>"},
+        )
+        assert created.status_code in (200, 201), created.text
+        pid = created.json()["data"]["id"]
 
-    resp = db_client.post(f"{PLAN_URL}/{pid}/plan", headers=op)
-    _assert_no_inner_code(resp)
-    body = resp.json()
-    assert PLAN_FULL in body["message"]
-    assert UPGRADE_CTA in body["message"]
-    assert WORKER_COPY not in body["message"]
-    assert STORAGE_CTA not in body["message"]
+        resp = db_client.post(f"{PLAN_URL}/{pid}/plan", headers=op)
+        _assert_no_inner_code(resp)
+        body = resp.json()
+        assert PLAN_FULL in body["message"]
+        assert UPGRADE_CTA in body["message"]
+        assert WORKER_COPY not in body["message"]
+        assert STORAGE_CTA not in body["message"]
 
-    snap = db_client.get(f"{PLAN_URL}/{pid}", headers=op)
-    assert snap.status_code == 200
-    assert snap.json()["data"]["status"] == "draft"
+        snap = db_client.get(f"{PLAN_URL}/{pid}", headers=op)
+        assert snap.status_code == 200
+        assert snap.json()["data"]["status"] == "draft"
+    finally:
+        settings.set("LLM.ENABLED", prev)
 
 
 def test_gwt_u02_5_usage_near_limit_is_not_full_copy(db_client, db_session):
@@ -313,7 +319,7 @@ def test_gwt_u02_7_buyer_upgrade_intent_checkout_path_no_order(
 def test_gwt_u02_7_buyer_checkout_empty_state_creates_no_order(
     db_client, db_session,
 ):
-    """N1 结账着陆：买方打开结账 → 收款通道未开通；不建单（N3 未接线）。"""
+    """W2：买方打开结账不建单；未配通道仍可见商品（GWT-U32.2 已作废）。"""
     from conftest import make_tenant_owner_headers
 
     owner, tid = make_tenant_owner_headers(db_session, slug="u02-7c")
@@ -322,7 +328,8 @@ def test_gwt_u02_7_buyer_checkout_empty_state_creates_no_order(
     resp = db_client.get(f"{CHECKOUT_URL}?product=plan_pro", headers=owner)
     assert resp.status_code != 429, resp.text
     body = resp.json()
-    assert CHECKOUT_EMPTY in (body.get("message") or "") + str(body.get("data") or "")
+    assert body["data"]["product"] == "plan_pro"
+    assert body["data"]["order_id"] is None
     assert "当前可买" not in str(body)
     assert "QUOTA_EXCEEDED" not in str(body)
     assert _orders_of(db_session, tid) == []

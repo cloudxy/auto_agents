@@ -78,7 +78,7 @@ def init_log():
             compression=None,
             enqueue=True,
             backtrace=True,
-            diagnose=True,
+            diagnose=False,
             filter=lambda r, n=name: (
                 (n == "error" and r["level"].no >= 40) or
                 (n == "global" and (not r["extra"].get("name") or r["extra"].get("name") == "global")) or

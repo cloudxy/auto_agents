@@ -118,6 +118,20 @@ test('GWT-U01.1 有工人提交成功见已入队', async () => {
   expect(onSubmitSuccess).toHaveBeenCalledTimes(1)
 })
 
+test('GWT-M03.1 submit has no paid/subscribe/relay precondition copy', async () => {
+  renderModal(false)
+  const copy = document.body.textContent || ''
+  expect(copy).not.toContain('请先开通专业档')
+  expect(copy).not.toContain('请先订阅能力')
+  expect(copy).not.toContain('请先开通中转')
+  openModalSelect(0)
+  await clickDropdownOption('示例（example）')
+  fireEvent.click(screen.getByRole('button', { name: /提交任务/ }))
+  expect(await screen.findByText(ENQUEUED_COPY)).toBeInTheDocument()
+  expect(runSpider).toHaveBeenCalledTimes(1)
+})
+
+
 test('GWT-U02.2 storage full: 已达配额上限 + 去结果库, not worker', async () => {
   ;(runSpider as jest.Mock).mockRejectedValueOnce({
     response: {

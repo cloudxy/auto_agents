@@ -8,13 +8,13 @@
  * - 产品事实 Tab 失败/真 0 同走 FR-84 句族（不空表冒充无事件）。
  */
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from '../store/useAuthStore'
 import App from '../App'
 import PlatformOps from './PlatformOps'
 import { listTenants } from '../services/platformOps'
-import { listPendingOrders } from '../services/billing'
+import { confirmOrder, listPendingOrders } from '../services/billing'
 import { listProductEvents } from '../services/productEvents'
 
 jest.mock('../services/platformOps', () => ({
@@ -24,6 +24,7 @@ jest.mock('../services/platformOps', () => ({
 jest.mock('../services/billing', () => ({
   listPendingOrders: jest.fn(),
   confirmOrder: jest.fn(),
+  CHANNEL_LABEL: { offline: '线下转账', alipay: '支付宝', wechat: '微信支付' },
 }))
 jest.mock('../services/productEvents', () => ({
   listProductEvents: jest.fn(),
@@ -43,6 +44,7 @@ jest.mock('../services/api', () => ({
 
 const orders = listPendingOrders as jest.Mock
 const events = listProductEvents as jest.Mock
+const confirm = confirmOrder as jest.Mock
 
 // 默认激活的「租户管理」Tab 给 1 行——避免其空表「暂无数据」留在 DOM 干扰跨 Tab 禁句断言
 const TENANT_ROW = {
@@ -50,12 +52,17 @@ const TENANT_ROW = {
   quota: { task_concurrency: 2, result_storage: 100, llm_tokens_month: 1000 },
   expires_at: null,
 }
-const ORDER = { id: 41, plan_id: 2, amount_cents: 19900, status: 'pending', channel: 'offline' }
+const ORDER = {
+  id: 41, plan_id: 2, plan_name: '专业档', product_code: 'plan_pro',
+  amount_cents: 29900, amount_yuan: 299, status: 'checkout_pending',
+  channel: 'offline', tenant_name: 'Acme 企业',
+}
 
 beforeEach(() => {
   useAuthStore.setState({ token: null, user: null, isAuthenticated: false, rememberMe: false })
   ;(listTenants as jest.Mock).mockReset().mockResolvedValue([TENANT_ROW])
   orders.mockReset()
+  confirm.mockReset()
   events.mockReset().mockResolvedValue({ total: 0, items: [], timezone: 'Asia/Shanghai' })
 })
 
@@ -85,20 +92,59 @@ test('GWT-84.4 retry refetches the pending orders list', async () => {
   fireEvent.click(screen.getByText('待确认收款'))
   expect(await screen.findByText('待确认收款列表加载失败。检查网络后重试。', {}, { timeout: 15000 })).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }))
-  expect(await screen.findByText('41', {}, { timeout: 15000 })).toBeInTheDocument()
+  expect(await screen.findByText('Acme 企业', {}, { timeout: 15000 })).toBeInTheDocument()
   expect(screen.queryByText(/加载失败/)).not.toBeInTheDocument()
 })
 
-test('pending orders true zero (200 + 0 pending) shows 还没有待确认的收款 sentence, not failure', async () => {
+test('pending orders true zero shows 暂无待确认收款, not failure', async () => {
   orders.mockResolvedValue([])
   renderOps()
   fireEvent.click(screen.getByText('待确认收款'))
-  // waitFor+getByText：antd Table 空态节点在 loading 翻转时会换节点，findByText 单点断言可能拿到已换下的节点
   await waitFor(() => {
-    expect(screen.getByText('还没有待确认的收款。租户提交线下升级申请后会出现在这里。')).toBeInTheDocument()
+    expect(screen.getByText('暂无待确认收款')).toBeInTheDocument()
   }, { timeout: 15000 })
   expect(screen.queryByText(/加载失败/)).not.toBeInTheDocument()
   expect(screen.queryByText(/暂无数据/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/还没有待确认的收款/)).not.toBeInTheDocument()
+})
+
+test('GWT-M31 lists checkout_pending with tenant name and ¥299 for pro, not cents', async () => {
+  orders.mockResolvedValue([ORDER])
+  renderOps()
+  fireEvent.click(screen.getByText('待确认收款'))
+  expect(await screen.findByText('Acme 企业')).toBeInTheDocument()
+  expect(screen.getByText('¥299')).toBeInTheDocument()
+  expect(screen.getByText('专业档')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '确认收款' })).toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain('29900')
+  expect(document.body.textContent || '').not.toContain('已确认')
+})
+
+test('GWT-M31 enterprise/relay amount is not ¥299', async () => {
+  orders.mockResolvedValue([{
+    ...ORDER, id: 7, plan_name: '企业档', product_code: 'plan_enterprise',
+    amount_cents: 99900, amount_yuan: 999,
+  }])
+  renderOps()
+  fireEvent.click(screen.getByText('待确认收款'))
+  expect(await screen.findByText('¥999')).toBeInTheDocument()
+  expect(screen.queryByText('¥299')).not.toBeInTheDocument()
+})
+
+test('GWT-M31 wrong amount stays pending and shows failure copy', async () => {
+  orders.mockResolvedValue([ORDER])
+  confirm.mockRejectedValue({
+    response: { data: { message: '金额不符，未确认' } },
+  })
+  renderOps()
+  fireEvent.click(screen.getByText('待确认收款'))
+  fireEvent.click(await screen.findByRole('button', { name: '确认收款' }))
+  expect(await screen.findByText('确认已收到该笔款项？此操作不可逆。')).toBeInTheDocument()
+  const confirms = screen.getAllByRole('button', { name: '确认收款' })
+  fireEvent.click(confirms[confirms.length - 1])
+  await waitFor(() => expect(confirm).toHaveBeenCalledWith(41))
+  expect(screen.getAllByText('Acme 企业').length).toBeGreaterThan(0)
+  expect(screen.getAllByRole('button', { name: '确认收款' }).length).toBeGreaterThan(0)
 })
 
 test('product-events tab failure shows FR-84 sentence + retry, not empty-table masquerade', async () => {

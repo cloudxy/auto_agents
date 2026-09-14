@@ -550,7 +550,7 @@ class TestIngestBatchLpop:
         consumer = SpiderTaskConsumer()
         consumer._running = True
         consumer._redis = AsyncMock()
-        consumer._redis.lpop = AsyncMock(side_effect=[None, asyncio.CancelledError()])
+        consumer._redis.lpop = AsyncMock(side_effect=[None, None, asyncio.CancelledError()])
         consumer._flush_batch = AsyncMock()
         fake_sleep = AsyncMock()
 

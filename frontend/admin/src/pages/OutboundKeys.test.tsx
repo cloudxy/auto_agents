@@ -83,6 +83,15 @@ test('gwt_51_2: empty sentence from envelope with issue entry for entitled role,
   expect(screen.queryByRole('button', { name: /新\s*建\s*渠\s*道\s*组/ })).not.toBeInTheDocument()
 })
 
+test('GWT-M20 product name is only 出站拉数钥匙, not API钥匙', async () => {
+  ;(fetchOutboundKeys as jest.Mock).mockResolvedValue(EMPTY_LIST)
+  renderPage()
+  expect(await screen.findByText('出站拉数钥匙')).toBeInTheDocument()
+  expect(document.body.textContent || '').not.toMatch(/API\s*钥匙/)
+  expect(screen.queryByText('网关钥匙')).not.toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain('当前可买')
+})
+
 test('gwt_51_5_51_9: viewer sees list with note, no issue/revoke controls', async () => {
   ;(fetchOutboundKeys as jest.Mock).mockResolvedValue(LIST_WITH_KEY)
   mockUserState.current = VIEWER

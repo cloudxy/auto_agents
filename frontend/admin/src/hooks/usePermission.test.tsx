@@ -18,7 +18,7 @@ import { useAuthStore } from '../store/useAuthStore'
 const ADMIN_PERMS = [
   'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
   'menu:users', 'menu:data', 'menu:settings', 'menu:ai', 'menu:skills',
-  'menu:members', 'menu:usage', 'menu:platform-ops', 'menu:logs',
+  'menu:spiders.nodes', 'menu:members', 'menu:usage', 'menu:platform-ops', 'menu:logs',
   'menu:llm', 'menu:newapi',
 ]
 

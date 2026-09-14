@@ -6,7 +6,7 @@
  * 读该接口）——脏 DB 菜单树不影响租户看见哪几片叶（GWT-82.1）。
  */
 import React, { useMemo, useState } from 'react'
-import { Layout, Menu, Typography, Button, Tabs } from 'antd'
+import { Layout, Menu, Typography, Button, Tabs, Tag } from 'antd'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
 import { usePermission } from '../hooks/usePermission'
@@ -74,7 +74,16 @@ const AdminLayout: React.FC = () => {
               )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ marginRight: '16px' }}>欢迎回来，<strong>{user?.username || '用户'}</strong></span>
+              <span style={{ marginRight: 16 }}>
+                欢迎回来，<strong>{user?.username || '用户'}</strong>
+                {user?.is_platform_admin
+                  ? <Tag color="gold" style={{ marginLeft: 8 }}>平台超管</Tag>
+                  : user?.tenant_role
+                    ? <Tag style={{ marginLeft: 8 }}>{user.tenant_role}{user.tenant_id != null ? ` · 租户 ${user.tenant_id}` : ''}</Tag>
+                    : user?.role
+                      ? <Tag style={{ marginLeft: 8 }}>{user.role}</Tag>
+                      : null}
+              </span>
               <Button type="link" onClick={() => { logout(); navigate('/login') }}>退出登录</Button>
             </div>
           </Header>

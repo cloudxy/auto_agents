@@ -1,7 +1,6 @@
 """订阅计费：价目、线下挂账、在线结账占坑。验真/履约在 PaymentNotifyService。"""
-import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -12,13 +11,15 @@ from backend.repositories.order_repository import OrderRepository
 from backend.repositories.payment_channel_credential_repository import (
     PaymentChannelCredentialRepository,
 )
-from backend.services.payment_provider import get_payment_provider
+from backend.services.billing_fulfill import apply_plan_quota, fulfill_checkout_product
 from backend.services.product_event_service import emit_product_event
 from backend.services.quota_service import (
     BUYER_TENANT_ROLES,
-    CHECKOUT_EMPTY_USER,
+    CHECKOUT_PENDING_EXISTS_USER,
     CHECKOUT_PRODUCTS,
+    CHECKOUT_UNCONFIGURED_SUBMIT_USER,
     CONTACT_ADMIN_UPGRADE,
+    ORDER_STORY_CLOSED_USER,
 )
 from config import settings
 from platform_core.exceptions import BusinessException, NotFoundException
@@ -32,17 +33,12 @@ logger = get_logger("service.billing")
 _PRODUCT_SLUG = {"plan_pro": "pro", "plan_enterprise": "enterprise"}
 _ONLINE = frozenset({"alipay", "wechat"})
 CHANNEL_UNCONFIGURED_USER = "该通道未开通"
-CHECKOUT_PENDING_EXISTS_USER = "已有未完成的支付"
 SUPERADMIN_NO_PAY_USER = "超管不能代企业支付"
-PAID_PROCESSING_USER = "支付已到账，开通处理中"
-UNPAID_USER = "支付未完成，套餐未开通"
-CONFIRM_OFFLINE_ONLY_USER = "在线待支付不能线下确认"
+PENDING_NOTICE_USER = "待支付"
+FULFILLED_NOTICE_USER = "已开通"
 
-# FR-92 事件名原样（蓝图 §5）：含 tenant_id + 档位名；无明文/密钥；失败不挡主路径。
 OFFLINE_ORDER_SUBMITTED_EVENT = "offline_order_submitted"
 OFFLINE_ORDER_CONFIRMED_EVENT = "offline_order_confirmed"
-
-_PERIOD_DAYS = {"month": 30, "year": 365}
 
 
 class BillingService:
@@ -65,9 +61,10 @@ class BillingService:
 
     async def preview_checkout(
         self, tenant_id: Optional[int], actor_tenant_role: Optional[str], product: str,
-        is_platform_admin: bool = False,
+        is_platform_admin: bool = False, actor_user_id: Optional[int] = None,
+        referrer_surface: str = "nav",
     ) -> dict:
-        """结账读面：不建单。两通道未配 → 收款通道未开通（200 空态）。"""
+        """结账读面：不建单。未配通道仍可见商品与提交入口。"""
         logger.info(
             f"打开结账 | tenant={tenant_id} role={actor_tenant_role} product={product}"
         )
@@ -79,27 +76,57 @@ class BillingService:
             {"channel": ch, "configured": ch in configured, "selectable": ch in configured}
             for ch in ("alipay", "wechat")
         ]
-        can_pay = bool(configured)
         repo = OrderRepository(self.session)
         pending = await repo.get_open_for_product(int(tenant_id), product)
         latest = pending or await repo.get_latest_for_product(int(tenant_id), product)
+        await self._emit_checkout_started(
+            int(tenant_id), product, referrer_surface, actor_user_id, actor_tenant_role,
+        )
+        return await self._preview_payload(
+            product, channels, configured, pending, latest,
+        )
+
+    async def _emit_checkout_started(
+        self, tenant_id: int, product: str, referrer: str,
+        actor_user_id: Optional[int], role: Optional[str],
+    ) -> None:
+        logger.info(f"上报进入结账 | tenant={tenant_id} product={product}")
+        surface = referrer if referrer in ("pricing", "usage", "nav") else "nav"
+        await emit_product_event(
+            self.session, "checkout_story_started",
+            tenant_id=tenant_id, actor_user_id=actor_user_id, role=role,
+            props={
+                "tenant_id": tenant_id, "product": product,
+                "surface": "checkout", "referrer_surface": surface,
+            },
+        )
+
+    async def _preview_payload(
+        self, product: str, channels: list, configured: set,
+        pending: Optional[Order], latest: Optional[Order],
+    ) -> dict:
+        logger.info(f"组装结账预览 | product={product} pending={pending is not None}")
+        pending_open = pending is not None
+        wait_unconfigured = not configured
+        show_gold = pending_open and wait_unconfigured
+        gold = CHECKOUT_UNCONFIGURED_SUBMIT_USER
         return {
             "product": product, "channels": channels,
-            "empty_state": None if can_pay else CHECKOUT_EMPTY_USER,
-            "can_pay": can_pay,
+            "empty_state": gold if show_gold else None,
+            "can_pay": not show_gold,
             "order_id": int(pending.id) if pending is not None else None,
             "amount_cents": await self._peek_amount(product),
-            "notice": self._notice_for(latest),
+            "notice": gold if show_gold else self._notice_for(latest),
         }
 
     @staticmethod
     def _notice_for(order: Optional[Order]) -> Optional[str]:
         if order is None:
             return None
-        if order.status == "paid_pending_fulfillment":
-            return PAID_PROCESSING_USER
-        if order.status == "unpaid":
-            return UNPAID_USER
+        if order.status == "checkout_pending":
+            return PENDING_NOTICE_USER
+        if order.status in ("fulfilled", "paid"):
+            return FULFILLED_NOTICE_USER
         return None
 
     def _assert_checkout_actor(
@@ -134,7 +161,7 @@ class BillingService:
 
     async def create_checkout(
         self, tenant_id: Optional[int], actor_tenant_role: Optional[str],
-        product: str, channel: str, actor_user_id: Optional[int] = None,
+        product: str, channel: Optional[str] = None, actor_user_id: Optional[int] = None,
         is_platform_admin: bool = False,
     ) -> OrderOut:
         logger.info(
@@ -142,28 +169,37 @@ class BillingService:
             f"product={product} channel={channel}"
         )
         self._assert_checkout_actor(is_platform_admin, tenant_id, actor_tenant_role)
-        if product not in CHECKOUT_PRODUCTS or channel not in _ONLINE:
+        if product not in CHECKOUT_PRODUCTS:
+            raise BusinessException(message="没有这个商品。", code="CHECKOUT_UNKNOWN_PRODUCT")
+        if channel is not None and channel not in _ONLINE:
             raise BusinessException(message="没有这个商品。", code="CHECKOUT_UNKNOWN_PRODUCT")
         cred_repo = PaymentChannelCredentialRepository(self.session)
         configured = await cred_repo.configured_channels()
-        if not configured:
-            raise BusinessException(
-                message=CHECKOUT_EMPTY_USER, code="BILLING_CHANNELS_UNCONFIGURED",
-                status_code=422,
-            )
         plan, amount, plan_name = await self._amount_snapshot(product)
-        if channel not in configured:
-            await self._fail_unconfigured(
-                int(tenant_id), product, channel, amount, plan, actor_user_id, actor_tenant_role,
-            )
-        cred = await cred_repo.get_by_channel(channel)
-        merchant = str(cred.merchant_no) if cred is not None else None
-        return await self._insert_pending(
-            int(tenant_id), product, channel, amount, plan, plan_name, merchant,
+        use_channel = channel if channel in configured else None
+        merchant = None
+        if use_channel:
+            cred = await cred_repo.get_by_channel(use_channel)
+            merchant = str(cred.merchant_no) if cred is not None else None
+        out = await self._insert_pending(
+            int(tenant_id), product, use_channel, amount, plan, plan_name, merchant,
+        )
+        await self._emit_status(int(tenant_id), product, "pending", actor_user_id, actor_tenant_role)
+        return out
+
+    async def _emit_status(
+        self, tenant_id: int, product: str, status: str,
+        actor_user_id: Optional[int], role: Optional[str],
+    ) -> None:
+        logger.info(f"上报订单状态 | tenant={tenant_id} product={product} status={status}")
+        await emit_product_event(
+            self.session, "order_status_reached",
+            tenant_id=tenant_id, actor_user_id=actor_user_id, role=role,
+            props={"tenant_id": tenant_id, "product": product, "status": status},
         )
 
     def _new_checkout_order(
-        self, tenant_id: int, product: str, channel: str, amount: int,
+        self, tenant_id: int, product: str, channel: Optional[str], amount: int,
         plan: Optional[Plan], merchant: Optional[str],
     ) -> Order:
         order_no = uuid.uuid4().hex
@@ -183,12 +219,12 @@ class BillingService:
         existing = await OrderRepository(self.session).get_open_for_product(tenant_id, product)
         if existing is not None:
             raise BusinessException(
-                message=CHECKOUT_PENDING_EXISTS_USER, code="CHECKOUT_PENDING_EXISTS",
+                message=CHECKOUT_PENDING_EXISTS_USER, code="ORDER_PENDING_EXISTS",
                 status_code=409,
             )
 
     async def _insert_pending(
-        self, tenant_id: int, product: str, channel: str, amount: int,
+        self, tenant_id: int, product: str, channel: Optional[str], amount: int,
         plan: Optional[Plan], plan_name: str, merchant: Optional[str],
     ) -> OrderOut:
         order = self._new_checkout_order(tenant_id, product, channel, amount, plan, merchant)
@@ -251,47 +287,9 @@ class BillingService:
             f"创建订单 | tenant={tenant_id} role={actor_tenant_role} "
             f"plan={payload.plan_id} channel={payload.channel}"
         )
-        self._assert_order_allowed(actor_tenant_role, payload.channel)
-        plan = await self.session.get(Plan, payload.plan_id)
-        if plan is None or not plan.is_public:
-            raise NotFoundException("套餐")
-        if int(plan.price_cents or 0) <= 0:
-            raise BusinessException(message="免费档无需下单", code="ORDER_FREE_PLAN")
-        order = Order(
-            tenant_id=tenant_id,
-            plan_id=plan.id,
-            amount_cents=plan.price_cents,
-            status="pending",
-            channel="offline",
-            idempotency_key=f"pending:{tenant_id}",
+        raise BusinessException(
+            message=ORDER_STORY_CLOSED_USER, code="ORDER_STORY_CLOSED", status_code=422,
         )
-        self.session.add(order)
-        try:
-            await self.session.flush()
-        except IntegrityError:
-            # GWT-50.15：单 pending 靠 idempotency_key 唯一约束兜底（非先查后插）。
-            await self.session.rollback()
-            raise BusinessException(
-                message="已有待确认的升级申请", code="ORDER_PENDING_EXISTS",
-            ) from None
-        # 快照先于 commit（P-BE-01：commit 后访问过期 ORM 属性触发同步刷新）。
-        order_id_snapshot = int(order.id)
-        plan_name_snapshot = plan.name
-        get_payment_provider(order.channel).collect(
-            order_id=order_id_snapshot, amount_cents=int(order.amount_cents), channel=order.channel,
-        )
-        await self.session.commit()
-        # GWT-92.1：进入待确认即上报（独立短会话，失败不挡主路径）；无明文/密钥。
-        await emit_product_event(
-            self.session, OFFLINE_ORDER_SUBMITTED_EVENT,
-            tenant_id=tenant_id, actor_user_id=actor_user_id,
-            role=actor_tenant_role,
-            props={"order_id": order_id_snapshot, "plan_name": plan_name_snapshot},
-        )
-        await self.session.refresh(order)
-        out = OrderOut.model_validate(order)
-        out.plan_name = plan_name_snapshot
-        return out
 
     async def list_orders(self, tenant_id: int) -> list[OrderOut]:
         logger.info(f"列出订单 | tenant={tenant_id}")
@@ -306,43 +304,95 @@ class BillingService:
         logger.info("列出待确认收款订单")
         rows = (await self.session.execute(
             select(Order, Plan.name, Tenant.name)
-            .join(Plan, Order.plan_id == Plan.id)
+            .outerjoin(Plan, Order.plan_id == Plan.id)
             .join(Tenant, Order.tenant_id == Tenant.id)
-            .where(Order.status == "pending")
+            .where(Order.status.in_(("checkout_pending", "pending")))
             .order_by(Order.id.desc())
         )).all()
-        return [self._to_out(order, plan_name, tenant_name=tenant_name)
-                for order, plan_name, tenant_name in rows]
+        outs = []
+        for order, plan_name, tenant_name in rows:
+            name = plan_name or ("中转" if order.product_code == "relay" else "")
+            outs.append(self._to_out(order, name, tenant_name=tenant_name))
+        return outs
 
     async def confirm_paid(
         self, order_id: int, actor_user_id: Optional[int] = None,
+        expected_order_id: Optional[int] = None,
     ) -> OrderOut:
         logger.info(f"确认收款 | order={order_id} actor={actor_user_id}")
+        if expected_order_id is not None and int(expected_order_id) != int(order_id):
+            raise BusinessException(
+                message="确认单与本笔不符", code="CONFIRM_ORDER_MISMATCH", status_code=422,
+            )
         order = await self.session.get(Order, order_id)
         if order is None:
             raise NotFoundException("订单")
-        if (order.product_code in CHECKOUT_PRODUCTS) or (order.channel in _ONLINE):
+        if order.status in ("fulfilled", "paid"):
+            return await self._confirm_noop(order)
+        if str(order.product_code or "") in CHECKOUT_PRODUCTS or order.status == "checkout_pending":
+            return await self._confirm_checkout(order, actor_user_id)
+        return await self._confirm_legacy_offline(order, actor_user_id)
+
+    async def _confirm_noop(self, order: Order) -> OrderOut:
+        logger.info(f"再确认 no-op | order={order.id} status={order.status}")
+        name = await self._plan_name_of(order)
+        return self._to_out(order, name)
+
+    async def _plan_name_of(self, order: Order) -> str:
+        if order.plan_id is None:
+            return "中转" if order.product_code == "relay" else ""
+        plan = await self.session.get(Plan, order.plan_id)
+        return str(plan.name) if plan is not None else ""
+
+    async def _confirm_checkout(self, order: Order, actor_user_id: Optional[int]) -> OrderOut:
+        logger.info(f"确认结账单 | order={order.id} product={order.product_code}")
+        product = str(order.product_code or "")
+        _plan, display, plan_name = await self._amount_snapshot(product)
+        if int(order.amount_cents) != int(display):
             raise BusinessException(
-                message=CONFIRM_OFFLINE_ONLY_USER, code="ORDER_CONFIRM_OFFLINE_ONLY",
+                message="确认金额与结账页不一致", code="CONFIRM_AMOUNT_MISMATCH",
+                status_code=422,
             )
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        oid = int(order.id)
+        tid = int(order.tenant_id) if order.tenant_id is not None else None
+        rows = await OrderRepository(self.session).cas_confirm_checkout(oid, int(display), now)
+        if rows == 0:
+            fresh = await OrderRepository(self.session).get_fresh(oid)
+            if fresh is not None and fresh.status == "fulfilled":
+                return self._to_out(fresh, plan_name)
+            raise BusinessException(
+                message="确认金额与结账页不一致", code="CONFIRM_AMOUNT_MISMATCH",
+                status_code=422,
+            )
+        fresh = await OrderRepository(self.session).get_fresh(oid)
+        await fulfill_checkout_product(self.session, fresh or order, now)
+        await self.session.commit()
+        await self._emit_status(tid or 0, product, "fulfilled", actor_user_id, None)
+        await emit_product_event(
+            self.session, OFFLINE_ORDER_CONFIRMED_EVENT,
+            tenant_id=tid, actor_user_id=actor_user_id,
+            props={"order_id": oid, "plan_name": plan_name, "product": product},
+        )
+        out_row = await OrderRepository(self.session).get_fresh(oid)
+        return self._to_out(out_row or order, plan_name)
+
+    async def _confirm_legacy_offline(
+        self, order: Order, actor_user_id: Optional[int],
+    ) -> OrderOut:
+        logger.info(f"确认旧线下单 | order={order.id}")
         plan = await self.session.get(Plan, order.plan_id)
         if plan is None:
             raise BusinessException("套餐已下架")
-        plan_name_snapshot = plan.name  # 快照先于 commit（P-BE-01）
-        if order.status == "paid":
-            # GWT-50.11：再确认 = no-op——保持 paid，不重放 _apply_plan，不重复上报事件。
-            return self._to_out(order, plan_name_snapshot)
+        plan_name_snapshot = plan.name
         tenant_id_snapshot = int(order.tenant_id) if order.tenant_id is not None else None
         order_id_snapshot = int(order.id)
         now = datetime.now(timezone.utc)
         order.status = "paid"
         order.paid_at = now
-        # 单 pending 是「同一企业同一时刻」：确认后释放占位键（改为按单号），
-        # 该企业此后可再提交新申请。T-01 冻结语义，不可回退。
         order.idempotency_key = f"paid:{order_id_snapshot}"
         await self._apply_plan(tenant_id_snapshot, plan, now)
         await self.session.commit()
-        # GWT-92.2：仅在真实 pending→paid 流转时上报一次；失败不挡主路径。
         await emit_product_event(
             self.session, OFFLINE_ORDER_CONFIRMED_EVENT,
             tenant_id=tenant_id_snapshot, actor_user_id=actor_user_id,
@@ -367,33 +417,16 @@ class BillingService:
             return
         await self._apply_plan(tenant_id, plan, datetime.now(timezone.utc), period_days=None)
         await self.session.flush()
+        try:
+            from backend.services.litellm.admin_service import LiteLlmAdminService
+
+            await LiteLlmAdminService().ensure_tenant_key(tenant_id)
+        except Exception as e:  # noqa: BLE001 中转站未启用不阻断注册
+            logger.warning(f"LiteLLM 虚拟键签发失败（忽略）: tenant={tenant_id} err={e}")
 
     async def _apply_plan(
         self, tenant_id: int | None, plan: Plan, now: datetime, period_days: int | None = 0,
     ) -> None:
-        if tenant_id is None:
-            raise NotFoundException("租户")
-        tenant = await self.session.get(Tenant, tenant_id)
-        if tenant is None:
-            raise NotFoundException("租户")
-        if plan.quota_json:
-            try:
-                tenant.quota = json.loads(plan.quota_json)
-            except (TypeError, ValueError):
-                pass
-        days = period_days if period_days is not None else _PERIOD_DAYS.get(plan.period, 30)
-        if plan.price_cents == 0:
-            tenant.expires_at = None
-            end = None
-        else:
-            end = now + timedelta(days=days or 30)
-            tenant.expires_at = end.replace(tzinfo=None)
-        sub = (await self.session.execute(
-            select(TenantSubscription).where(TenantSubscription.tenant_id == tenant_id)
-        )).scalar_one_or_none()
-        if sub is None:
-            sub = TenantSubscription(tenant_id=tenant_id, plan_id=plan.id, status="active")
-            self.session.add(sub)
-        sub.plan_id = plan.id
-        sub.status = "active"
-        sub.current_period_end = end
+        await apply_plan_quota(
+            self.session, tenant_id, plan, now, period_days=period_days,
+        )

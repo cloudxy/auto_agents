@@ -5,7 +5,8 @@
  *   保存即 DB 单源生效（/auth/permissions 实时读取，用户重登/刷新即得新权限）
  * - 部门 Tab：按公司管理部门（软删除），成员挂接在用户管理页
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Select, Switch,
   Alert, Button, Card, Checkbox, Form, Input, message, Modal, Popconfirm,
   Space, Spin, Table, Tabs, Tag, Typography,
@@ -23,28 +24,20 @@ const { Text } = Typography
 
 // ---------------- 角色权限矩阵 ----------------
 const RolesTab: React.FC = () => {
-  const [roles, setRoles] = useState<RoleRow[]>([])
-  const [catalog, setCatalog] = useState<PermissionCode[]>([])
-  const [loading, setLoading] = useState(true)
   const [savingKey, setSavingKey] = useState<string | null>(null)
-  // 本地编辑态：role_key → 权限码集合
   const [drafts, setDrafts] = useState<Record<string, string[]>>({})
+  const qc = useQueryClient()
+  const rolesQ = useQuery({ queryKey: ['rbac-roles'], queryFn: listRoles })
+  const roles = rolesQ.data?.roles ?? []
+  const catalog = rolesQ.data?.catalog ?? []
+  const loading = rolesQ.isLoading
+  const load = () => { qc.invalidateQueries({ queryKey: ['rbac-roles'] }) }
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await listRoles()
-      setRoles(data.roles)
-      setCatalog(data.catalog)
-      setDrafts(Object.fromEntries(data.roles.map((r) => [r.role_key, [...r.permissions]])))
-    } catch (e) {
-      message.error(apiErrorMessage(e, '角色列表加载失败'))
-    } finally {
-      setLoading(false)
+  React.useEffect(() => {
+    if (rolesQ.data?.roles) {
+      setDrafts(Object.fromEntries(rolesQ.data.roles.map((r) => [r.role_key, [...r.permissions]])))
     }
-  }, [])
-
-  useEffect(() => { load() }, [load])
+  }, [rolesQ.data])
 
   const toggle = (roleKey: string, code: string, checked: boolean) => {
     setDrafts((prev) => {
@@ -72,6 +65,9 @@ const RolesTab: React.FC = () => {
     }
   }
 
+  if (rolesQ.isError) {
+    return <Alert type="error" showIcon title={apiErrorMessage(rolesQ.error, '角色权限加载失败')} />
+  }
   if (loading) return <div style={{ textAlign: 'center', padding: 64 }}><Spin /></div>
 
   const dirty = (r: RoleRow) =>
@@ -81,7 +77,7 @@ const RolesTab: React.FC = () => {
     <div>
       <Alert
         type="info" showIcon style={{ marginBottom: 16 }}
-        message="权限矩阵即菜单管理"
+        title="权限矩阵即菜单管理"
         description="勾选即分配：menu:* 控制左侧菜单与页面可见性，btn:* 控制页面内按钮。保存后用户刷新页面即生效（权限从数据库实时读取）。"
       />
       {roles.map((role) => (
@@ -124,22 +120,13 @@ const RolesTab: React.FC = () => {
 
 // ---------------- 权限资源管理 ----------------
 const PermissionsTab: React.FC = () => {
-  const [rows, setRows] = useState<PermissionRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [form] = Form.useForm()
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      setRows(await listPermissionResources())
-    } catch (e) {
-      message.error(apiErrorMessage(e, '权限资源加载失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-  useEffect(() => { load() }, [load])
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['rbac-permissions'], queryFn: listPermissionResources })
+  const rows = q.data ?? []
+  const loading = q.isLoading
+  const load = () => { qc.invalidateQueries({ queryKey: ['rbac-permissions'] }) }
 
   const onCreate = async () => {
     try {
@@ -211,23 +198,14 @@ const PermissionsTab: React.FC = () => {
 
 // ---------------- 菜单管理 ----------------
 const MenusTab: React.FC = () => {
-  const [tree, setTree] = useState<MenuNode[]>([])
-  const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<MenuNode | null>(null)
   const [form] = Form.useForm()
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      setTree(await fetchMenuTree())
-    } catch (e) {
-      message.error(apiErrorMessage(e, '菜单树加载失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-  useEffect(() => { load() }, [load])
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['rbac-menus'], queryFn: fetchMenuTree })
+  const tree = q.data ?? []
+  const loading = q.isLoading
+  const load = () => { qc.invalidateQueries({ queryKey: ['rbac-menus'] }) }
 
   const openCreate = (parent?: MenuNode) => {
     form.resetFields()
@@ -299,7 +277,7 @@ const MenusTab: React.FC = () => {
   return (
     <div>
       <Alert type="info" showIcon style={{ marginBottom: 16 }}
-             message="菜单结构在此维护（menus 表为运行时真相源）"
+             title="菜单结构在此维护（menus 表为运行时真相源）"
              description="新建/编辑/删除后刷新页面生效；权限码控制可见性，空=登录即可见。左侧导航由 /auth/menus 按当前用户权限动态下发。" />
       <Space style={{ marginBottom: 16 }}>
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>

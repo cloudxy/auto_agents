@@ -16,6 +16,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.mysql_fidelity
+
 from backend.app.api.v1.members import require_tenant_manager
 from backend.app.api.deps import CurrentUser
 from backend.repositories.skill_repository import SkillRepository
@@ -151,7 +153,9 @@ async def test_capability_service_sort_compiles_on_mysql_0e0aaf8():
     not mysql_fidelity_enabled(),
     reason="需真库验证：MySQL 方言下 NULL 排序语义往返（CI MYSQL_FIDELITY 通道执行）",
 )
-def test_null_aware_sort_roundtrip_mysql_fidelity(db_client, admin_client, db_engine, db_session):
+def test_null_aware_sort_roundtrip_mysql_fidelity(
+    db_client, platform_admin_client, db_engine, db_session,
+):
     """0e0aaf8 保真通道：真 MySQL 上 NULL updated_at 行参与排序不 500 且 NULL 排最后
 
     MySQL DESC 默认 NULL 在最后（与修复后的语义等价断言）；SQLite 通道
@@ -173,7 +177,7 @@ def test_null_aware_sort_roundtrip_mysql_fidelity(db_client, admin_client, db_en
                 .values(updated_at=None))
             await s.commit()
 
-        resp = admin_client.get("/api/v1/capabilities", params={"type": "plugin"})
+        resp = platform_admin_client.get("/api/v1/capabilities", params={"type": "plugin"})
         assert resp.status_code == 200, resp.text
         items = resp.json()["data"]["items"]
         names = [item["name"] for item in items]

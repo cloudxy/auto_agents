@@ -50,6 +50,8 @@ TENANT_EXEMPT_TABLES: "tuple[str, ...]" = (
     # 供应商模型子表：无独立归属，随父表 llm_providers 行走（访问经父行收口）；
     # 无 tenant_id 列（防御性声明）
     "llm_provider_models",
+    # 套餐价目：平台级目录，无 tenant_id 列（防御性声明）
+    "plans",
     # 能力目录（PIT-3 / GWT-20）：tenant_id 恒 NULL——不豁免则租户态 Core
     # UPDATE/DELETE 注入 tenant_id 条件，恒 NULL 行全部失配，超管刷新看不见
     # 自己的扫描/治理改动。禁止给本表加 TenantMixin。
