@@ -5,6 +5,9 @@ appetite: "program; 端态四角色完备；施工分波链帽；单波超 50% �
 current_hat: deliver
 hats_done: [define, shape, implement, verify, review, qc, deliver]
 phase: HatDone
+env_gates:
+  C2: {status: pass, at: "2026-09-14", evidence: "litellm-proxy :4000 healthy; token_id=2 chat 200 total_tokens=39 model=deepseek-pro/deepseek-v4-flash; used_tokens 0→39; 1 relay_token_call_succeeded; outbound ok- → 401 usage unchanged"}
+  C4: {status: pass, at: "2026-09-14", evidence: "spider example task id=3 completed result_count=1 in ~4s via httpbin; Homebrew Redis+MySQL; not FakeRedis"}
 path: default
 intent:
   class: new-feature

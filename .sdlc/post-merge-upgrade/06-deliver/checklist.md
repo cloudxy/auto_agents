@@ -16,8 +16,8 @@ qc 条件 7：本文件存在，并抄条件 1–8；MYSQL_FIDELITY / C2 / C4 / 
 | 1 | **不得**标四柱 GA；**不得**宣称支付已通 / 市场已开店 / 北极星已在生产出现 | `/pm` `/ops` | 本帽遵守；不写对外文案 |
 | 2 | live 支付通道指纹（非 HMAC 夹具、非超管确认收款）出现前，访客与租户可见面禁止「当前可买」 | `/frontend` `/pm` | 本帽不改可见面；预发抽检仍开 |
 | 3 | GWT-M11.12 **不得**当 W2 已兑。须 `MYSQL_FIDELITY=1` 双连接同时 POST | `/sre` + `/backend` | qc 当时未勾。本 spawn 补跑见 §3.1；**不**改 `coverage.md` 为 ✅（条件 8） |
-| 4 | C2 真网关轮仍是环境闸。签发成功 ≠ 对租户 live | `/sre` | **未勾** |
-| 5 | C4 live 工人 120s、GWT-M11.7 live 收银台、结账 5s 墙钟未在本波验证 | `/sre` | **未勾**（HMAC ≠ 已通） |
+| 4 | C2 真网关轮仍是环境闸。签发成功 ≠ 对租户 live | `/sre` | **本机已勾**（§3.2）；签发成功仍 ≠ 对租户开通文案 |
+| 5 | C4 live 工人 120s **本机已勾**（§3.3）；GWT-M11.7 live 收银台、结账 5s 墙钟仍未验证 | `/sre` | C4 **已勾**；收银台/5s **未勾** |
 | 6 | 合入前对**冻结 SHA**重跑四闸：全量 pytest + arch.sh + admin/official **build** + `db_migrations.sh` | `/sre` | **未勾**（无冻结 SHA；见 §2） |
 | 7 | `/sre` 写 `06-deliver/checklist.md`，抄条件 1–6，并写明 MYSQL_FIDELITY / C2 / C4 / M11.7 未勾 | `/sre` | 本文件 |
 | 8 | coverage.md GWT-M11.14 行号下次改；**不得**把 M11.12 改成 ✅ | `/qa` | 本帽不改 coverage.md |
@@ -25,8 +25,8 @@ qc 条件 7：本文件存在，并抄条件 1–8；MYSQL_FIDELITY / C2 / C4 / 
 环境闸（合入后仍开，直到各节贴命令+退出码）：
 
 - [ ] **冻结 SHA 四闸**（条件 6）
-- [ ] **C2** 真网关轮（条件 4）
-- [ ] **C4** live 工人 120s（条件 5）
+- [x] **C2** 真网关轮（条件 4）— 本机 2026-09-14，见 §3.2
+- [x] **C4** live 工人 120s（条件 5）— 本机 2026-09-14，见 §3.3
 - [ ] **GWT-M11.7** live 收银台（条件 5）
 - [ ] **结账 5s** 墙钟（条件 5）
 - [ ] **047 up→down→up** 真库回滚（§4：**未实测**）
@@ -134,15 +134,16 @@ bash tools/check/db_migrations.sh
 |---|---|---|
 | GWT-M11.12 两买方并发 | SQLite ThreadPool ≠ InnoDB 生成列 UNIQUE | **本 spawn 已跑** MYSQL_FIDELITY，见 §3.1。coverage.md **不**由本帽改 ✅ |
 | GWT-M31.4 双超管同时确认 | 行锁 CAS | ⚠️ 未跑 |
-| C2 真网关轮 GWT-M34.2 | mock LiteLLM ≠ 上游 | ⚠️ **未勾**。签发 ≠ live |
-| C4 live worker 120s | ingest+webhook 夹具 ≠ `run.py spider` | ⚠️ **未勾**。禁止写北极星已在生产出现 |
+| C2 真网关轮 GWT-M34.2 | mock LiteLLM ≠ 上游 | **本机已勾**（§3.2）。签发 ≠ 对租户开通文案 |
+| C4 live worker 120s | ingest+webhook 夹具 ≠ `run.py spider` | **本机已勾**（§3.3）。禁止写北极星已在生产出现 |
 | GWT-M11.7 live 收银台 | HMAC/`signed_body` 夹具 ≠ 支付宝/微信 | ⚠️ **未勾**。HMAC ≠ 支付已通 |
 | NFR-M01 结账 5s 墙钟 | Jest 路由跳转不代替 | ⚠️ **未勾** |
 | 047 up→down→up | SQLite 无 `MODIFY NULL` 方言；down 与 db-spec 不一致 | ⚠️ **未实测**（§4） |
 | 支付宝/微信 live | 通道 CIDR / 证书 / 报文 | ➖ 本波不执行、不合入闸 |
 
 - [x] HMAC 夹具已标明 ≠ live 通道指纹（确认收款也 ≠ live 指纹）
-- [ ] C2 / C4 / M11.7 / 结账 5s / 047 回滚 — 未勾
+- [x] C2、C4 本机已勾（§3.2 / §3.3）
+- [ ] M11.7 / 结账 5s / 047 回滚 — 未勾
 - [ ] 结果回填 `/qa` coverage.md — **禁止本帽把 M11.12 改成 ✅**（条件 8）
 
 ### 3.1 MYSQL_FIDELITY · GWT-M11.12（本 spawn 补跑）
@@ -173,7 +174,7 @@ exit: 0
 
 复跑时密码从环境注入，禁止把口令写进本文件。
 
-### 3.2 C2 真网关轮（未勾）— 怎么验
+### 3.2 C2 真网关轮 — 本机已勾（2026-09-14）
 
 向租户开放渠道组/令牌 **之前**。`LITELLM.ENABLED` 默认 false（`config/default/litellm.yml`）。密钥：`AUTO_AGENTS_LITELLM__MASTER_KEY` / `AUTO_AGENTS_LITELLM__ADMIN__MASTER_KEY`，**不进 git**。根 compose **无** litellm 服务；独立 `deploy/litellm`。前置：`docker network create litellm-net`（已存在则跳过）。`LITELLM.BASE_URL` 默认 `http://127.0.0.1:4000`（`LITELLM.PROXY.PORT`）。
 
@@ -186,17 +187,59 @@ exit: 0
 
 失败 = 环境闸未过。**不得**把「令牌已签发」写成「网关已对租户开通」。
 
-### 3.3 C4 live 工人 120s（未勾）— 怎么验
+本机实测（`deploy/litellm` 独立 compose，非根 compose；Homebrew MySQL + 本机 backend `:9111`）：
+
+```
+# 网关
+docker ps → litellm-proxy Up (healthy) 127.0.0.1:4000
+GET http://127.0.0.1:4000/health/liveliness → 200 I'm alive!
+GET /v1/models → deepseek-pro/* + kimi3/*（上游 Key 从本机 llm_providers 解密写入 deploy/litellm/.env，不进 git）
+
+# 1) 签发（明文只一次）
+POST /api/v1/relay/tokens group_id=1 name=c2-live-2 → 201 前缀 sk-  used_tokens=0  token_id=2
+
+# 2) 真对话（不是套餐超限句）
+POST :4000/v1/chat/completions  Bearer <签发明文>
+  model=deepseek-pro/deepseek-v4-flash  max_tokens=8
+  → 200  total_tokens=39
+
+# 3) 用量 0→≥1 + 恰 1 条事件（spend 日志落盘后再 GET）
+GET /api/v1/relay/tokens/2 → used_tokens=39  message=操作成功（非 60.5）
+product_events：恰 1 行 event_name=relay_token_call_succeeded
+  tenant_id=10  props={token_id:2, group_id:1, used_tokens:39}（无明文）
+
+# 4) 出站钥匙打同一 Base URL → 拒绝；用量不变
+POST /api/v1/outbound/keys → 201 前缀 ok-
+POST :4000/v1/chat/completions Bearer <出站明文> → 401
+  "LiteLLM Virtual Key expected. Received=ok-…, expected to start with 'sk-'."
+GET /api/v1/relay/tokens/2 → used_tokens 仍 39
+```
+
+口径：真 LiteLLM v1.100.0 + 真上游 DeepSeek，不是夹具网关。签发成功 ≠ 本格；本格四步都过。本格绿 ≠ 四柱 GA、≠「当前可买」、≠ 对租户开通文案。
+
+为让观察/事件在真网上成立，本机改了两处（合入前随工作树走，无冻结 SHA）：
+
+1. `list_key_spend_logs` 改打 `GET /spend/logs?api_key=<key_hash>`。v1.100.0 `GET /spend/logs/v2` 无起止日期会 400，且行上常缺 `api_key` / `total_tokens`。
+2. `_persist_event` 复用 `session.bind`（AsyncEngine）。原先 `create_async_engine(str(bind.url))` 把密码打成 `***`，独立会话 `auto_agents@localhost` 1045，主路径能写令牌、事件表一直 0 行。
+
+### 3.3 C4 live 工人 120s — 本机已勾（2026-09-14）
 
 根 compose **没有** spider。工人：`uv run python run.py start spider`。完成态必须是真 Scrapy + Redis，不是测试 ingest+webhook。
 
+本机实测（Homebrew MySQL 8 + Redis 7，非 compose）：
+
 ```
-$ uv run python run.py start spider
-$ uv run python run.py status spider
-# 非夹具免费企业、example/httpbin（或合同允许的夹具站点）入队
-# 期望 ≤120s：task completed 且 result_count>0
-# 北极星口径仍是非夹具合格出数；本格绿 ≠ 北极星已在生产出现
+$ uv run python run.py start backend --env local
+$ uv run python run.py start spider --env local
+$ uv run python run.py status --env local
+# spider 运行中；heartbeat key spider:worker:* 在场
+# POST /api/v1/public/tenant/signup 新建免费企业（非夹具）
+# POST /api/v1/spiders/run spider_name=example params={"urls":["https://httpbin.org/get"]} priority=high
+# GET /api/v1/spiders/tasks → id=3 status=completed result_count=1
+# created_at 09:02:53 → completed_at 09:02:57（约 4s，≤120s）
 ```
+
+口径：真 worker 消费 Redis 队列 + httpbin 出 1 条。**不是** FakeRedis / ingest+webhook。本格绿 ≠ 北极星已在生产出现。
 
 回滚工人：`uv run python run.py stop spider`（不要 `compose down`）。
 
