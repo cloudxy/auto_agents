@@ -48,10 +48,16 @@ OLD_PARAMS = '{"urls": ["https://a.b"]}'
 NEW_PARAMS = '{"urls": ["https://c.d"]}'
 
 
-def _msg(task_id: int, spider_name: str, params: str) -> str:
+def _msg(task_id: int, spider_name: str, params: str, tenant_id=None, priority="normal") -> str:
     """构造与 enqueue/_relocate_queue_message 完全一致的任务消息"""
     return json.dumps(
-        {"task_id": task_id, "spider_name": spider_name, "params": params},
+        {
+            "task_id": task_id,
+            "spider_name": spider_name,
+            "params": params,
+            "tenant_id": tenant_id,
+            "priority": priority,
+        },
         ensure_ascii=False,
     )
 
@@ -148,10 +154,10 @@ def _registry_service() -> SpiderRegistryService:
 
 
 def _definition(**overrides) -> MagicMock:
-    """可被 SpiderDefinitionResponse.model_validate 的定义实体桩"""
+    """可被 SpiderDefinitionResponse.model_validate 的定义实体桩（params 列 T-39 新增）"""
     d = MagicMock(
         id=5, title="通用采集示例", type="web",
-        description="", enabled=True, source="yml_seed",
+        description="", enabled=True, source="yml_seed", params=None,
         created_at=None, updated_at=None,
     )
     d.name = overrides.pop("name", "example")  # name 是 MagicMock 保留参数，需显式赋值
@@ -166,6 +172,7 @@ def _task(**overrides) -> MagicMock:
         id=9, spider_name="example", status="pending", priority="normal",
         result_count=0, retry_count=0, error_message=None,
         params='{"urls": ["https://a.b"]}',
+        tenant_id=None,
         created_at=None, updated_at=None, started_at=None, completed_at=None,
     )
     defaults.update(overrides)
@@ -237,18 +244,22 @@ class TestDefinitionCrud:
 
     @pytest.mark.asyncio
     async def test_delete_rejected_when_tasks_exist(self):
-        """m1 回归：原子条件删除 rowcount=0 且定义存在 → 被引用拒绝（先插任务再删的等价态）"""
+        """m1 回归：原子条件删除 rowcount=0 且定义存在 → 被引用拒绝（先插任务再删的等价态）
+
+        T-39：拒绝句升级为说明引用任务（#id 列举，GWT-103.3），口径不变。"""
         svc = _registry_service()
         repo = MagicMock()
         repo.delete_if_unreferenced = AsyncMock(return_value=False)
         repo.get_by_name = AsyncMock(return_value=_definition(id=5))
         svc.repo.count_by_spider = AsyncMock(return_value=3)
+        svc.repo.list_ids_by_spider = AsyncMock(return_value=[12, 15])
 
         with patch("backend.services.spider_registry_service.SpiderDefinitionRepository", return_value=repo):
-            with pytest.raises(BusinessException):
+            with pytest.raises(BusinessException) as e:
                 await svc.delete_definition("example")
 
         repo.delete_if_unreferenced.assert_awaited_once_with("example")
+        assert "#12" in str(e.value) and "#15" in str(e.value)
         svc.session.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -388,14 +399,8 @@ class TestUpdateTask:
 
         assert resp.priority == "high"
         svc.repo.update.assert_awaited_once_with(12, priority="high")
-        old_msg = json.dumps(
-            {"task_id": 12, "spider_name": "example", "params": '{"urls": ["https://a.b"]}'},
-            ensure_ascii=False,
-        )
-        new_msg = json.dumps(
-            {"task_id": 12, "spider_name": "example", "params": '{"urls": ["https://a.b"]}'},
-            ensure_ascii=False,
-        )
+        old_msg = _msg(12, "example", '{"urls": ["https://a.b"]}', priority="normal")
+        new_msg = _msg(12, "example", '{"urls": ["https://a.b"]}', priority="high")
         fake_redis.lrem.assert_called_once_with("spider:task_queue:normal", 1, old_msg)
         fake_redis.rpush.assert_called_once_with("spider:task_queue:high", new_msg)
 
@@ -498,7 +503,9 @@ class TestUpdateTask:
             await svc.update_task(12, params=NEW_PARAMS, priority="high")
 
         assert fake_redis.items("spider:task_queue:normal") == []
-        assert fake_redis.items("spider:task_queue:high") == [_msg(12, "example", NEW_PARAMS)]
+        assert fake_redis.items("spider:task_queue:high") == [
+            _msg(12, "example", NEW_PARAMS, priority="high")
+        ]
 
     @pytest.mark.asyncio
     async def test_rpush_failure_compensates_back_to_source_queue(self):
@@ -609,7 +616,7 @@ class TestSearchResults:
         kwargs = svc.result_repo.query_by_spider.await_args.kwargs
         assert kwargs.get("exclude_source") == "marketplace"
         assert resp.total == 0 and resp.items == []
-        assert EMPTY_DATACENTER_COPY == "还没有采集结果"
+        assert EMPTY_DATACENTER_COPY == "还没有结果，去提交采集"
 
     @pytest.mark.asyncio
     async def test_query_public_results_excludes_marketplace(self):

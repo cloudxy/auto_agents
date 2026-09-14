@@ -61,7 +61,7 @@ def _task(**overrides) -> MagicMock:
     """可被 SpiderTaskResponse.model_validate 的任务实体桩"""
     defaults = dict(
         id=9, spider_name="example", status="pending", priority="normal",
-        result_count=0, retry_count=0, error_message=None,
+        result_count=0, retry_count=0, error_message=None, tenant_id=None,
         created_at=None, updated_at=None, started_at=None, completed_at=None,
     )
     defaults.update(overrides)
@@ -160,6 +160,33 @@ class TestEnqueueConcurrency:
             await svc.finish_task(7, "completed")
             await _drain_side_effects()  # patch 块内 drain：避免副作用触碰真实依赖
         fake_redis.srem.assert_called_once_with("spider:active_tasks:example", 7)
+
+    @pytest.mark.asyncio
+    async def test_finish_task_releases_tenant_slot(self):
+        svc = _service()
+        task = _task(id=7, status="running", tenant_id=3)
+        svc.repo.get_by_id = AsyncMock(return_value=task)
+        svc.repo.update = AsyncMock(return_value=_task(id=7, status="completed", tenant_id=3))
+        svc.notifier.notify_task_finished = AsyncMock()
+        fake_redis = AsyncMock()
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+            await svc.finish_task(7, "completed")
+            await _drain_side_effects()
+        keys = [c.args[0] for c in fake_redis.srem.call_args_list]
+        assert "spider:active_tasks:example" in keys
+        assert "spider:active_tasks:3:example" in keys
+
+    @pytest.mark.asyncio
+    async def test_finish_task_skips_when_already_terminal(self):
+        svc = _service()
+        terminal = _task(id=7, status="completed")
+        svc.repo.get_by_id = AsyncMock(side_effect=[_task(id=7, status="running"), terminal])
+        svc.repo.update = AsyncMock(return_value=None)
+        fake_redis = AsyncMock()
+        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+            out = await svc.finish_task(7, "completed")
+        assert out.status == "completed"
+        fake_redis.srem.assert_not_called()
 
 
 # ---------------- 消费者：多队列顺序 / 旧键清理 / 载荷 ----------------

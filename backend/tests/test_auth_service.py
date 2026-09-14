@@ -122,6 +122,62 @@ class TestAuthenticate:
         assert await service.authenticate("alice", "same-pass") is None
 
 
+class TestAuthenticateEmailIdentifier:
+    """authenticate：标识含 @ 走 email 查找（FR-83 / contract §7.6，全局唯一不做消歧）"""
+
+    @pytest.mark.asyncio
+    async def test_email_identifier_uses_email_lookup(self):
+        """GWT-83.1（service 层）：邮箱标识 → email 查找命中，username 路径不触发"""
+        from backend.utils.auth import get_password_hash
+
+        service = _make_service()
+        service.user_repo.get_login_candidates_by_email.return_value = [
+            _make_user(get_password_hash("secret-123"))]
+
+        result = await service.authenticate("alice@example.com", "secret-123")
+
+        assert result is not None
+        assert result["username"] == "alice"
+        service.user_repo.get_login_candidates_by_email.assert_awaited_once_with(
+            "alice@example.com")
+        service.user_repo.get_by_username.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_email_identifier_normalized_lowercase(self):
+        """signup/validate_email 均按小写落库：登录标识统一小写再查"""
+        from backend.utils.auth import get_password_hash
+
+        service = _make_service()
+        service.user_repo.get_login_candidates_by_email.return_value = [
+            _make_user(get_password_hash("secret-123"))]
+
+        result = await service.authenticate("Alice@Example.COM", "secret-123")
+
+        assert result is not None
+        service.user_repo.get_login_candidates_by_email.assert_awaited_once_with(
+            "alice@example.com")
+
+    @pytest.mark.asyncio
+    async def test_unknown_email_returns_none(self):
+        """GWT-83.2（service 层）：未知邮箱与未知 username 同为 None（同句由 router 保证）"""
+        service = _make_service()
+        service.user_repo.get_login_candidates_by_email.return_value = []
+
+        assert await service.authenticate("ghost@nowhere.test", "whatever") is None
+        service.user_repo.get_by_username.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_email_wrong_password_returns_none(self):
+        """GWT-83.2（service 层）：邮箱行存在但密码错 → None（与未知标识同路径）"""
+        from backend.utils.auth import get_password_hash
+
+        service = _make_service()
+        service.user_repo.get_login_candidates_by_email.return_value = [
+            _make_user(get_password_hash("secret-123"))]
+
+        assert await service.authenticate("alice@example.com", "wrong-password") is None
+
+
 class TestCreateToken:
     """create_token：令牌签发"""
 

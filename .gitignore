@@ -52,8 +52,15 @@ Thumbs.db
 
 # Testing
 .coverage
+coverage.json
 .pytest_cache/
 htmlcov/
+frontend/admin/playwright-report/
+frontend/admin/test-results/
+frontend/admin/blob-report/
+
+# LiteLLM 生成的 proxy 配置（含明文 API Key，L1 影子接入：backend/scripts/export_litellm_config.py）
+deploy/litellm/config.gen.yaml
 
 .claude/*
 !.claude/rules/
@@ -77,7 +84,5 @@ ai_tool/*
 storage/
 
 .scratch/
-
-docs/
 
 .video_agent/

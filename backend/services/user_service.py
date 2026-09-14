@@ -14,6 +14,31 @@ from platform_core.schemas.auth import UserListResponse, UserResponse
 
 logger = get_logger("api")
 
+# 平台租户 slug（024 种子；set_admin_account / create_user 同口径）
+PLATFORM_TENANT_SLUG = "platform"
+# 种子 admin 用户名（init_project.sh / set_admin_account.py 单一口径）
+SEED_ADMIN_USERNAME = "admin"
+# GWT-92.8：恢复成功上报的产品事实事件名（props 带 restored_user_id）
+USER_RESTORED_EVENT = "user_restored"
+
+
+def _list_users_where(status: str, q: str | None):
+    """列表谓词：active=未删；deleted=已删；disabled=未删且停用；q=登录名包含。"""
+    from sqlalchemy import and_
+
+    from platform_core.models.user import User
+
+    if status == "deleted":
+        cond = User.deleted_at.isnot(None)
+    elif status == "disabled":
+        cond = and_(User.deleted_at.is_(None), User.is_active.is_(False))
+    else:
+        cond = User.deleted_at.is_(None)
+    needle = (q or "").strip()
+    if needle:
+        cond = and_(cond, User.username.contains(needle))
+    return cond
+
 
 @dataclass(frozen=True)
 class AuthIdentity:
@@ -64,26 +89,33 @@ class UserService:
         self.session = session
         self.repo = UserRepository(session)
 
-    async def list_users(self, skip: int = 0, limit: int = 20) -> UserListResponse:
-        """分页查询用户（JOIN tenants 带归属公司名；不含密码哈希）"""
-        logger.info(f"查询用户列表: skip={skip}, limit={limit}")
+    async def list_users(self, skip: int = 0, limit: int = 20,
+                         status: str = "active", q: str | None = None
+                         ) -> UserListResponse:
+        """分页查询用户（JOIN tenants 带归属公司名；不含密码哈希）
+
+        status：active=未删（含停用）；deleted=已删；disabled=未删且停用。
+        q：按登录名包含筛选（FR-M32）。
+        """
+        logger.info(f"查询用户列表: skip={skip} limit={limit} status={status} q={q}")
         from sqlalchemy import func, select
 
         from platform_core.models.department import Department
         from platform_core.models.tenant import Tenant
         from platform_core.models.user import User
 
+        cond = _list_users_where(status, q)
         rows = (await self.session.execute(
             select(User, Tenant.name.label("tenant_name"),
                    Department.name.label("department_name"))
             .outerjoin(Tenant, Tenant.id == User.tenant_id)
             .outerjoin(Department, Department.id == User.department_id)
-            .where(User.deleted_at.is_(None))  # 软删除行不陈列（回收站语义见操作审计）
+            .where(cond)
             .order_by(User.id.asc())
             .offset(skip).limit(limit)
         )).all()
         total = (await self.session.execute(
-            select(func.count()).select_from(User).where(User.deleted_at.is_(None))
+            select(func.count()).select_from(User).where(cond)
         )).scalar_one()
         items = []
         for user, tenant_name, department_name in rows:
@@ -105,6 +137,7 @@ class UserService:
         import asyncio
 
         from sqlalchemy import select
+        from sqlalchemy.exc import IntegrityError
 
         from platform_core.exceptions import BusinessException, ValidationException
         from platform_core.models.tenant import Tenant
@@ -114,10 +147,12 @@ class UserService:
         tenant_role = None
         is_platform_admin = False
         target_tenant_id = payload.tenant_id
-        if target_tenant_id is None:
-            # 平台超管账户：挂 platform 租户（024 种子；NULL 租户语义已消灭）
+        if target_tenant_id is None or target_tenant_id == 0:
+            # 平台账户（不挂公司）：显式挂 platform 租户（024 种子；NULL 租户语义
+            # 已消灭）。0 = 前端「（平台账户，不挂公司）」选项值 → 同一映射，
+            # 归属显示「平台租户」（GWT-95.4 显式化；行为不变，归属清晰）
             target_tenant_id = (await self.session.execute(
-                select(Tenant.id).where(Tenant.slug == "platform")
+                select(Tenant.id).where(Tenant.slug == PLATFORM_TENANT_SLUG)
             )).scalar_one_or_none()
             if target_tenant_id is None:
                 raise ValidationException(
@@ -131,7 +166,8 @@ class UserService:
                 raise ValidationException(message=f"租户不存在: {target_tenant_id}", field="tenant_id")
             tenant_role = "admin" if payload.role == "admin" else payload.role
 
-        # 查重按 (目标租户, username) 口径且含软删行（与唯一约束及 T4 占位一致）
+        # 查重按在册行口径（042 唯一键在册化 / GWT-93.5/93.7 释放语义）：
+        # 已删行不阻塞新建；并发窗口由 DB 唯一键兜底（IntegrityError → 400）
         if await self.repo.exists_username_in_tenant(target_tenant_id, payload.username):
             raise BusinessException(f"用户名已存在: {payload.username}")
         if await self.repo.get_by_email(payload.email):
@@ -148,7 +184,13 @@ class UserService:
             is_platform_admin=is_platform_admin,
         )
         self.session.add(user)
-        await self.session.flush()
+        try:
+            await self.session.flush()
+        except IntegrityError:
+            # 并发占名竞态兜底（db-spec §16.1：恢复先落 → 并发新建撞唯一键 →
+            # 优雅报错，不裸奔 IntegrityError 500）
+            await self.session.rollback()
+            raise BusinessException("用户名或邮箱已被现有用户占用")
         await self.session.refresh(user)  # onupdate/默认列需回读，防 expired 属性同步 IO
         logger.info(f"创建用户 | id={user.id} username={payload.username} tenant={target_tenant_id}")
         resp = UserResponse.model_validate(user)
@@ -221,19 +263,30 @@ class UserService:
         return resp
 
     async def delete_user(self, user_id: int, actor_id: int) -> None:
-        """软删除账户（防删自己；防删最后一个平台超管）"""
+        """软删除账户（种子 admin 不可删；防删自己；防删最后一个平台超管）"""
         from sqlalchemy import func, select
 
         from platform_core.exceptions import BusinessException
+        from platform_core.models.tenant import Tenant
         from platform_core.models.user import User
 
-        if user_id == actor_id:
-            raise BusinessException("不能删除自己")
         user = (await self.session.execute(
             select(User).where(User.id == user_id)
         )).scalar_one_or_none()
         if user is None:
             raise BusinessException(f"用户不存在: {user_id}")
+        # 种子 admin 守卫（T-26 / GWT-94.1，判定在既有两守卫之前）：身份=
+        # (platform 租户, username='admin') 的平台超管行（set_admin_account
+        # 按此精确取）；跨租户同名 admin 不误伤。即使存在第二个平台超管
+        # （「最后超管」不适用）也拒绝，中文句不含内部码。
+        if user.username == SEED_ADMIN_USERNAME and user.is_platform_admin:
+            platform_id = (await self.session.execute(
+                select(Tenant.id).where(Tenant.slug == PLATFORM_TENANT_SLUG)
+            )).scalar_one_or_none()
+            if platform_id is not None and user.tenant_id == platform_id:
+                raise BusinessException("平台初始账号不可删除。")
+        if user_id == actor_id:
+            raise BusinessException("不能删除自己")
         if user.is_platform_admin:
             admins = (await self.session.execute(
                 select(func.count()).select_from(User).where(
@@ -249,3 +302,95 @@ class UserService:
         await self.session.flush()
         logger.warning(f"软删除用户 | id={user_id} username={user.username}")
         await self.session.commit()
+
+    async def restore_user(self, user_id: int, actor_id: int) -> UserResponse:
+        """恢复软删账户（T-24 / FR-93；仅平台超管，路由层 404 同形守卫）
+
+        机制（db-spec §16.1）：
+        - 占用预检与恢复写入同事务；正确性由 042 唯一键兜底——并发「新建占名
+          先落」时恢复 UPDATE 使 alive_flag=1 撞唯一键 → IntegrityError → 回滚
+          → 同句拒绝，现有用户行不被触碰（UPDATE 只清本行，永不覆盖他人）。
+        - 恢复=单条条件 UPDATE（deleted_at IS NOT NULL 使 rowcount=0）：重复
+          恢复/并发恢复均为 no-op，不写、不重复上报 user_restored（GWT-93.9）。
+        - 占用判定各自独立（GWT-93.4）：username 同租户在册判、email 全局
+          在册判，任一冲突即拒绝（预检只为提前给友好文案，不当正确性依据）。
+        """
+        logger.info(f"恢复软删用户 | id={user_id} actor={actor_id}")
+        from sqlalchemy import select, update
+
+        from sqlalchemy.exc import IntegrityError
+
+        from platform_core.exceptions import BusinessException
+        from platform_core.models.user import User
+
+        from backend.services.product_event_service import emit_product_event
+
+        user = (await self.session.execute(
+            select(User).where(User.id == user_id)
+        )).scalar_one_or_none()
+        if user is None:
+            raise BusinessException(f"用户不存在: {user_id}")
+        if user.deleted_at is None:
+            if not user.is_active:
+                return await self._reactivate_disabled(user, actor_id)
+            # GWT-93.9：已在册且启用 = no-op，状态保持、无事件、无副作用
+            return UserResponse.model_validate(user)
+
+        # 占用预检（同事务；在册口径——目标行本身已删，不参与判重）
+        if await self.repo.exists_username_in_tenant(user.tenant_id, user.username):
+            raise BusinessException("用户名或邮箱已被现有用户占用")
+        if await self.repo.exists_by_email(user.email):
+            raise BusinessException("用户名或邮箱已被现有用户占用")
+
+        # 快照先于写入/提交（ADR-0007 D2：commit 后属性惰性加载抛 MissingGreenlet）
+        tenant_id_snapshot = int(user.tenant_id) if user.tenant_id is not None else None
+        try:
+            result = await self.session.execute(
+                update(User)
+                .where(User.id == user_id, User.deleted_at.isnot(None))
+                .values(deleted_at=None, is_active=True)
+            )
+        except IntegrityError:
+            # DB 兜底（并发新建占名先落）：回滚保持已删 + 同句（GWT-93.4/93.8）
+            await self.session.rollback()
+            raise BusinessException("用户名或邮箱已被现有用户占用")
+
+        # 条件 UPDATE 后回读响应快照（身份映射中的旧实例已过期语义）
+        fresh = (await self.session.execute(
+            select(User).where(User.id == user_id)
+            .execution_options(populate_existing=True)
+        )).scalar_one()
+        resp = UserResponse.model_validate(fresh)
+        await self.session.commit()
+
+        if result.rowcount == 1:
+            logger.info(f"恢复软删用户成功 | id={user_id} tenant={tenant_id_snapshot}")
+            # GWT-92.8：user_restored（tenant_id + restored_user_id）；失败不挡主路径
+            await emit_product_event(
+                self.session, USER_RESTORED_EVENT,
+                tenant_id=tenant_id_snapshot, actor_user_id=actor_id,
+                props={"restored_user_id": user_id},
+            )
+        else:
+            # rowcount=0：预检后、UPDATE 前被并发恢复抢先 → no-op、不重复上报
+            logger.info(f"恢复软删用户 no-op（并发已恢复） | id={user_id}")
+        return resp
+
+    async def _reactivate_disabled(self, user, actor_id: int) -> UserResponse:
+        """停用（未软删）恢复：置回启用并上报 user_restored（GWT-M32.4）。"""
+        logger.info(f"恢复已停用用户 | id={user.id} actor={actor_id}")
+        from backend.services.product_event_service import emit_product_event
+
+        uid = int(user.id)
+        tenant_id_snapshot = int(user.tenant_id) if user.tenant_id is not None else None
+        user.is_active = True
+        await self.session.flush()
+        await self.session.refresh(user)
+        resp = UserResponse.model_validate(user)
+        await self.session.commit()
+        await emit_product_event(
+            self.session, USER_RESTORED_EVENT,
+            tenant_id=tenant_id_snapshot, actor_user_id=actor_id,
+            props={"restored_user_id": uid},
+        )
+        return resp

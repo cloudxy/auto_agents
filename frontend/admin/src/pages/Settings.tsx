@@ -2,16 +2,22 @@
  * 系统设置页面 - 管理网站基础信息
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Tag, Form, Input, Button, Card, message, Divider, Spin } from 'antd'
+import { Tag, Form, Input, Button, Card, message, Divider, Spin, Typography } from 'antd'
 import { fetchSiteConfigs, fetchWebhookStatus, updateSiteConfig, type WebhookStatus } from '../services/settings'
 import { fetchNotifyConfig, updateNotifyConfig, type NotifyChannelConfig } from '../services/users'
 import { apiErrorMessage } from '../utils/errorMessage'
+import { useAuthStore } from '../store/useAuthStore'
+import NotFound from './NotFound'
+
+const { Text } = Typography
 
 /** 表单值契约（与 initialValues 的字段一致） */
 interface SiteConfigValues {
   site_title: string
   site_description?: string
 }
+
+/** T-21 / FR-M33：系统设置写面 = 平台超管 only。租户直打 = 404 同形，不是说明态。 */
 
 const Settings: React.FC = () => {
   const [form] = Form.useForm()
@@ -21,13 +27,16 @@ const Settings: React.FC = () => {
   const [notifyCfg, setNotifyCfg] = useState<NotifyChannelConfig | null>(null)
   const [notifySaving, setNotifySaving] = useState(false)
   const [notifyForm] = Form.useForm()
+  const user = useAuthStore((s) => s.user)
+  const canWriteSettings = user?.is_platform_admin === true
 
   useEffect(() => {
+    if (!canWriteSettings) return // 只读说明态不渲染表单，不拉配置
     fetchWebhookStatus().then(setWebhook).catch(() => setWebhook(null))
     fetchNotifyConfig().then((cfg) => { setNotifyCfg(cfg); notifyForm.setFieldsValue(cfg) })
       .catch(() => setNotifyCfg(null))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [canWriteSettings])
 
   const fetchConfigs = useCallback(async () => {
     try {
@@ -40,8 +49,8 @@ const Settings: React.FC = () => {
   }, [form])
 
   useEffect(() => {
-    fetchConfigs()
-  }, [fetchConfigs])
+    if (canWriteSettings) fetchConfigs()
+  }, [canWriteSettings, fetchConfigs])
 
   const onSaveNotify = async () => {
     try {
@@ -66,9 +75,8 @@ const Settings: React.FC = () => {
           updateSiteConfig(key, value)
         )
       )
-      message.success('系统配置已成功保存')
-      // 提示用户官网已同步
-      message.info('官网内容已实时同步更新')
+      // FR-90 / GWT-90.1：诚实句——只声明保存，不声明官网同步（本波不做设置→官网真同步）
+      message.success('系统配置已保存')
     } catch (error) {
       console.error('Save error:', error)
       message.error('保存失败，请稍后重试')
@@ -77,19 +85,25 @@ const Settings: React.FC = () => {
     }
   }
 
+  if (!canWriteSettings) return <NotFound />
+
   if (fetching) {
     return <div style={{ textAlign: 'center', padding: '50px' }}><Spin tip="加载配置中..." /></div>
   }
 
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-      <Card title="全局系统设置" extra={<span style={{ color: '#999', fontSize: '12px' }}>修改后立即生效</span>}>
-        <Form 
-          form={form} 
-          layout="vertical" 
-          onFinish={onFinish}
-          initialValues={{ site_title: 'AutoAgents', site_description: '' }}
-        >
+      {/* §0.10 / GWT-99.1：页名「系统设置」唯一标题在顶栏；首区块标题卡「全局系统设置」
+          （复述页名）移除，表单分区直接开始。原 Card extra 提示保留为表单上方说明行（信息不丢） */}
+      <div style={{ marginBottom: 12 }}>
+        <Text type="secondary">修改后立即生效</Text>
+      </div>
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={onFinish}
+        initialValues={{ site_title: 'AutoAgents', site_description: '' }}
+      >
           <Form.Item 
             name="site_title" 
             label="网站/平台名称" 
@@ -117,9 +131,9 @@ const Settings: React.FC = () => {
               保存并发布
             </Button>
           </Form.Item>
-        </Form>
-      </Card>
+      </Form>
 
+      {/* 区块标题（§0.10：不复述页名，允许保留）；marginTop 16 = content.block-gap */}
       <Card title="Webhook 与通知渠道" style={{ marginTop: 16 }}>
         {webhook === null ? <Spin /> : (
           <p style={{ margin: '6px 0' }}>

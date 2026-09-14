@@ -12,6 +12,8 @@ import type { ColumnsType } from 'antd/es/table'
 import { STATUS_META, PRIORITY_META } from './types'
 import type { Task, SpiderMap } from './types'
 import { SPIDER_WORKER_OFFLINE_COPY, STILL_RUNNING_COPY, ZERO_ITEMS_DONE_COPY } from './copy'
+import { LoadEmpty } from '../LoadState'
+import { CANNOT_SUBMIT_COLLECT, CLEAR_FILTERS, EMPTY_TASKS_COPY, FILTERED_TASKS_EMPTY } from '../../constants/collectCopy'
 
 const { Text } = Typography
 
@@ -69,7 +71,7 @@ export const TaskList: React.FC<TaskListProps> = ({
       dataIndex: 'spider_name',
       key: 'spider_name',
       render: (name: string) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text strong>{spiderMap[name]?.title || name}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>{name}</Text>
         </Space>
@@ -120,7 +122,7 @@ export const TaskList: React.FC<TaskListProps> = ({
         )
         // 失败原因直显（U1-6）：不再只藏 Tag 的 hover 里
         return record.error_message ? (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Tooltip title={record.error_message}>{tag}</Tooltip>
             <Text type="danger" ellipsis style={{ maxWidth: 150, fontSize: 12 }} title={record.error_message}>
               {record.error_message}
@@ -306,6 +308,7 @@ export const TaskList: React.FC<TaskListProps> = ({
               新增任务
             </Button>
           )}
+          {!canCreate && <Text type="secondary">{CANNOT_SUBMIT_COLLECT}</Text>}
           <Button icon={<ReloadOutlined />} onClick={onRefresh}>刷新</Button>
         </Space>
       </div>
@@ -321,6 +324,30 @@ export const TaskList: React.FC<TaskListProps> = ({
           showSizeChanger: false,
           showTotal: (t) => `共 ${t} 条任务`,
           onChange: (p, ps) => onPaginationChange(p, ps),
+        }}
+        locale={{
+          emptyText: (statusFilter || spiderFilter || priorityFilter) ? (
+            <LoadEmpty
+              title={FILTERED_TASKS_EMPTY}
+              action={(
+                <Button size="small" onClick={() => {
+                  onStatusFilterChange(undefined)
+                  onSpiderFilterChange(undefined)
+                  onPriorityFilterChange(undefined)
+                }}
+                >
+                  {CLEAR_FILTERS}
+                </Button>
+              )}
+            />
+          ) : (
+            <LoadEmpty
+              title={EMPTY_TASKS_COPY}
+              action={canCreate ? (
+                <Button type="primary" size="small" onClick={onCreateNew}>新增任务</Button>
+              ) : undefined}
+            />
+          ),
         }}
       />
     </>

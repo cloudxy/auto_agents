@@ -1,0 +1,217 @@
+feature: upgrade-four-pillars
+lane: L3
+appetite: "collect-depth 2w; relay-sku + alipay/wechat max 8pw (split at define)"
+current_hat: Closed
+hats_done: [define, shape, implement, verify, review, qc, deliver]
+phase: Closed
+path: default
+intent:
+  class: resume
+  quote: "继续"
+  skip_shape: false
+  skip_discover: false
+  at: "2026-09-13T10:10:00Z"
+operator_override_closed_leftovers:
+  at: "2026-09-13T10:10:00Z"
+  action: "Closed feature leftover qc conditions 7+10 only; do not reopen swimlane or mark GA"
+  intent_quote: "继续"
+stale_artifacts: []
+resume_note: >
+  2026-09-13 操作者「真人跑一次」+ 四柱实现。未另开 feature。
+  T-26/T-27 evidence 已在盘（07:19/07:22），coverage 已含 N4。
+  本窗用原生 sdlc-workflow:* 关 implement G-fresh（N4），再重跑 verify→review→qc→deliver∥enablement。
+  qc/deliver 仍是 N1 有条件放行，标 stale。禁止写成四柱 GA。
+discovery:
+  status: done
+  skip_why: ""
+  briefing: 00-discover/briefing.md
+  tracks:
+    discuss: done
+    compete: done
+    market: done
+    falsify: done
+  at: "2026-09-12T07:30:00Z"
+roles_skipped: []
+roles_skipped_why: {}
+q_security: yes
+open_questions:
+  - {id: Q-RELAY, status: answered, owner: operator, answer: "对外可买 SKU"}
+  - {id: Q-VOICE, status: answered, owner: operator, answer: "采集"}
+  - {id: Q-PRICE, status: answered, owner: operator, answer: "履约；支付未跑通前不得写当前可买"}
+  - {id: Q-BILL, status: answered, owner: operator, answer: "支付宝+微信；商户凭据超管后台可配"}
+  - {id: Q-AGPL, status: answered, owner: operator, answer: "收费故事未选定；可见面禁止当前可买；N3能付施工不阻塞"}
+  - {id: Q-MARKET-USER, status: answered, owner: operator, answer: "N2 同时做订阅租户与治理超管，不选单一主用户"}
+  - {id: Q-OPS-DUTY, status: answered, owner: operator, answer: "本波不承诺 SLA 数字"}
+  - {id: Q-OPS-COLLECT, status: answered, owner: operator, answer: "本波不承诺支持负荷数字"}
+rework_rounds: 2
+implement_n4_rework: 1
+deliver_rework: 2
+gates:
+  - name: check-sdlc-define
+    kind: script
+    result: pass
+    cmd: bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat define
+    exit_code: 0
+    stage: define
+    at: "2026-09-12T15:25:00Z"
+  - name: fresh-context
+    kind: fresh-context
+    stage: define
+    result: fail
+    findings_total: 7
+    blocker: 1
+    major: {unwaived: 4}
+    root_cause: "Checkout/fulfillment GWTs named pages not product-scoped actions"
+    at: "2026-09-12T15:40:00Z"
+  - name: fresh-context
+    kind: fresh-context
+    stage: define
+    result: pass
+    findings_total: 3
+    blocker: 0
+    major: {unwaived: 0}
+    minor: {fixed: 0, waived: 3}
+    at: "2026-09-12T16:30:00Z"
+  - name: fresh-context
+    kind: fresh-context
+    stage: shape
+    result: pass
+    findings_total: 1
+    blocker: 0
+    major: {unwaived: 0}
+    minor: {fixed: 0, waived: 1}
+    at: "2026-09-12T16:50:00Z"
+  - name: check-sdlc-implement-n4
+    kind: script
+    result: pass
+    cmd: bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat implement
+    exit_code: 0
+    stage: implement
+    at: "2026-09-13T08:05:00Z"
+  - name: fresh-context
+    kind: fresh-context
+    stage: implement
+    result: fail
+    findings_total: 5
+    blocker: 0
+    major: {unwaived: 2}
+    minor: {fixed: 0, waived: 0}
+    at: "2026-09-13T08:20:00Z"
+  - name: fresh-context
+    kind: fresh-context
+    stage: implement
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: {unwaived: 0}
+    minor: {fixed: 5, waived: 0}
+    at: "2026-09-13T08:45:00Z"
+  - name: check-sdlc-verify-n4
+    kind: script
+    result: pass
+    cmd: bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat verify
+    exit_code: 0
+    stage: verify
+    at: "2026-09-13T08:50:00Z"
+  - name: check-sdlc-review-n4
+    kind: script
+    result: pass
+    cmd: bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat review
+    exit_code: 0
+    stage: review
+    at: "2026-09-13T09:00:00Z"
+  - name: fresh-context
+    kind: fresh-context
+    stage: review
+    result: pass
+    findings_total: 2
+    blocker: 0
+    major: {unwaived: 0}
+    minor: {fixed: 0, waived: 2}
+    at: "2026-09-13T09:00:00Z"
+  - name: self-review
+    kind: self-review
+    decision: "L3 G-self: scope is N1–N4 four-pillar depth not GA; irreversible pieces are 045/046 + notify fulfill; cost within N3 8pw cap if live payment stays out; conditional release is the only legal tier"
+    duration_min: 15
+    at: "2026-09-13T09:10:00Z"
+  - name: check-sdlc-qc
+    kind: script
+    result: pass
+    cmd: bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat qc
+    exit_code: 0
+    stage: qc
+    at: "2026-09-13T09:15:00Z"
+  - name: check-sdlc-deliver
+    kind: script
+    result: pass
+    cmd: bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat deliver
+    exit_code: 0
+    stage: deliver
+    at: "2026-09-13T09:20:00Z"
+  - name: check-sdlc-enablement
+    kind: script
+    result: pass
+    cmd: bash PLUGIN_ROOT/scripts/check-sdlc.sh --require --hat enablement
+    exit_code: 0
+    stage: enablement
+    at: "2026-09-13T09:20:00Z"
+  - name: fresh-context
+    kind: fresh-context
+    stage: deliver
+    result: fail
+    findings_total: 4
+    blocker: 0
+    major: {unwaived: 2}
+    minor: {fixed: 0, waived: 0}
+    root_cause: "checklist operator steps were written from intended outcomes, not the FastAPI/lifespan/compose contracts those steps invoke"
+    at: "2026-09-13T09:40:00Z"
+  - name: fresh-context
+    kind: fresh-context
+    stage: deliver
+    result: pass
+    findings_total: 0
+    blocker: 0
+    major: {unwaived: 0}
+    minor: {fixed: 4, waived: 0}
+    at: "2026-09-13T10:00:00Z"
+tickets:
+  - {id: T-01, title: fixture membership, status: done, wave: N1}
+  - {id: T-02, title: enqueue/results/worker copy, status: done, wave: N1}
+  - {id: T-03, title: quota copy + upgrade-intent, status: done, wave: N1}
+  - {id: T-04, title: collect empty UI, status: done, wave: N1}
+  - {id: T-05, title: events queryable, status: done, wave: N1}
+  - {id: T-06, title: official hero 采集, status: done, wave: N1}
+  - {id: T-07, title: collect IA, status: done, wave: N1}
+  - {id: T-08, title: market flag + subscribe, status: done, wave: N2}
+  - {id: T-09, title: platform write 404, status: done, wave: N2}
+  - {id: T-10, title: closed vs empty shelf UI, status: done, wave: N2}
+  - {id: T-11, title: skill md text XSS, status: done, wave: N2}
+  - {id: T-12, title: permission unknown + 404 shell, status: done, wave: N2}
+  - {id: T-13, title: market IA, status: done, wave: N2}
+  - {id: T-14, title: N3 schema 046, status: done, wave: N3}
+  - {id: T-15, title: merchant credentials, status: done, wave: N3}
+  - {id: T-16, title: checkout create, status: done, wave: N3}
+  - {id: T-17, title: notify verify fulfill, status: done, wave: N3}
+  - {id: T-18, title: relay SKU gate, status: done, wave: N3}
+  - {id: T-19, title: checkout UI, status: done, wave: N3}
+  - {id: T-20, title: 我的渠道组 UI, status: done, wave: N3}
+  - {id: T-21, title: pricing CTA, status: done, wave: N3}
+  - {id: T-22, title: payment events, status: done, wave: N3}
+  - {id: T-23, title: ban 当前可买, status: done, wave: N3}
+  - {id: T-24, title: notify ingress, status: done, wave: N3}
+  - {id: T-25, title: checkout IA, status: done, wave: N3}
+  - {id: T-26, title: duty 活, status: done, wave: N4, evidence: 03-impl/T-26-evidence.md}
+  - {id: T-27, title: duty UI, status: done, wave: N4, evidence: 03-impl/T-27-evidence.md}
+host_spawn:
+  researcher: {requested: sdlc-workflow:researcher, available: general-purpose, fallback: general-purpose, reason: no native type}
+  competitor: {requested: sdlc-workflow:competitor, available: general-purpose, fallback: general-purpose, reason: no native type}
+  pm: {requested: sdlc-workflow:pm, available: general-purpose, fallback: general-purpose, reason: no native type}
+  reviewer: {requested: sdlc-workflow:reviewer, available: general-purpose, fallback: general-purpose, reason: no native type}
+  architect: {requested: sdlc-workflow:architect, available: general-purpose, fallback: general-purpose, reason: no native type}
+  dba: {requested: sdlc-workflow:dba, available: general-purpose, fallback: general-purpose, reason: no native type}
+  designer: {requested: sdlc-workflow:designer, available: general-purpose, fallback: general-purpose, reason: no native type}
+  reviewer_n4_2026_09_13:
+    requested: sdlc-workflow:reviewer
+    available: [sdlc-workflow:reviewer]
+    fallback: none
+    reason: "Grok host now has native sdlc-workflow hats; implement N4 G-fresh uses native reviewer"

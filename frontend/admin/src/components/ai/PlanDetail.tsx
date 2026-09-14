@@ -22,6 +22,9 @@ import { STATUS_META } from '../spider/types'
 import type { Task } from '../spider/types'
 import { FilterRuleList, FlowPreview } from './PlanForm'
 import type { AiPlanFlow } from '../../hooks/useAiPlanFlow'
+import { QuotaBlockAlert } from '../quota/QuotaBlockAlert'
+import { PlanningDisabledBanner } from './PlanningDisabled'
+import { CANNOT_PLAN_COPY, PLANNING_COPY } from '../../constants/collectCopy'
 
 const { Text } = Typography
 
@@ -68,7 +71,7 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
     step, plan, editedFlow, creating, actionLoading, customTask,
     createForm, flowForm, history, latestPassed,
     setStep, onCreate, onReplan, onTest, onTestEdited, onApplyFlowEdit, onRegister,
-    resetWizard, resultsTaskOf,
+    resetWizard, resultsTaskOf, collectBlock, planningDisabled,
   } = flow
 
   if (!plan && step > 0) return null
@@ -97,11 +100,18 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
       >
         <Input.TextArea rows={6} placeholder="粘贴目标页面的 HTML 片段（最多 200000 字符）" />
       </Form.Item>
-      {canOperate && (
-        <Button type="primary" icon={<ThunderboltOutlined />} loading={creating} onClick={onCreate}>
-          创建并开始规划
+      <Space wrap>
+        <Button
+          type="primary"
+          icon={<ThunderboltOutlined />}
+          loading={creating}
+          disabled={!canOperate}
+          onClick={onCreate}
+        >
+          {creating ? PLANNING_COPY : '创建并开始规划'}
         </Button>
-      )}
+        {!canOperate && <Text type="secondary">{CANNOT_PLAN_COPY}</Text>}
+      </Space>
     </Form>
   )
 
@@ -200,7 +210,7 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
               disabled={plan.status === 'planning'}
               onClick={onReplan}
             >
-              重新规划
+              {actionLoading === 'plan' ? PLANNING_COPY : '重新规划'}
             </Button>
             {svcFlow && (
               <Button
@@ -346,6 +356,10 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
 
   return (
     <>
+      {planningDisabled && <PlanningDisabledBanner />}
+      {collectBlock?.kind === 'quota' && (
+        <QuotaBlockAlert cta={collectBlock.cta} style={{ marginBottom: 16 }} />
+      )}
       <Steps current={step} items={stepItems} style={{ marginBottom: 24, maxWidth: 860 }} />
       {step > 0 && plan && (
         <div style={{ marginBottom: 16 }}>

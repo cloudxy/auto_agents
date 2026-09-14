@@ -25,8 +25,16 @@ WAVE0_EVENT_NAMES = (
     "login_failed",
     "task_run_submitted",
     "task_completed",
+    "task_blocked",
     "results_exported",
     "quota_exceeded",
+    "llm_planning_blocked",
+    "data_export_completed",
+    "checkout_story_started",
+    "order_status_reached",
+    "second_checkout_story_submitted",
+    "outbound_wrong_plane_rejected",
+    "duty_entry_opened",
 )
 LOGIN_FAIL_REASONS = ("credential", "expired", "locked")
 QUOTA_DIMENSIONS = ("concurrency", "storage", "llm_tokens")
@@ -65,6 +73,7 @@ class ProductEventOut(BaseModel):
     role: Optional[str] = None
     props: Optional[dict[str, Any]] = None
     created_at: datetime
+    is_internal_fixture: Optional[bool] = None
 
 
 class ProductEventListOut(BaseModel):

@@ -24,14 +24,28 @@ from platform_core.redis_async import get_async_redis
 
 logger = get_logger("service.quota")
 
-# 用户可见句（X-QUOTA / FR-12）。内部码 QUOTA_EXCEEDED 不得出现在这些常量里。
+# 用户可见句（FR-U02）。内部码 QUOTA_EXCEEDED 不得出现在这些常量里。
 PLAN_FULL_USER = "已达配额上限"
-PLAN_FULL_CTA = "申请提升配额"
+PLAN_FULL_CTA = "申请提升"
+TASK_QUOTA_LIMIT_CODE = "TASK_QUOTA_LIMIT_REACHED"
 NEAR_LIMIT_USER = "接近上限。超额操作会被拒绝。"
 GATEWAY_UNREACHABLE_USER = "平台 LLM 网关不可达"
 NO_MODEL_USER = "还没有平台模型"
 PROVIDER_ERROR_USER = "本企业供应商调用失败"
 STORAGE_CLEANUP_CTA = "去结果库"
+CONTACT_ADMIN_UPGRADE = "请联系本企业管理员开通"
+CHECKOUT_EMPTY_USER = "收款通道未开通"
+CHECKOUT_UNCONFIGURED_SUBMIT_USER = "收款通道未开通，提交后等待平台确认开通"
+CHECKOUT_PENDING_EXISTS_USER = "已有待支付"
+ORDER_STORY_CLOSED_USER = "请从结账页提交开通"
+CHECKOUT_PRODUCTS = frozenset({"plan_pro", "plan_enterprise", "relay"})
+DEFAULT_UPGRADE_PRODUCT = "plan_pro"
+BUYER_TENANT_ROLES = frozenset({"owner", "admin"})
+PRO_TIER_QUOTA = {
+    "task_concurrency": 50,
+    "result_storage": 200000,
+    "llm_tokens_month": 5000000,
+}
 SHANGHAI_TZ = "Asia/Shanghai"
 
 
@@ -74,21 +88,22 @@ def user_visible_llm_failure(code: str, message: str = "") -> str:
     return message or "调用失败"
 
 
+def _full_cta(metric: str) -> str:
+    logger.debug(f"满额 CTA | metric={metric}")
+    if metric == "result_storage":
+        return STORAGE_CLEANUP_CTA
+    return PLAN_FULL_CTA
+
+
 def build_usage_alerts(usage: dict, quota: dict, llm_error_code: str | None = None) -> list[dict]:
     logger.debug(f"生成用量告警 | llm_error_code={llm_error_code}")
     alerts: list[dict] = []
     if llm_error_code == "LLM_GATEWAY_UNREACHABLE":
         alerts.append({
-            "metric": "llm_gateway",
-            "level": "error",
+            "metric": "llm_gateway", "level": "error",
             "message": user_visible_llm_failure(llm_error_code),
         })
-    labels = {
-        "task_concurrency": "任务并发",
-        "result_storage": "结果存储",
-        "llm_tokens_month": "LLM Token",
-    }
-    for key in labels:
+    for key in ("task_concurrency", "result_storage", "llm_tokens_month"):
         limit = int(quota.get(key) or 0)
         used = int(usage.get(key) or 0)
         if limit <= 0:
@@ -96,31 +111,62 @@ def build_usage_alerts(usage: dict, quota: dict, llm_error_code: str | None = No
         ratio = used / limit
         if ratio >= 1.0:
             alerts.append({
-                "metric": key,
-                "level": "full",
-                "message": PLAN_FULL_USER,
+                "metric": key, "level": "full",
+                "message": PLAN_FULL_USER, "cta": _full_cta(key),
             })
         elif ratio >= 0.9:
             alerts.append({
-                "metric": key,
-                "level": "near",
-                "message": NEAR_LIMIT_USER,
+                "metric": key, "level": "near", "message": NEAR_LIMIT_USER,
             })
     return alerts
+
+
+def checkout_path_for(product: str) -> str:
+    logger.debug(f"结账路由 | product={product}")
+    return f"/billing/checkout?product={product}"
+
+
+def wrap_quota_exceeded(exc: "QuotaExceededException") -> BusinessException:
+    """入队/规划 HTTP 信封：已达配额上限 + 分维 CTA；禁 429 / QUOTA_EXCEEDED。"""
+    logger.warning(f"配额满信封 | inner={getattr(exc, 'code', None)}")
+    dimension = getattr(exc, "dimension", "unknown")
+    cta = STORAGE_CLEANUP_CTA if dimension == "storage" else PLAN_FULL_CTA
+    return BusinessException(
+        message=f"{PLAN_FULL_USER}。{cta}",
+        code=TASK_QUOTA_LIMIT_CODE,
+        data={"dimension": dimension, "cta": cta},
+    )
+
+
+def resolve_upgrade_intent(tenant_role: str | None, product: str = DEFAULT_UPGRADE_PRODUCT) -> dict:
+    """申请提升分角色着陆（FR-U02）：配额模块只给意图，不建支付单。"""
+    logger.info(f"申请提升分角色着陆 | role={tenant_role} product={product}")
+    sku = product if product in CHECKOUT_PRODUCTS else DEFAULT_UPGRADE_PRODUCT
+    if tenant_role in BUYER_TENANT_ROLES:
+        return {
+            "action": "checkout", "product": sku,
+            "checkout_path": checkout_path_for(sku), "message": "去结账",
+        }
+    return {
+        "action": "contact_admin", "product": sku,
+        "checkout_path": None, "message": CONTACT_ADMIN_UPGRADE,
+    }
 
 # 免费档默认配额（tenants.quota 缺失时兜底；平台级默认，运营台可改行级）
 DEFAULT_QUOTA = {
     "task_concurrency": 5,
     "result_storage": 10000,
     "llm_tokens_month": 200000,
+    "result_retention_days": 90,
 }
 
 
 class QuotaExceededException(BusinessException):
     """租户配额超限（业务码 QUOTA_EXCEEDED，文案给出可行动建议）"""
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, dimension: str = "unknown"):
         super().__init__(message=message, code="QUOTA_EXCEEDED", status_code=429)
+        self.dimension = dimension
 
 
 # 租户配额：行级 quota JSON 与平台默认逐键合并（部分覆盖生效）
@@ -190,7 +236,8 @@ class QuotaService:
             await self._emit_quota(tenant_id, "concurrency")
             raise QuotaExceededException(
                 f"任务并发{PLAN_FULL_USER}（{active}/{limit}）：请等待运行中任务完成，"
-                f"或{PLAN_FULL_CTA}"
+                f"或{PLAN_FULL_CTA}",
+                dimension="concurrency",
             )
         logger.debug(f"配额检查·任务并发 | tenant={tenant_id} {active}/{limit}")
 
@@ -208,7 +255,8 @@ class QuotaService:
         if stored >= limit:
             await self._emit_quota(tenant_id, "storage")
             raise QuotaExceededException(
-                f"结果存储{PLAN_FULL_USER}（{stored}/{limit}）：请{STORAGE_CLEANUP_CTA}清理历史结果"
+                f"结果存储{PLAN_FULL_USER}（{stored}/{limit}）：请{STORAGE_CLEANUP_CTA}清理历史结果",
+                dimension="storage",
             )
         logger.debug(f"配额检查·结果存储 | tenant={tenant_id} {stored}/{limit}")
 
@@ -216,19 +264,24 @@ class QuotaService:
         """LLM 调用前：本租户当月 total_tokens 合计 < llm_tokens_month"""
         tenant = await self._tenant(tenant_id)
         limit = int(quota_of(tenant)["llm_tokens_month"])
-        month_prefix = f"{year_month}-"
-        used = (await self.session.execute(
-            select(func.coalesce(func.sum(LlmTokenUsage.total_tokens), 0)).where(
-                LlmTokenUsage.tenant_id == tenant_id,
-                func.cast(LlmTokenUsage.stat_date, String).like(month_prefix + "%"),
-            )
-        )).scalar_one()
-        if int(used) >= limit:
+        from backend.services.llm_usage_service import get_tenant_month_used
+
+        redis_used = await get_tenant_month_used(tenant_id)
+        if redis_used is None:
+            month_prefix = f"{year_month}-"
+            redis_used = int((await self.session.execute(
+                select(func.coalesce(func.sum(LlmTokenUsage.total_tokens), 0)).where(
+                    LlmTokenUsage.tenant_id == tenant_id,
+                    func.cast(LlmTokenUsage.stat_date, String).like(month_prefix + "%"),
+                )
+            )).scalar_one())
+        if int(redis_used) >= limit:
             await self._emit_quota(tenant_id, "llm_tokens")
             raise QuotaExceededException(
-                f"本月 LLM token 用量{PLAN_FULL_USER}（{used}/{limit}）。{PLAN_FULL_CTA}"
+                f"本月 LLM token 用量{PLAN_FULL_USER}（{redis_used}/{limit}）。{PLAN_FULL_CTA}",
+                dimension="llm_tokens",
             )
-        logger.debug(f"配额检查·LLM 月度 | tenant={tenant_id} {used}/{limit}")
+        logger.debug(f"配额检查·LLM 月度 | tenant={tenant_id} {redis_used}/{limit}")
 
     async def usage_by_member(self, tenant_id: int) -> list[dict]:
         """成员维度用量分摊（B6 工单 91）：spider_tasks 按 created_by 聚合
@@ -270,8 +323,11 @@ class QuotaService:
         )
         month_prefix = f"{year_month}-"
         tokens_row = (await self.session.execute(
-            select(LlmTokenUsage.provider_name,
-                   func.sum(LlmTokenUsage.total_tokens).label("tokens"))
+            select(
+                LlmTokenUsage.provider_name,
+                func.sum(LlmTokenUsage.total_tokens).label("tokens"),
+                func.sum(LlmTokenUsage.cost_cents).label("cost"),
+            )
             .where(
                 LlmTokenUsage.tenant_id == tenant_id,
                 func.cast(LlmTokenUsage.stat_date, String).like(month_prefix + "%"),
@@ -279,6 +335,7 @@ class QuotaService:
             .group_by(LlmTokenUsage.provider_name)
         )).all()
         tokens_total = sum(int(r.tokens or 0) for r in tokens_row)
+        cost_by_provider = {r.provider_name: int(r.cost or 0) for r in tokens_row}
         usage = {
             "task_concurrency": int(active_tasks),
             "result_storage": int(stored_results),
@@ -289,6 +346,8 @@ class QuotaService:
             "quota": quota,
             "usage": usage,
             "llm_by_provider": {r.provider_name: int(r.tokens or 0) for r in tokens_row},
+            "cost_by_provider": cost_by_provider,
+            "cost_cents_total": sum(cost_by_provider.values()),
             "timezone": SHANGHAI_TZ,
             "year_month": year_month,
             "alerts": build_usage_alerts(usage, quota),

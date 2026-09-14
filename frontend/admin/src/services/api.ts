@@ -9,12 +9,12 @@ import { useAuthStore } from '../store/useAuthStore'
 import { navigateToLogin } from './navigation'
 
 const api = createApiClient({
-  baseURL: process.env.REACT_APP_API_BASE_URL || 'http://localhost:9111/api/v1',
+  baseURL: process.env.REACT_APP_API_BASE_URL || '/api/v1',
   getAuthToken: () => useAuthStore.getState().token,
   onUnauthorized: () => {
     useAuthStore.getState().logout()
-    const here = window.location.pathname
-    if (here === '/login') return
+    const here = `${window.location.pathname}${window.location.search}`
+    if (window.location.pathname === '/login') return
     navigateToLogin(here)
   },
 })

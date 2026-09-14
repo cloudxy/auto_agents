@@ -75,13 +75,15 @@ beforeEach(() => {
 test('GWT-04.1 success primary goes to admin login with from and named copy', async () => {
   signup.mockResolvedValue({
     tenant: { name: 'Acme Corp', slug: 'acme-corp' },
-    owner: { username: 'boss' },
+    owner: { username: 'boss', email: 'boss@acme.com' },
   })
   renderRegister()
   fillForm()
   submit()
 
-  expect(await screen.findByText('企业「Acme Corp」已开通，负责人 boss。登录后开始采集。')).toBeInTheDocument()
+  expect(await screen.findByText(
+    '企业「Acme Corp」已开通，负责人 boss@acme.com。登录时请填写注册邮箱，登录后开始采集。',
+  )).toBeInTheDocument()
   expect(document.body.textContent || '').not.toContain('企业「」')
   const login = screen.getByRole('link', { name: '登录管理后台' })
   const href = login.getAttribute('href') || ''
@@ -91,6 +93,36 @@ test('GWT-04.1 success primary goes to admin login with from and named copy', as
   expect(href).not.toContain('/register')
   expect(screen.getByRole('button', { name: '再注册一家' })).toBeInTheDocument()
   expect(screen.queryByRole('link', { name: '再注册一家' })).not.toBeInTheDocument()
+})
+
+test('GWT-83.3 success screen names the registered email as the login identifier', async () => {
+  signup.mockResolvedValue({
+    tenant: { name: 'Acme Corp', slug: 'acme-corp' },
+    owner: { username: 'boss', email: 'boss@acme.com' },
+  })
+  renderRegister()
+  fillForm()
+  submit()
+
+  const copy = await screen.findByText(/已开通/)
+  // 写明「登录时请填写注册邮箱」；负责人标识展示注册邮箱本身
+  expect(copy).toHaveTextContent('登录时请填写注册邮箱')
+  expect(copy).toHaveTextContent('boss@acme.com')
+})
+
+test('GWT-83.3 fallback without email still tells email login, never short-name-only', async () => {
+  signup.mockResolvedValue({
+    tenant: { name: 'Acme Corp', slug: 'acme-corp' },
+    owner: { username: 'boss' },
+  })
+  renderRegister()
+  fillForm()
+  submit()
+
+  const copy = await screen.findByText(/已开通/)
+  expect(copy).toHaveTextContent('登录时请填写注册邮箱')
+  // 展示短登录名不暗示「只能用短登录名」：提示句在场即合规（GWT-83.3 后半）
+  expect(copy).toHaveTextContent('负责人 boss。')
 })
 
 test('GWT-04.2 failed register stays on form with 注册未完成 and no success screen', async () => {
@@ -206,3 +238,49 @@ test('success unwraps once (no nested .data empty names)', async () => {
   expect(screen.queryByText(/企业「undefined」/)).not.toBeInTheDocument()
   await waitFor(() => expect(signup).toHaveBeenCalledTimes(1))
 })
+
+test('GWT-M51.1 primary is 创建企业 and success is company admin, not personal space', async () => {
+  signup.mockResolvedValue({
+    tenant: { name: 'Acme Corp', slug: 'acme-corp' },
+    owner: { username: 'boss', email: 'boss@acme.com' },
+  })
+  renderRegister()
+  expect(screen.getByRole('button', { name: '创建企业' })).toBeInTheDocument()
+  expect(document.body.textContent || '').not.toMatch(/个人空间/)
+  expect(document.body.textContent || '').not.toMatch(/去掉企业/)
+  fillForm()
+  submit()
+  const login = await screen.findByRole('link', { name: '登录管理后台' })
+  expect(decodeURIComponent(login.getAttribute('href') || '')).toContain('/dashboard')
+  expect(decodeURIComponent(login.getAttribute('href') || '')).not.toMatch(/personal|me\/home|个人/)
+  expect(document.body.textContent || '').not.toMatch(/个人空间/)
+  expect(document.body.textContent || '').not.toContain('当前可买')
+})
+
+test('GWT-M51.2 empty company name: 请填写企业名, does not create', async () => {
+  renderRegister()
+  fillForm({ company: '' })
+  submit()
+  expect(await screen.findByText('请填写企业名')).toBeInTheDocument()
+  expect(signup).not.toHaveBeenCalled()
+  expect(screen.queryByRole('link', { name: '登录管理后台' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '创建企业' })).toBeInTheDocument()
+})
+
+test('GWT-M51.4 company name of 1 char: 企业名至少 2 个字符, does not create', async () => {
+  renderRegister()
+  fillForm({ company: '甲' })
+  submit()
+  expect(await screen.findByText('企业名至少 2 个字符')).toBeInTheDocument()
+  expect(signup).not.toHaveBeenCalled()
+  expect(screen.queryByRole('link', { name: '登录管理后台' })).not.toBeInTheDocument()
+})
+
+test('GWT-M51.3 no personal-space CTA on the register form', () => {
+  renderRegister()
+  const copy = document.body.textContent || ''
+  expect(copy).not.toMatch(/开通个人空间/)
+  expect(copy).not.toMatch(/去掉企业只用个人账号/)
+  expect(copy).not.toMatch(/个人空间/)
+})
+

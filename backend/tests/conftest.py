@@ -33,6 +33,8 @@ if str(TESTS_DIR) not in sys.path:
 
 # 固定测试环境为 local（必须在导入 config 之前设置）
 os.environ.setdefault("APP_ENV", "local")
+# T1：测试态 bcrypt 因子降到 4，避免登录链被 12 轮拖进分钟级
+os.environ.setdefault("BCRYPT_ROUNDS", "4")
 
 
 # ── get_async_db 全局兜底 mock（CI 无 .env，防意外连真库）──
@@ -103,7 +105,15 @@ async def _current_user_override(request, credentials, session, default_role: st
             )
     if default_role is None:
         raise AuthenticationException(message="未登录或缺少 Token")
-    return CurrentUser(id=1, username=f"test-{default_role}", role=default_role)
+    is_plat = default_role == "platform_admin"
+    return CurrentUser(
+        id=1,
+        username=f"test-{default_role}",
+        role="admin" if is_plat else default_role,
+        is_platform_admin=is_plat,
+        tenant_id=None if is_plat else (1 if default_role == "admin" else None),
+        tenant_role=None if is_plat else ("owner" if default_role == "admin" else None),
+    )
 
 
 def _make_auth_override(role: str | None):
@@ -164,8 +174,16 @@ def _reset_auth_override(app):
 
 @pytest.fixture
 def admin_client(app, client, _reset_auth_override):
-    """admin 特权 TestClient（显式 opt-in；无凭据请求以 admin 快照通过）"""
+    """admin 特权 TestClient（租户 admin，非平台超管）"""
     _set_auth_override(app, "admin")
+    yield client
+    _set_auth_override(app, None)
+
+
+@pytest.fixture
+def platform_admin_client(app, client, _reset_auth_override):
+    """平台超管 TestClient（require_platform_admin 放行）"""
+    _set_auth_override(app, "platform_admin")
     yield client
     _set_auth_override(app, None)
 
@@ -221,6 +239,7 @@ def platform_admin_client(app, client, _reset_auth_override):
 def make_platform_admin_headers(db_session) -> dict:
     """平台超管 Bearer（真链路：platform 租户 + is_platform_admin 用户 + JWT）"""
     import asyncio
+    import time
 
     from backend.services.auth_service import AuthService
     from platform_core.models.tenant import Tenant
@@ -246,7 +265,16 @@ def make_platform_admin_headers(db_session) -> dict:
             })
             return token.access_token
 
-    return {"Authorization": f"Bearer {asyncio.run(_go())}"}
+    last: BaseException | None = None
+    for _ in range(8):
+        try:
+            return {"Authorization": f"Bearer {asyncio.run(_go())}"}
+        except Exception as exc:  # noqa: BLE001 SQLite 测试库偶发 locked
+            if "database is locked" not in str(exc):
+                raise
+            last = exc
+            time.sleep(0.05)
+    raise last  # type: ignore[misc]
 
 
 def make_tenant_owner_headers(db_session, *, slug: str = "co-a") -> tuple[dict, int]:
@@ -350,7 +378,10 @@ def db_engine(tmp_path: Path) -> Iterator["AsyncEngine"]:
     else:
         url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
 
-    engine = create_async_engine(url, poolclass=NullPool)
+    engine_kw: dict = {"poolclass": NullPool}
+    if url.startswith("sqlite"):
+        engine_kw["connect_args"] = {"timeout": 30}
+    engine = create_async_engine(url, **engine_kw)
 
     async def _create_all() -> None:
         async with engine.begin() as conn:
@@ -434,9 +465,23 @@ def _reset_db_manager():
 
 
 @pytest.fixture(autouse=True)
+def _power_market_enabled_for_tests():
+    """公开/订阅测默认打开总开关；关闭路径在用例里 settings.set False（FR-U11）。"""
+    from config import settings
+
+    original = settings.get("POWER_MARKET.ENABLED")
+    settings.set("POWER_MARKET.ENABLED", True)
+    try:
+        yield
+    finally:
+        settings.set("POWER_MARKET.ENABLED", original)
+
+
+@pytest.fixture(autouse=True)
 def _workers_online_unless_offline_node(request, monkeypatch):
-    """入队闸默认报告工人在线；GWT-18.2/18.4 离线节点走真心跳扫描。"""
-    if "test_spider_worker_offline.py" in request.node.nodeid:
+    """入队闸默认报告工人在线；离线节点（GWT-18.2/18.4 / FR-U02.1）走真心跳扫描。"""
+    nodeid = request.node.nodeid
+    if "test_spider_worker_offline.py" in nodeid or "test_fr_u01_enqueue.py" in nodeid:
         return
 
     async def _online(_client) -> int:
@@ -449,20 +494,25 @@ def _workers_online_unless_offline_node(request, monkeypatch):
 
 
 def _purge_quota_count_keys() -> None:
-    """DEL quota:count:* via URL 直连（禁止 redis_client→init_all 拉真 MySQL）。"""
+    """DEL quota:count:* / login_fail:* via URL 直连（禁止 redis_client→init_all 拉真 MySQL）。
+
+    login_fail:*（既有缺口，三票回报）：本机 Redis 限流计数跨测试存活，曾把
+    test_gwt_15_4 的 fail-a/locked-a 喂爆 429 假红——与 quota:count:* 同口径清理。
+    """
     import redis as redis_sync
 
     from config import settings
-    from platform_core.queues import QUOTA_COUNT_PREFIX
+    from platform_core.queues import LOGIN_FAIL_PREFIX, QUOTA_COUNT_PREFIX
 
     url = str(settings.get("REDIS.DEFAULT.URL") or "")
     if not url:
         return
     client = redis_sync.from_url(url, decode_responses=True, socket_connect_timeout=0.5)
     try:
-        keys = list(client.scan_iter(match=f"{QUOTA_COUNT_PREFIX}*", count=200))
-        if keys:
-            client.delete(*keys)
+        for prefix in (QUOTA_COUNT_PREFIX, LOGIN_FAIL_PREFIX):
+            keys = list(client.scan_iter(match=f"{prefix}*", count=200))
+            if keys:
+                client.delete(*keys)
     finally:
         client.close()
 

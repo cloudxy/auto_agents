@@ -27,6 +27,10 @@ from typing import TYPE_CHECKING, Optional
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.ai_planner.llm_client import (
+    PLANNING_DISABLED_CODE,
+    PLANNING_DISABLED_COPY,
+)
 from backend.services.llm_common.seam import seam as _seam
 from backend.services.spider_common import require_enqueue_tenant
 from platform_core.exceptions import BusinessException, NotFoundException
@@ -43,6 +47,12 @@ if TYPE_CHECKING:  # 仅类型检查期导入（运行时不求值注解，规�
     from backend.services.ai_planner.state import _TaskSnapshot
 
 logger = get_logger("api")
+
+
+def planning_is_open() -> bool:
+    """智能规划是否对提交开放（LLM.ENABLED；与网关可达/BYOK 分家）。"""
+    logger.debug("读取智能规划开关")
+    return bool(_seam().settings.get("LLM.ENABLED", False))
 
 
 class AiPlannerService:
@@ -62,6 +72,7 @@ class AiPlannerService:
         """创建计划（draft；html_snippet 预置后规划阶段跳过在线抓取）"""
         logger.info(f"创建 AI 采集计划: target_url={payload.target_url}, by={created_by}")
         owner_id = require_enqueue_tenant(tenant_id)
+        await self._reject_if_planning_disabled(owner_id)
         plan_json = {"html_snippet": payload.html_snippet} if payload.html_snippet else None
         item = await self.repo.create(
             target_url=payload.target_url, status="draft", plan_json=plan_json,
@@ -103,6 +114,39 @@ class AiPlannerService:
     # ------------------------------------------------------------------
     # 后台任务触发（API 端点内 create_task，立即返回快照）
     # ------------------------------------------------------------------
+    async def _reject_if_token_quota_full(self, tenant_id: int | None) -> None:
+        """规划点击 3 秒内可见配额句（GWT-U02.4）；不建单、不混工人句。"""
+        logger.info(f"规划前 token 配额闸 | tenant={tenant_id}")
+        if tenant_id is None:
+            return
+        from backend.services.quota_service import (
+            QuotaExceededException, QuotaService, shanghai_year_month,
+            wrap_quota_exceeded,
+        )
+        try:
+            await QuotaService(self.session).check_llm_tokens_month(
+                int(tenant_id), shanghai_year_month(),
+            )
+        except QuotaExceededException as exc:
+            raise wrap_quota_exceeded(exc) from exc
+
+    async def _reject_if_planning_disabled(self, tenant_id: int | None) -> None:
+        """未开放立即 422（GWT-M01.1）：不抢 planning、不入队、上报失败不挡。"""
+        logger.info(f"规划开放闸 | tenant={tenant_id}")
+        if planning_is_open():
+            return
+        from backend.services.product_event_service import emit_product_event
+        await emit_product_event(
+            self.session, "llm_planning_blocked",
+            tenant_id=tenant_id,
+            props={"reason": "disabled"},
+        )
+        raise BusinessException(
+            PLANNING_DISABLED_COPY,
+            code=PLANNING_DISABLED_CODE,
+            status_code=422,
+        )
+
     async def launch_plan(self, plan_id: int) -> AiPlanResponse:
         """触发后台规划：原子抢断置 planning → asyncio.create_task 执行，立即返回快照"""
         plan = await self.repo.get_by_id(plan_id)
@@ -110,6 +154,9 @@ class AiPlannerService:
             raise NotFoundException("AI 采集计划")
         if plan.status in _seam()._BUSY_STATUSES:
             raise BusinessException(f"计划当前状态为 {plan.status}，不允许触发规划")
+        owner_id = int(plan.tenant_id) if getattr(plan, "tenant_id", None) else None
+        await self._reject_if_planning_disabled(owner_id)
+        await self._reject_if_token_quota_full(owner_id)
         # M5：check-then-act 非原子，并发触发会双跑双 LLM 调用；
         # 条件 UPDATE（status NOT IN busy）一次语句抢断，rowcount=0 即已被并发占用。
         claimed = await self.repo.claim_status(

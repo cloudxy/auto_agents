@@ -14,6 +14,8 @@ export interface UsageOverview {
   quota?: { task_concurrency: number; result_storage: number; llm_tokens_month: number }
   usage?: { task_concurrency: number; result_storage: number; llm_tokens_month: number }
   llm_by_provider?: Record<string, number>
+  cost_by_provider?: Record<string, number>
+  cost_cents_total?: number
   timezone?: string
   year_month?: string
   alerts?: UsageAlert[]
@@ -33,3 +35,24 @@ export interface MemberUsageRow {
 /** 成员维度用量分摊（B6 工单 91） */
 export const fetchUsageByMember = (): Promise<MemberUsageRow[]> =>
   api.get('/tenants/me/usage/by-member').then((r) => unwrap<MemberUsageRow[]>(r))
+
+export interface DeliveryWebhook {
+  delivery_webhook_url: string | null
+}
+
+export const fetchDeliveryWebhook = (): Promise<DeliveryWebhook> =>
+  api.get('/tenants/me/delivery-webhook').then((r) => unwrap<DeliveryWebhook>(r))
+
+export const putDeliveryWebhook = (url: string | null): Promise<DeliveryWebhook> =>
+  api.put('/tenants/me/delivery-webhook', { url }).then((r) => unwrap<DeliveryWebhook>(r))
+
+export interface UpgradeIntent {
+  action: 'checkout' | 'contact_admin' | string
+  product: string
+  checkout_path: string | null
+  message: string
+}
+
+/** T-03 GET /tenants/me/quota/upgrade-intent：分角色着陆，不建单。 */
+export const fetchUpgradeIntent = (product = 'plan_pro'): Promise<UpgradeIntent> =>
+  api.get('/tenants/me/quota/upgrade-intent', { params: { product } }).then((r) => unwrap<UpgradeIntent>(r))

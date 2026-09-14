@@ -16,6 +16,9 @@ from platform_core.models.user import User
 from platform_core.tenant_context import tenant_exempt_tables, tenant_scope
 from platform_core.schemas.product_event import CTA_FUNNEL
 
+# T-22：导入 T-35 的库/沙箱夹具（pytest 按模块命名空间解析 fixture）
+from backend.tests.test_t35_asset_import import import_env  # noqa: F401
+
 
 QUERY = "/api/v1/product-events"
 PUBLIC = "/api/v1/public/events"
@@ -409,3 +412,280 @@ def test_product_events_exempt_update_unfiltered(db_session):
                 await s.commit()
                 assert result.rowcount == 1
     asyncio.run(_go())
+
+
+# ===========================================================================
+# T-22（FR-92）：GWT-92.6 fail-open 逐上报点异常注入 + GWT-92.7 租户无查询面
+# 七上报点 = offline_order_submitted/confirmed(T-02) · outbound_key_issued(T-05)
+#          · relay_token_call_succeeded(T-09) · market_list_paged(T-14)
+#          · user_restored(T-24) · asset_imported(T-35)
+# ===========================================================================
+
+
+@pytest.fixture
+def events_channel_down(monkeypatch):
+    """GWT-92.6 注入：product_events 写入通道整体故障（emit 内吞，主路径不挡）"""
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("product_events write down")
+
+    monkeypatch.setattr("backend.services.product_event_service._persist_event", _boom)
+
+
+def _t22_event_rows(db_session, *names: str) -> list:
+    async def _go():
+        async with db_session() as s:
+            return list((await s.execute(
+                select(ProductEvent).where(ProductEvent.event_name.in_(list(names)))
+            )).scalars().all())
+
+    return asyncio.run(_go())
+
+
+def test_gwt_92_6_offline_order_events_fail_open(db_client, db_session, events_channel_down):
+    """下单/确认收款：事件通道故障 → 申请已挂上 + 确认 paid，零事件行（GWT-92.6）"""
+    from backend.tests.test_billing_orders_write_rules import _seed_plans
+    from platform_core.models.billing import Order
+
+    _seed_plans(db_session)
+    owner, tid = make_tenant_owner_headers(db_session, slug="t22-926o")
+    created = db_client.post(
+        "/api/v1/billing/checkout", headers=owner, json={"product": "plan_pro"},
+    )
+    assert created.status_code == 201, created.text
+    order_id = int(created.json()["data"]["id"])
+
+    async def _order_state():
+        async with db_session() as s:
+            row = await s.get(Order, order_id)
+            return row.status
+
+    assert asyncio.run(_order_state()) == "checkout_pending"
+
+    pa = make_platform_admin_headers(db_session)
+    confirmed = db_client.post(f"/api/v1/billing/orders/{order_id}/confirm", headers=pa)
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["data"]["status"] == "fulfilled"
+
+    async def _paid_state():
+        async with db_session() as s:
+            return (await s.get(Order, order_id)).status
+
+    assert asyncio.run(_paid_state()) == "fulfilled"
+    assert _t22_event_rows(
+        db_session, "offline_order_submitted", "offline_order_confirmed",
+        "order_status_reached",
+    ) == []
+
+
+def test_gwt_92_6_outbound_key_event_fail_open(db_client, db_session, events_channel_down):
+    """签发钥匙：事件通道故障 → 钥匙已签发、明文可见一次（GWT-92.6）"""
+    from platform_core.models.outbound_key import OutboundKey
+
+    owner, tid = make_tenant_owner_headers(db_session, slug="t22-926k")
+    resp = db_client.post("/api/v1/outbound/keys", headers=owner, json={"name": "管道"})
+    assert resp.status_code == 201, resp.text
+    data = resp.json()["data"]
+    assert data["plaintext_key"].startswith("ok-")  # 明文只出现这一次
+
+    async def _keys():
+        async with db_session() as s:
+            rows = (await s.execute(
+                select(OutboundKey).where(OutboundKey.tenant_id == tid)
+            )).scalars().all()
+            return [(r.revoked_at, r.key_prefix) for r in rows]
+
+    keys = asyncio.run(_keys())
+    assert len(keys) == 1 and keys[0][0] is None  # 钥匙已落库、未吊销
+    assert _t22_event_rows(db_session, "outbound_key_issued") == []
+
+
+def _t22_relay_env(db_session, *, slug: str) -> tuple[int, int]:
+    """一个已登记网关、未吊销、用量 0 的令牌（观察触发面成立）"""
+    from platform_core.models.relay import RelayGroup, RelayToken
+    from platform_core.models.tenant import Tenant
+
+    async def _go():
+        async with db_session() as s:
+            t = Tenant(slug=slug, name="公司-relay")
+            s.add(t)
+            await s.flush()
+            from platform_core.models.relay_sku_entitlement import RelaySkuEntitlement
+            s.add(RelaySkuEntitlement(tenant_id=t.id, status="active"))
+            g = RelayGroup(tenant_id=t.id, name="g", rpm_limit=0, tpm_limit=0)
+            s.add(g)
+            await s.flush()
+            tok = RelayToken(
+                tenant_id=t.id, group_id=g.id, name="k",
+                key_prefix="sk-t22", key_hash=f"hash-{slug}", quota_tokens=-1,
+                used_tokens=0, gateway_key_id=f"gwi-{slug}",
+            )
+            s.add(tok)
+            await s.commit()
+            await s.refresh(tok)
+            return int(t.id), int(tok.id)
+
+    return asyncio.run(_go())
+
+
+def test_gwt_92_6_relay_usage_event_fail_open(db_session, monkeypatch, events_channel_down):
+    """用量 0→≥1：事件通道故障 → 回写落库、详情/批量刷新不炸（GWT-92.6）"""
+    from backend.services.relay_service import RelayService
+    from platform_core.models.relay import RelayToken
+
+    tid, token_id = _t22_relay_env(db_session, slug="t22-926r")
+    monkeypatch.setattr(
+        RelayService, "_observe_gateway_usage",
+        AsyncMock(return_value=(7, datetime(2026, 9, 11, 4, 0, 0))),
+    )
+
+    async def _go():
+        async with db_session() as s:
+            out, degraded = await RelayService(s).get_token(tid, token_id)
+            assert int(out.used_tokens) == 7 and degraded is False
+            rows = await RelayService(s).refresh_tokens_usage(tid)
+            assert [int(r.used_tokens) for r in rows] == [7]
+
+    asyncio.run(_go())  # 不抛 = 主路径仍成功
+
+    async def _persisted():
+        async with db_session() as s:
+            return int((await s.get(RelayToken, token_id)).used_tokens)
+
+    assert asyncio.run(_persisted()) == 7  # 回写落库不回退
+    assert _t22_event_rows(db_session, "relay_token_call_succeeded") == []
+
+
+def test_gwt_92_6_relay_refresh_emits_with_production_expire_on_commit(
+    db_engine, db_session, monkeypatch,
+):
+    """T-22 审查缺陷回归（红→绿）：生产 get_async_session 不带 expire_on_commit=False，
+    refresh_tokens_usage 的 relay_token_call_succeeded 上报不得在吞异常圈外读
+    commit 后过期属性抛 MissingGreenlet（旧实现把 fail-open 打穿成主路径失败）。"""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from backend.services.relay_service import RelayService
+
+    tid, token_id = _t22_relay_env(db_session, slug="t22-926p")
+    monkeypatch.setattr(
+        RelayService, "_observe_gateway_usage",
+        AsyncMock(return_value=(7, datetime(2026, 9, 11, 4, 0, 0))),
+    )
+
+    async def _go():
+        async with AsyncSession(db_engine) as s:  # 生产形态：expire_on_commit=True
+            rows = await RelayService(s).refresh_tokens_usage(tid)
+            assert [int(r.used_tokens) for r in rows] == [7]
+            out, degraded = await RelayService(s).get_token(tid, token_id)
+            assert int(out.used_tokens) == 7 and degraded is False
+
+    asyncio.run(_go())
+    events = _t22_event_rows(db_session, "relay_token_call_succeeded")
+    assert len(events) == 1  # 快照口径下事件不丢（至少一次，GWT-92.4 不回退）
+    assert (events[0].props or {}).get("token_id") == token_id
+
+
+def test_gwt_92_6_market_paged_event_fail_open(
+    db_client, db_session, events_channel_down, monkeypatch,
+):
+    """公开列表翻页：事件通道故障 → 列表已翻页、页上事实不变（GWT-92.6）"""
+    from backend.tests.fr33_support import fr33_asset, seed_rows
+
+    class _RateRedis:
+        async def incr(self, _key):
+            return 1
+
+        async def expire(self, _key, _ttl):
+            return True
+
+    import backend.app.api.v1.public_skills as mod
+
+    async def _fake_redis(_key: str = "DEFAULT"):
+        return _RateRedis()
+
+    monkeypatch.setattr(mod, "get_async_redis", _fake_redis)
+    seed_rows(db_session, [
+        fr33_asset(name=f"t22pg-{i:02d}", title=f"夹具{i:02d}") for i in range(25)
+    ])
+    page2 = db_client.get("/api/v1/public/skills", params={"page": 2})
+    assert page2.status_code == 200, page2.text
+    data = page2.json()["data"]
+    assert data["total"] == 25
+    assert len(data["items"]) == 5  # 列表已翻页（25 张、页大小 20）
+    assert data["has_more"] is False
+    assert _t22_event_rows(db_session, "market_list_paged") == []
+
+
+def test_gwt_92_6_user_restored_event_fail_open(db_client, db_session, events_channel_down):
+    """恢复软删用户：事件通道故障 → 恢复成功、用户回在册（GWT-92.6/92.8）"""
+    from platform_core.models.tenant import Tenant
+    from platform_core.models.user import User
+
+    async def _seed():
+        async with db_session() as s:
+            t = Tenant(slug="t22-926u", name="公司-恢复")
+            s.add(t)
+            await s.flush()
+            gone = User(
+                username="gone-t22", email="gone-t22@x.co", password_hash="x",
+                role="viewer", tenant_id=t.id, tenant_role="viewer",
+                deleted_at=datetime(2026, 9, 10, 0, 0, 0), is_active=False,
+            )
+            s.add(gone)
+            await s.commit()
+            await s.refresh(gone)
+            return int(gone.id)
+
+    uid = asyncio.run(_seed())
+    pa = make_platform_admin_headers(db_session)
+    resp = db_client.post(f"/api/v1/admin/users/{uid}/restore", headers=pa)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["deleted_at"] is None
+
+    async def _alive():
+        async with db_session() as s:
+            row = await s.get(User, uid)
+            return row.deleted_at is None and row.is_active is True
+
+    assert asyncio.run(_alive())
+    assert _t22_event_rows(db_session, "user_restored") == []
+
+
+def test_gwt_92_6_asset_imported_event_fail_open(db_client, db_session, import_env, events_channel_down):
+    """资产导入：事件通道故障 → 导入完成、资产已落库（GWT-92.6/92.9）"""
+    from backend.tests.test_t35_asset_import import SKILL_MD, _post_zip, _zip
+    from platform_core.models.capability import CapabilityAsset
+
+    pa = make_platform_admin_headers(db_session)
+    resp = _post_zip(db_client, pa, _zip({"imported-skill/SKILL.md": SKILL_MD}))
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["succeeded"] == 1 and data["status"] == "completed"
+
+    async def _assets():
+        async with db_session() as s:
+            rows = (await s.execute(
+                select(CapabilityAsset).where(CapabilityAsset.name == "imported-skill")
+            )).scalars().all()
+            return [(r.listing_state, r.asset_type) for r in rows]
+
+    assert asyncio.run(_assets()) == [("unlisted", "skill")]  # 资产已落库
+    assert (import_env["library"] / "skills" / "imported-skill" / "SKILL.md").exists()
+    assert _t22_event_rows(db_session, "asset_imported") == []
+
+
+def test_gwt_92_7_tenant_query_face_same_shape_as_missing_page(db_client, db_session):
+    """租户直打查询面 = 与「页面不存在」同形（v2 仍真）：统一 404 信封、非 403、零泄露"""
+    tenant_headers, _tid = make_tenant_owner_headers(db_session, slug="t22-927")
+    _seed_event(db_session, event_name="offline_order_confirmed", tenant_id=1)
+    faced = db_client.get(QUERY, headers=tenant_headers)
+    # 同形对照：租户直打另一个「对其不存在」的平台页（同走 require_platform_admin_or_404）
+    other_missing = db_client.get("/api/v1/admin/tenants", headers=tenant_headers)
+    assert faced.status_code == other_missing.status_code == 404
+    fb, ob = faced.json(), other_missing.json()
+    assert set(fb) == set(ob)  # 同形：同一信封键集
+    for key in ("success", "code", "message", "data"):
+        assert fb[key] == ob[key]
+    assert fb["code"] == "HTTP_404" and fb["message"] == "Not Found"  # 不是 403 信封
+    assert "FORBIDDEN" not in faced.text and "403" not in fb["code"]
+    assert "offline_order_confirmed" not in faced.text  # 零事实泄露

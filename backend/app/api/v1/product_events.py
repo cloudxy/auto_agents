@@ -52,6 +52,7 @@ async def query_product_events(
     tenant_id: Optional[int] = Query(None, ge=1),
     occurred_from: Optional[datetime] = Query(None),
     occurred_to: Optional[datetime] = Query(None),
+    is_internal_fixture: Optional[bool] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     _user: CurrentUser = Depends(require_platform_admin_or_404),
@@ -62,6 +63,7 @@ async def query_product_events(
     data = await service.query(
         event_name=event_name, tenant_id=tenant_id,
         occurred_from=occurred_from, occurred_to=occurred_to,
+        is_internal_fixture=is_internal_fixture,
         skip=skip, limit=limit,
     )
     return ok(data=data.model_dump(mode="json"))

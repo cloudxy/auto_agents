@@ -4,7 +4,7 @@ Revision ID: 025
 Revises: 024
 Create Date: 2026-09-05
 
-体检 F-03 per-table 处置（决策表全文见 .scratch/p0-p1-2026-09/issues/T9.md）：
+体检 F-03 per-table 处置（T9，已结案；软删唯一键与应用 `deleted_at IS NULL` 语义对齐）：
 - 本迁移改造（应用层「已存在」检查均带 deleted_at IS NULL——删后即视为可建，
   DB 唯一键必须与应用语义对齐，否则应用放行、DB 拒绝，IntegrityError 裸奔）：
     departments          uq_departments_tenant_name              (tenant_id, name)

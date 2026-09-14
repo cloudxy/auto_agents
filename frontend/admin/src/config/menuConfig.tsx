@@ -28,7 +28,7 @@ export interface MenuItem {
 }
 
 /** 平台写面路由（导航隐藏 + 直打 404；与 /llm 无关） */
-export const PLATFORM_WRITE_KEYS = ['/newapi', '/platform-ops', '/users'] as const
+export const PLATFORM_WRITE_KEYS = ['/newapi', '/platform-ops', '/users', '/settings'] as const
 
 export const isPlatformWritePath = (pathname: string): boolean =>
   PLATFORM_WRITE_KEYS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
@@ -44,6 +44,7 @@ export const menuConfig: MenuItem[] = [
     children: [
       { key: '/dashboard', label: '仪表盘', permission: 'menu:dashboard' },
       { key: '/usage', label: '用量看板', permission: 'menu:usage', tenantOnly: true },
+      { key: '/relay', label: '我的渠道组', permission: 'menu:relay', tenantOnly: true },
     ],
   },
   {
@@ -56,6 +57,9 @@ export const menuConfig: MenuItem[] = [
       { key: '/spiders/nodes', label: '节点监控', permission: 'menu:spiders.nodes' },
       { key: '/ai', label: 'AI 采集规划', permission: 'menu:ai' },
       { key: '/data', label: '数据中心', permission: 'menu:data' },
+      // T-06 出站拉数钥匙（FR-51）：tenantOnly 单控（可见性矩阵：租户三角色都显示、超管无企业隐藏）；
+      // 不加权限码——新码需迁移+fallback 双落，漏一处叶被滤光违反「不得永久消失」；写权在页内藏控件
+      { key: '/outbound-keys', label: '出站拉数钥匙', tenantOnly: true },
     ],
   },
   {
@@ -85,7 +89,7 @@ export const menuConfig: MenuItem[] = [
       { key: '/llm', label: 'LLM 配置', permission: 'menu:llm' },
       { key: '/newapi', label: '中转站管控', permission: 'menu:newapi', platformOnly: true },
       { key: '/users', label: '用户管理', permission: 'menu:users', platformOnly: true },
-      { key: '/settings', label: '系统设置', permission: 'menu:settings' },
+      { key: '/settings', label: '系统设置', permission: 'menu:settings', platformOnly: true },
     ],
   },
 ]

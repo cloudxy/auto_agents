@@ -6,7 +6,7 @@
 （行级隔离生效）；无锚 → platform_scope（平台域全量，写豁免租户断言）。
 
 删除测试：删掉本模块，每个后台路径又要各自开 session + 手挂 scope——
-复杂度集中重现，确认为深模块（见 docs/plan/architecture-review 候选1）。
+复杂度集中重现，确认为深模块（禁止拆回各后台路径各自开 session）。
 """
 from contextlib import asynccontextmanager
 from typing import Any, Optional
@@ -14,10 +14,14 @@ from typing import Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import platform_core.db as _db
+from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
 from platform_core.tenant_context import platform_scope, tenant_scope
 
 logger = get_logger("service.background_session")
+
+# 平台租户 slug（024 种子行；与 user_service / tenant_admin_service 同字面量口径）
+PLATFORM_TENANT_SLUG = "platform"
 
 
 def _anchor_tenant_id(anchor: Any) -> Optional[int]:
@@ -62,3 +66,28 @@ async def default_tenant_id(session: AsyncSession) -> int:
     await session.flush()
     logger.info("默认租户已按需创建")
     return int(tenant.id)
+
+
+# 平台租户（slug=platform，024 种子行）——平台超管的 acting tenant（FR-102 / T-38）。
+# 与 default_tenant_id 的关键差异（契约 §7/§8 钉死）：种子行缺失 = 配置错误 →
+# 入队失败可见（fail loud），不静默回退 None、不临时建租户。
+async def platform_tenant_id_or_none(session: AsyncSession) -> Optional[int]:
+    """查平台租户 id（行缺失返回 None；非致命判定路径用，如冒名守卫）"""
+    logger.debug("平台租户查询")
+    from sqlalchemy import select
+
+    from platform_core.models.tenant import Tenant
+
+    return (await session.execute(
+        select(Tenant.id).where(Tenant.slug == PLATFORM_TENANT_SLUG)
+    )).scalar_one_or_none()
+
+
+async def platform_tenant_id(session: AsyncSession) -> int:
+    """平台租户 id（行缺失 = 配置错误，BusinessException 入队失败可见）"""
+    logger.debug("平台租户解析（严格）")
+    row = await platform_tenant_id_or_none(session)
+    if row is None:
+        logger.error("平台租户缺失（slug=platform 种子行不存在，迁移 024 未执行？）")
+        raise BusinessException("平台租户未初始化，无法入队")
+    return row

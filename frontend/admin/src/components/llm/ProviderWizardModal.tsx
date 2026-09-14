@@ -11,10 +11,11 @@ import {
 import { CloudDownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import {
   createLlmProvider, probeModels, probeTest, updateLlmProvider,
-  type LlmProvider, type LlmProviderPayload, type PlatformPreset,
+  type LlmProvider, type PlatformPreset,
 } from '../../services/llm'
 import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
 import { PROTOCOL_NAMES } from './llmShared'
+import { buildWizardPayload } from './wizardPayload'
 
 const { Text } = Typography
 
@@ -120,28 +121,16 @@ const ProviderWizardModal: React.FC<Props> = ({ open, editing, presets, onClose,
   const onSubmit = async () => {
     try {
       const values = await form.validateFields()
-      setSubmitting(true)
-      const payload: LlmProviderPayload = {
-        name: values.name.trim(),
-        provider_type: values.provider_type?.trim() || 'openai_compatible',
-        base_url: values.base_url.trim(),
-        api_key: values.api_key?.trim() || undefined,
-        model: values.model.trim(),
-        temperature: values.temperature ?? undefined,
-        timeout: values.timeout ?? undefined,
-        max_retries: values.max_retries ?? undefined,
-        enabled: values.enabled ?? true,
-        remark: values.remark?.trim() || undefined,
+      const payload = buildWizardPayload(values, editing)
+      if (!payload) {
+        message.warning('请指定默认模型')
+        return
       }
+      setSubmitting(true)
       if (editing) {
         await updateLlmProvider(editing.id, payload)
         message.success(`供应商「${payload.name}」已更新`)
       } else {
-        // 向导流：勾选模型一并落子表（默认模型行 is_default）
-        payload.models = (values.models_field || []).map((id: string) => ({
-          model_id: id,
-          is_default: id === values.model,
-        }))
         await createLlmProvider(payload)
         message.success(`供应商「${payload.name}」已创建`)
       }
@@ -251,12 +240,17 @@ const ProviderWizardModal: React.FC<Props> = ({ open, editing, presets, onClose,
             </Form.Item>
           </>
         ) : (
-          <Form.Item label="模型" tooltip="编辑态模型集经「管理模型」抽屉维护">
-            <Space wrap>
-              <Tag color="gold">{editing.model || form.getFieldValue('model')}</Tag>
-              <Text type="secondary">（列表页「管理模型」增删/改默认）</Text>
-            </Space>
-          </Form.Item>
+          <>
+            <Form.Item name="model" hidden>
+              <Input />
+            </Form.Item>
+            <Form.Item label="模型" tooltip="编辑态模型集经「管理模型」抽屉维护">
+              <Space wrap>
+                <Tag color="gold">{editing.model || form.getFieldValue('model')}</Tag>
+                <Text type="secondary">（列表页「管理模型」增删/改默认）</Text>
+              </Space>
+            </Form.Item>
+          </>
         )}
 
         <Row gutter={16}>

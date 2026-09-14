@@ -1,0 +1,240 @@
+// schema.dbml · upgrade-four-pillars
+// 上游：db-spec.md ｜ 下游：Alembic autogenerate → /backend ORM
+// 泳道：L3｜作者：/dba｜日期：2026-09-12
+// 规范：每个索引后必须用注释标注访问模式 ID（无模式 ID 的索引不许进本文件）
+// 主键跟仓 INT。物理类型 VARCHAR，禁止 MySQL ENUM（下方 enum 仅文档合法值）。
+// 本文件 = 本特征新表 + 被改表 live 全列 ∪ 加列。不是全库 IR。
+// 禁止用本文件对拍目录/渠道/安装表。对齐禁止 DROP 现网 orders/product_events/plans 列与现网索引。
+// 列序：live 物理序，本特征 ADD 接表尾。N1 与 N3 不得挤进同一迁移。
+// 商户密钥禁止进入 git/yml；密文只在 payment_channel_credentials.secrets_encrypted。
+
+Project upgrade_four_pillars {
+  database_type: 'MySQL'
+  note: '夹具名单+事件快照；结账单据 expand；商户凭据密文；中转 SKU 权益。头修订现行 044。'
+}
+
+// ─────────────────────────────────────────────
+// 枚举：VARCHAR + 应用校验；此处登记合法值供下游对齐
+// ─────────────────────────────────────────────
+
+enum checkout_order_status {
+  pending                    [note: '旧写；读模型视为 checkout_pending']
+  paid                       [note: '旧写；读模型视为 fulfilled']
+  cancelled                  [note: '旧写；读模型视为 unpaid']
+  checkout_pending           [note: '新待支付']
+  paid_pending_fulfillment   [note: '验真通过、开通未完成']
+  fulfilled                  [note: '开通完成终态']
+  unpaid                     [note: '取消/超时/通道失败/未配置终态']
+}
+
+enum checkout_product_code {
+  plan_pro
+  plan_enterprise
+  relay
+}
+
+enum payment_channel {
+  alipay
+  wechat
+  offline                    [note: '仅存量线下单；新结账闭集 alipay/wechat']
+}
+
+enum payment_fail_reason {
+  cancel
+  timeout
+  channel_error
+  unconfigured
+}
+
+enum relay_sku_status {
+  none
+  active
+  expired
+}
+
+enum product_event_name {
+  task_run_submitted
+  task_completed
+  task_blocked               [note: '本波新增；D3 拦住']
+  market_subscribe_succeeded
+  payment_succeeded          [note: '本波新增；验真通过即可']
+  payment_failed             [note: '本波新增']
+}
+
+// ─────────────────────────────────────────────
+// 新表 · N1
+// ─────────────────────────────────────────────
+
+Table internal_fixture_tenants {
+  id          int          [pk, increment, note: '代理主键，跟仓 INT']
+  tenant_id   int          [not null, note: '被标为夹具的企业；PIT-4 禁止 NULL=平台']
+  created_by  varchar(64)  [not null, note: '谁标的（超管用户名快照，无用户 FK）']
+  created_at  datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '何时标上']
+  updated_at  datetime     [not null, default: `CURRENT_TIMESTAMP`, note: 'R-AUD；移出为 DELETE']
+
+  indexes {
+    (tenant_id) [unique, name: 'uk_internal_fixture_tenants_tenant']
+    // 服务 P-U01：emit 按企业点查是否在名单。兼业务唯一（一企至多一行）
+  }
+
+  note: '一行=一家当前在内部测试名单上的企业。超管加入 INSERT、移出 DELETE。无软删。禁止 TenantMixin；同 PR 进 TENANT_EXEMPT_TABLES。北极星禁止 JOIN 本表。'
+}
+
+// ─────────────────────────────────────────────
+// 已有表加列 · N1 product_events
+// ─────────────────────────────────────────────
+
+Table product_events {
+  id                    int          [pk, increment, note: '代理主键，跟仓 INT']
+  occurred_at           datetime     [not null, note: '业务时间 UTC；切日 Asia/Shanghai']
+  event_name            varchar(64)  [not null, note: '见 enum product_event_name；dba 不改口径']
+  tenant_id             int          [null, note: 'NULL=匿名或无法消歧。事件主语，非隔离归属']
+  actor_user_id         int          [null, note: '匿名 NULL；不加 FK']
+  anonymous_id          varchar(64)  [null, note: '浏览匿名身份']
+  role                  varchar(32)  [null, note: '已登录才有']
+  props                 json         [null, note: '非查询列：result_count/is_marketplace_candidate/channel/product/reason/...；禁止密钥']
+  created_at            datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '记录时间']
+  updated_at            datetime     [not null, default: `CURRENT_TIMESTAMP`, note: 'R-AUD；应用永不更新']
+  is_internal_fixture   tinyint      [null, note: '本波 ADD 表尾。1=当时夹具 0=非夹具 NULL=旧事件未快照']
+
+  indexes {
+    (event_name, occurred_at) [name: 'idx_product_events_name_occurred']
+    // 服务 P-U10（v2 P-E01）：超管按事件名 + 发生时间。ESR：等值 event_name → 范围 occurred_at
+    // live 保留，禁止 DROP
+
+    (tenant_id, occurred_at) [name: 'idx_product_events_tenant_occurred']
+    // 服务 v2 P-E02：超管按企业过滤。live 保留，禁止 DROP
+
+    (event_name, is_internal_fixture, occurred_at) [name: 'idx_product_events_name_fixture_occurred']
+    // 服务 P-U03：北极星 event_name=task_completed 等值 + is_internal_fixture=0 等值 + occurred_at 范围
+    // ESR：等值 → 等值 → 范围/排序。不替代上一复合（支付事件不带夹具谓词）
+  }
+
+  note: '一行=一次产品事实。追加；v1 无精确一次键。本波只加 is_internal_fixture 快照列。进 TENANT_EXEMPT_TABLES。'
+}
+
+// ─────────────────────────────────────────────
+// 已有表 · plans（FK 完整性 + R-AUD；ADD updated_at）
+// ─────────────────────────────────────────────
+
+Table plans {
+  id            int          [pk, increment, note: '代理主键']
+  slug          varchar(32)  [not null, note: 'free/pro；enterprise 种子待 /pm 标价，禁止 slug=relay']
+  name          varchar(64)  [not null]
+  price_cents   int          [not null, default: 0, note: '分；跟仓 INT 不改 DECIMAL']
+  period        varchar(16)  [not null, default: 'month']
+  quota_json    text         [null, note: 'NULL=未声明配额 JSON']
+  is_public     int          [not null, default: 1, note: '1=可下单']
+  created_at    datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at    datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '本波 ADD 表尾；R-AUD']
+
+  indexes {
+    (slug) [unique, name: 'slug']
+    // live UniqueConstraint(slug)。价目按 slug 点查（履约映射 plan_pro→pro）
+  }
+
+  note: '一行=一条平台价目。TENANT_EXEMPT。本波不加 relay 价目行。'
+}
+
+// ─────────────────────────────────────────────
+// 已有表加列 · N3 orders
+// ─────────────────────────────────────────────
+
+Table orders {
+  id                      int           [pk, increment, note: '代理主键，跟仓 INT']
+  tenant_id               int           [null, note: 'live 可空；新结账应用必填。本波不收紧 NOT NULL']
+  plan_id                 int           [null, ref: > plans.id, note: '本波放宽可空；product_code=relay 时 NULL']
+  amount_cents            int           [not null, note: '下单金额快照（分）；通知必须一致']
+  status                  checkout_order_status [not null, default: 'pending', note: '物理 VARCHAR(32)，本波 16→32']
+  channel                 payment_channel [not null, default: 'offline']
+  idempotency_key         varchar(64)   [null, note: '请求去重；NULL=未用。终态后改键']
+  paid_at                 datetime      [null, note: 'NULL=从未验真通过']
+  created_at              datetime      [not null, default: `CURRENT_TIMESTAMP`, note: '建单记录时间']
+  product_code            varchar(32)   [null, note: '本波 ADD。闭集 plan_pro/plan_enterprise/relay。NULL=040 线下单']
+  order_no                varchar(64)   [null, note: '本波 ADD。我方订单号。NULL=旧行']
+  channel_trade_no        varchar(64)   [null, note: '本波 ADD。通道侧交易号。NULL=尚未收到']
+  merchant_id_snapshot    varchar(64)   [null, note: '本波 ADD。当时商户号，不是密钥。NULL=旧线下单']
+  fail_reason             varchar(32)   [null, note: '本波 ADD。cancel/timeout/channel_error/unconfigured。NULL=未失败']
+  late_notify_at          datetime      [null, note: '本波 ADD。NULL=从未记迟到回调']
+  verified_at             datetime      [null, note: '本波 ADD。FR-U38 通过。NULL=从未验真']
+  fulfilled_at            datetime      [null, note: '本波 ADD。开通完成。NULL=未完成']
+  unpaid_at               datetime      [null, note: '本波 ADD。进入 unpaid。NULL=未入该终态']
+  open_product_slot       varchar(32)   [null, note: 'STORED GENERATED：product_code 非空且 status IN (checkout_pending,paid_pending_fulfillment,pending) 则为 product_code，否则 NULL']
+  updated_at              datetime      [not null, default: `CURRENT_TIMESTAMP`, note: '本波 ADD。R-AUD']
+
+  indexes {
+    (idempotency_key) [unique, name: 'idempotency_key']
+    // live UniqueConstraint(idempotency_key)。请求级去重。多 NULL 合法
+
+    (tenant_id) [name: 'ix_orders_tenant_id']
+    // 服务 P-U06：本企业订单列表。live 保留，禁止 DROP
+
+    (order_no) [unique, name: 'uk_orders_order_no']
+    // 服务 P-U05：通知按我方订单号点查。多 NULL=旧行
+
+    (tenant_id, open_product_slot) [unique, name: 'uk_orders_tenant_open_product']
+    // 服务 P-U04：同一企业同一商品同时最多 1 笔非终态待支付。ESR 等值 tenant_id → 等值 slot
+    // 终态行生成 NULL，不占坑。禁止只先查后插
+
+    (channel, channel_trade_no) [unique, name: 'uk_orders_channel_trade']
+    // 约束：同一通道交易号只绑一单（非 Top-N 查询）。多 NULL 合法
+
+    // 已评估不建：
+    //   (status) —— 基数低；见 db-spec §5
+    //   (tenant_id, created_at) —— P-U06 非 Top-N；ix_orders_tenant_id 已覆盖等值
+  }
+
+  note: '一行=一次结账意图。密钥/口令不得入本表。新结账只写新 status 字面量；读模型双认旧值。'
+}
+
+// ─────────────────────────────────────────────
+// 新表 · N3
+// ─────────────────────────────────────────────
+
+Table payment_channel_credentials {
+  id                  int          [pk, increment, note: '代理主键']
+  channel             varchar(16)  [not null, note: 'alipay/wechat；一通道一行']
+  merchant_no         varchar(64)  [not null, note: '商户号，可掩码；不是密钥']
+  secrets_encrypted   text         [not null, note: '不透明密文 blob。明文永不落库/git/yml/浏览器/日志/Redis']
+  key_version         int          [not null, default: 1, note: '每轮换 +1；旧密文不保留']
+  rotated_at          datetime     [null, note: 'NULL=从未轮换']
+  created_by          varchar(64)  [null, note: '超管用户名']
+  updated_by          varchar(64)  [null]
+  created_at          datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at          datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (channel) [unique, name: 'uk_payment_channel_credentials_channel']
+    // 服务 P-U07：按通道点查凭据。兼业务唯一
+  }
+
+  note: '一行=一个收款通道的一套运行凭据。无 tenant_id 列（PIT-3）。禁止 TenantMixin；同 PR 进 TENANT_EXEMPT_TABLES。从未配置=零行。'
+}
+
+Table relay_sku_entitlements {
+  id            int          [pk, increment, note: '代理主键']
+  tenant_id     int          [not null, note: '本企业；PIT-4 禁止 NULL=平台 SKU']
+  status        relay_sku_status [not null, default: 'none', note: '物理 VARCHAR(16)']
+  period_end    datetime     [null, note: '账期结束快照。active 应用必填；expired 保留到期时刻；none 未开通 NULL']
+  activated_at  datetime     [null, note: '最近一次进入 active。NULL=从未开通']
+  created_at    datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at    datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (tenant_id) [unique, name: 'uk_relay_sku_entitlements_tenant']
+    // 服务 P-U02：/relay 与令牌闸按企业点查。兼业务唯一。禁止用组行 COUNT 当已买
+
+    // 已评估不建：
+    //   (status, period_end) —— P-U08 到期扫描非 Top-N；一行一企表小
+    //   (status) —— 基数 3
+  }
+
+  note: '一行=一企业当前中转买没买。缺行≡none。履约独占写；专业档开通不得改本表。不 FK 到 relay_groups；本波不删组行。tenant_id NOT NULL，不进 TENANT_EXEMPT。'
+}
+
+// ─────────────────────────────────────────────
+// 关系（级联默认 RESTRICT）
+// ─────────────────────────────────────────────
+
+Ref: orders.plan_id > plans.id [delete: restrict, update: cascade]
+// N:1。RESTRICT：有单据的价目不允许删。relay 单 plan_id NULL，不走本 FK。

@@ -3,8 +3,7 @@ import inspect
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from backend.repositories.product_event_repository import ProductEventRepository
 from platform_core.logger import get_logger
@@ -45,21 +44,31 @@ def _row_kwargs(
     }
 
 
+async def _fixture_snapshot(session: AsyncSession, tenant_id: int | None) -> bool:
+    logger.debug(f"夹具快照点查 | tenant={tenant_id}")
+    if tenant_id is None:
+        return False
+    from backend.repositories.internal_fixture_tenant_repository import (
+        InternalFixtureTenantRepository,
+    )
+    return await InternalFixtureTenantRepository(session).exists(tenant_id=tenant_id)
+
+
 async def _persist_event(session: AsyncSession, fields: dict[str, Any]) -> None:
     logger.debug(f"写入产品事件 | name={fields.get('event_name')}")
-    # 独立短会话：主路径 rollback（配额拒绝/登录失败）不得带走已发生的事实。
-    bind = session.get_bind()
+    # 独立短会话：主路径 rollback 不得带走已发生的事实。
+    # 必须复用 session.bind（AsyncEngine）。str(url) 重建会丢掉密码（***）并
+    # 改走 pymysql@localhost → 1045，主路径却仍成功。
+    bind = session.bind
     if inspect.isawaitable(bind):
         bind = await bind
-    own = not isinstance(bind, AsyncEngine)
-    engine = bind if isinstance(bind, AsyncEngine) else create_async_engine(str(bind.url), poolclass=NullPool)
-    try:
-        async with AsyncSession(engine, expire_on_commit=False) as extra:
-            extra.add(ProductEvent(**fields))
-            await extra.commit()
-    finally:
-        if own:
-            await engine.dispose()
+    if not isinstance(bind, AsyncEngine):
+        raise RuntimeError("product event persist needs AsyncEngine bind")
+    async with AsyncSession(bind, expire_on_commit=False) as extra:
+        row = dict(fields)
+        row["is_internal_fixture"] = await _fixture_snapshot(extra, row.get("tenant_id"))
+        extra.add(ProductEvent(**row))
+        await extra.commit()
 
 
 async def emit_product_event(session: AsyncSession, event_name: str, *, tenant_id: int | None = None, actor_user_id: int | None = None, anonymous_id: str | None = None, role: str | None = None, props: dict[str, Any] | None = None, occurred_at: datetime | None = None) -> None:
@@ -95,6 +104,7 @@ class ProductEventService:
         tenant_id: Optional[int] = None,
         occurred_from: Optional[datetime] = None,
         occurred_to: Optional[datetime] = None,
+        is_internal_fixture: Optional[bool] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> ProductEventListOut:
@@ -102,6 +112,7 @@ class ProductEventService:
         total, rows = await self.repo.list_by_occurred(
             event_name=event_name, tenant_id=tenant_id,
             occurred_from=occurred_from, occurred_to=occurred_to,
+            is_internal_fixture=is_internal_fixture,
             skip=skip, limit=limit,
         )
         return ProductEventListOut(

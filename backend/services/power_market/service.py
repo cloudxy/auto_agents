@@ -1,7 +1,7 @@
-"""能力市场公开读模型：查询侧 FR-33 闸再 COUNT/LIMIT（PIT-5）。"""
+"""能力市场公开读模型：查询侧 FR-33 闸再 COUNT/LIMIT（PIT-5）+ FR-80 测试种子闸。"""
 from typing import Optional
 
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.power_market.aliases import AliasWriter
@@ -21,6 +21,13 @@ from backend.services.power_market.listing import ListingWriter
 from backend.services.power_market.sources import SourceRegistry
 from backend.services.power_market.sync import SourceSync
 from backend.services.power_market.references import list_runtime_refs
+from backend.services.power_market.flag import (
+    MSG_EMPTY_SHELF,
+    closed_detail_payload,
+    closed_list_payload,
+    is_power_market_enabled,
+    require_power_market_open,
+)
 from backend.services.power_market.types import (
     DEFAULT_ALLOWED_LICENSES,
     GOVERNANCE_PUBLIC,
@@ -35,6 +42,9 @@ from backend.services.power_market.types import (
     PUBLIC_ASSET_TYPES,
     PUBLIC_HOSTS,
     READABLE_ASSET_TYPES,
+    SEED_DESC_MARKER,
+    SEED_NAME_PREFIX,
+    SEED_TITLE_PREFIX,
     PatchInstallRequest,
     PatchLicenseOverrideRequest,
     PatchListingRequest,
@@ -75,13 +85,36 @@ def _license_ok(row: CapabilityAsset) -> bool:
     return (row.license or "") in DEFAULT_ALLOWED_LICENSES
 
 
+def _seed_clause():
+    """FR-80 测试种子谓词（读模型层单点）：短名 nfr01qc2-* ∨ 标题「NFR卡片」开头 ∨ 描述含标记。
+
+    三支 coalesce 到空串——NULL 列不是"未知种子"，是与 _row_is_seed 同口径的
+    非种子（SQL 三值逻辑下 or_ 出 NULL 会把 listed 行整个挡出商店）。
+    """
+    return or_(
+        func.coalesce(func.lower(CapabilityAsset.name), "").like(f"{SEED_NAME_PREFIX}%"),
+        func.coalesce(CapabilityAsset.title, "").like(f"{SEED_TITLE_PREFIX}%"),
+        func.coalesce(CapabilityAsset.description, "").like(f"%{SEED_DESC_MARKER}%"),
+    )
+
+
+def _row_is_seed(row: CapabilityAsset) -> bool:
+    """FR-80 行级种子判定——与 _seed_clause 同口径（详情/订阅走同一闸）。"""
+    return (
+        (row.name or "").lower().startswith(SEED_NAME_PREFIX)
+        or (row.title or "").startswith(SEED_TITLE_PREFIX)
+        or SEED_DESC_MARKER in (row.description or "")
+    )
+
+
 def _fr33_clause():
-    """上架∈listed∪coming_soon ∩ 治理∈stable∪recommended ∩ 许可过闸 ∩ 非软删。"""
+    """上架∈listed∪coming_soon ∩ 治理∈stable∪recommended ∩ 许可过闸 ∩ 非软删 ∩ 非测试种子（FR-80）。"""
     return (
         CapabilityAsset.listing_state.in_(LISTING_VISIBLE),
         CapabilityAsset.status.in_(GOVERNANCE_PUBLIC),
         CapabilityAsset.deleted_at.is_(None),
         _license_clause(),
+        not_(_seed_clause()),
     )
 
 
@@ -132,6 +165,8 @@ def _row_is_fr33(row: CapabilityAsset) -> bool:
         return False
     if row.status not in GOVERNANCE_PUBLIC:
         return False
+    if _row_is_seed(row):  # FR-80：种子翻成 listed 也不进公开详情/订阅
+        return False
     return _license_ok(row)
 
 
@@ -172,13 +207,15 @@ class PowerMarketService:
         )
         page_size = self._page_size(page_size)
         page = max(int(page or 1), 1)
+        if not is_power_market_enabled():
+            return closed_list_payload(page=page, page_size=page_size)
         public = self.parse_asset_type(asset_type, default=default)
         stored = None if public is None else _stored_types_for(public)
         rows, total = await self._list_fr33(
             stored, category, q, page, page_size, host=host,
         )
         sides = await self._command_sides(rows)
-        return {
+        payload = {
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -186,12 +223,19 @@ class PowerMarketService:
             "items": [
                 self._project(row, command=sides.get(row.id)) for row in rows
             ],
+            "market_closed": False,
         }
+        if total == 0:
+            payload["empty"] = True
+            payload["message"] = MSG_EMPTY_SHELF
+        return payload
 
     async def get_public(
         self, asset_type: Optional[str], name: str, *, default: Optional[str] = None,
     ) -> Optional[dict]:
         logger.info(f"power_market.get_public | type={asset_type} name={name}")
+        if not is_power_market_enabled():
+            return closed_detail_payload()
         public = self.parse_asset_type(asset_type, default=default)
         row = await self._load_named(public, name)
         if row is None or not _row_is_fr33(row):
@@ -216,6 +260,7 @@ class PowerMarketService:
         default: Optional[str] = None,
     ) -> dict:
         logger.info(f"power_market.subscribe_public | type={asset_type} name={name}")
+        require_power_market_open()
         public = self.parse_asset_type(asset_type, default=default)
         row = await self._load_named(public, name)
         if row is None or not _row_is_fr33(row):

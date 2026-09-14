@@ -90,10 +90,12 @@ async def export_results(
     task_id: int = Path(..., ge=1),
     format: str = Query("csv", pattern="^(csv|json)$", description="导出格式：csv/json"),
     service: SpiderQueryService = Depends(_query_service),
-    _user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
+    user: CurrentUser = Depends(require_login),
 ) -> StreamingResponse:
     """导出指定任务的非候选结果（csv/json；单次最多 100 条；空窗不下载）"""
     stream, filename, media_type = await service.export_results(task_id, format)
+    await record_audit(session, user, "result.export", f"task#{task_id}")
     return StreamingResponse(
         stream,
         media_type=media_type,

@@ -1,0 +1,194 @@
+// schema.dbml · post-merge-upgrade
+// 上游：db-spec.md ｜ 下游：Alembic autogenerate → /backend ORM
+// 泳道：L3｜作者：/dba｜日期：2026-09-13｜修订：shape r1 QA-03/QA-04
+// 规范：每个索引后必须用注释标注访问模式 ID（无模式 ID 的索引不许进本文件）
+// 主键跟仓 INT。物理类型 VARCHAR，禁止 MySQL ENUM（下方 enum 仅文档合法值）。
+// 本文件 = 本特征被改表 live 全列 ∪ 本波变更。不是全库 IR。
+// 禁止用本文件对拍目录/渠道组/安装表。对齐禁止 DROP 现网 orders/plans/SKU/outbound 列与现网索引。
+// 无新表。禁止 Stripe 表。禁止 plans.slug=relay。
+// 列序：046 物理序；本波放宽 orders.channel 可空并 DROP DEFAULT 'offline' + 价目数据。
+
+Project post_merge_upgrade {
+  database_type: 'MySQL'
+  note: 'W2 两条合法开通：确认收款接结账单；价目/配额与定价页对齐；出站查找只 outbound_keys。头修订现行 046 → 047。'
+}
+
+// ─────────────────────────────────────────────
+// 枚举：VARCHAR + 应用校验；此处登记合法值供下游对齐
+// ─────────────────────────────────────────────
+
+enum checkout_order_status {
+  pending                    [note: '旧写；读模型视为 checkout_pending。W2 不新写']
+  paid                       [note: '旧写；读模型视为 fulfilled。W2 不新写']
+  cancelled                  [note: '旧写；读模型视为 unpaid。W2 不新写']
+  checkout_pending           [note: 'W2 待支付']
+  paid_pending_fulfillment   [note: 'live 处理中；W2 不构造']
+  fulfilled                  [note: '已开通终态']
+  unpaid                     [note: 'live 未完成；W2 不构造']
+}
+
+enum checkout_product_code {
+  plan_pro
+  plan_enterprise
+  relay
+}
+
+enum payment_channel {
+  alipay
+  wechat
+  offline                    [note: '仅 040 存量第二套单']
+  // 物理可空：NULL = W2 未选通道 / 两通道未配
+}
+
+enum relay_sku_status {
+  none
+  active
+  expired
+}
+
+enum product_event_name {
+  // 本波增量（无 DDL）
+  llm_planning_blocked
+  data_export_completed
+  checkout_story_started
+  order_status_reached
+  second_checkout_story_submitted
+  outbound_wrong_plane_rejected
+  duty_entry_opened
+  offline_order_confirmed
+}
+
+// ─────────────────────────────────────────────
+// 已有表 · plans（数据：pro quota 对齐；INSERT enterprise）
+// ─────────────────────────────────────────────
+
+Table plans {
+  id            int          [pk, increment, note: '代理主键']
+  slug          varchar(32)  [not null, note: 'free/pro/enterprise；禁止 slug=relay']
+  name          varchar(64)  [not null]
+  price_cents   int          [not null, default: 0, note: '分；pro=29900；enterprise=99900≠29900；跟仓 INT']
+  period        varchar(16)  [not null, default: 'month']
+  quota_json    text         [null, note: 'pro 执法 50/200000/5000000（047 UPDATE）。enterprise 必须存在且 ≠ 该三数字；具体三数未冻，禁止把夹具 50/2M/20M 当 T-08 金标']
+  is_public     int          [not null, default: 1, note: '1=可下单']
+  created_at    datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at    datetime     [not null, default: `CURRENT_TIMESTAMP`, note: '046 ADD；R-AUD']
+
+  indexes {
+    (slug) [unique, name: 'slug']
+    // 服务 P-M04：价目按 slug 点查（履约映射 plan_pro→pro，plan_enterprise→enterprise）
+  }
+
+  note: '一行=一条平台价目。TENANT_EXEMPT。本波无加列。047 数据：UPDATE pro.quota_json；INSERT enterprise 99900 + 配额占位≠专业档（非 T-08 金标）。中转展示分不在本表（BILLING.RELAY_PRICE_CENTS）。'
+}
+
+// ─────────────────────────────────────────────
+// 已有表 · orders（046 全列；本波 channel 放宽 NULL）
+// ─────────────────────────────────────────────
+
+Table orders {
+  id                      int           [pk, increment, note: '代理主键，跟仓 INT。P-M02 确认点查']
+  tenant_id               int           [null, note: 'live 可空；新结账应用必填。本波不收紧 NOT NULL']
+  plan_id                 int           [null, ref: > plans.id, note: 'product_code=relay 时 NULL']
+  amount_cents            int           [not null, note: '下单时展示金额快照（分）；确认必须等于当前价目展示分 [SEC-3]']
+  status                  checkout_order_status [not null, default: 'pending', note: '物理 VARCHAR(32)。W2 写 checkout_pending/fulfilled']
+  channel                 payment_channel [null, note: '本波放宽可空并 DROP DEFAULT offline。无 server_default。W2 未配 INSERT 必须显式 NULL；offline 仅 040 存量行；alipay/wechat=已选通道']
+  idempotency_key         varchar(64)   [null, note: '请求去重。新结账用 order_no，禁止 pending:tenant_id 旧键']
+  paid_at                 datetime      [null, note: '确认收款或通道验真。NULL=从未']
+  created_at              datetime      [not null, default: `CURRENT_TIMESTAMP`, note: '建单记录时间']
+  product_code            varchar(32)   [null, note: '闭集 plan_pro/plan_enterprise/relay。NULL=040 线下单']
+  order_no                varchar(64)   [null, note: '我方订单号。NULL=旧行']
+  channel_trade_no        varchar(64)   [null, note: '通道侧交易号。W2 确认路径保持 NULL']
+  merchant_id_snapshot    varchar(64)   [null, note: '当时商户号，不是密钥。未配通道 NULL']
+  fail_reason             varchar(32)   [null, note: 'W2 写路径不产生 unpaid，保持 NULL']
+  late_notify_at          datetime      [null, note: '迟到回调。NULL=从未记']
+  verified_at             datetime      [null, note: 'FR-U38。确认收款不要求本列']
+  fulfilled_at            datetime      [null, note: '开通完成。NULL=未完成']
+  unpaid_at               datetime      [null, note: 'W2 不写入']
+  open_product_slot       varchar(32)   [null, note: 'STORED GENERATED：product_code 非空且 status IN (checkout_pending,paid_pending_fulfillment,pending) 则为 product_code，否则 NULL']
+  updated_at              datetime      [not null, default: `CURRENT_TIMESTAMP`, note: '046 ADD。R-AUD']
+
+  indexes {
+    (idempotency_key) [unique, name: 'idempotency_key']
+    // live UniqueConstraint(idempotency_key)。请求级去重。多 NULL 合法
+
+    (tenant_id) [name: 'ix_orders_tenant_id']
+    // 服务 P-M09：本企业订单列表。046 保留，禁止 DROP
+
+    (order_no) [unique, name: 'uk_orders_order_no']
+    // 通道路径按我方订单号点查。多 NULL=旧行
+
+    (tenant_id, open_product_slot) [unique, name: 'uk_orders_tenant_open_product']
+    // 服务 P-M01：同一企业同一商品同时最多 1 笔非终态待支付。ESR 等值 tenant_id → 等值 slot
+    // 终态行生成 NULL，不占坑。禁止只先查后插
+
+    (channel, channel_trade_no) [unique, name: 'uk_orders_channel_trade']
+    // 约束：同一通道交易号只绑一单（非 Top-N）。多 NULL 合法。channel NULL 时 MySQL UNIQUE 不挡
+
+    (plan_id) [name: 'plan_id']
+    // live FK 辅助索引。046/040 保留，禁止 DROP
+
+    // 已评估不建：
+    //   (status) —— P-M03 基数低；PRIMARY 倒扫。见 db-spec §5
+    //   (tenant_id, id) —— P-M09 filesort 单企可接受
+  }
+
+  note: '一行=一次结账意图。密钥不得入本表。确认 CAS：id + status=checkout_pending + amount_cents=当前展示分。channel 无 DEFAULT；W2 未配必须显式 NULL。无新表。'
+}
+
+// ─────────────────────────────────────────────
+// 已有表 · relay_sku_entitlements（无 DDL；写入者扩为 relay 或 plan_enterprise）
+// ─────────────────────────────────────────────
+
+Table relay_sku_entitlements {
+  id            int          [pk, increment, note: '代理主键']
+  tenant_id     int          [not null, note: '本企业；PIT-4 禁止 NULL=平台 SKU']
+  status        relay_sku_status [not null, default: 'none', note: '物理 VARCHAR(16)']
+  period_end    datetime     [null, note: '账期结束快照。active 应用必填；none 未开通 NULL']
+  activated_at  datetime     [null, note: '最近一次进入 active。NULL=从未开通']
+  created_at    datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at    datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (tenant_id) [unique, name: 'uk_relay_sku_entitlements_tenant']
+    // 服务 P-M06：渠道组读路径按企业点查。兼业务唯一。禁止用组行 COUNT 当已买
+
+    // 已评估不建：
+    //   (status, period_end) —— 一行一企表小
+    //   (status) —— 基数 3
+  }
+
+  note: '一行=一企业当前中转买没买。缺行≡none。ADR-0026：relay 或 plan_enterprise 履约写 active；plan_pro 不得改本表。不 FK relay_groups；不删组行。tenant_id NOT NULL，不进 TENANT_EXEMPT。'
+}
+
+// ─────────────────────────────────────────────
+// 已有表 · outbound_keys（无 DDL；拉数命中集合收口为本表）
+// ─────────────────────────────────────────────
+
+Table outbound_keys {
+  id                  int          [pk, increment, note: '代理主键']
+  tenant_id           int          [not null, note: '本企业；PIT-4 禁止 NULL=平台钥匙']
+  name                varchar(64)  [null, note: '备注名；NULL=未起名']
+  key_prefix          varchar(16)  [not null, note: '再进页可见前缀；应用保证不以 sk- 开头']
+  key_hash            varchar(64)  [not null, note: 'SHA-256 指纹；明文不落库']
+  issued_by_user_id   int          [not null, note: '签发者；无用户 FK']
+  revoked_at          datetime     [null, note: 'NULL=active；非空=吊销终态']
+  created_at          datetime     [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at          datetime     [not null, default: `CURRENT_TIMESTAMP`]
+
+  indexes {
+    (key_hash) [unique, name: 'uk_outbound_keys_key_hash']
+    // 服务 P-M05：拉数按指纹点查。命中后再滤 revoked_at IS NULL
+
+    (tenant_id, created_at) [name: 'idx_outbound_keys_tenant_created']
+    // 出站入口列表。041 保留，禁止 DROP
+  }
+
+  note: '一行=一把出站入口签发的本企业钥匙。拉数命中集合=本表 active 行。不含 api_keys / relay_tokens。不进 TENANT_EXEMPT。本波无加列。'
+}
+
+// ─────────────────────────────────────────────
+// 关系（级联默认 RESTRICT）
+// ─────────────────────────────────────────────
+
+Ref: orders.plan_id > plans.id [delete: restrict, update: cascade]
+// N:1。RESTRICT：有单据的价目不允许删。relay 单 plan_id NULL，运营台必须 LEFT JOIN。

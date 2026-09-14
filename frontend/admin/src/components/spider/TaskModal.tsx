@@ -6,11 +6,21 @@
  * - 表单未覆盖的扩展键（store_to/render_js 等）以原 params 为基底 merge，不丢失。
  */
 import React, { useState } from 'react'
-import { Modal, Form, Radio, Select, Switch, message } from 'antd'
+import { Modal, Form, Radio, Select, Switch, message, Alert, Button } from 'antd'
+import { useNavigate } from 'react-router-dom'
 import type { SpiderRegistry, TaskTemplate, SpiderMap, Task } from './types'
 import { renderParamFields, collectParams, paramsToFormValues, parseParamsJson } from './formUtils'
 import { runSpider } from '../../services/spiders'
 import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
+import { parseCollectBlock, type CollectBlock } from '../../utils/collectBlock'
+import { QuotaBlockAlert } from '../quota/QuotaBlockAlert'
+import {
+  ENQUEUED_COPY,
+  SPIDER_WORKER_OFFLINE_COPY,
+  SUBMIT_OFFLINE_COPY,
+  SUBMITTING_COPY,
+  VIEW_NODES_TEXT,
+} from '../../constants/collectCopy'
 
 /** 参数回填预设：来自任务行"运行"、调度"手动运行"或模板 */
 export interface TaskPreset {
@@ -25,19 +35,25 @@ export interface TaskModalProps {
   spiderMap: SpiderMap
   templates: TaskTemplate[]
   preset?: TaskPreset | null
+  /** T-18 / GWT-85.2：0 在线工人（false/undefined = 有工人或未知/加载中——加载中不拦） */
+  workerOffline?: boolean
   onSubmitSuccess: (task: Task) => void
   onCancel: () => void
 }
 
 export const TaskModal: React.FC<TaskModalProps> = ({
-  visible, registry, spiderMap, templates, preset,
+  visible, registry, spiderMap, templates, preset, workerOffline,
   onSubmitSuccess, onCancel,
 }) => {
   const [selectedType, setSelectedType] = useState<string>('web')
   const [submitting, setSubmitting] = useState(false)
   // 基底参数（表单未覆盖的扩展键回填用）；用户手切类型/爬虫时清空防串键
   const [baseParams, setBaseParams] = useState<Record<string, unknown>>({})
+  // 0 工人被拦后弹窗内提示（提交时校验，非按钮禁用——避免误伤节点加载态）
+  const [blockedNoWorker, setBlockedNoWorker] = useState(false)
+  const [quotaBlock, setQuotaBlock] = useState<Extract<CollectBlock, { kind: 'quota' }> | null>(null)
   const [form] = Form.useForm()
+  const navigate = useNavigate()
 
   const currentType = registry.types.find((t) => t.type === selectedType)
   const spidersOfType = registry.spiders.filter((s) => s.type === selectedType)
@@ -65,12 +81,25 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   React.useEffect(() => {
     if (visible) {
       form.resetFields()
+      setBlockedNoWorker(false)
+      setQuotaBlock(null)
       applyPreset(preset)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible])
 
   const onSubmitTask = async () => {
+    setQuotaBlock(null)
+    setBlockedNoWorker(false)
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      message.error(SUBMIT_OFFLINE_COPY)
+      return
+    }
+    // GWT-U02.1：0 工人提交被拦——任务不入队；锁句「采集未运行，不会出数」+「查看节点」
+    if (workerOffline) {
+      setBlockedNoWorker(true)
+      return
+    }
     try {
       const values = await form.validateFields()
       const collected = collectParams(values, currentType?.fields)
@@ -78,7 +107,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         message.error(collected)
         return
       }
-      // 基底 merge：保留表单未覆盖的扩展键（API 直建任务的 store_to/render_js 等）
       const merged: Record<string, unknown> = { ...baseParams, ...collected }
       if (values.incremental) {
         merged.incremental = true
@@ -89,11 +117,20 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         JSON.stringify(merged),
         values.priority || 'normal'
       )
-      message.success(`任务 #${task.id} 已提交，正在排队执行`)
+      message.success(ENQUEUED_COPY)
       onCancel()
       onSubmitSuccess(task)
     } catch (error) {
       if (isFormValidateError(error)) return
+      const block = parseCollectBlock(error)
+      if (block?.kind === 'worker') {
+        setBlockedNoWorker(true)
+        return
+      }
+      if (block?.kind === 'quota') {
+        setQuotaBlock(block)
+        return
+      }
       message.error(apiErrorMessage(error, '提交任务失败'))
     } finally {
       setSubmitting(false)
@@ -107,10 +144,26 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       onOk={onSubmitTask}
       onCancel={onCancel}
       confirmLoading={submitting}
-      okText="提交任务"
+      okText={submitting ? SUBMITTING_COPY : '提交任务'}
       destroyOnHidden
       width={560}
     >
+      {blockedNoWorker && (
+        <Alert
+          type="warning"
+          showIcon
+          title={SPIDER_WORKER_OFFLINE_COPY}
+          action={(
+            <Button size="small" onClick={() => navigate('/spiders/nodes')}>
+              {VIEW_NODES_TEXT}
+            </Button>
+          )}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      {quotaBlock && (
+        <QuotaBlockAlert cta={quotaBlock.cta} style={{ marginBottom: 12 }} />
+      )}
       <Form form={form} layout="vertical" preserve={false}>
         {templates.length > 0 && (
           <Form.Item label="从模板创建">

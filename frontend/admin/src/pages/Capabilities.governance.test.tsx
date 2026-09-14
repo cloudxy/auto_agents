@@ -2,13 +2,15 @@
  * T-28 治理台七叶：GWT-37.1…37.6 / 40.1…40.3。
  */
 import React from 'react'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import {
   AGENT_EMPTY, BULK_LIST, CATALOG_EMPTY, COMMAND_EMPTY, ENABLE_HOST, HOST_RUNNING,
-  LIST_CHILD, LISTED_NE_VERIFY, MERGED, NEED_PLATFORM_ADMIN, NEED_PLATFORM_MARKET,
-  OPEN_IN_CATALOG, SOURCE_EMPTY, SUB_NE_HOST, TAB_LABELS, TEAM_EMPTY,
+  GOVERNANCE_PAGE_SIZE, LIST_CHILD, LISTED_NE_VERIFY, MERGED,
+  NEED_PLATFORM_MARKET, OPEN_IN_CATALOG, SOURCE_EMPTY, SUB_NE_HOST, TAB_LABELS,
+  TEAM_EMPTY, catalogFocusCopy,
 } from './market/marketCopy'
 import type { AssetRow } from '../services/capabilities'
 
@@ -31,10 +33,15 @@ jest.mock('../services/capabilities', () => ({
   createTeam: jest.fn(),
   verifyPlugin: jest.fn(),
   patchListing: jest.fn(),
+  uninstallInstall: jest.fn(),
   getPlugin: jest.fn(),
   fetchPublicCapability: jest.fn(),
   subscribeCapability: jest.fn(),
   listInstalls: jest.fn(),
+  importAssets: jest.fn(),
+  listPublicAssets: jest.fn().mockResolvedValue({ items: [], total: 0, market_closed: false }),
+  getPowerMarket: jest.fn().mockResolvedValue({ enabled: true }),
+  putPowerMarket: jest.fn(),
 }))
 
 jest.mock('./Skills', () => () => <div>skills-tab</div>)
@@ -44,10 +51,11 @@ jest.mock('../hooks/usePermission', () => ({
 }))
 
 import Capabilities from './Capabilities'
-import { getPlugin, listAssets, patchListing } from '../services/capabilities'
+import { getPlugin, listAssets, patchListing, uninstallInstall } from '../services/capabilities'
 
 const list = listAssets as jest.Mock
 const patch = patchListing as jest.Mock
+const uninstall = uninstallInstall as jest.Mock
 const pluginDetail = getPlugin as jest.Mock
 
 const row = (over: Partial<AssetRow> = {}): AssetRow => ({
@@ -65,17 +73,20 @@ const row = (over: Partial<AssetRow> = {}): AssetRow => ({
 })
 
 function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter initialEntries={['/capabilities']}>
-      <Routes>
-        <Route path="/capabilities" element={<Capabilities />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/capabilities']}>
+        <Routes>
+          <Route path="/capabilities" element={<Capabilities />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 
 beforeEach(() => {
-  perm.isPlatformAdmin = false
+  perm.isPlatformAdmin = true
   list.mockReset()
   patch.mockReset()
   pluginDetail.mockReset()
@@ -85,11 +96,13 @@ beforeEach(() => {
 test('GWT-37.1 seven tabs and no 专家 agent leaf', async () => {
   renderPage()
   expect(await screen.findByText(CATALOG_EMPTY)).toBeInTheDocument()
+  expect(await screen.findByTestId('power-market-switch')).toBeInTheDocument()
   for (const label of TAB_LABELS) {
     expect(screen.getByRole('tab', { name: label })).toBeInTheDocument()
   }
   expect(screen.queryByRole('tab', { name: /^专家$/ })).not.toBeInTheDocument()
   expect(document.querySelector('.market-tabs')).toBeTruthy()
+  expect(document.body.textContent || '').not.toContain('当前可买')
 })
 
 test('GWT-37.2 command empty is actionable not git path', async () => {
@@ -101,12 +114,13 @@ test('GWT-37.2 command empty is actionable not git path', async () => {
   expect(screen.getByRole('button', { name: '去源叶' })).toBeInTheDocument()
 })
 
-test('GWT-37.3 tenant listing switch disabled with platform note', async () => {
+test('GWT-37.3 platform admin listing switch is enabled on governance shell', async () => {
   list.mockResolvedValue({ total: 1, items: [row()] })
   renderPage()
   const group = await screen.findByRole('group', { name: '上架 demo-skill' })
-  expect(group.querySelector('input')).toBeDisabled()
-  expect(screen.getByText(NEED_PLATFORM_MARKET)).toBeInTheDocument()
+  expect(group.querySelector('input')).not.toBeDisabled()
+  expect(screen.queryByText(NEED_PLATFORM_MARKET)).not.toBeInTheDocument()
+  expect(screen.getByTestId('governance-shell')).toBeInTheDocument()
 })
 
 test('GWT-37.4 merged sentence keeps listed child', async () => {
@@ -150,6 +164,43 @@ test('GWT-37.5 plugin drawer has no bulk-list control', async () => {
   expect(await screen.findByText(OPEN_IN_CATALOG)).toBeInTheDocument()
   expect(screen.getByText(LIST_CHILD)).toBeInTheDocument()
   expect(document.body.textContent).not.toContain(BULK_LIST)
+})
+
+test('IM-17 open in catalog keeps short name', async () => {
+  perm.isPlatformAdmin = true
+  list.mockImplementation((type?: string) => {
+    if (type === 'plugin') {
+      return Promise.resolve({
+        total: 1,
+        items: [row({ id: 9, name: 'pack-a', asset_type: 'plugin' })],
+      })
+    }
+    return Promise.resolve({
+      total: 1,
+      items: [row({
+        id: 10, name: 'pack-a__child-a', title: 'child-a', asset_type: 'skill',
+      })],
+    })
+  })
+  pluginDetail.mockResolvedValue({
+    name: 'pack-a', health_status: 'unknown', bundled_skills: ['child-a'], mcp_servers: {},
+  })
+  renderPage()
+  fireEvent.click(screen.getByRole('tab', { name: '插件' }))
+  expect(await screen.findByText('pack-a')).toBeInTheDocument()
+  fireEvent.click(screen.getByText('详情'))
+  fireEvent.click(await screen.findByText(OPEN_IN_CATALOG))
+  expect(await screen.findByText(catalogFocusCopy('child-a'))).toBeInTheDocument()
+  expect(screen.getByText('pack-a__child-a')).toBeInTheDocument()
+})
+
+test('IM-19 governance catalog table paginates', async () => {
+  list.mockResolvedValue({ total: 1, items: [row()] })
+  renderPage()
+  expect(await screen.findByText('demo-skill')).toBeInTheDocument()
+  expect(document.querySelector('.ant-pagination')).toBeTruthy()
+  expect(screen.getByText('共 1 条')).toBeInTheDocument()
+  expect(GOVERNANCE_PAGE_SIZE).toBe(20)
 })
 
 test('GWT-37.6 listed_at remains after unlist in the row', async () => {
@@ -205,28 +256,11 @@ test('GWT-40.2 no host-running copy and no enable-host', async () => {
   expect(document.body.textContent).not.toContain(ENABLE_HOST)
 })
 
-test('GWT-40.3 tenant verify is disabled with note', async () => {
-  list.mockImplementation((type?: string) => {
-    if (type === 'plugin') {
-      return Promise.resolve({
-        total: 1,
-        items: [row({ id: 5, name: 'pack-c', asset_type: 'plugin' })],
-      })
-    }
-    return Promise.resolve({ total: 0, items: [] })
-  })
-  renderPage()
-  fireEvent.click(screen.getByRole('tab', { name: '插件' }))
-  expect(await screen.findByText('pack-c')).toBeInTheDocument()
-  const verify = screen.getByText(NEED_PLATFORM_ADMIN).closest('button')
-  expect(verify).toBeDisabled()
-})
-
-test('source empty hides register for tenant', async () => {
+test('source empty shows register for platform admin', async () => {
   renderPage()
   fireEvent.click(screen.getByRole('tab', { name: '源' }))
   expect(await screen.findByText(SOURCE_EMPTY)).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: '登记源' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '登记源' })).toBeInTheDocument()
 })
 
 test('team empty keeps create for platform admin', async () => {
@@ -242,4 +276,28 @@ test('agent leaf empty is 智能体 not 专家', async () => {
   fireEvent.click(screen.getByRole('tab', { name: '智能体' }))
   expect(await screen.findByText(AGENT_EMPTY)).toBeInTheDocument()
   expect(screen.queryByRole('columnheader', { name: '专家' })).not.toBeInTheDocument()
+})
+
+test('GWT-M41 unlist one row does not uninstall existing installs', async () => {
+  perm.isPlatformAdmin = true
+  uninstall.mockReset()
+  list.mockResolvedValue({ total: 1, items: [row({ listing_state: 'listed' })] })
+  patch.mockResolvedValue({ listing_state: 'unlisted' })
+  renderPage()
+  const group = await screen.findByRole('group', { name: '上架 demo-skill' })
+  fireEvent.click(within(group).getByText('未上架'))
+  await waitFor(() => expect(patch).toHaveBeenCalledWith('skill', 'demo-skill', 'unlisted', false))
+  expect(uninstall).not.toHaveBeenCalled()
+  expect(document.body.textContent || '').not.toContain('当前可买')
+})
+
+test('GWT-M41 tenant has no author-submit CTA', async () => {
+  perm.isPlatformAdmin = false
+  list.mockResolvedValue({ total: 0, items: [] })
+  renderPage()
+  expect(await screen.findByTestId('tenant-shelf')).toBeInTheDocument()
+  expect(screen.queryByText('投稿')).not.toBeInTheDocument()
+  expect(screen.queryByText('成为作者')).not.toBeInTheDocument()
+  expect(screen.queryByText('发布到能力市场')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('governance-shell')).not.toBeInTheDocument()
 })

@@ -65,6 +65,9 @@ class _FakeAuthService:
     async def authenticate(self, username, password):
         return self.authenticate_result
 
+    async def assert_tenant_login_allowed(self, user_data):
+        return None
+
     async def create_token(self, user_data):
         return MagicMock(
             access_token="fake-token", token_type="bearer", username=user_data["username"]
