@@ -71,7 +71,7 @@ uv run python run.py stop                  # 停止全部
 uv run python run.py restart               # 强制重启
 uv run pytest -x -q backend/tests          # 后端测试
 bash tools/check/arch.sh                 # 架构合规检查
-uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type post-checkout
 ```
 
 环境切换：所有入口接受 `--env {local,dev,prod}`。本地联调全栈：`docker compose up --build`（backend + MySQL 8 + Redis 7；compose 已设 `AUTO_AGENTS_API__HOST=0.0.0.0`）。

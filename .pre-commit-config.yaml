@@ -9,6 +9,9 @@
 # - check-arch.sh 退出码 = 违规数，非 0 即阻断提交
 # - ruff 仅检查暂存的 Python 文件（快速反馈）
 # - pytest 运行完整 backend/tests 套件（与 CI 对齐）
+# - default_stages 锁定门禁在提交/推送阶段，避免在 post-checkout 等阶段误跑
+
+default_stages: [pre-commit, pre-push]
 
 repos:
   - repo: local
@@ -57,3 +60,12 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      # 分支切换后自动同步 main（fail-open，冲突时回滚并提示手动处理）
+      - id: sync-main
+        name: Sync Main（切换分支自动合并 main）
+        entry: bash tools/git/sync_main.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [post-checkout]
