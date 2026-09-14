@@ -144,8 +144,8 @@ test('GWT-M01.3 viewer submit is refused and does not create a plan', async () =
 test('GWT-M01.4 success: wizard enters 方案与试采 and list shows the row; no 已入队', async () => {
   ;(fetchAiPlans as jest.Mock).mockImplementation(() =>
     Promise.resolve({
-      items: createAiPlan.mock.calls.length ? [draftPlan] : [],
-      total: createAiPlan.mock.calls.length ? 1 : 0,
+      items: (createAiPlan as jest.Mock).mock.calls.length ? [draftPlan] : [],
+      total: (createAiPlan as jest.Mock).mock.calls.length ? 1 : 0,
       planning_disabled: false,
     }),
   )
