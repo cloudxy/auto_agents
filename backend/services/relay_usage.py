@@ -32,7 +32,7 @@ async def observe_gateway_usage(row: RelayToken) -> tuple[int, Optional[datetime
     page = 1
     while page <= _SPEND_LOGS_MAX_PAGES:
         logs = await gateway_admin.list_key_spend_logs(
-            str(row.gateway_key_id), page=page,
+            str(row.key_hash), page=page,
         )
         rows = (logs or {}).get("data") or []
         for entry in rows:

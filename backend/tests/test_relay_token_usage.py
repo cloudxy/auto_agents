@@ -8,7 +8,7 @@ GWT-60.3（QA-21/QA-05 夹具口径，contract §7.4）：夹具网关是 **真�
 夹具按 v1.100.0 OpenAPI/源码实读钉端点（T-08 §0 + 本票核对）：
 - GET /key/info?key=<sha256(明文)>（litellm token 即 sha256 hexdigest，与本地
   key_hash 同值——明文永不出库）
-- GET /spend/logs/v2?key_alias=<alias>（分页；rows 含 total_tokens）
+- GET /spend/logs?api_key=<sha256(明文)>（v1 list；rows 含 total_tokens）
 """
 import asyncio
 import hashlib
@@ -165,22 +165,13 @@ class _FixtureGateway:
                         }
                     self._reply(200, {"key": key, "token_id": None, "expires": None, "info": info})
                     return
-                if path == "/spend/logs/v2":
+                if path == "/spend/logs":
                     with gw._lock:
                         gw.admin_hits.append(path)
-                        alias = (query.get("key_alias") or [""])[0]
-                        page = int((query.get("page") or ["1"])[0])
-                        page_size = int((query.get("page_size") or ["100"])[0])
-                        rows = [dict(r) for r in gw.logs if r["key_alias"] == alias]
-                    total = len(rows)
-                    start = (page - 1) * page_size
-                    page_rows = rows[start:start + page_size]
-                    self._reply(200, {
-                        "data": page_rows, "total": total, "page": page,
-                        "page_size": page_size,
-                        "total_pages": (total + page_size - 1) // page_size,
-                        "total_is_capped": False,
-                    })
+                        api_key = (query.get("api_key") or [""])[0]
+                        rows = [dict(r) for r in gw.logs if r["api_key"] == api_key]
+                    # 对齐 LiteLLM v1.100.0：/spend/logs 成功体是 list，不是 {data}
+                    self._reply(200, rows)
                     return
                 self._reply(404, {"error": {"message": f"no route {path}"}})
 
@@ -315,7 +306,7 @@ def test_gwt_60_3_chat_authed_usage_moves_and_event(
         assert body["choices"][0]["message"]["content"]
         assert int(body["usage"]["total_tokens"]) >= 1
 
-        # Then 三同时：用量 0→≥1（详情=回写触发点，经真实 /key/info + /spend/logs/v2）
+        # Then 三同时：用量 0→≥1（详情=回写触发点，经真实 /key/info + /spend/logs）
         detail = db_client.get(f"/api/v1/relay/tokens/{token_id}", headers=owner)
         assert detail.status_code == 200, detail.text
         env = detail.json()

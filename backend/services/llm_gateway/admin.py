@@ -129,6 +129,21 @@ async def delete_key(
     return await _http_json("POST", "/key/delete", json_body=body, transport=transport)
 
 
+def _normalize_spend_logs(raw: Any, *, page: int, page_size: int) -> dict:
+    """把 /spend/logs 的 list 收成观察面用的 {data, total_pages}。"""
+    if isinstance(raw, dict) and isinstance(raw.get("data"), list):
+        return raw
+    rows = raw if isinstance(raw, list) else []
+    return {
+        "data": rows,
+        "total": len(rows),
+        "page": int(page),
+        "page_size": int(page_size),
+        "total_pages": 1,
+        "total_is_capped": False,
+    }
+
+
 async def get_key_info(
     key: str,
     *,
@@ -146,21 +161,23 @@ async def get_key_info(
 
 
 async def list_key_spend_logs(
-    key_alias: str,
+    api_key_hash: str,
     *,
     page: int = 1,
     page_size: int = 100,
     transport: Optional[httpx.AsyncBaseTransport] = None,
 ) -> Any:
-    """GET /spend/logs/v2：按 key_alias 过滤的分页 spend 日志（T-09 用量观察）。
+    """GET /spend/logs?api_key=<sha256>：按虚拟 Key 过滤（T-09 用量观察）。
 
-    v1.100.0 实读：rows（``data``）含 ``total_tokens``（int）——是按 Key 累计
-    token 用量的可得口径（key/info 行只有 USD spend，无 token 计数）。
-    响应：``{data, total, page, page_size, total_pages, total_is_capped}``。
+    v1.100.0 实读：``/spend/logs/v2`` 无起止日期会 400，且行上常缺
+    ``api_key`` / ``key_alias`` / ``total_tokens``。v1 ``/spend/logs`` 带
+    ``api_key`` 返回 list，row.total_tokens 可累计。调用方只持本地
+    ``key_hash``（明文永不出库）。
     """
-    logger.info("LiteLLM GET /spend/logs/v2")
-    return await _http_json(
-        "GET", "/spend/logs/v2",
-        params={"key_alias": key_alias, "page": int(page), "page_size": int(page_size)},
+    logger.info("LiteLLM GET /spend/logs (key filter)")
+    raw = await _http_json(
+        "GET", "/spend/logs",
+        params={"api_key": api_key_hash},
         transport=transport,
     )
+    return _normalize_spend_logs(raw, page=page, page_size=page_size)
