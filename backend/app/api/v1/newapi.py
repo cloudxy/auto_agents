@@ -21,6 +21,7 @@ from backend.services.channel_config_service import ChannelConfigService
 from backend.services.channel_probe_service import ChannelProbeService
 from backend.services.newapi_overview_service import NewapiOverviewService
 from platform_core.db import get_async_db
+from platform_core.logger import get_logger
 from platform_core.schemas.newapi import (
     ChannelConfigInfo,
     ChannelConfigUpdateResult,
@@ -37,6 +38,7 @@ from platform_core.schemas.newapi import (
 )
 
 router = APIRouter()
+logger = get_logger("api.newapi")
 
 
 def _service(session: AsyncSession = Depends(get_async_db)) -> NewapiOverviewService:
@@ -50,10 +52,21 @@ def _config_service() -> ChannelConfigService:
 @router.get("/overview", response_model=ApiResponse[NewapiOverviewResponse])
 async def get_overview(
     service: NewapiOverviewService = Depends(_service),
-    _user: CurrentUser = Depends(require_platform_admin_or_404),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
+    session: AsyncSession = Depends(get_async_db),
 ) -> ApiResponse[NewapiOverviewResponse]:
     """值班总览：网关模型（异常降级 available=false）+ 本地事件/探针统计"""
-    return ok(await service.get_overview())
+    data = await service.get_overview()
+    try:
+        from backend.services.product_event_service import emit_product_event
+        await emit_product_event(
+            session, "duty_entry_opened",
+            actor_user_id=user.id, role="platform_admin",
+            props={"user_id": user.id},
+        )
+    except Exception as exc:  # noqa: BLE001 失败不挡值班打开
+        logger.warning(f"值班打开事件上报失败 | err={exc}")
+    return ok(data)
 
 
 @router.get("/events", response_model=PaginatedResponse[ChannelEventResponse])

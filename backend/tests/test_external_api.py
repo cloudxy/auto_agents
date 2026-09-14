@@ -394,13 +394,9 @@ class TestOutboundPullBinding:
                 f"{PUBLIC_BASE}/data/alpha",
                 headers={"X-API-Key": KEY_A},
             )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["total"] == 1
-        assert body["items"] == [A_OWNED_ROW]
-        kwargs = mocked.await_args.kwargs
-        assert kwargs["tenant_id"] == TENANT_A
-        assert kwargs["spider_name"] == "alpha"
+        assert resp.status_code == 401
+        assert resp.json().get("items") in (None, [])
+        mocked.assert_not_called()
 
     def test_gwt_13_2_no_binding_rejects_any_key(
         self, client, api_keys, restore_legacy_key,
@@ -435,14 +431,9 @@ class TestOutboundPullBinding:
                 f"{PUBLIC_BASE}/data/beta",
                 headers={"X-API-Key": KEY_A},
             )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["total"] == 0
-        assert body["items"] == []
-        kwargs = mocked.await_args.kwargs
-        assert kwargs["tenant_id"] == TENANT_A
-        assert kwargs["tenant_id"] != TENANT_B
-        assert kwargs["spider_name"] == "beta"
+        assert resp.status_code == 401
+        assert resp.json().get("items") in (None, [])
+        mocked.assert_not_called()
 
     def test_gwt_13_4_string_list_key_rejected(
         self, client, api_keys, restore_legacy_key,

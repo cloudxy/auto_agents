@@ -118,15 +118,15 @@ export const createAiPlan = (payload: {
   html_snippet?: string
 }): Promise<AiPlan> => api.post('/ai/plans', payload).then((res) => unwrap<AiPlan>(res))
 
-/** 计划分页列表（分页信封 data，可按状态过滤） */
+/** 计划分页列表（分页信封 data，可按状态过滤；planning_disabled 为 FR-M01 读模型） */
 export const fetchAiPlans = (params: {
   skip?: number
   limit?: number
   status?: string
-} = {}): Promise<{ total: number; items: AiPlan[] }> =>
+} = {}): Promise<{ total: number; items: AiPlan[]; planning_disabled?: boolean }> =>
   api
     .get('/ai/plans', { params })
-    .then((res) => unwrap<{ total: number; items: AiPlan[] }>(res))
+    .then((res) => unwrap<{ total: number; items: AiPlan[]; planning_disabled?: boolean }>(res))
 
 /** 计划快照（状态机进度查询，轮询用） */
 export const fetchAiPlan = (planId: number): Promise<AiPlan> =>

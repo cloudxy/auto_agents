@@ -1,19 +1,26 @@
 """计费 API：公开价目 + 租户订购 + 结账占坑 + 通道通知 + 平台确认收款。"""
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, get_current_user, require_platform_admin
+from backend.app.api.deps import (
+    CurrentUser, get_current_user, require_platform_admin_or_404,
+)
 from backend.app.responses import ApiResponse, created, ok
 from backend.services.billing_service import BillingService
 from backend.services.payment_notify_service import PaymentNotifyService
-from backend.services.quota_service import DEFAULT_UPGRADE_PRODUCT
+from backend.services.quota_service import (
+    CHECKOUT_UNCONFIGURED_SUBMIT_USER,
+    DEFAULT_UPGRADE_PRODUCT,
+)
 from platform_core.db import get_async_db
 from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
 from platform_core.schemas.billing import (
-    ChannelNotifyIn, CheckoutCreate, OnlinePayChannel, OrderCreate, OrderOut,
-    PlanOut, SubscriptionOut,
+    ChannelNotifyIn, CheckoutCreate, OnlinePayChannel, OrderConfirmIn, OrderCreate,
+    OrderOut, PlanOut, SubscriptionOut,
 )
 
 logger = get_logger("api.billing")
@@ -37,6 +44,7 @@ async def list_plans(service: BillingService = Depends(_svc)) -> ApiResponse[lis
 @router.get("/checkout")
 async def preview_checkout(
     product: str = Query(DEFAULT_UPGRADE_PRODUCT),
+    referrer_surface: Optional[str] = Query(None),
     user: CurrentUser = Depends(get_current_user),
     service: BillingService = Depends(_svc),
 ):
@@ -45,6 +53,8 @@ async def preview_checkout(
     data = await service.preview_checkout(
         user.tenant_id, user.tenant_role, product,
         is_platform_admin=user.is_platform_admin,
+        actor_user_id=user.id,
+        referrer_surface=referrer_surface or "nav",
     )
     notice = data.get("notice") or data.get("empty_state") or "操作成功"
     return ok(data=data, message=str(notice))
@@ -69,7 +79,10 @@ async def create_checkout(
         session, user, "checkout.create", f"order#{order.id}",
         detail={"product": payload.product, "channel": payload.channel},
     )
-    return created(order, message="待支付已创建")
+    message = (
+        CHECKOUT_UNCONFIGURED_SUBMIT_USER if not order.channel else "待支付已创建"
+    )
+    return created(order, message=message)
 
 
 @router.post("/notify/{channel}")
@@ -127,7 +140,7 @@ async def list_orders(
 
 @router.get("/admin/orders", response_model=ApiResponse[list[OrderOut]])
 async def list_pending_orders(
-    _user: CurrentUser = Depends(require_platform_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
     service: BillingService = Depends(_svc),
 ) -> ApiResponse[list[OrderOut]]:
     return ok(await service.list_pending_orders())
@@ -136,10 +149,14 @@ async def list_pending_orders(
 @router.post("/orders/{order_id}/confirm", response_model=ApiResponse[OrderOut])
 async def confirm_order(
     order_id: int,
-    user: CurrentUser = Depends(require_platform_admin),
+    payload: OrderConfirmIn | None = None,
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: BillingService = Depends(_svc),
 ) -> ApiResponse[OrderOut]:
-    out = await service.confirm_paid(order_id, actor_user_id=user.id)
+    expected = payload.order_id if payload is not None else None
+    out = await service.confirm_paid(
+        order_id, actor_user_id=user.id, expected_order_id=expected,
+    )
     await record_audit(session, user, "order.confirm", f"order#{order_id}")
     return ok(out)

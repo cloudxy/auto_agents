@@ -37,6 +37,10 @@ from platform_core.logger import get_logger
 
 logger = get_logger("api")
 
+PLANNING_DISABLED_COPY = "智能规划未开放"
+PLANNING_DISABLED_CODE = "PLANNING_DISABLED"
+PLANNING_READONLY_COPY = "当前账号不能开始规划"
+
 # LLM 重试退避基数（指数：1s/2s/4s...）
 _RETRY_BASE_DELAY = 1.0
 
@@ -451,8 +455,9 @@ async def llm_chat(
     # ENABLED=false 须在网关探测前返回，避免与 74.1「平台 LLM 网关不可达」混句
     if not cfg.enabled:
         raise BusinessException(
-            "LLM 功能未启用（无激活供应商且 LLM.ENABLED=false）："
-            "请在 LLM 供应商管理中配置并激活，或开启 LLM.ENABLED 并配置 LLM_API_KEY"
+            PLANNING_DISABLED_COPY,
+            code=PLANNING_DISABLED_CODE,
+            status_code=422,
         )
     if _is_litellm_plane() and cfg.source == "gateway":
         await _enforce_tenant_token_quota()

@@ -35,9 +35,17 @@ PROVIDER_ERROR_USER = "本企业供应商调用失败"
 STORAGE_CLEANUP_CTA = "去结果库"
 CONTACT_ADMIN_UPGRADE = "请联系本企业管理员开通"
 CHECKOUT_EMPTY_USER = "收款通道未开通"
+CHECKOUT_UNCONFIGURED_SUBMIT_USER = "收款通道未开通，提交后等待平台确认开通"
+CHECKOUT_PENDING_EXISTS_USER = "已有待支付"
+ORDER_STORY_CLOSED_USER = "请从结账页提交开通"
 CHECKOUT_PRODUCTS = frozenset({"plan_pro", "plan_enterprise", "relay"})
 DEFAULT_UPGRADE_PRODUCT = "plan_pro"
 BUYER_TENANT_ROLES = frozenset({"owner", "admin"})
+PRO_TIER_QUOTA = {
+    "task_concurrency": 50,
+    "result_storage": 200000,
+    "llm_tokens_month": 5000000,
+}
 SHANGHAI_TZ = "Asia/Shanghai"
 
 

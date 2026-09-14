@@ -88,8 +88,10 @@ test('GWT-U35.1/5 paid-tier 去结账 goes to checkout not register', () => {
   expect(copy).not.toContain('预告不可购买')
   expect(copy).not.toContain('尚未开通购买')
   expect(copy).not.toContain('当前可买')
+  expect(copy).not.toContain('支付已通')
   expect(copy).not.toContain('联系升级')
   expect(screen.queryByRole('link', { name: '联系平台' })).toBeNull()
+  expect(copy).not.toContain('mailto:')
 })
 
 test('closed-set B items are listed without 预告 tag', () => {
@@ -130,6 +132,7 @@ test('test_no_currently_buyable_relay_copy_gwt_60_9', () => {
   renderPricing()
   const copy = document.body.textContent || ''
   expect(copy).not.toContain('当前可买')
+  expect(copy).not.toContain('支付已通')
   expect(copy).not.toContain('可买中转')
   expect(copy).not.toContain('开通即送中转')
   const relayRow = featureRow('中转站渠道组分配')

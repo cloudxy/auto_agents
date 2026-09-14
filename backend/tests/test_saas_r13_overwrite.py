@@ -138,13 +138,10 @@ def test_a_cannot_see_b_users_in_members(db_client):
 
 
 def test_a_cannot_see_b_users_in_admin_users(db_client):
-    """/admin/users（用户管理页，A owner role=admin 可过角色守卫）：
-    TenantMixin 自动过滤生效——A 只见本租户用户，B 用户不可见"""
+    """租户直打 /admin/users → 404 同形（FR-M32），不能读任何企业用户。"""
     resp = db_client.get("/api/v1/admin/users?limit=100", headers=_auth("a"))
-    assert resp.status_code == 200
-    usernames = [u["username"] for u in resp.json()["data"]["items"]]
-    assert any(u.startswith("a-owner-") for u in usernames), "A 应看到本租户用户（正向对照）"
-    assert all(not u.startswith("b-owner-") for u in usernames), "B 用户不得出现在 A 的用户列表"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
 
 
 def test_null_tenant_non_platform_token_rejected(db_client, db_session):

@@ -196,10 +196,16 @@ class SpiderQueryService:
     async def _emit_exported(self, task, fmt: str, row_count: int) -> None:
         logger.info(f"导出成功事件 | task={getattr(task, 'id', None)} rows={row_count}")
         from backend.services.product_event_service import emit_product_event
+        tenant_id = getattr(task, "tenant_id", None)
         await emit_product_event(
             self.session, "results_exported",
-            tenant_id=getattr(task, "tenant_id", None),
+            tenant_id=tenant_id,
             props={"format": fmt, "row_count": row_count},
+        )
+        await emit_product_event(
+            self.session, "data_export_completed",
+            tenant_id=tenant_id,
+            props={"file_format": fmt, "row_count": row_count},
         )
 
     async def _iter_export_chunks(

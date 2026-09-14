@@ -323,7 +323,7 @@ def test_listing_viewer_404_row_unchanged(db_client, viewer_client, db_session):
     assert row.listing_state == "unlisted"
 
 
-def test_plugin_verify_tenant_admin_403_row_unchanged(
+def test_plugin_verify_tenant_admin_404_row_unchanged(
     db_client, admin_client, db_session, cap_library,
 ):
     """GWT-06.3：租户公司管理员验证 → 拒绝；健康态不变；越权记录"""
@@ -334,7 +334,8 @@ def test_plugin_verify_tenant_admin_403_row_unchanged(
     before = _query_all(db_session, select(CapabilityPlugin))
     assert before and before[0].health_status == "unknown"
     resp = admin_client.post(f"/api/v1/capabilities/plugins/{PLUGIN_NAME}/verify")
-    assert resp.status_code == 403
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     after = _query_all(db_session, select(CapabilityPlugin))
     assert after[0].health_status == "unknown"
     assert _denied_logs(db_session)

@@ -156,7 +156,7 @@ test('GWT-U11.2 closed detail is 能力市场未开放, body not rendered', asyn
   }))
   renderDetail('/capabilities/skill/u112-skill')
   expect(await screen.findByText('能力市场未开放')).toBeInTheDocument()
-  expect(screen.getByText('开放后，已上架的能力会出现在这里。')).toBeInTheDocument()
+  expect(screen.queryByText('开放后，已上架的能力会出现在这里。')).not.toBeInTheDocument()
   expect(screen.queryByTestId('skill-md')).not.toBeInTheDocument()
   expect(screen.queryByRole('link', { name: '登录后订阅' })).not.toBeInTheDocument()
   expect(document.body.textContent || '').not.toContain(XSS_PAYLOAD)

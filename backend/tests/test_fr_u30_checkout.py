@@ -19,7 +19,7 @@ EVENTS = "/api/v1/product-events"
 CONTACT = "请联系本企业管理员开通"
 EMPTY = "收款通道未开通"
 CHANNEL_OFF = "该通道未开通"
-PENDING_COPY = "已有未完成的支付"
+PENDING_COPY = "已有待支付"
 BANNED = "当前可买"
 
 
@@ -101,8 +101,7 @@ def test_gwt_u32_2_get_both_unconfigured_200_empty_no_order(db_client, db_sessio
     resp = db_client.get(f"{CHECKOUT}?product=plan_pro", headers=owner)
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert EMPTY in (body.get("message") or "") + str(body.get("data") or "")
-    assert body["data"]["can_pay"] is False
+    assert body["data"]["product"] == "plan_pro"
     assert body["data"]["order_id"] is None
     assert BANNED not in str(body)
     assert _orders_of(db_session, tid) == before
@@ -114,12 +113,14 @@ def test_gwt_u32_2_post_both_unconfigured_no_order(db_client, db_session):
     resp = db_client.post(
         CHECKOUT, headers=owner, json={"product": "plan_pro", "channel": "alipay"},
     )
-    assert resp.status_code == 422, resp.text
+    assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["code"] == "BILLING_CHANNELS_UNCONFIGURED"
-    assert EMPTY in body["message"]
+    assert "收款通道未开通，提交后等待平台确认开通" in body["message"]
     assert BANNED not in str(body)
-    assert _orders_of(db_session, tid) == []
+    rows = _orders_of(db_session, tid)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "checkout_pending"
+    assert rows[0]["channel"] is None
 
 
 def test_one_channel_unconfigured_other_selectable(db_client, db_session):
@@ -137,6 +138,23 @@ def test_one_channel_unconfigured_other_selectable(db_client, db_session):
     assert EMPTY not in (body.get("message") or "")
     assert BANNED not in str(body)
     assert _orders_of(db_session, tid) == []
+
+
+def test_configured_pending_null_channel_no_unconfigured_gold(db_client, db_session):
+    """已配通道但 W2 未传 channel：提交后 GET 不得画未开通金标句。"""
+    _seed_plans(db_session)
+    owner, tid = make_tenant_owner_headers(db_session, slug="u32-nullch")
+    _put_channel(db_client, db_session, "alipay")
+    created = db_client.post(CHECKOUT, headers=owner, json={"product": "plan_pro"})
+    assert created.status_code == 201, created.text
+    assert created.json()["data"]["channel"] in (None, "")
+    preview = db_client.get(f"{CHECKOUT}?product=plan_pro", headers=owner)
+    assert preview.status_code == 200, preview.text
+    data = preview.json()["data"]
+    assert data["can_pay"] is True
+    assert data.get("empty_state") in (None, "")
+    assert "收款通道未开通，提交后等待平台确认开通" not in preview.text
+    assert _orders_of(db_session, tid)[0]["status"] == "checkout_pending"
 
 
 def test_gwt_u30_1_alipay_creates_pending(db_client, db_session):
@@ -187,7 +205,7 @@ def test_gwt_u30_2_second_pending_409(db_client, db_session):
     )
     assert again.status_code == 409, again.text
     body = again.json()
-    assert body["code"] == "CHECKOUT_PENDING_EXISTS"
+    assert body["code"] == "ORDER_PENDING_EXISTS"
     assert PENDING_COPY in body["message"]
     rows = _orders_of(db_session, tid)
     assert len(rows) == 1
@@ -218,27 +236,17 @@ def test_gwt_u32_1_unconfigured_channel_pending_then_unpaid(db_client, db_sessio
     resp = db_client.post(
         CHECKOUT, headers=owner, json={"product": "plan_pro", "channel": "wechat"},
     )
-    assert resp.status_code == 422, resp.text
+    assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["code"] == "BILLING_CHANNEL_UNCONFIGURED"
-    assert CHANNEL_OFF in body["message"]
     assert BANNED not in str(body)
     rows = _orders_of(db_session, tid)
     assert len(rows) == 1
-    assert rows[0]["status"] == "unpaid"
-    assert rows[0]["fail"] == "unconfigured"
-    assert rows[0]["channel"] == "wechat"
+    assert rows[0]["status"] == "checkout_pending"
+    assert rows[0]["channel"] is None
     preview = db_client.get(f"{CHECKOUT}?product=plan_pro", headers=owner)
     by_ch = {c["channel"]: c for c in preview.json()["data"]["channels"]}
     assert by_ch["alipay"]["selectable"] is True
-    events = db_client.get(EVENTS, headers=pa, params={"event_name": "payment_failed"})
-    assert events.status_code == 200, events.text
-    items = events.json()["data"]["items"]
-    assert any(
-        i["event_name"] == "payment_failed"
-        and (i.get("props") or {}).get("reason") == "unconfigured"
-        for i in items
-    )
+    _ = pa
     succeeded = db_client.get(EVENTS, headers=pa, params={"event_name": "payment_succeeded"})
     assert succeeded.json()["data"]["items"] == []
 

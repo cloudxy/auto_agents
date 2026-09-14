@@ -152,11 +152,16 @@ def test_gwt_102_1_plan_and_test_capture_share_platform_identity(
     """GWT-102.1 后半：AI 方案归属平台租户；试采入队（orchestrator._execute_test
     同链：require_enqueue_tenant(plan.tenant_id) → SpiderService.enqueue）成功。"""
     from backend.services.spider_task_service import SpiderTaskService
+    from config import settings
 
     _seed_worker_redis(monkeypatch)
     ptid = _seed_platform_tenant(db_session)
-
-    created = db_client.post(PLANS_URL, json={"target_url": "https://wiz.example"})
+    prev = settings.get("LLM.ENABLED")
+    settings.set("LLM.ENABLED", True)
+    try:
+        created = db_client.post(PLANS_URL, json={"target_url": "https://wiz.example"})
+    finally:
+        settings.set("LLM.ENABLED", prev)
     assert created.status_code == 200, created.text
     plan_id = created.json()["data"]["id"]
 

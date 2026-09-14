@@ -82,6 +82,8 @@ def _service() -> AiPlannerService:
     svc.repo.claim_status.return_value = True  # 默认抢断成功
     # FR-U02：launch_plan 规划前 token 闸走真 QuotaService；本模块 session 是 MagicMock。
     svc._reject_if_token_quota_full = AsyncMock()
+    # FR-M01：未开放闸走真 settings；本模块只测抢断/spawn。
+    svc._reject_if_planning_disabled = AsyncMock()
     return svc
 
 
@@ -176,7 +178,7 @@ class TestLlmChat:
         with patch("backend.services.ai_planner_service.settings", cfg):
             with pytest.raises(BusinessException) as ei:
                 await svc._llm_chat([{"role": "user", "content": "hi"}])
-        assert "未启用" in str(ei.value)
+        assert "智能规划未开放" in str(ei.value)
         assert "平台 LLM 网关不可达" not in str(ei.value)
         assert "还没有平台模型" not in str(ei.value)
 

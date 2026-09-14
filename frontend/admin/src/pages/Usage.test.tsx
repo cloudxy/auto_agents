@@ -131,10 +131,12 @@ function pageCopy(): string {
 
 function assertNoForbidden() {
   expect(pageCopy()).not.toContain('当前可买')
+  expect(pageCopy()).not.toContain('支付已通')
   expect(pageCopy()).not.toContain('QUOTA_EXCEEDED')
   expect(pageCopy()).not.toMatch(/\b429\b/)
   expect(pageCopy()).not.toContain('申请提升配额')
   expect(pageCopy()).not.toContain('/register')
+  expect(pageCopy()).not.toContain('套餐与订购')
 }
 
 beforeEach(() => {
@@ -148,14 +150,62 @@ beforeEach(() => {
   ;(listMyOrders as jest.Mock).mockReset().mockResolvedValue([])
 })
 
-test('renders usage quota cards with webhook and billing', async () => {
+test('renders usage quota cards with webhook and no BillingPanel', async () => {
+  ;(usePermission as jest.Mock).mockReturnValue(adminPerm)
+  useAuthStore.setState({ user: userWith('owner') })
   ;(fetchUsageOverview as jest.Mock).mockResolvedValueOnce(
     overview({ task_concurrency: 1, result_storage: 2, llm_tokens_month: 3 }),
   )
   renderUsage()
   expect(await screen.findByText('任务并发')).toBeInTheDocument()
   expect(await screen.findByText('任务交付 Webhook')).toBeInTheDocument()
-  expect(await screen.findByText('套餐与订购')).toBeInTheDocument()
+  expect(screen.queryByText('套餐与订购')).toBeNull()
+  expect(screen.queryByRole('radio')).toBeNull()
+  expect(screen.getByRole('button', { name: '去结账' })).toBeInTheDocument()
+  expect(pageCopy()).not.toContain('支付已通')
+})
+
+test('GWT-M10.1 buyer 去结账 is the only upgrade submit path, no 套餐与订购 form', async () => {
+  ;(usePermission as jest.Mock).mockReturnValue(adminPerm)
+  useAuthStore.setState({ user: userWith('owner') })
+  ;(fetchUpgradeIntent as jest.Mock).mockResolvedValue({
+    action: 'checkout', product: 'plan_pro', checkout_path: CHECKOUT_PATH_PRO, message: '去结账',
+  })
+  ;(fetchUsageOverview as jest.Mock).mockResolvedValueOnce(
+    overview({ task_concurrency: 1, result_storage: 2, llm_tokens_month: 3 }),
+  )
+  renderUsage()
+  fireEvent.click(await screen.findByRole('button', { name: '去结账' }))
+  expect(await screen.findByTestId('checkout-probe')).toHaveTextContent('plan_pro')
+  expect(createOrder).not.toHaveBeenCalled()
+  expect(pageCopy()).not.toContain('套餐与订购')
+})
+
+test('GWT-M22 / M10.3 viewer cannot order: no 去结账, no BillingPanel', async () => {
+  useAuthStore.setState({ user: userWith('viewer') })
+  ;(fetchUsageOverview as jest.Mock).mockResolvedValueOnce(
+    overview({ task_concurrency: 1, result_storage: 2, llm_tokens_month: 3 }),
+  )
+  renderUsage()
+  expect(await screen.findByText('任务并发')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '去结账' })).toBeNull()
+  expect(screen.queryByText('套餐与订购')).toBeNull()
+  expect(createOrder).not.toHaveBeenCalled()
+  expect(pageCopy()).not.toContain('当前可买')
+})
+
+test('GWT-M22 zero usage is 0 vs limits, not a load failure', async () => {
+  ;(usePermission as jest.Mock).mockReturnValue(adminPerm)
+  useAuthStore.setState({ user: userWith('owner') })
+  ;(fetchUsageOverview as jest.Mock).mockResolvedValueOnce(
+    overview({ task_concurrency: 0, result_storage: 0, llm_tokens_month: 0 }),
+  )
+  renderUsage()
+  expect(await screen.findByText('任务并发')).toBeInTheDocument()
+  expect(pageCopy()).toContain('/ 5 个运行中')
+  expect(screen.queryByText('用量加载失败')).toBeNull()
+  expect(screen.queryByText('暂无用量数据')).toBeNull()
+  expect(screen.getByRole('button', { name: '去结账' })).toBeInTheDocument()
 })
 
 test('test_readonly_usage_no_plan_edit_gateway_failure_not_quota', async () => {

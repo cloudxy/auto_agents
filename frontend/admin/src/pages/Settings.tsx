@@ -2,11 +2,12 @@
  * 系统设置页面 - 管理网站基础信息
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Tag, Form, Input, Button, Card, message, Divider, Spin, Typography, Alert } from 'antd'
+import { Tag, Form, Input, Button, Card, message, Divider, Spin, Typography } from 'antd'
 import { fetchSiteConfigs, fetchWebhookStatus, updateSiteConfig, type WebhookStatus } from '../services/settings'
 import { fetchNotifyConfig, updateNotifyConfig, type NotifyChannelConfig } from '../services/users'
 import { apiErrorMessage } from '../utils/errorMessage'
 import { useAuthStore } from '../store/useAuthStore'
+import NotFound from './NotFound'
 
 const { Text } = Typography
 
@@ -16,10 +17,7 @@ interface SiteConfigValues {
   site_description?: string
 }
 
-/** T-21 / GWT-90.2（IMPL-QA-2 写面收紧）：系统设置写面 = 平台超管 only。
- *  后端 PUT /configs 挂 require_platform_admin——租户 owner/admin 保存恒 403，
- *  给他们渲染表单是「见表单但保存必败」；收紧为与后端同权，
- *  租户各角色（owner/admin/operator/viewer）统一说明态早退。 */
+/** T-21 / FR-M33：系统设置写面 = 平台超管 only。租户直打 = 404 同形，不是说明态。 */
 
 const Settings: React.FC = () => {
   const [form] = Form.useForm()
@@ -87,20 +85,7 @@ const Settings: React.FC = () => {
     }
   }
 
-  // GWT-90.2（QA-22 单 Then；IMPL-QA-2 收紧后）：非平台超管（租户 owner/admin/operator/viewer）
-  // 打开 = 角色说明态，而非 404 同形（设置不是组织幽灵页）
-  if (!canWriteSettings) {
-    return (
-      <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-        <Alert
-          type="info"
-          showIcon
-          title="当前账号不能改系统设置"
-          description="系统设置由平台超管维护；如需调整站点名称、简介或通知渠道，请联系平台管理员。"
-        />
-      </div>
-    )
-  }
+  if (!canWriteSettings) return <NotFound />
 
   if (fetching) {
     return <div style={{ textAlign: 'center', padding: '50px' }}><Spin tip="加载配置中..." /></div>

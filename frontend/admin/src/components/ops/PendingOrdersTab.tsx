@@ -1,63 +1,73 @@
 /**
- * 平台超管：待确认收款订单。确认后套用套餐配额。
+ * T-19 待确认收款：结账待支付行；企业名+展示金额；空态「暂无待确认收款」。
  */
 import React from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Popconfirm, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Popconfirm, Table, message } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { CHANNEL_LABEL, confirmOrder, listPendingOrders, type OrderRow } from '../../services/billing'
 import { apiErrorMessage } from '../../utils/errorMessage'
+import { LoadEmpty, LoadFailure } from '../LoadState'
 
-const { Text } = Typography
+const ORDERS_LOAD_FAILED = '待确认收款列表加载失败。检查网络后重试。'
+export const ORDERS_EMPTY = '暂无待确认收款'
 
-const yuan = (cents: number) => (cents / 100).toFixed(2)
+const PENDING = new Set(['checkout_pending', 'pending'])
+
+function displayAmount(row: OrderRow): string {
+  const yuan = typeof row.amount_yuan === 'number' ? row.amount_yuan : row.amount_cents / 100
+  return `¥${yuan.toLocaleString('en-US')}`
+}
 
 const PendingOrdersTab: React.FC = () => {
   const qc = useQueryClient()
-  const q = useQuery({ queryKey: ['billing-pending-orders'], queryFn: listPendingOrders })
-  const rows = q.data ?? []
-  const load = () => { void qc.invalidateQueries({ queryKey: ['billing-pending-orders'] }) }
+  const q = useQuery({ queryKey: ['pending-orders'], queryFn: listPendingOrders, retry: false })
+  const rows = (q.data || []).filter((r) => PENDING.has(r.status))
 
   const onConfirm = async (row: OrderRow) => {
     try {
       await confirmOrder(row.id)
-      message.success(`订单 #${row.id} 已确认收款，配额已套用`)
-      load()
+      message.success('已确认收款')
+      void qc.invalidateQueries({ queryKey: ['pending-orders'] })
     } catch (e) {
-      message.error(apiErrorMessage(e, '确认失败'))
+      message.error(apiErrorMessage(e, '确认失败，订单仍待确认'))
     }
   }
 
+  if (q.isError) {
+    return <LoadFailure title={ORDERS_LOAD_FAILED} onRetry={() => { void q.refetch() }} />
+  }
+
   return (
-    <div>
-      {q.isError ? (
-        <Alert type="error" showIcon style={{ marginBottom: 12 }}
-               title={apiErrorMessage(q.error, '待确认订单加载失败')} />
-      ) : null}
-      <Alert
-        type="info" showIcon style={{ marginBottom: 12 }}
-        title="租户在用量页下单后出现在此。确认收款即套用套餐配额（支付宝/微信本环境不直连网关，以人工到账为准）。"
-      />
-      <Space style={{ marginBottom: 12 }}>
-        <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
-      </Space>
+    <div data-testid="pending-orders">
+      <Button icon={<ReloadOutlined />} onClick={() => q.refetch()} style={{ marginBottom: 12 }}>刷新</Button>
       <Table<OrderRow>
-        rowKey="id" size="small" loading={q.isLoading} dataSource={rows} pagination={false}
+        rowKey="id"
+        size="middle"
+        loading={q.isPending}
+        dataSource={rows}
+        pagination={{ pageSize: 20 }}
+        locale={{ emptyText: <LoadEmpty title={ORDERS_EMPTY} /> }}
         columns={[
-          { title: '订单', dataIndex: 'id', width: 70, render: (v: number) => `#${v}` },
-          { title: '租户', dataIndex: 'tenant_id', width: 80, render: (v: number | null) => v ?? '-' },
-          { title: '金额', dataIndex: 'amount_cents', width: 90, render: (v: number) => `¥${yuan(v)}` },
-          { title: '渠道', dataIndex: 'channel', width: 100,
-            render: (v: string) => <Text>{CHANNEL_LABEL[v] || v}</Text> },
-          { title: '状态', dataIndex: 'status', width: 90, render: () => <Tag color="gold">待确认</Tag> },
-          { title: '操作', width: 110, render: (_: unknown, row) => (
-            <Popconfirm title={`确认订单 #${row.id} 已到账？`} okText="确认收款" cancelText="取消"
-                        onConfirm={() => onConfirm(row)}>
-              <Button type="link" size="small">确认收款</Button>
-            </Popconfirm>
-          ) },
+          { title: '企业', dataIndex: 'tenant_name', render: (v: string | undefined) => v || '—' },
+          { title: '商品', dataIndex: 'plan_name', render: (v: string | undefined, r) => v || r.product_code || '—' },
+          { title: '金额', key: 'amount', width: 120, render: (_: unknown, r) => displayAmount(r) },
+          { title: '通道', dataIndex: 'channel', width: 100, render: (v: string) => CHANNEL_LABEL[v] || v },
+          {
+            title: '操作',
+            width: 120,
+            render: (_: unknown, r) => (
+              <Popconfirm
+                title="确认已收到该笔款项？此操作不可逆。"
+                okText="确认收款"
+                cancelText="取消"
+                onConfirm={() => onConfirm(r)}
+              >
+                <Button size="small" type="primary">确认收款</Button>
+              </Popconfirm>
+            ),
+          },
         ]}
-        locale={{ emptyText: '没有待确认订单' }}
       />
     </div>
   )

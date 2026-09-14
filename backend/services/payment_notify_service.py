@@ -1,24 +1,18 @@
 """通道通知验真后履约（FR-U33/U34/U38）。伪造/四要素不符不开通。"""
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.repositories.order_repository import OrderRepository
 from backend.repositories.payment_channel_credential_repository import (
     PaymentChannelCredentialRepository,
 )
-from backend.repositories.relay_sku_entitlement_repository import (
-    RelaySkuEntitlementRepository,
-)
-from backend.services.billing_service import BillingService
 from backend.services.channel_notify_auth import mac_matches
 from backend.services.llm_secret_vault import LlmSecretVault
 from backend.services.product_event_service import emit_product_event
-from backend.services.quota_service import CHECKOUT_PRODUCTS
 from platform_core.logger import get_logger
-from platform_core.models.billing import Order, Plan
+from platform_core.models.billing import Order
 from platform_core.schemas.billing import ChannelNotifyIn
 
 logger = get_logger("service.payment_notify")
@@ -26,7 +20,6 @@ logger = get_logger("service.payment_notify")
 _ONLINE = frozenset({"alipay", "wechat"})
 _FAIL = frozenset({"cancel", "timeout", "channel_error"})
 _OK = "success"
-_PERIOD_DAYS = 30
 
 
 def _utc_naive() -> datetime:
@@ -144,7 +137,9 @@ class PaymentNotifyService:
             logger.info(f"迟到成功通知，保持 unpaid | order={oid}")
             return
         if current.status == "fulfilled":
-            logger.info(f"重复成功通知，已开通 | order={oid}")
+            await self.orders.mark_late_notify(oid, now)
+            await self.session.commit()
+            logger.info(f"迟到成功通知，保持已开通 | order={oid}")
             return
         if current.status == "paid_pending_fulfillment":
             await self._fulfill(oid)
@@ -187,39 +182,5 @@ class PaymentNotifyService:
         await self.session.commit()
 
     async def _fulfill_product(self, order: Order, now: datetime) -> None:
-        logger.info(f"按商品开通 | order={order.id} product={order.product_code}")
-        product = str(order.product_code or "")
-        tid = int(order.tenant_id)
-        if product == "relay":
-            await self._activate_relay(tid, now)
-            return
-        if product not in CHECKOUT_PRODUCTS:
-            return
-        plan = await self._plan_for(order)
-        if plan is None:
-            logger.warning(f"履约缺套餐 | order={order.id} product={product}")
-            return
-        await BillingService(self.session)._apply_plan(tid, plan, now)
-
-    async def _activate_relay(self, tenant_id: int, now: datetime) -> None:
-        logger.info(f"开通中转 SKU | tenant={tenant_id}")
-        naive = now.replace(tzinfo=None) if now.tzinfo else now
-        end = naive + timedelta(days=_PERIOD_DAYS)
-        await RelaySkuEntitlementRepository(self.session).activate_for_tenant(
-            tenant_id, period_end=end, activated_at=naive,
-        )
-
-    async def _plan_for(self, order: Order) -> Optional[Plan]:
-        logger.info(f"解析履约套餐 | order={order.id}")
-        if order.plan_id is not None:
-            plan = await self.session.get(Plan, order.plan_id)
-            if plan is not None:
-                return plan
-        slug = {"plan_pro": "pro", "plan_enterprise": "enterprise"}.get(
-            str(order.product_code or ""),
-        )
-        if not slug:
-            return None
-        return (await self.session.execute(
-            select(Plan).where(Plan.slug == slug)
-        )).scalar_one_or_none()
+        from backend.services.billing_fulfill import fulfill_checkout_product
+        await fulfill_checkout_product(self.session, order, now)

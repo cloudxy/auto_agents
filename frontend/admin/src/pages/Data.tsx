@@ -5,7 +5,7 @@
  * - 统计卡片（/admin/stats，ApiResponse 信封需解包 data）
  * - 跨任务结果表格：爬虫/时间范围/关键词筛选，服务端分页（GET /spiders/results）
  * - 行内操作：查看详情（复用 ResultDrawer，按结果所属任务打开）、删除（仅管理员，二次确认）
- * - 导出：按当前筛选条件拉取最多 100 条非候选，格式仅 CSV/JSON（无 xlsx）
+ * - 导出：按当前筛选 CSV/JSON；恰好 100 可出；101 金标上限且无文件；无 xlsx
  */
 import React, { useCallback, useMemo, useState } from 'react'
 import {
@@ -30,9 +30,22 @@ import { fetchAdminStats } from '../services/admin'
 import {
   CLEAR_FILTERS,
   EMPTY_RESULTS_COPY,
+  EXPORT_MAX_ROWS,
+  EXPORT_OFFLINE_COPY,
+  EXPORT_ROW_LIMIT_CODE,
+  EXPORT_ROW_LIMIT_COPY,
+  EXPORT_XLSX_FAILED,
+  EXPORTED_COPY,
   FILTERED_RESULTS_EMPTY,
   GO_SUBMIT_COLLECT,
 } from '../constants/collectCopy'
+import { apiErrorCode } from '../utils/collectBlock'
+import {
+  buildExportBlob,
+  exportWindowOverLimit,
+  nonCandidateRows,
+  triggerDownload,
+} from '../utils/dataExport'
 
 const { Text } = Typography
 
@@ -69,20 +82,6 @@ const toPseudoTask = (row: SpiderResult): Task => ({
   priority: 'normal',
   result_count: 0,
 })
-
-/** 结果转 CSV（含 BOM，Excel 直接打开不乱码） */
-const toCsv = (rows: SpiderResult[]): string => {
-  const header = ['id', 'task_id', 'spider_name', 'title', 'content', 'url', 'created_at']
-  const esc = (v: unknown) => {
-    const s = v === null || v === undefined ? '' : String(v)
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  const lines = [
-    header.join(','),
-    ...rows.map((r) => header.map((h) => esc((r as unknown as Record<string, unknown>)[h])).join(',')),
-  ]
-  return '\ufeff' + lines.join('\n')
-}
 
 const Data: React.FC = () => {
   const { hasPermission } = usePermission()
@@ -161,31 +160,38 @@ const Data: React.FC = () => {
     }
   }
 
-  // 按当前筛选条件导出（最多 100 条非候选；空窗不下载）
+  // 按当前筛选条件导出（恰好 100 可出；101 可见上限且无文件）
   const onExport = async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      message.warning(EXPORT_OFFLINE_COPY)
+      return
+    }
+    if (exportFmt !== 'csv' && exportFmt !== 'json') {
+      message.error(EXPORT_XLSX_FAILED)
+      return
+    }
     setExporting(true)
     try {
-      const res = await searchResults({ ...buildQuery(), page: 1, page_size: 100 })
-      const items = (res.items || [])
-        .filter((r) => r.source !== 'marketplace')
-        .slice(0, 100)
+      const res = await searchResults({ ...buildQuery(), page: 1, page_size: EXPORT_MAX_ROWS })
+      if (exportWindowOverLimit(res.total || 0)) {
+        message.warning(EXPORT_ROW_LIMIT_COPY)
+        return
+      }
+      const items = nonCandidateRows(res.items || [])
       if (!items.length) {
         message.warning('没有可导出的结果')
         return
       }
-      const isJson = exportFmt === 'json'
-      const blob = new Blob(
-        [isJson ? JSON.stringify(items, null, 2) : toCsv(items)],
-        { type: isJson ? 'application/json' : 'text/csv;charset=utf-8' },
+      triggerDownload(
+        buildExportBlob(items, exportFmt),
+        `data_center_export_${Date.now()}.${exportFmt}`,
       )
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `data_center_export_${Date.now()}.${exportFmt}`
-      link.click()
-      URL.revokeObjectURL(url)
-      message.success(`已导出 ${items.length} 条结果（${exportFmt.toUpperCase()}）`)
+      message.success(EXPORTED_COPY)
     } catch (error) {
+      if (apiErrorCode(error) === EXPORT_ROW_LIMIT_CODE) {
+        message.warning(EXPORT_ROW_LIMIT_COPY)
+        return
+      }
       message.error(apiErrorMessage(error, '导出失败。检查网络后重试。'))
     } finally {
       setExporting(false)

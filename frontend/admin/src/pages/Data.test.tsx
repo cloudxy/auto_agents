@@ -129,3 +129,79 @@ test('GWT-U01.2 filtered empty is not the true-zero lock sentence', async () => 
   fireEvent.click(screen.getByRole('button', { name: '清除筛选' }))
   expect(await screen.findByText('还没有结果，去提交采集')).toBeInTheDocument()
 })
+
+function makeRows(n: number, source = 'spider') {
+  return Array.from({ length: n }, (_, i) => ({
+    id: i + 1,
+    task_id: 1,
+    spider_name: 'example',
+    title: `row-${i + 1}`,
+    content: 'c',
+    url: 'https://example.com',
+    created_at: '2026-01-01T00:00:00',
+    source,
+  }))
+}
+
+test('GWT-M02.2 empty copy is gold and never the superseded 84.2 sentence', async () => {
+  renderData()
+  expect(await screen.findByText('还没有结果，去提交采集')).toBeInTheDocument()
+  expect(document.body.textContent).not.toContain('还没有采集结果。完成一次采集后会显示在这里。')
+})
+
+test('GWT-M02.5 exactly 100 non-candidate rows: csv file has 100 data rows and toast 已导出', async () => {
+  const items = makeRows(100)
+  ;(searchResults as jest.Mock).mockImplementation((q: { page_size?: number }) => {
+    if (q?.page_size === 100) return Promise.resolve({ items, total: 100 })
+    return Promise.resolve({ items: items.slice(0, 20), total: 100 })
+  })
+  const success = jest.spyOn(message, 'success').mockImplementation((() => undefined) as never)
+  const blobs: string[] = []
+  const RealBlob = global.Blob
+  global.Blob = class extends RealBlob {
+    constructor(parts?: BlobPart[], opts?: BlobPropertyBag) {
+      super(parts, opts)
+      blobs.push(String(parts?.[0] ?? ''))
+    }
+  } as typeof Blob
+  renderData()
+  await screen.findByText('单次最多 100 条')
+  fireEvent.click(screen.getByRole('button', { name: /导出/ }))
+  await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled())
+  expect(success).toHaveBeenCalledWith('已导出')
+  const csv = blobs.find((b) => b.includes('row-1')) || blobs[0]
+  const lines = csv.replace(/^\ufeff/, '').split('\n').filter((l) => l.length > 0)
+  expect(lines.length).toBe(101)
+  global.Blob = RealBlob
+  success.mockRestore()
+})
+
+test('GWT-M02.6 101 non-candidate rows: 单次最多导出 100 条 and no file', async () => {
+  const items = makeRows(100)
+  ;(searchResults as jest.Mock).mockImplementation((q: { page_size?: number }) => {
+    if (q?.page_size === 100) return Promise.resolve({ items, total: 101 })
+    return Promise.resolve({ items: items.slice(0, 20), total: 101 })
+  })
+  const warn = jest.spyOn(message, 'warning').mockImplementation((() => undefined) as never)
+  const success = jest.spyOn(message, 'success').mockImplementation((() => undefined) as never)
+  renderData()
+  await screen.findByText('单次最多 100 条')
+  fireEvent.click(screen.getByRole('button', { name: /导出/ }))
+  await waitFor(() => {
+    expect(warn).toHaveBeenCalledWith('单次最多导出 100 条')
+  })
+  expect(URL.createObjectURL).not.toHaveBeenCalled()
+  expect(success).not.toHaveBeenCalled()
+  expect(document.body.textContent).not.toMatch(/xlsx/i)
+  warn.mockRestore()
+  success.mockRestore()
+})
+
+test('GWT-M02.4 xlsx is not a successful export format', async () => {
+  renderData()
+  await screen.findByText('单次最多 100 条')
+  expect(document.body.textContent).not.toMatch(/xlsx/i)
+  expect(document.body.textContent).not.toMatch(/Excel/i)
+  expect(screen.getByRole('combobox', { name: '导出格式' })).toBeInTheDocument()
+})
+

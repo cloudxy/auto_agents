@@ -38,30 +38,35 @@ beforeEach(() => {
   ;(listMyOrders as jest.Mock).mockReset()
 })
 
-test('GWT-50.3 renders plan name, zh status and yuan amount without cents math', async () => {
-  ;(listMyOrders as jest.Mock).mockResolvedValueOnce(rows)
+test('GWT-50.3 / T-09 renders plan name, 待支付/已开通 and yuan amount without cents math', async () => {
+  ;(listMyOrders as jest.Mock).mockResolvedValueOnce([
+    { ...rows[0], status: 'checkout_pending' },
+    { ...rows[1], status: 'fulfilled' },
+  ])
   renderOrders()
-  // 两行同档位名：多行同文案用 findAllByText
   expect((await screen.findAllByText('专业档', {}, { timeout: 15000 })).length).toBe(2)
-  expect(screen.getByText('待确认收款')).toBeInTheDocument()
-  expect(screen.getByText('已确认')).toBeInTheDocument()
+  expect(screen.getByText('待支付')).toBeInTheDocument()
+  expect(screen.getByText('已开通')).toBeInTheDocument()
   expect(screen.getAllByText(/299\s*元/).length).toBe(2)
   const copy = document.body.textContent || ''
-  // 金额以元渲染：不出现分值；不写确认履约句（Q-PRICE）
   expect(copy).not.toContain('29900')
-  expect(copy).not.toContain('配额已变为专业档')
+  expect(copy).not.toContain('已确认')
+  expect(copy).not.toContain('待确认收款')
+  expect(copy).not.toContain('开通处理中')
+  expect(copy).not.toContain('未完成')
+  expect(copy).not.toContain('当前可买')
+  expect(copy).not.toContain('支付已通')
 })
 
-test('GWT-50.4 empty orders show pinned copy with next links, not default empty table', async () => {
+test('T-09 empty orders are not failure and have 去结账, no 还没有升级申请', async () => {
   ;(listMyOrders as jest.Mock).mockResolvedValueOnce([])
   renderOrders()
-  expect(await screen.findByText('还没有升级申请。', {}, { timeout: 15000 })).toBeInTheDocument()
-  expect(screen.getByText('提交线下升级申请后，待确认和已确认都会列在这里。')).toBeInTheDocument()
-  const goUsage = screen.getByRole('link', { name: '去用量' })
-  expect(goUsage.getAttribute('href')).toBe('/usage')
-  const pricing = screen.getByRole('link', { name: '看定价' })
-  expect(pricing.getAttribute('href') || '').toMatch(/\/pricing$/)
+  const go = await screen.findByRole('link', { name: '去结账' })
+  expect(go).toHaveAttribute('href', '/billing/checkout?product=plan_pro')
+  expect(screen.queryByText('还没有升级申请。')).toBeNull()
   expect(screen.queryByText(/暂无数据/)).toBeNull()
+  expect(screen.queryByText(/暂无订单/)).toBeNull()
+  expect(document.body.textContent || '').not.toContain('已确认')
 })
 
 test('FR-84 order list failure shows failure sentence + retry, retry refetches', async () => {

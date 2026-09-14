@@ -239,6 +239,7 @@ def platform_admin_client(app, client, _reset_auth_override):
 def make_platform_admin_headers(db_session) -> dict:
     """平台超管 Bearer（真链路：platform 租户 + is_platform_admin 用户 + JWT）"""
     import asyncio
+    import time
 
     from backend.services.auth_service import AuthService
     from platform_core.models.tenant import Tenant
@@ -264,7 +265,16 @@ def make_platform_admin_headers(db_session) -> dict:
             })
             return token.access_token
 
-    return {"Authorization": f"Bearer {asyncio.run(_go())}"}
+    last: BaseException | None = None
+    for _ in range(8):
+        try:
+            return {"Authorization": f"Bearer {asyncio.run(_go())}"}
+        except Exception as exc:  # noqa: BLE001 SQLite 测试库偶发 locked
+            if "database is locked" not in str(exc):
+                raise
+            last = exc
+            time.sleep(0.05)
+    raise last  # type: ignore[misc]
 
 
 def make_tenant_owner_headers(db_session, *, slug: str = "co-a") -> tuple[dict, int]:
@@ -368,7 +378,10 @@ def db_engine(tmp_path: Path) -> Iterator["AsyncEngine"]:
     else:
         url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
 
-    engine = create_async_engine(url, poolclass=NullPool)
+    engine_kw: dict = {"poolclass": NullPool}
+    if url.startswith("sqlite"):
+        engine_kw["connect_args"] = {"timeout": 30}
+    engine = create_async_engine(url, **engine_kw)
 
     async def _create_all() -> None:
         async with engine.begin() as conn:

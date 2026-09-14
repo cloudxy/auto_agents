@@ -11,6 +11,7 @@ import { track } from '../../utils/track'
 import { Button } from 'antd'
 import { RocketOutlined, ArrowRightOutlined } from '@ant-design/icons'
 import { trackCta, trackPageView } from '../../services/beacon'
+import { DUTY_CONTACT, DUTY_CONTACT_LABEL } from '../../dutyContact'
 
 const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
 
@@ -151,6 +152,9 @@ const SiteLayout: React.FC = () => {
             ))}
             <Link to="/terms" style={linkStyle}>服务条款</Link>
             <Link to="/privacy" style={linkStyle}>隐私政策</Link>
+            {DUTY_CONTACT ? (
+              <a href={`mailto:${DUTY_CONTACT}`} style={linkStyle}>{DUTY_CONTACT_LABEL}</a>
+            ) : null}
           </nav>
         </div>
         <div

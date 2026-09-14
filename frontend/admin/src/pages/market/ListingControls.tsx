@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Modal, Radio, Space, Typography } from 'antd'
+import { Modal, Radio, Space, Typography, message } from 'antd'
 
 import { patchListing, type AssetRow } from '../../services/capabilities'
 import { apiErrorMessage } from '../../utils/errorMessage'
@@ -30,6 +30,8 @@ const ListingControls: React.FC<Props> = ({
     try {
       const next = await patchListing(row.asset_type, row.name, listing_state, confirm)
       onChanged({ ...row, ...next })
+      if (listing_state === 'listed') message.success('已上架')
+      if (listing_state === 'unlisted') message.success('已下架')
     } catch (e) {
       onError(apiErrorMessage(e, '上架失败'))
     } finally {

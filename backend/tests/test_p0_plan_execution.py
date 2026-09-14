@@ -78,6 +78,6 @@ def test_tenant_admin_cannot_write_platform_config(app, client, _reset_auth_over
     app.dependency_overrides[get_current_user] = _tenant_admin
     try:
         resp = client.put("/api/v1/configs/site.name", json={"value": "x"})
-        assert resp.status_code in (401, 403)
+        assert resp.status_code in (401, 403, 404)
     finally:
         app.dependency_overrides.pop(get_current_user, None)

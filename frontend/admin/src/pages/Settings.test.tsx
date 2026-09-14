@@ -17,6 +17,7 @@
  */
 import React from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 
 jest.mock('../services/settings', () => ({
   fetchSiteConfigs: jest.fn().mockResolvedValue({}),
@@ -100,47 +101,35 @@ describe('T-21 FR-90 设置页不得声称官网已同步', () => {
     expect((message.info as jest.Mock)).not.toHaveBeenCalled()
   })
 
-  test('GWT-90.2（QA-22 单 Then）经办打开：只见「当前账号不能改系统设置」，无保存控件，非 404 同形', async () => {
+  test('GWT-M33 tenant operator 直打设置写面 is 404 same-shape, no form, no 只读说明态', async () => {
     mockUserState.current = OPERATOR_USER
-    render(<Settings />)
-    expect(await screen.findByText('当前账号不能改系统设置')).toBeInTheDocument()
-    // 无保存控件：系统设置表单与通知渠道表单都不渲染
+    render(<MemoryRouter><Settings /></MemoryRouter>)
+    expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /返回工作台/ })).toBeInTheDocument()
+    expect(screen.queryByText('当前账号不能改系统设置')).toBeNull()
     expect(screen.queryByRole('button', { name: /保存并发布/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: /保存渠道配置/ })).toBeNull()
     expect(screen.queryByLabelText(/网站\/平台名称/)).toBeNull()
-    // 不是「页面不存在」同形（设置不是组织幽灵页）
-    expect(screen.queryByText(/页面不存在/)).toBeNull()
-    // 无已同步成功句
     expect(document.body.textContent || '').not.toMatch(/同步/)
   })
 
-  test('GWT-90.2/90.3 只读打开：同说明态，强提交不可达（无 form、写 API 零调用）', async () => {
+  test('GWT-M33 viewer 直打设置写面 is 404 same-shape, write API zero', async () => {
     mockUserState.current = VIEWER_USER
-    render(<Settings />)
-    expect(await screen.findByText('当前账号不能改系统设置')).toBeInTheDocument()
-    // GWT-90.3：只读无保存路径——页面无 form 元素即无提交路径，Hero 自然不变
+    render(<MemoryRouter><Settings /></MemoryRouter>)
+    expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /保存并发布/ })).toBeNull()
     expect(document.querySelector('form')).toBeNull()
-    // 只读会话不触发任何配置写；无已同步成功句
     expect((updateSiteConfig as jest.Mock)).not.toHaveBeenCalled()
     expect((message.success as jest.Mock)).not.toHaveBeenCalled()
-    expect(document.body.textContent || '').not.toMatch(/同步/)
   })
 
-  test('IMPL-QA-2 写面收紧：租户 owner/admin（原写面角色）打开 = 同说明态，不再见表单', async () => {
-    // 后端 PUT /configs 挂 require_platform_admin——给他们表单是「见表单但保存必 403」，
-    // 收紧后与后端同权：原写面角色与 operator/viewer 同形早退
+  test('GWT-M33 tenant owner/admin 直打设置写面 is 404 same-shape', async () => {
     for (const formerWriter of [OWNER_USER, ADMIN_USER]) {
       mockUserState.current = formerWriter
-      const { unmount } = render(<Settings />)
-      expect(await screen.findByText('当前账号不能改系统设置')).toBeInTheDocument()
-      // 表单与两处保存控件都不渲染；写 API 零调用；非 404 同形；无同步句
+      const { unmount } = render(<MemoryRouter><Settings /></MemoryRouter>)
+      expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /保存并发布/ })).toBeNull()
-      expect(screen.queryByRole('button', { name: /保存渠道配置/ })).toBeNull()
-      expect(screen.queryByLabelText(/网站\/平台名称/)).toBeNull()
-      expect(screen.queryByText(/页面不存在/)).toBeNull()
+      expect(screen.queryByText('当前账号不能改系统设置')).toBeNull()
       expect((updateSiteConfig as jest.Mock)).not.toHaveBeenCalled()
-      expect(document.body.textContent || '').not.toMatch(/同步/)
       unmount()
     }
   })
