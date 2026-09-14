@@ -14,7 +14,32 @@ branch_labels = None
 depends_on = None
 
 
+def _has_table(name: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(name)
+
+
+def _has_column(table: str, col: str) -> bool:
+    insp = sa.inspect(op.get_bind())
+    if not insp.has_table(table):
+        return False
+    return col in {c["name"] for c in insp.get_columns(table)}
+
+
 def upgrade() -> None:
+    if not _has_table("plans"):
+        _create_billing_tables()
+        _seed_plans()
+    if not _has_column("llm_providers", "unit_price_per_1k_cents"):
+        op.add_column("llm_providers", sa.Column(
+            "unit_price_per_1k_cents", sa.Integer(), nullable=True, comment="每千 token 单价（分）"
+        ))
+    if not _has_column("llm_token_usage", "cost_cents"):
+        op.add_column("llm_token_usage", sa.Column(
+            "cost_cents", sa.BigInteger(), nullable=False, server_default="0"
+        ))
+
+
+def _create_billing_tables() -> None:
     op.create_table(
         "plans",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -54,20 +79,26 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("idempotency_key"),
     )
-    op.add_column("llm_providers", sa.Column(
-        "unit_price_per_1k_cents", sa.Integer(), nullable=True, comment="每千 token 单价（分）"
-    ))
-    op.add_column("llm_token_usage", sa.Column(
-        "cost_cents", sa.BigInteger(), nullable=False, server_default="0"
-    ))
-    # quota_json 含 `:5` 这类片段会被 SQLAlchemy 当成 bind；走 bindparams 避免吃 JSON
+
+
+def _seed_plans() -> None:
+    # 回填: 免费档/专业档价目（JSON 走 bindparams，避免 :5 被当成 SQL bind）
     op.execute(
         sa.text(
             "INSERT INTO plans (slug, name, price_cents, period, quota_json, is_public) "
-            "VALUES ('free', '免费档', 0, 'month', :q_free, 1), "
-            "('pro', '专业档', 29900, 'month', :q_pro, 1)"
+            "SELECT 'free', '免费档', 0, 'month', :q_free, 1 FROM DUAL "
+            "WHERE NOT EXISTS (SELECT 1 FROM plans WHERE slug = 'free')"
         ).bindparams(
             q_free='{"task_concurrency":5,"result_storage":10000,"llm_tokens_month":200000}',
+        )
+    )
+    # 回填: 专业档
+    op.execute(
+        sa.text(
+            "INSERT INTO plans (slug, name, price_cents, period, quota_json, is_public) "
+            "SELECT 'pro', '专业档', 29900, 'month', :q_pro, 1 FROM DUAL "
+            "WHERE NOT EXISTS (SELECT 1 FROM plans WHERE slug = 'pro')"
+        ).bindparams(
             q_pro='{"task_concurrency":20,"result_storage":500000,"llm_tokens_month":5000000}',
         )
     )

@@ -19,7 +19,26 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _has_table(name: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(name)
+
+
 def upgrade() -> None:
+    if not _has_table("plans"):
+        _create_plans()
+    if not _has_table("tenant_subscriptions"):
+        _create_subscriptions()
+    if not _has_table("orders"):
+        _create_orders()
+    if not _has_table("relay_groups"):
+        _create_relay_groups()
+    if not _has_table("relay_tokens"):
+        _create_relay_tokens()
+    _seed_plans()
+    _grant_relay_menu()
+
+
+def _create_plans() -> None:
     op.create_table(
         "plans",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False, comment="主键"),
@@ -33,6 +52,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("slug"),
     )
+
+
+def _create_subscriptions() -> None:
     op.create_table(
         "tenant_subscriptions",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False, comment="主键"),
@@ -46,6 +68,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("tenant_id", name="uq_tenant_subscriptions_tenant"),
     )
     op.create_index("ix_tenant_subscriptions_tenant_id", "tenant_subscriptions", ["tenant_id"])
+
+
+def _create_orders() -> None:
     op.create_table(
         "orders",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False, comment="主键"),
@@ -61,6 +86,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("idempotency_key"),
     )
     op.create_index("ix_orders_tenant_id", "orders", ["tenant_id"])
+
+
+def _create_relay_groups() -> None:
     op.create_table(
         "relay_groups",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False, comment="主键"),
@@ -76,6 +104,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("tenant_id", "name", name="uq_relay_groups_tenant_name"),
     )
     op.create_index("ix_relay_groups_tenant_id", "relay_groups", ["tenant_id"])
+
+
+def _create_relay_tokens() -> None:
     op.create_table(
         "relay_tokens",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False, comment="主键"),
@@ -95,17 +126,32 @@ def upgrade() -> None:
         sa.UniqueConstraint("key_hash"),
     )
     op.create_index("ix_relay_tokens_tenant_id", "relay_tokens", ["tenant_id"])
-    # 回填: 免费档/专业档价目（JSON 走 bindparams，避免 :5 被当成 SQL bind）
+
+
+def _seed_plans() -> None:
+    # 回填: 免费档（与 029 双线会合时 slug 可能已在）
     op.execute(
         sa.text(
             "INSERT INTO plans (slug, name, price_cents, period, quota_json, is_public) "
-            "VALUES ('free', '免费档', 0, 'month', :q_free, 1), "
-            "('pro', '专业档', 29900, 'month', :q_pro, 1)"
+            "SELECT 'free', '免费档', 0, 'month', :q_free, 1 FROM DUAL "
+            "WHERE NOT EXISTS (SELECT 1 FROM plans WHERE slug = 'free')"
         ).bindparams(
             q_free='{"task_concurrency":5,"result_storage":10000,"llm_tokens_month":200000}',
+        )
+    )
+    # 回填: 专业档
+    op.execute(
+        sa.text(
+            "INSERT INTO plans (slug, name, price_cents, period, quota_json, is_public) "
+            "SELECT 'pro', '专业档', 29900, 'month', :q_pro, 1 FROM DUAL "
+            "WHERE NOT EXISTS (SELECT 1 FROM plans WHERE slug = 'pro')"
+        ).bindparams(
             q_pro='{"task_concurrency":20,"result_storage":500000,"llm_tokens_month":5000000}',
         )
     )
+
+
+def _grant_relay_menu() -> None:
     # 回填: 租户角色可见渠道组菜单
     op.execute(sa.text(
         "UPDATE roles SET permissions = JSON_ARRAY_APPEND(permissions, '$', 'menu:relay') "

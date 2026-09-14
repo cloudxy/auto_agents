@@ -14,7 +14,28 @@ branch_labels = None
 depends_on = None
 
 
+def _has_table(name: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(name)
+
+
+def _has_column(table: str, col: str) -> bool:
+    insp = sa.inspect(op.get_bind())
+    if not insp.has_table(table):
+        return False
+    return col in {c["name"] for c in insp.get_columns(table)}
+
+
 def upgrade() -> None:
+    if not _has_table("api_keys"):
+        _create_api_keys()
+    if not _has_column("spider_results", "fetched_at"):
+        op.add_column(
+            "spider_results",
+            sa.Column("fetched_at", sa.DateTime(timezone=True), nullable=True, comment="采集时刻"),
+        )
+
+
+def _create_api_keys() -> None:
     op.create_table(
         "api_keys",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -36,10 +57,6 @@ def upgrade() -> None:
     )
     op.create_index("ix_api_keys_tenant_id", "api_keys", ["tenant_id"])
     op.create_index("ix_api_keys_key_hash", "api_keys", ["key_hash"], unique=True)
-    op.add_column(
-        "spider_results",
-        sa.Column("fetched_at", sa.DateTime(timezone=True), nullable=True, comment="采集时刻"),
-    )
 
 
 def downgrade() -> None:
