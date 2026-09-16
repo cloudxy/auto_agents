@@ -1,0 +1,206 @@
+# state.yaml — feat-agents-market 进度唯一事实源
+feature: feat-agents-market
+lane: L3
+appetite: "3-5pw 等效（manager 建议）：四类资产市场展示 + md 详情抽屉 + 目录导入自动分类 + 单通道修复扫描 bug + 后台 UI 重设计"
+current_hat: implement
+hats_done: [define, shape]
+phase: InProgress
+implement_waves:
+  backend: {tickets: [T-00, T-01, T-03, T-04, T-05, T-06, T-07, T-14], lane_file: api, at: "2026-09-15"}
+  frontend: {tickets: [T-02, T-08, T-09, T-10, T-11, T-12, T-13, T-15], lane_file: ui, at: "2026-09-15"}
+implement_progress:
+  interrupted_at: >
+    上一会话（ZCode sess_e8ca95f3）2026-09-15T08:43Z 因 provider quota 中断（TerminalStreamChunkError:
+    exceed quota limit），停在 T-05 完成、T-06 刚读 contract AD-6/AD-7 未动手；两个实现波子代理
+    （agent_741f67cd=api、agent_db02ca2d=ui）同批中断。
+  done: [T-00, T-01, T-02, T-03, T-04, T-05, T-06, T-07, T-08, T-09, T-10, T-11, T-12, T-13, T-14, T-15]
+  open: []
+  evidence:
+    T-00: 03-impl/T-00-evidence.md
+    T-06: 03-impl/T-06-evidence.md
+    T-07: 03-impl/T-07-evidence.md
+    T-14: 03-impl/T-14-evidence.md   # 含 T-04 票指定但缺失的 test_public_detail_preview.py 补齐
+    T-11/T-15: 03-impl/T-11-T-15-frontend-fix-evidence.md
+    T-12: 03-impl/T-12-evidence.md
+  remaining_gap: >
+    票表 T-00–T-15 全部交付并有证据。T-12 的用例落在 ImportTreePicker.test.tsx 而非票面写的
+    Capabilities.import.test.tsx（理由见该票证据 §1），页面级集成用例不回退。
+    唯一未做的复验是「Mac 本机 MySQL + Redis 齐全环境下的全量」——见 verification.must_rerun_on_mac。
+  defects_fixed_in_implement:
+    - id: D-1
+      where: backend/services/product_event_service.py
+      what: >
+        事务内发射的产品事件在单写库上被永久丢弃。_persist_event 刻意开第二连接提交事件，
+        而调用方 flush 后持库级写锁 → SQLite 必 `database is locked`，等满 connect_args
+        timeout=30s 后抛错被 emit_product_event 的 try/except 吞掉。本仓库 CI 主 pytest job
+        正是 SQLite（MYSQL_FIDELITY 只在单独 fidelity job 开），故 sync_completed/
+        import_completed 在 CI 口径下 100% 丢，GWT-08.1/08.3 可检索断言永远不可能通过。
+      fix: 独立会话被 OperationalError 挡住则退回主会话追加；SQLite 侧先 PRAGMA busy_timeout=250 不做长等。
+      impact: test_sync_endpoint 单用例 33.8s → 全套三文件 15 用例 10.35s；事件不再丢。
+    - id: D-2
+      where: backend/app/api/v1/public_skills.py
+      what: detail_opened 写成了 preview/正式二选一，租户侧不发——与 AD-5e「preview 与正式均发」相悖，GWT-08.4 租户分支覆盖不到。
+      fix: 两条通道都追发 detail_opened；MARKET_DETAIL_VIEWED 原样保留。
+    - id: D-3
+      where: frontend/admin/src/pages/market/CatalogTab.test.tsx（+ CatalogTab.tsx aria-label）
+      what: 上一会话中断时刚写完未跑，11 用例全红（缺 QueryClientProvider / antd 两字按钮插空格与图标 aria-label 污染可及名 / 一行写废的三元）。
+      fix: 见 03-impl/T-11-T-15-frontend-fix-evidence.md；现 11/11 绿。
+    - id: D-5
+      where: frontend/admin/src/frU24CopyScan.test.tsx
+      what: >
+        T-08 给 TenantShelf 接了 usePermission（内部 `useAuthStore()` 不带 selector），
+        而该机械钉用例的 useAuthStore mock 只支持带 selector 的调用形态 → 渲染即
+        `TypeError: sel is not a function`，上一会话遗留的红。
+      fix: mock 改为两种调用形态都支持（与 zustand 真实 API 一致），并补 isAuthenticated。
+    - id: D-4
+      where: backend/services/power_market/service.py
+      what: WIP 把 _project 搬到 projection.py 后留下两处 F401（hosts_for_asset / _to_public_asset_type），ruff 红。
+      fix: ruff --fix；顺带为 AD-11 行数预算腾出 2 行。
+  verification:
+    env_caveat: >
+      接手会话的 shell 在用户 Mac 上的 Linux 沙箱内，够不到本机 MySQL 与 Redis，测试走 conftest 的
+      SQLite 回退（与 CI 主 job 同口径）。仓库 .venv 是 macOS 构建的，已改用仓库外 ~/venv-linux
+      执行，.venv / uv.lock 零改动。单次 shell 调用上限 120s 且后台进程随调用结束被杀，全量
+      pytest 用分片脚本跨调用续跑。
+    full_backend: "1900 passed / 1 failed / 20 error —— 21 项非绿全部为环境所致（20 error = Redis 127.0.0.1:6379 拒连；1 failed = test_skill_import 的 httpx trust_env 用例走 DNS 解析）"
+    gates: "ruff exit 0；tools/check/arch.sh exit 0（13 红线 + 4 边界 + FR-14）；tools/check/db_migrations.sh exit 0"
+    frontend: "market 面 + Capabilities 面共 81 passed（CatalogTab 11 / AssetDetailDrawer 7 / AssetVisual+MarkdownBody 9 / TenantShelf+PowerMarketSwitch+TeamLeafTab 26 / Capabilities×4 28）"
+    must_rerun_on_mac: "MySQL + Redis 齐全的本机全量 pytest 与 npm run check-frontend 尚未跑过，合票前需在 Mac 上复验一遍"
+shape_rulings: >
+  OQ-1 接受（.agents 顶层 agents//commands/ 随 T-07 加 AGENTS.md 一行）；OQ-2 执行统一落 .agents 根；
+  OQ-3 货架 team tab 保留现状；OQ-D1=预览态豁免：公开详情端点对平台管理员豁免 listed 过滤（治理需要），
+  租户/匿名仍 404；OQ-D2=加票 T-15（prune 治理面按钮+确认弹窗，超管only）；dba OQ1 接受 updated_at 跳档
+  （无 GWT 反例）；dba OQ2 batch_id 走 product_events.props 不建表；OQ-D3 预览态显示订阅计数；OQ-D4 tokens
+  由实现帽从 edge-states.md 内嵌 JSON 块提取。
+intent:
+  class: new-feature
+  quote: "将 .agents 的 skills/commands/agents/plugins 做到能力市场（icon+背景图、md 详情、全后台管理、导入选目录自动分类、UI 好用美观）；插件页点扫描插件目录插件全部丢失是 bug"
+  at: "2026-09-15"
+operator_directive_continue: >
+  操作者以 $sdlc 亲令建造（消息含完整需求清单 + 参考图），Discover Discuss 四问
+  AskUserQuestion 未获即时作答（自治模式继续，推荐项已记录可否决）。Freeze 后的
+  「continue to define」按该原始指令视为已确认，不二次阻塞；操作者可在 review 前否决 S1-S4。
+discovery:
+  status: done
+  skip_why: ""
+  briefing: 00-discover/briefing.md
+  recon: 00-discover/recon.md
+  tracks:
+    discuss: done
+    compete: done
+    market: done
+    falsify: done
+  at: "2026-09-15"
+lane_judge:
+  Q1_schema: true
+  Q2_auth_tenant: true
+  Q3_external_contract: false
+  Q4_irreversible: true
+  Q5_new_dependency: true
+  Q6_files_or_subprojects: true
+  reason: >
+    049 迁移（WIP）+ 可能新增列/表（Q1）；公开端点 + 管理面 + POWER_MARKET 闸 + 租户订阅面（Q2）；
+    数据清理（孤儿行软删）不可逆侧（Q4）；react-markdown+remark-gfm 新前端依赖（Q5）；
+    backend + frontend/admin + platform_core 三子项目、预计 >20 文件（Q6）。无第三方对外契约变更（Q3 no）。
+    UI 重大重设计 → designer；schema → dba。
+roles_skipped: []
+q_security: no
+survey_findings: >
+  market.md：磁盘 166 资产（9 skill + 6 插件：bundled 128 skill/5 command/18 agent）；DB live 182 行、
+  12 plugin 行全软删（bug 足迹）、~22 孤儿行（13 oh-story__* command + ~9 skill，retract 只收 plugin 型）；
+  消费面闸前 Reach=0（POWER_MARKET.ENABLED=false），闸后=租户数（本地 5，生产未量化）。
+  compete.md：Claude marketplace 更新非破坏性（E2 引文）= bug 修复验收线；icon/bg 为规范级差异化
+  （marketplace.json/SKILL.md 无图像字段）；借鉴 manifest 驱动自动分类 + 示例 prompt 区 + Featured 式综合；
+  回避远程源分发/公开安装计数/AI 生成图；「最热」无事件数据。
+discuss_decisions: >
+  S1 收敛单通道修 bug（旧 scan-plugins 退役 + 孤儿行一次性清理）；S2 webkitdirectory 目录导入 +
+  后端结构自动分类（复用 agents_hub collect）；S3 admin 抽屉式详情（official 本轮不动）；
+  S4 react-markdown+remark-gfm。附加：最热=真实订阅计数否则降级综合；无图资产确定性占位；
+  POWER_MARKET.ENABLED 默认仍 false。全部为 manager 推荐项，操作者未即时作答，可否决。
+wip_context: >
+  工作区未提交 WIP（agents_hub 同步链路 + 049 迁移 + TenantShelf logo 渲染 + ctl 自动同步 + 单测）
+  是本 feature 基底，盘点见 00-discover/recon.md；实现帽不得回退这些改动，须先验证其测试可过。
+open_questions:
+  - {id: Q-OP-RATIFY, status: open, owner: operator, note: "S1-S4 + 三项附加裁定待追认；review 前任意时点可否决"}
+  - {id: Q-SCAN-EXPERTS, status: open, owner: operator+architect, note: "scan-experts 同类破坏风险未复现，是否下一轮退役；不阻塞"}
+gates:
+  - name: define-gfresh-r1
+    kind: fresh-context
+    hat: define
+    result: fail
+    at: "2026-09-15"
+    findings: 05-review/findings-define-r1.md
+    majors: [QA-1, QA-2]
+    minors: [QA-3, QA-4, QA-5, QA-6, QA-7]
+    rework_rounds: 1
+    snapshot:
+      spec_md: 7fc841ca6fa4aa8a1087df0adbe5aab5e682135b9673f7ef6e4449d8b03a48ae
+  - name: define-gfresh-r2
+    kind: fresh-context
+    hat: define
+    result: fail
+    at: "2026-09-15"
+    findings: 05-review/findings.md
+    majors: [NEW-1]
+    minors: [NEW-2, NEW-3, NEW-4, NEW-5]
+    rework_rounds: 2
+    root_cause: "v1.1 新增越权 GWT 套用 403 信封直觉断言，未核对仓库既有安全门面（require_platform_admin_or_404 存在性隐藏 + is_platform_admin 布尔模型）；产品矩阵同时引入 NFR-06 禁止的中间角色——写验收断言前未核对现状安全设计"
+    manager_ruling: "NEW-1 按 reviewer 选项 a 修复：越权断言统一 404 存在性隐藏，矩阵运营行改写为布尔模型现状，不引入 403 信封/权限扩张"
+    snapshot:
+      spec_md: dffb77488f4d913323a07eef6b881a76777a468b62ed8bfcd261ee8499eb208f
+  - name: define-gfresh-r3
+    kind: fresh-context
+    hat: define
+    result: pass
+    at: "2026-09-15"
+    findings: 05-review/findings.md
+    minors_left_for_qa: [R3-1（GWT-01.3 括注措辞，以 :102+§3.1 为准）]
+    snapshot:
+      spec_md: 1fc48a67616f7564dbcd87c81dbe7ade191c0667c5a6d9cc26261e022c4b6867
+  - name: shape-gfresh-r1
+    kind: fresh-context
+    hat: shape
+    result: fail
+    at: "2026-09-15"
+    findings: 05-review/findings.md
+    majors: [QA-1 OQ-D1 未传导, QA-2 T-15 缺票, QA-3 NULLS LAST 残留, QA-4 GWT-03.6-03.8 无票锚]
+    minors: [QA-5, QA-6, QA-7, QA-8]
+    rework_rounds: 1
+    snapshot:
+      contract_md: 984a63d5bbb7fc91d9d5fa1e317077b9a0c5af7812fea51150538834fb31dfa6
+      db_spec_md: 0e68dbb50fc503dc709e15fb808bb4a4343929a5e2f6c3b44e5f4e07c8ce9078
+  - name: shape-gfresh-r2
+    kind: fresh-context
+    hat: shape
+    result: fail
+    at: "2026-09-15"
+    findings: 05-review/findings.md
+    majors: [QA-7R expert 谓词过度排除]
+    minors: [QA-9, QA-10, QA-11]
+    rework_rounds: 2
+    root_cause: "QA-7 修复处方未与入库通道交互推演：capability_experts 侧行已非遗留判别式（agents_hub 对每个 agent 行建侧行），照抄处方引入过度排除"
+    snapshot:
+      contract_md: 675a2ba6a00fdfdb37c2cfa41fe3d271847b360f46cd58e61e29e9cb1cff2066
+      db_spec_md: 826ec32e7eb0c03f7ed0bafe361634760ae022e7b64ed854f9be8fdc4fcb02bb
+  - name: implement-review-r1
+    kind: fresh-context
+    hat: review
+    entry: "/sdlc-review（人工入口，report-only；不推进 hats_done/current_hat）"
+    result: fail
+    at: "2026-09-16"
+    findings: 05-review/findings.md
+    blockers: [QA-1 hub_import._land 符号链接路径逃逸（已本地复现）, QA-2 前端从不发 preview=true 致 FR-03 验收通道不可执行]
+    majors: [QA-3 ExamplesModal 空覆盖, QA-4 list_catalog 不投影 featured, QA-5 _md_path 绝对根丢 rel（相对 HEAD 回归）, QA-6 OQ-2 缺存量迁移致 legacy 行被误 prune, QA-7 事件兜底反转设计承诺且失败路径仍丢, QA-8 GWT-01.3 全称量词未成立]
+    minors: [QA-9, QA-10, QA-11, QA-12, QA-13, QA-14, QA-15, QA-16]
+    host_spawn:
+      native: "sdlc-workflow:reviewer 不在 host spawn 表"
+      fallback: general-purpose
+      note: "单次回退，子代理读 PLUGIN_ROOT/agents/reviewer.md + skills/findings/SKILL.md；未发生双派发"
+    archived_previous: 05-review/findings-shape-r3.md
+    snapshot:
+      spec_md: 1fc48a67616f7564dbcd87c81dbe7ade191c0667c5a6d9cc26261e022c4b6867
+      contract_md: b35a3a3150499efe6f1080214bcebe840cdb5c6ab4ae6054e22942aa3d46c2a0
+      db_spec_md: 826ec32e7eb0c03f7ed0bafe361634760ae022e7b64ed854f9be8fdc4fcb02bb
+      edge_states_md: 6d347382c405b178912e6f5b5712d978b8a23ebcc5c2fcad40ea6e2a0a7169d4
+      impl_evidence_state: 4728927e383f2ef1a1f9474c4e7c473a8a7de7a8fa55ef6901f532530ca147cb
+      worktree_code_set: 69b397870f4b1e71ff6d2bfbb8fe1425fd11042a3c2b0830044b52cb1c7228fd
