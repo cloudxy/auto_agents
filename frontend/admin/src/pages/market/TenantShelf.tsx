@@ -30,6 +30,10 @@ type Props = {
   onSubscribe: (type: string, name: string) => void
   /** T-13：超管预览态退出预览回治理壳；租户侧缺省跳 /capabilities */
   onExitPreview?: () => void
+  /** QA-2 修复：调用方（Capabilities.tsx 的「货架预览」分支）显式声明这是
+   * 超管预览态——驱动请求侧 preview=true，豁免闸与 listed 过滤。租户侧
+   * 渲染 TenantShelf 时不传（缺省 false），后端也只认平台管理员会话。 */
+  preview?: boolean
 }
 
 const MarketSkeleton: React.FC = () => (
@@ -110,22 +114,23 @@ type GridProps = {
   category: string
   page: number
   sort: string
+  preview?: boolean
   onPage: (page: number) => void
   onClear: () => void
   onOpenAsset: (item: PublicShelfItem) => void
 }
 
 const AssetGrid: React.FC<GridProps> = ({
-  type, q, host, category, page, sort, onPage, onClear, onOpenAsset,
+  type, q, host, category, page, sort, preview, onPage, onClear, onOpenAsset,
 }) => {
   const { isPlatformAdmin } = usePermission()
   const [syncing, setSyncing] = useState(false)
   const typeParam = type === 'all' ? undefined : type
   const query = useQuery({
-    queryKey: ['admin', 'public-capabilities', typeParam, q, host, category, page, sort],
+    queryKey: ['admin', 'public-capabilities', typeParam, q, host, category, page, sort, Boolean(preview)],
     queryFn: () => listPublicAssets({
       type: typeParam, q: q || undefined, host: host || undefined,
-      category: category || undefined, page, sort,
+      category: category || undefined, page, sort, preview,
     }),
     placeholderData: keepPreviousData,
     retry: false,
@@ -222,7 +227,7 @@ function writeParams(prev: URLSearchParams, patch: FilterPatch): URLSearchParams
   return next
 }
 
-const TenantShelf: React.FC<Props> = ({ canSubscribe, onSubscribe, onExitPreview }) => {
+const TenantShelf: React.FC<Props> = ({ canSubscribe, onSubscribe, onExitPreview, preview }) => {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const rawType = searchParams.get('type')
@@ -318,6 +323,7 @@ const TenantShelf: React.FC<Props> = ({ canSubscribe, onSubscribe, onExitPreview
             category={category}
             page={page}
             sort={sort}
+            preview={preview}
             onPage={onPage}
             onClear={goGovernance}
             onOpenAsset={setSelected}
@@ -329,6 +335,7 @@ const TenantShelf: React.FC<Props> = ({ canSubscribe, onSubscribe, onExitPreview
             canSubscribe={canSubscribe}
             onSubscribe={onSubscribe}
             onClose={() => setSelected(null)}
+            preview={preview}
           />
         </>
       )}

@@ -131,7 +131,7 @@ function renderShelf(path = '/capabilities') {
   )
 }
 
-function renderShelfDirect(path = '/capabilities') {
+function renderShelfDirect(path = '/capabilities', preview?: boolean) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
@@ -144,6 +144,7 @@ function renderShelfDirect(path = '/capabilities') {
                 canSubscribe
                 onSubscribe={() => undefined}
                 onExitPreview={() => undefined}
+                preview={preview}
               />
             )}
           />
@@ -331,7 +332,9 @@ test('FR-03 卡片 onClick 打开详情抽屉（1 次点击，无页面跳转）
   renderShelf()
   fireEvent.click(await screen.findByRole('button', { name: '查看 可订技能 详情' }))
   await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
-  expect(fetchCard).toHaveBeenCalledWith('skill', 'listed-ok')
+  // 租户侧渲染（isPlatformAdmin=false）：不带 preview——QA-2 修复后必须能断言
+  // 请求实参，而不是只看 mock 的返回值（否则测不出请求侧从未透传 preview 的回归）
+  expect(fetchCard).toHaveBeenCalledWith('skill', 'listed-ok', undefined)
 })
 
 test('FR-04 排序条：切「最热」带 sort=hot 请求；服务端回 smart 静默接受（GWT-04.4：无计数数字、无降级提示）', async () => {
@@ -390,8 +393,11 @@ test('GWT-03.3 超管预览态 tab 空态给 [立即同步]：点击走 syncAgen
   perm.isPlatformAdmin = true
   sync.mockResolvedValue({ inserted: 3, updated: 1, unchanged: 2, failed: 0, total: 6 })
   fetchList.mockResolvedValue({ items: [], total: 0, market_closed: false, preview: true })
-  renderShelfDirect('/capabilities?type=plugin')
+  renderShelfDirect('/capabilities?type=plugin', true)
   const syncBtn = await screen.findByRole('button', { name: '立即同步' })
+  // QA-2 修复回归：预览态必须真正把 preview:'true' 送进请求，不能只靠 mock
+  // 的响应体自称 preview:true（否则测不出请求侧从未透传的回归——finding QA-2）
+  expect(fetchList).toHaveBeenCalledWith(expect.objectContaining({ preview: true }))
   fireEvent.click(syncBtn)
   await waitFor(() => expect(sync).toHaveBeenCalledTimes(1))
   await waitFor(() => expect(message.success).toHaveBeenCalledWith(syncDoneCopy(3, 1, 2)))
@@ -414,11 +420,13 @@ test('GWT-03.6 下架后不出现在货架 tab（货架侧断言：可见集变�
 })
 
 test('T-13 预览 badge：preview=true 且闸关时显示，gate_open=true 不显示', async () => {
+  perm.isPlatformAdmin = true
   fetchList.mockResolvedValueOnce({
     items: [item()], total: 1, market_closed: false, preview: true, gate_open: false,
   })
-  renderShelfDirect()
+  renderShelfDirect('/capabilities', true)
   expect(await screen.findByTestId('shelf-preview-badge')).toBeInTheDocument()
   expect(screen.getByTestId('shelf-preview-badge').textContent)
     .toContain('预览模式 · 市场未对租户开放，你看到的是上架后的展示效果')
+  expect(fetchList).toHaveBeenCalledWith(expect.objectContaining({ preview: true }))
 })

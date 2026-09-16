@@ -288,6 +288,10 @@ export type PublicListQuery = {
   page_size?: number
   /** T-08（FR-04）：smart | latest | hot */
   sort?: string
+  /** QA-2 修复：请求侧 preview 参数（AD-5c 超管预览旁路）——响应里的
+   * `PublicShelfList.preview` 只是回显，真正驱动闸/listed 豁免的是这个请求参数。
+   * 后端只认平台管理员的会话，非管理员传了也被忽略。 */
+  preview?: boolean
 }
 
 export type PublicShelfItem = {
@@ -334,6 +338,7 @@ const compactPublicQuery = (params: PublicListQuery): Record<string, string | nu
   if (params.host) query.host = params.host
   if (params.category) query.category = params.category
   if (params.sort) query.sort = params.sort
+  if (params.preview) query.preview = 'true'
   return query
 }
 
@@ -389,6 +394,8 @@ export const uninstallInstall = (id: number): Promise<{ id: number; deleted: boo
 export const fetchPublicCapability = (
   assetType: string,
   name: string,
+  preview?: boolean,
 ): Promise<PublicCapabilityCard> =>
-  api.get(`/public/capabilities/${encodeURIComponent(assetType)}/${encodeURIComponent(name)}`)
-    .then((r) => unwrap<PublicCapabilityCard>(r))
+  api.get(`/public/capabilities/${encodeURIComponent(assetType)}/${encodeURIComponent(name)}`, {
+    params: preview ? { preview: 'true' } : undefined,
+  }).then((r) => unwrap<PublicCapabilityCard>(r))
