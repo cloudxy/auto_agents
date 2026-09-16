@@ -119,11 +119,22 @@ def _seed_plugin_row(db_session):
 
 
 def _seed_via_http_scan(db_client, db_session, headers: dict | None = None):
-    """播种插件（直插）+ 专家（HTTP scan-experts；调用方须已是特权或带超管 Bearer）"""
+    """播种插件（直插）+ 专家（K4 退役 POST /scan-experts 后改走 service 层
+    直调——cap_library 夹具已把 SKILLS.LIBRARY_ROOT 指到含 experts/ 的临时
+    目录，ExpertService.scan_experts() 的默认 root 解析与退役前的 HTTP
+    端点内部调用完全一致，只是不再绕 HTTP）。函数名沿用旧称，调用方无需
+    改动；headers 参数保留兼容旧签名但已不再使用（scan-experts 不再有独立
+    授权层需要区分调用者身份）。
+    """
+    from backend.services.expert_service import ExpertService
+
     _seed_plugin_row(db_session)
-    kw = {"headers": headers} if headers else {}
-    e = db_client.post("/api/v1/capabilities/scan-experts", **kw)
-    assert e.status_code == 200, e.text
+
+    async def _go():
+        async with db_session() as s:
+            await ExpertService(s).scan_experts()
+
+    asyncio.run(_go())
 
 
 def _seed_via_http_scan_headers(db_client, db_session, headers: dict):
@@ -282,14 +293,22 @@ def test_plugin_verify_tenant_admin_404_row_unchanged(
 
 
 # ---------------------------------------------------------------------------
-# POST /api/v1/capabilities/scan-experts + GET .../experts/{name}
+# ExpertService.scan_experts() service 层 + GET .../experts/{name}
+# K4：POST /api/v1/capabilities/scan-experts 已退役（扫的是 OQ-2 切根后已
+# 不存在的 capability-library/experts/，每次扫必然为空）。service 方法本身
+# 保留——接受显式 root 参数，是内部/测试按需从任意目录导入专家的正常入口，
+# 覆盖挪到 service 层直调，不再经过已退役的 HTTP 端点。
 # ---------------------------------------------------------------------------
 
-def test_scan_experts_ok(db_client, platform_admin_client, db_engine, db_session, cap_library):
-    resp = db_client.post("/api/v1/capabilities/scan-experts")
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    assert data["succeeded"] == 1
+def test_scan_experts_ok(db_session, cap_library):
+    from backend.services.expert_service import ExpertService
+
+    async def _go():
+        async with db_session() as s:
+            return await ExpertService(s).scan_experts()
+
+    result = asyncio.run(_go())
+    assert result["succeeded"] == 1
 
     assets = _query_all(db_session, select(CapabilityAsset).where(
         CapabilityAsset.asset_type == "expert"))
@@ -299,8 +318,11 @@ def test_scan_experts_ok(db_client, platform_admin_client, db_engine, db_session
     assert "资深代码评审员" in details[0].persona_md
 
 
-def test_scan_experts_anonymous_401(client):
-    assert client.post("/api/v1/capabilities/scan-experts").status_code == 401
+def test_scan_experts_endpoint_retired(client, platform_admin_client):
+    """K4 退役回归：路由表里不再有这条 POST，超管调用也是 404（同形，不是
+    先鉴权再业务空转）。"""
+    assert client.post("/api/v1/capabilities/scan-experts").status_code == 404
+    assert platform_admin_client.post("/api/v1/capabilities/scan-experts").status_code == 404
 
 
 def test_expert_detail_contract(db_client, platform_admin_client, db_engine, db_session, cap_library):

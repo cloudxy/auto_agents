@@ -36,7 +36,6 @@ jest.mock('antd', () => {
 jest.mock('../../services/capabilities', () => ({
   listAssets: jest.fn().mockResolvedValue({ total: 0, items: [] }),
   listSources: jest.fn().mockResolvedValue({ total: 0, items: [] }),
-  scanExperts: jest.fn(),
   createTeam: jest.fn(),
   verifyPlugin: jest.fn(),
   patchListing: jest.fn(),
