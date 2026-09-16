@@ -135,17 +135,21 @@ def test_gwt_08_1_import_completed_fields(
     }
     got = platform_admin_client.post(TREE_CONFIRM, files=_parts(files))
     assert got.status_code == 200, got.text
+    # QA-10：contract §4 #4 要求响应带 batch_id（回执号不入库，只是关联令牌）
+    resp_batch_id = got.json()["data"].get("batch_id")
+    assert resp_batch_id, "confirm 响应缺 batch_id"
     admin = make_platform_admin_headers(db_session)
     rows = _rows(db_client, admin, "import_completed")
     assert rows, "import_completed 未进 product_events"
     props = rows[0].get("props") or {}
     for key in ("actor_role", "source", "files",
-                "assets_created", "assets_updated", "assets_skipped"):
+                "assets_created", "assets_updated", "assets_skipped", "batch_id"):
         assert key in props, f"import_completed 缺字段 {key}"
     assert props["source"] == "directory"
     assert props["files"] == len(files)
     assert props["assets_created"] == 2
     assert props["assets_skipped"] == 1      # 非白名单 .exe 进跳过清单
+    assert props["batch_id"] == resp_batch_id  # 事件里的 batch_id 与响应一致，能对上号
     assert any("emit_import_completed" in ln for ln in loguru_sink)
 
 

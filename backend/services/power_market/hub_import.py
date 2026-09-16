@@ -23,6 +23,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 from backend.services.power_market.agents_hub import _upsert_item_listing
 from backend.services.power_market.agents_hub_scan import HubItem, collect_agents_hub
@@ -209,9 +210,16 @@ async def preview_tree_import(session, files: list[UploadedFile]) -> dict:
 
 
 async def confirm_tree_import(session, files: list[UploadedFile], *, agents_root) -> dict:
-    """确认：落盘到真实 .agents 根 + upsert 入库（单项失败不整批回滚，GWT-07.5）。"""
+    """确认：落盘到真实 .agents 根 + upsert 入库（单项失败不整批回滚，GWT-07.5）。
+
+    QA-10：contract §4 #4 要求响应带 batch_id 但实现之前没给——回执号不入库
+    （db-spec §10 裁定），只是一次导入批次的关联令牌，随 import_completed
+    事件一起发（emit_import_completed 的 batch_id 形参此前一直存在但从未被
+    传值）。用 uuid4 而不是自增 id：这批资产本身不建表，没有天然的行 id 可用。
+    """
     logger.info(f"hub_import.confirm | parts={len(files)} root={agents_root}")
     _guard_count(files)
+    batch_id = uuid4().hex[:12]
     created = updated = 0
     failed: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="hub-import-") as tmp:
@@ -235,6 +243,7 @@ async def confirm_tree_import(session, files: list[UploadedFile], *, agents_root
         await session.flush()
     return {
         "created": created, "updated": updated, "failed": failed, "skipped": skipped,
+        "batch_id": batch_id,
     }
 
 

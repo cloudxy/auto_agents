@@ -179,7 +179,7 @@ async def emit_sync_failed(session: AsyncSession, *, actor: str, error_type: str
 async def emit_import_completed(
     session: AsyncSession, *, actor_role: str, source: str, files: int,
     assets_created: int, assets_updated: int, assets_skipped: int,
-    actor_user_id: int | None = None, batch_id: int | None = None,
+    actor_user_id: int | None = None, batch_id: str | None = None,
 ) -> None:
     logger.info(
         f"market_events.emit_import_completed | source={source} files={files} "
@@ -191,7 +191,7 @@ async def emit_import_completed(
         "assets_skipped": int(assets_skipped),
     }
     if batch_id is not None:
-        props["batch_id"] = int(batch_id)
+        props["batch_id"] = str(batch_id)
     await emit_market_event(
         session, IMPORT_COMPLETED, actor_user_id=actor_user_id, props=props,
     )
