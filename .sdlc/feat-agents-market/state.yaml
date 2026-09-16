@@ -204,3 +204,66 @@ gates:
       edge_states_md: 6d347382c405b178912e6f5b5712d978b8a23ebcc5c2fcad40ea6e2a0a7169d4
       impl_evidence_state: 4728927e383f2ef1a1f9474c4e7c473a8a7de7a8fa55ef6901f532530ca147cb
       worktree_code_set: 69b397870f4b1e71ff6d2bfbb8fe1425fd11042a3c2b0830044b52cb1c7228fd
+post_review_baseline:
+  note: >
+    上述 implement-review-r1 判定发生在工作区未提交阶段（worktree_code_set 快照）。
+    2026-09-16 按 auto_agents-全面产品升级方案.md H 线把该 WIP 拆批提交，代码内容
+    与判定时逐字节一致（提交前后无代码改动，只是把散落改动落成 git 历史）：
+    4b3f444（backend/power_market+迁移）→ 062e372（frontend market UI）→
+    6099ade（.sdlc 工件本身）。commit_sha: 6099ade 起为后续修复 diff 的基线，
+    QA-1/QA-2 等修复必须叠加在此 SHA 之上，不得回填进这三个提交。
+  commit_sha: 6099ade
+post_review_fixes:
+  - id: QA-1
+    severity: blocker
+    status: fixed
+    commit: faf4e23
+    note: >
+      platform_core/fs_guard.py::assert_contained（全仓路径收容唯一实现，F5）+
+      hub_import._land 出口收容断言 + asset_import_service 委派同一实现；顺带修
+      QA-9（rmtree+copytree → copytree(dirs_exist_ok=True)）。回归测试
+      test_qa1_symlink_escape_rejected_top_and_nested：穿越式覆盖顶层符号链接
+      项与嵌套 bundled 子项两个挂载点，已用 git stash 验证过修复前失败/修复后通过。
+    verified: >
+      uv run pytest backend/tests/test_tree_import.py（14 passed）；backend/tests
+      -k "agents_hub or hub_import or tree_import or asset_import"（136 passed）；
+      全量 backend/tests（1923 passed / 41 skipped / 0 failed）；ruff 0；
+      tools/check/arch.sh exit 0。
+  - id: QA-2
+    severity: blocker
+    status: fixed
+    commit: cc0b8e0
+    note: >
+      capabilities.ts 请求侧补 preview 参数（PublicListQuery/
+      compactPublicQuery/fetchPublicCapability）；TenantShelf/AssetDetailDrawer
+      逐层透传；Capabilities.tsx「货架预览」分支与 CatalogTab.tsx 治理面开抽屉
+      分别接上 preview。测试从「断言 mock 返回值」改成「断言请求实参」
+      （TenantShelf.test.tsx / CatalogTab.test.tsx）。
+    verified: >
+      admin 全量 Jest（53 suites / 380 passed）；tsc --noEmit 0 错误。
+    remaining: >
+      本次只验证了组件层请求实参正确透传；FR-03 的 GWT-03.1~03.3/04.1~04.4/
+      05.1/05.3/06.1~06.3 尚未在真实后端 + 真实浏览器上逐条跑过（referenced by
+      升级方案 A.1 验收要求）——留给下一轮 verify 帽或 Mac 本机人工过一遍。
+  - id: QA-3
+    severity: major
+    status: fixed
+    commit: cc0b8e0
+    note: >
+      ExamplesModal 读示例带 preview=true；加 loadError 态区分"读失败"与
+      "读到空"，读失败锁保存按钮 + 提示，不再静默退化成空列表被保存覆盖。
+      新增回归：CatalogTab.test.tsx「QA-3 读示例失败：锁保存按钮」。
+    verified: 随 QA-2 一并跑 admin 全量 Jest（380 passed）。
+  - {id: QA-4, status: open}
+  - {id: QA-5, status: open}
+  - {id: QA-6, status: open}
+  - {id: QA-7, status: open}
+  - {id: QA-8, status: open}
+  - {id: QA-9, status: fixed, note: "随 QA-1 一并修（同一函数），见上"}
+  - {id: QA-10, status: open}
+  - {id: QA-11, status: open}
+  - {id: QA-12, status: open}
+  - {id: QA-13, status: open}
+  - {id: QA-14, status: open}
+  - {id: QA-15, status: open}
+  - {id: QA-16, status: open}
