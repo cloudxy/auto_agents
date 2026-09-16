@@ -134,10 +134,14 @@ export const syncAgentsHub = (): Promise<AgentsHubSyncResult> =>
   api.post('/capabilities/sync-agents-hub')
     .then((r) => unwrap<AgentsHubSyncResult>(r))
 
-/** T-15（FR-02）：失源行清理。dry_run=true 只取同构预览不落库。 */
+/** T-15（FR-02）：失源行清理。dry_run=true 只取同构预览不落库。
+ * QA-14：live_total 是治理目录里全部存活行的真实数目；reconcile_total 是
+ * 对账候选集口径（不含 team/源注册表行/expert 遗留型），只用来做
+ * "候选集与磁盘集差值=0"的对账 oracle，不是给人看的"存活"数字。 */
 export interface PruneMissingResult {
   pruned: Array<{ asset_type: string; name: string }>
   live_total: number
+  reconcile_total: number
   disk_total: number
 }
 

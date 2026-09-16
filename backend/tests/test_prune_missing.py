@@ -176,10 +176,38 @@ def test_gwt_02_2_reconciliation_zero_gap(db_client, platform_admin_client,
     settings.set("SKILLS.AGENTS_ROOT", str(agents))
     try:
         pruned = platform_admin_client.post(_PRUNE).json()["data"]
-        assert pruned["live_total"] == pruned["disk_total"]  # 差值 = 0
+        # QA-14：对账 oracle 是 reconcile_total（候选集口径），不是 live_total
+        # （治理目录里全部存活行的真实数目，两者口径不同，不能再共用同一个字段）
+        assert pruned["reconcile_total"] == pruned["disk_total"]  # 差值 = 0
         again = platform_admin_client.post(_PRUNE).json()["data"]
         assert again["pruned"] == []
-        assert again["live_total"] == again["disk_total"]
+        assert again["reconcile_total"] == again["disk_total"]
+    finally:
+        settings.set("SKILLS.AGENTS_ROOT", original)
+
+
+def test_qa14_live_total_counts_all_alive_rows_not_just_reconcile_candidates(
+    db_client, platform_admin_client, db_session, tmp_path,
+):
+    """QA-14：_full_fixture 里的 team（人工定义）与 src-row（源注册表行）都不
+    进对账候选集，但都是治理目录里真实存活的行。live_total 必须把它们算
+    进去；reconcile_total（对账 oracle）则不该算——两个字段口径不同，不能
+    再共用。"""
+    from config import settings
+    from sqlalchemy import func, select
+
+    agents = _agents_tree(tmp_path)
+    _full_fixture(db_session)
+    original = settings.get("SKILLS.AGENTS_ROOT")
+    settings.set("SKILLS.AGENTS_ROOT", str(agents))
+    try:
+        data = platform_admin_client.post(_PRUNE).json()["data"]
+        true_live = _q(db_session, select(func.count()).select_from(CapabilityAsset).where(
+            CapabilityAsset.deleted_at.is_(None),
+        ))[0]
+        assert data["live_total"] == true_live
+        # a-team + src-row 至少让 live_total 比 reconcile_total 多 2
+        assert data["live_total"] >= data["reconcile_total"] + 2
     finally:
         settings.set("SKILLS.AGENTS_ROOT", original)
 
@@ -253,7 +281,7 @@ def test_dry_run_same_shape_no_write(
         assert preview.status_code == 200, preview.text
         pv = preview.json()["data"]
         assert pv["dry_run"] is True
-        assert pv["live_total"] == pv["disk_total"]  # 模拟剪除后对账归零
+        assert pv["reconcile_total"] == pv["disk_total"]  # 模拟剪除后对账归零（QA-14）
 
         after = _q(db_session, select(CapabilityAsset))
         deleted_after = sorted(

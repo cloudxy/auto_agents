@@ -8,7 +8,7 @@ actor=manual|startup 进 sync_completed/sync_failed 事件（GWT-08.3）。
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import and_, exists, not_, select
+from sqlalchemy import and_, exists, func, not_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,6 +98,13 @@ async def prune_missing_assets(
     剪除 = 候选 − 磁盘集 − 仍在 capability-library 磁盘上的存量行（QA-6）
     → deleted_at=now, sync_state='gone'。
     dry_run=True 返回同构预览不落库（QA-9）。幂等：二次执行 pruned=[]（GWT-02.4）。
+
+    QA-14：`reconcile_total`（对账候选数 − 剪除数）曾经直接顶着 `live_total`
+    这个名字对外发——GWT-02.2 拿它当"候选集与磁盘集差值=0"的对账 oracle
+    是对的，但它排除了 team/源注册表行/expert 遗留型，从来不是「治理目录
+    里存活的资产总数」；T-15 的 toast 逐字把它当"存活"呈现给管理员，数字
+    比治理目录里能看到的行数小。两个字段分开发：`reconcile_total` 继续做
+    对账 oracle，`live_total` 改成真实 COUNT(全部存活行)，文案改用后者。
     """
     logger.info(f"agents_hub.prune_missing_assets | root={agents_root} dry_run={dry_run}")
     disk = {(i.asset_type, i.name) for i in collect_agents_hub(Path(agents_root))}
@@ -123,13 +130,19 @@ async def prune_missing_assets(
             row.sync_state = "gone"
     if not dry_run:
         await session.flush()
+    reconcile_total = live_before - len(pruned)
+    live_total = (await session.execute(
+        select(func.count()).select_from(CapabilityAsset)
+        .where(CapabilityAsset.deleted_at.is_(None))
+    )).scalar_one()
     logger.info(
         f"agents_hub.prune done | pruned={len(pruned)} live_before={live_before} "
         f"disk={len(disk)} dry_run={dry_run}"
     )
     return {
         "pruned": pruned,
-        "live_total": live_before - len(pruned),
+        "reconcile_total": reconcile_total,
+        "live_total": int(live_total or 0),
         "disk_total": len(disk),
         "dry_run": bool(dry_run),
     }
