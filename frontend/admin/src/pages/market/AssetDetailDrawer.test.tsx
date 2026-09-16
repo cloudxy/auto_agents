@@ -139,7 +139,7 @@ test('详情请求失败（网络级）：关闭抽屉 + toast「详情加载失
   await waitFor(() => expect(message.error).toHaveBeenCalledWith(DRAWER_DETAIL_FAIL))
 })
 
-test('OQ-D1 预览态 unlisted：附「未上架」标记；元信息计数仅 n≥1 显示', async () => {
+test('OQ-D1 预览态 unlisted：附「未上架」标记；install_count=0 时元信息计数不显示', async () => {
   fetchDetail.mockResolvedValue(detail({
     listing_state: 'unlisted',
     preview: true,
@@ -151,6 +151,18 @@ test('OQ-D1 预览态 unlisted：附「未上架」标记；元信息计数仅 n
   expect(screen.getByText('未上架')).toBeInTheDocument()
   expect(screen.queryByText(/已订阅/)).not.toBeInTheDocument()
   expect(screen.getByText('更新于 2026-09-01')).toBeInTheDocument()
+})
+
+test('QA-11 预览态 install_count>=1 时元信息显示「已订阅 N 次」（两分支都钉，不只测 0 那半）', async () => {
+  fetchDetail.mockResolvedValue(detail({
+    listing_state: 'unlisted',
+    preview: true,
+    install_count: 3,
+    updated_at: '2026-09-01T10:00:00',
+  }))
+  renderDrawer()
+  await waitFor(() => expect(screen.getByTestId('asset-drawer')).toBeInTheDocument())
+  expect(screen.getByText(/已订阅 3 次/)).toBeInTheDocument()
 })
 
 test('示例 [复制]：clipboard 写入 + toast「已复制到剪贴板」', async () => {

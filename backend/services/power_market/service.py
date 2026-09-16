@@ -26,7 +26,7 @@ from backend.services.power_market.projection import (
     _project as _project_row,
     _read_skill_md,
 )
-from backend.services.power_market.sorting import _apply_sort, _resolve_sort
+from backend.services.power_market.sorting import _apply_sort, _resolve_sort, install_count_for
 from backend.services.power_market.sources import SourceRegistry
 from backend.services.power_market.sync import SourceSync
 from backend.services.power_market.references import list_runtime_refs
@@ -273,6 +273,9 @@ class PowerMarketService:
             item["market_closed"] = False
             if row.listing_state == "unlisted":
                 item["preview_unlisted"] = True  # 抽屉「未上架」提醒标签（OQ-D1）
+            # QA-11：OQ-D3 裁定预览态显示订阅计数，之前只有前端渲染逻辑，
+            # 后端从没填过这个字段——抽屉的「已订阅 N 次」恒不出现。
+            item["install_count"] = await install_count_for(self.session, row.id)
         return item
 
     async def get_media_path(

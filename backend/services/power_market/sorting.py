@@ -20,7 +20,10 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from platform_core.logger import get_logger
 from platform_core.models.capability import CapabilityAsset, CapabilityInstall
+
+logger = get_logger("service.power_market")
 
 SORT_SMART = "smart"
 SORT_LATEST = "latest"
@@ -50,6 +53,24 @@ def _install_counts():
         .group_by(CapabilityInstall.asset_id)
         .subquery()
     )
+
+
+async def install_count_for(session: AsyncSession, asset_id: int) -> int:
+    """QA-11：单资产 alive 订阅计数——OQ-D3 裁定"预览态显示订阅计数"，但
+    实现一直没有对应字段，抽屉只能渲染永远是 undefined 的 install_count。
+    复用 hot 排序同一份 CapabilityInstall 计数口径（deleted_at IS NULL），
+    不新开一套统计逻辑。
+    """
+    logger.debug(f"power_market.install_count_for | asset={asset_id}")
+    row = (await session.execute(
+        select(func.count())
+        .select_from(CapabilityInstall)
+        .where(
+            CapabilityInstall.asset_id == asset_id,
+            CapabilityInstall.deleted_at.is_(None),
+        )
+    )).scalar_one()
+    return int(row or 0)
 
 
 async def _resolve_sort(session: AsyncSession, requested: Optional[str]) -> str:
