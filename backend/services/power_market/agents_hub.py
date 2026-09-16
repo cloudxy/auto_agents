@@ -24,6 +24,7 @@ from platform_core.models.capability import (
 logger = get_logger("service.power_market")
 _DESC_MAX = 1024
 _LICENSE_OK = "MIT"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _utcnow() -> datetime:
@@ -65,6 +66,28 @@ def _expert_legacy_clause():
     )
 
 
+def _legacy_library_source_still_on_disk(row: CapabilityAsset) -> bool:
+    """QA-6：OQ-2 切根到 .agents 只处理了新写路径，存量 capability-library 行
+    （切根前导入、file_path 无 `.agents/` 前缀）没有对应的存量迁移或读兼容——
+    prune 的磁盘集只扫 `.agents`，扫不到这些行不代表它们真的失源，只是
+    扫描器没往 capability-library 看（仓库实存 capability-library/skills/
+    example-pdf-extractor 即是一例）。
+
+    agent 型 legacy 行已由 `_expert_legacy_clause` 无条件保护（QA-7R 裁定，
+    与磁盘是否存在无关，因为它们从未进入过 .agents 扫描宇宙），这里不重复
+    判定，只补 skill/plugin/command 三类此前完全没有的存量保护。真正的孤儿
+    行（file_path 指向的路径哪里都不存在，如存量清理列表里的 oh-story__*
+    command）没有对应磁盘内容，仍然会被剪除——这不是全称保护，是「磁盘源
+    真的还在就别删」。
+    """
+    if row.asset_type == "agent":
+        return False
+    fp = (row.file_path or "").strip()
+    if not fp or fp.startswith(".agents/"):
+        return False
+    return (_REPO_ROOT / fp).exists()
+
+
 async def prune_missing_assets(
     session: AsyncSession, agents_root, *, dry_run: bool = False,
 ) -> dict:
@@ -72,7 +95,8 @@ async def prune_missing_assets(
 
     候选 = live ∩ 四类 ∩ source_id IS NULL ∩ 非 expert 遗留型；
     磁盘集 = collect_agents_hub 的 (asset_type, name)；
-    剪除 = 候选 − 磁盘集 → deleted_at=now, sync_state='gone'。
+    剪除 = 候选 − 磁盘集 − 仍在 capability-library 磁盘上的存量行（QA-6）
+    → deleted_at=now, sync_state='gone'。
     dry_run=True 返回同构预览不落库（QA-9）。幂等：二次执行 pruned=[]（GWT-02.4）。
     """
     logger.info(f"agents_hub.prune_missing_assets | root={agents_root} dry_run={dry_run}")
@@ -90,6 +114,8 @@ async def prune_missing_assets(
     now = _utcnow()
     for row in rows:
         if (row.asset_type, row.name) in disk:
+            continue
+        if _legacy_library_source_still_on_disk(row):
             continue
         pruned.append({"asset_type": row.asset_type, "name": row.name})
         if not dry_run:
