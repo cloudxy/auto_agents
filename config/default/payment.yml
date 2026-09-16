@@ -1,0 +1,19 @@
+# 支付网关配置（Alipay/WeChat Pay 商户接入）。
+# 商户密钥本身不落这里——走超管后台写 payment_channel_credentials 表
+# （Fernet 落库、明文只写不回读，见 backend/services/payment_credential_service.py）。
+# 本文件只放非密钥参数；改哪个环境值用对应 <env>.yml 或环境变量覆盖。
+# 覆盖：AUTO_AGENTS_PAYMENT__PUBLIC_BASE_URL 等（Dynaconf 双下划线嵌套）
+PAYMENT:
+  # 本服务对外可达的基址，用于拼 notify_url（如 https://app.example.com）。
+  # 空 = 未配置：创建在线支付订单时直接拒绝（不猜测域名，不用 Host 头兜底——
+  # 那是可伪造的请求头，notify_url 错配是资损级事故）。
+  PUBLIC_BASE_URL: ""
+  ALIPAY:
+    GATEWAY: "https://openapi.alipay.com/gateway.do"
+    SANDBOX_GATEWAY: "https://openapi-sandbox.dl.alipaydev.com/gateway.do"
+    SANDBOX: false
+  WECHAT:
+    # 微信支付平台证书缓存目录（SDK 自动下载/刷新，用于验证回调签名）。
+    # 相对路径以仓库根为基准；确保部署时该目录可写。
+    CERT_DIR: "storage/wechat_certs"
+    SANDBOX: false
