@@ -18,7 +18,7 @@ import ShelfCard from './ShelfCard'
 import {
   EMPTY_SHELF, FILTER_EMPTY, GO_GOVERNANCE, HOST_OPTIONS, LOAD_FAIL,
   LOAD_FAIL_HINT, MARKET_CLOSED, PREVIEW_BADGE, PUBLIC_TYPES, SORT_OPTIONS,
-  SYNC_NOW, TAB_EMPTY, emptyShelfHint, hasActiveFilters, resolveSort, resolveType,
+  SYNC_NOW, TAB_EMPTY, emptyShelfHint, resolveSort, resolveType,
   tabEmptyHint, typeLabelOf,
 } from './shelfCopy'
 import './TenantShelf.css'
@@ -43,20 +43,6 @@ const MarketSkeleton: React.FC = () => (
     ))}
   </div>
 )
-
-const FilterEcho: React.FC<{ filters: { q: string; host: string; category: string } }> = ({ filters }) => {
-  const rows: Array<{ key: string; label: string; value: string }> = []
-  if (filters.q) rows.push({ key: 'q', label: '关键词', value: filters.q })
-  if (filters.host) rows.push({ key: 'host', label: '宿主', value: filters.host })
-  if (filters.category) rows.push({ key: 'category', label: '分类', value: filters.category })
-  return (
-    <ul data-testid="filter-echo" className="tenant-shelf__echo">
-      {rows.map((row) => (
-        <li key={row.key}>{`${row.label}：${row.value}`}</li>
-      ))}
-    </ul>
-  )
-}
 
 /** T-08 tab 类型空态（GWT-03.3）：[立即同步] 仅超管预览态渲染（治理动作在治理面） */
 const TypeTabEmpty: React.FC<{
