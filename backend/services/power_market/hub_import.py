@@ -28,6 +28,7 @@ from backend.services.power_market.agents_hub import _upsert_item_listing
 from backend.services.power_market.agents_hub_scan import HubItem, collect_agents_hub
 from backend.services.plugin_service import _plugin_manifest_path
 from platform_core.exceptions import ValidationException
+from platform_core.fs_guard import PathEscapeError, assert_contained
 from platform_core.logger import get_logger
 
 logger = get_logger("service.power_market")
@@ -250,7 +251,17 @@ def _collect(tmp: Path, files: list[UploadedFile]) -> tuple[list[HubItem], list[
 
 
 def _land(staged_agents: Path, real_agents: Path, item: HubItem) -> None:
-    """把该资产在暂存 .agents 下的产物复制到真实 .agents 同名位置（覆盖式）。"""
+    """把该资产在暂存 .agents 下的产物复制到真实 .agents 同名位置（update 语义）。
+
+    QA-1 修复：落盘前经 `assert_contained` 做出口路径收容——`.agents/plugins/*`
+    在本仓库全部是指向仓外真实目录的符号链接（指针农场，"禁止复制内容"），入口
+    清洗（QA-8 的 `_clean_rel`）只保证相对路径字面量合法，不保证它落盘时不会
+    穿过既有符号链接写到仓库外；出口必须单独收容，两者不能互相替代。
+    QA-9 修复：不再 `rmtree` 后 `copytree`（会把真实 `.agents/<type>/<name>`
+    下不在本次上传树里的文件，例如 049 迁移引入的 icon.png/background.png，
+    一并静默删除）——改用 `dirs_exist_ok=True` 做增量合并式更新，只覆盖上传
+    树里出现的文件。
+    """
     rel = (item.file_path or "").strip()
     if not rel.startswith(".agents/"):
         raise ValueError(f"落盘路径非法：{rel}")
@@ -259,11 +270,13 @@ def _land(staged_agents: Path, real_agents: Path, item: HubItem) -> None:
     dst = real_agents / tail
     if not src.exists():
         raise ValueError(f"暂存产物缺失：{rel}")
+    try:
+        dst = assert_contained(dst, real_agents)
+    except PathEscapeError as exc:
+        raise ValueError(f"落盘路径逃逸收容根：{rel}") from exc
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
-        if dst.exists():
-            shutil.rmtree(dst)
-        shutil.copytree(src, dst)
+        shutil.copytree(src, dst, dirs_exist_ok=True)
     else:
         shutil.copy2(src, dst)
 
