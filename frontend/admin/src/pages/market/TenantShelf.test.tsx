@@ -296,7 +296,7 @@ test('GWT-03.1 卡片四要素：主副标题/描述兜底/标签（精选>预�
     items: [
       item({
         name: 'child-skill', title: '捆绑技能', origin_plugin_name: 'dev-team',
-        featured: true, description: '',
+        featured: 1, description: '',
       }),
       item({ name: 'bare-skill', title: '裸技能', listing_state: 'coming_soon' }),
     ],

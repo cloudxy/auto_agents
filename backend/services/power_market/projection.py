@@ -1,8 +1,7 @@
 """公开读模型投影（feat-agents-market AD-5/AD-11，自 service.py 迁出）。
 
 职责：行 → 公开 dict 的字段白名单投影 + 媒体 href + md 正文读取分流。
-新增投影位：persona_md（agent 侧行，WIP 缺陷 B）、gate_open（CTA 闸语义）、
-examples（050 列落地前 getattr 前向兼容）。
+新增投影位：persona_md（agent 侧行，WIP 缺陷 B）、gate_open（CTA 闸语义）。
 _read_skill_md 分流（WIP 缺陷 A 修复）：file_path 以 `.agents/` 开头 → 仓库根
 相对读取；否则 LIBRARY_ROOT 兜底（legacy 行）。
 """
@@ -31,7 +30,11 @@ def _project(
     item["asset_type"] = _to_public_asset_type(row.asset_type)
     item["updated_at"] = row.updated_at.isoformat() if row.updated_at else None
     item["score"] = float(row.score) if row.score is not None else None
-    item["featured"] = int(getattr(row, "featured", 0) or 0)
+    # QA-13：featured 列随 050 迁移落地，`select(CapabilityAsset)` 在迁移前的
+    # 库上本就会因未知列直接炸 SQL 错误——getattr 防御不到它声称保护的场景
+    # （防御发生在 Python 属性访问阶段，SQL 报错发生在这之前），只留一份
+    # ORM 侧真实存在时的类型归一化。
+    item["featured"] = int(row.featured or 0)
     item["subscribable"] = row.listing_state == "listed"
     item["hosts"] = hosts_for_asset(row)
     pub = item["asset_type"]
@@ -71,4 +74,7 @@ def _md_path(rel: str) -> Path:
     from config import settings
 
     library = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT)))
-    return library if library.is_absolute() else Path.cwd() / library / rel
+    # QA-5（相对 HEAD 回归）：HEAD 原式 `Path(LIBRARY_ROOT) / rel` 天然对
+    # 绝对/相对两种配置都正确；迁出时误把"绝对/相对归一化"与"拼 rel"糅在
+    # 一起，绝对分支整个丢了 rel——默认配置是相对路径，回归静默通过零覆盖。
+    return (library if library.is_absolute() else Path.cwd() / library) / rel

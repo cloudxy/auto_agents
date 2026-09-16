@@ -59,6 +59,9 @@ class CapabilityService:
                 "source_type": r.source_type,
                 "logo": r.logo, "background": r.background,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                # QA-4：治理目录端点原本不投影 featured，CatalogTab 星标一刷新
+                # 就丢（乐观更新短暂显示，切筛选/翻页立刻回退成"—"）。
+                "featured": int(r.featured or 0),
             }
             for r in rows
         ]

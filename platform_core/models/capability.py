@@ -86,7 +86,7 @@ class CapabilityAsset(SoftDeleteMixin, AuditMixin, Base):
     logo = Column(String(512), nullable=True, comment="icon 相对仓库路径")
     background = Column(String(512), nullable=True, comment="背景图相对仓库路径")
     featured = Column(
-        SmallInteger, nullable=False, server_default="0",
+        SmallInteger, nullable=False, default=0, server_default="0",
         comment="精选权重（feat-agents-market FR-04 综合/最热序）；0=非精选",
     )
     examples = Column(

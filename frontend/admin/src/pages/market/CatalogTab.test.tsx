@@ -72,7 +72,7 @@ const row = (over: Partial<AssetRow> = {}): AssetRow => ({
   listing_state: 'unlisted',
   listed_at: null,
   source_type: 'self_built',
-  featured: false,
+  featured: 0,
   ...over,
 })
 
@@ -89,7 +89,7 @@ beforeEach(() => {
 })
 
 test('T-11 精选星标：点击调 patchFeatured(true)，行内星标翻转', async () => {
-  star.mockResolvedValue(row({ featured: true }))
+  star.mockResolvedValue(row({ featured: 1 }))
   renderTab()
   const btn = await screen.findByRole('button', { name: '设为精选 demo-skill' })
   fireEvent.click(btn)
