@@ -18,6 +18,8 @@ export interface AssetRow {
   listing_state?: string
   listed_at?: string | null
   source_type?: string
+  /** T-05 列（FR-04）：治理目录精选星标 */
+  featured?: boolean
 }
 
 export interface PluginVerifyResult {
@@ -114,8 +116,105 @@ export const syncSource = (name: string): Promise<{ succeeded: number; failed: n
   api.post(`/capabilities/sources/${encodeURIComponent(name)}/sync`)
     .then((r) => unwrap<{ succeeded: number; failed: number }>(r))
 
-export const scanPlugins = (): Promise<void> =>
-  api.post('/capabilities/scan-plugins').then(() => undefined)
+/** T-02（FR-01）：同步 .agents——非破坏单通道，替代已退役的 scan-plugins。 */
+export interface AgentsHubSyncResult {
+  inserted: number
+  updated: number
+  unchanged: number
+  failed: number
+  total: number
+  failed_items?: Array<{ asset_type: string; name: string; reason?: string }>
+}
+
+export const syncAgentsHub = (): Promise<AgentsHubSyncResult> =>
+  api.post('/capabilities/sync-agents-hub')
+    .then((r) => unwrap<AgentsHubSyncResult>(r))
+
+/** T-15（FR-02）：失源行清理。dry_run=true 只取同构预览不落库。 */
+export interface PruneMissingResult {
+  pruned: Array<{ asset_type: string; name: string }>
+  live_total: number
+  disk_total: number
+}
+
+export const pruneMissingAssets = (dryRun = false): Promise<PruneMissingResult> =>
+  api.post('/capabilities/assets/prune-missing', undefined, {
+    params: dryRun ? { dry_run: 'true' } : undefined,
+  }).then((r) => unwrap<PruneMissingResult>(r))
+
+/** T-12（FR-07）：目录导入两段式。filename = webkitRelativePath（服务端按树判型）。 */
+export interface TreeImportAsset {
+  asset_type: string
+  name: string
+  action: 'create' | 'update'
+  origin_path?: string | null
+  bundled?: TreeImportAsset[]
+}
+
+export interface TreeImportSkip { path: string; reason: string }
+
+export interface TreePreviewResult {
+  assets: TreeImportAsset[]
+  skipped: TreeImportSkip[]
+  counts: { skill: number; plugin: number; command: number; agent: number }
+  files_total: number
+}
+
+export interface TreeConfirmResult {
+  created: number
+  updated: number
+  failed: Array<{ name: string; reason: string }>
+  skipped: TreeImportSkip[]
+  batch_id?: string | number | null
+}
+
+const appendTreeFiles = (form: FormData, files: File[]): void => {
+  for (const file of files) {
+    const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+    form.append('files', file, rel || file.name)
+  }
+}
+
+export const previewTreeImport = (
+  files: File[],
+  onUploadProgress?: (event: AxiosProgressEvent) => void,
+): Promise<TreePreviewResult> => {
+  const form = new FormData()
+  appendTreeFiles(form, files)
+  return api.post('/capabilities/import/tree/preview', form, { onUploadProgress })
+    .then((r) => unwrap<TreePreviewResult>(r))
+}
+
+export const confirmTreeImport = (
+  files: File[],
+  onUploadProgress?: (event: AxiosProgressEvent) => void,
+): Promise<TreeConfirmResult> => {
+  const form = new FormData()
+  appendTreeFiles(form, files)
+  return api.post('/capabilities/import/tree/confirm', form, { onUploadProgress })
+    .then((r) => unwrap<TreeConfirmResult>(r))
+}
+
+/** T-11（FR-04/附加 d）：精选开关 + 示例维护（治理门面 PATCH）。 */
+export const patchFeatured = (
+  assetType: string,
+  name: string,
+  featured: boolean,
+): Promise<AssetRow> =>
+  api.patch(
+    `/capabilities/${encodeURIComponent(assetType)}/${encodeURIComponent(name)}/featured`,
+    { featured },
+  ).then((r) => unwrap<AssetRow>(r))
+
+export const patchExamples = (
+  assetType: string,
+  name: string,
+  examples: string[],
+): Promise<AssetRow> =>
+  api.patch(
+    `/capabilities/${encodeURIComponent(assetType)}/${encodeURIComponent(name)}/examples`,
+    { examples },
+  ).then((r) => unwrap<AssetRow>(r))
 
 export const verifyPlugin = (name: string): Promise<PluginVerifyResult> =>
   api.post(`/capabilities/plugins/${encodeURIComponent(name)}/verify`)
@@ -157,11 +256,27 @@ export interface SubscribeResult {
 export interface PublicCapabilityCard {
   name: string
   asset_type: string
+  title?: string | null
+  description?: string | null
+  category?: string
   listing_state?: string
   subscribable?: boolean
   hosts?: string[]
   market_closed?: boolean
   message?: string | null
+  /** T-04/T-10 详情增量（contract API #8）：md 正文三源 / 示例 / 闸值 / 预览态 */
+  skill_md?: string | null
+  body_md?: string | null
+  persona_md?: string | null
+  examples?: string[] | null
+  gate_open?: boolean
+  preview?: boolean
+  install_count?: number | null
+  origin_plugin_name?: string | null
+  featured?: boolean
+  logo?: string | null
+  background?: string | null
+  updated_at?: string | null
 }
 
 export type PublicListQuery = {
@@ -171,6 +286,8 @@ export type PublicListQuery = {
   category?: string
   page?: number
   page_size?: number
+  /** T-08（FR-04）：smart | latest | hot */
+  sort?: string
 }
 
 export type PublicShelfItem = {
@@ -185,6 +302,11 @@ export type PublicShelfItem = {
   slash?: string | null
   score?: number | null
   tier?: string | null
+  logo?: string | null
+  background?: string | null
+  origin_plugin_name?: string | null
+  featured?: boolean
+  updated_at?: string | null
 }
 
 export type PublicShelfList = {
@@ -196,6 +318,12 @@ export type PublicShelfList = {
   market_closed?: boolean
   empty?: boolean
   message?: string
+  /** T-06/T-08：hot 无全库计数时服务端回 smart（UI 静默接受，GWT-04.4） */
+  sort_applied?: string
+  /** T-13：管理员预览旁路（AD-5c） */
+  preview?: boolean
+  gate_open?: boolean
+  live_total?: number
 }
 
 const compactPublicQuery = (params: PublicListQuery): Record<string, string | number> => {
@@ -205,6 +333,7 @@ const compactPublicQuery = (params: PublicListQuery): Record<string, string | nu
   if (params.q) query.q = params.q
   if (params.host) query.host = params.host
   if (params.category) query.category = params.category
+  if (params.sort) query.sort = params.sort
   return query
 }
 
