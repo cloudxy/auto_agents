@@ -43,6 +43,7 @@ from backend.services.asset_import_sandbox import (
 )
 from backend.services.product_event_service import emit_product_event
 from platform_core.exceptions import ValidationException
+from platform_core.fs_guard import PathEscapeError, assert_contained
 from platform_core.logger import get_logger
 from platform_core.models.asset_import import AssetImportBatch, AssetImportItem
 from platform_core.models.capability import CapabilityAsset
@@ -128,10 +129,16 @@ def _dir_files(pkg: Path) -> list[tuple[str, Path]]:
 
 
 def _contained_write(dest: Path, data: bytes) -> None:
-    """写入前双重收容断言：目标必须落在资产目录内（GWT-100.7 兜底）"""
+    """写入前收容断言：目标必须落在资产目录内、且路径中无符号链接（GWT-100.7 兜底）。
+
+    收容检查委派给 `platform_core.fs_guard.assert_contained`（QA-1 修复：全仓
+    路径收容唯一实现，与 hub_import._land 共用同一份断言）。
+    """
+    try:
+        dest = assert_contained(dest, _landing_root())
+    except PathEscapeError as exc:
+        raise OSError(f"越界写入拒绝: {dest}") from exc
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if not dest.resolve().is_relative_to(_landing_root().resolve()):
-        raise OSError(f"越界写入拒绝: {dest}")
     dest.write_bytes(data)
 
 
@@ -357,8 +364,10 @@ class AssetImportService:
                              p.files[0][1].read_bytes())
             return
         dest = root / _TYPE_DIRS[p.asset_type] / p.name
-        if not dest.resolve().is_relative_to(root.resolve()):
-            raise OSError(f"越界写入拒绝: {p.name}")
+        try:
+            dest = assert_contained(dest, root)
+        except PathEscapeError as exc:
+            raise OSError(f"越界写入拒绝: {p.name}") from exc
         dest.mkdir(parents=True, exist_ok=False)
         for rel, src in p.files:
             _contained_write(dest.joinpath(*PurePosixPath(rel).parts), src.read_bytes())

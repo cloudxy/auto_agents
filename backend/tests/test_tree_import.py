@@ -281,6 +281,54 @@ def test_qa8_malicious_relative_paths_skipped(
     assert not list(agents_root.rglob("*slash*"))
 
 
+# ---------- QA-1 出口路径收容（符号链接逃逸，穿越式） ----------
+
+def test_qa1_symlink_escape_rejected_top_and_nested(
+    db_client, platform_admin_client, db_session, agents_root, tmp_path,
+):
+    """复现报告的完整攻击链：`.agents/plugins/<name>` 若是指向仓外真实目录的
+    符号链接——顶层 `_land(".../plugins/<name>")` 与嵌套 bundled 子项
+    `_land(".../plugins/<name>/skills/<idx>")` **都**必须被拒绝，不能只靠
+    顶层 `rmtree` 对符号链接的"运气式"拒绝；仓外目标树的文件集合与 mtime
+    必须零变化（既不能被写入，也不能被删除），且不能有任何 DB 行落库。
+
+    "穿越式"覆盖两个挂载点：顶层项自身 = 符号链接、嵌套 bundled 项的父路径
+    经过符号链接，对应 finding 里"顶层运气拒绝 + 嵌套穿透"两段式攻击链。
+    """
+    outside = tmp_path / "outside-plugin-real"
+    outside.mkdir()
+    sentinel = outside / "untouched.txt"
+    sentinel.write_bytes(b"real content living outside the repo")
+    before_mtime = sentinel.stat().st_mtime
+
+    plugins_dir = agents_root / "plugins"
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    (plugins_dir / "myplug").symlink_to(outside, target_is_directory=True)
+
+    files = _tree()  # 顶层 myplug（符号链接同名）+ 3 个嵌套 bundled skill + alpha/beta
+    got = platform_admin_client.post(CONFIRM, files=_parts(files))
+    assert got.status_code == 200, got.text
+    out = got.json()["data"]
+
+    # 不相关的游离 skill 不受影响；myplug 顶层 + 3 个嵌套 bundled 全部拒绝
+    assert out["created"] == 2 and out["updated"] == 0   # alpha、beta
+    assert len(out["failed"]) == 4
+    assert all("myplug" in f["name"] for f in out["failed"])
+
+    # 仓外目标树零变化：未被写入新内容，也未被 rmtree 删除
+    assert sentinel.is_file()
+    assert sentinel.stat().st_mtime == before_mtime
+    assert list(outside.iterdir()) == [sentinel]
+
+    # 符号链接本身未被穿透覆盖，仍是符号链接（不是被替换成真实目录）
+    assert plugins_dir.joinpath("myplug").is_symlink()
+
+    # DB 零写入：myplug 及其 bundled 子项都不应该落库
+    live = _live(db_session)
+    assert not any(name.startswith("myplug") for _t, name in live)
+    assert ("skill", "alpha") in live and ("skill", "beta") in live
+
+
 # ---------- AD-4g 顶层游离 agent/command ----------
 
 def test_ad4g_loose_agent_and_command_land_and_collect(
