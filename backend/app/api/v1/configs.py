@@ -45,5 +45,5 @@ async def update_config(
     """更新单个配置项（仅平台超管，租户写 404 同形；不声称官网已同步）。"""
     service = ConfigService(session)
     await service.set_config(key, data.value)
-    await record_audit(session, user, "config.update", key)
+    await record_audit(user, "config.update", key)
     return updated(message=f"配置 {key} 已更新")

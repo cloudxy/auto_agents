@@ -117,7 +117,7 @@ async def test_provider_model(
 ):
     """单模型 1-token 测试并落健康态（healthy/down/degraded + 延迟 + 时间）"""
     result = await service.test_model(provider_id, model_id)
-    await record_audit(session, user, "llm.provider.model.test",
+    await record_audit(user, "llm.provider.model.test",
                        f"llm_provider#{provider_id}/{model_id}", detail={"ok": result["ok"]})
     return ok(data=result)
 
@@ -144,7 +144,7 @@ async def put_provider_models(
     result = await service.put_models(
         provider_id, [m.model_dump() for m in body.models], **_actor(user),
     )
-    await record_audit(session, user, "llm.provider.models.update", f"llm_provider#{provider_id}",
+    await record_audit(user, "llm.provider.models.update", f"llm_provider#{provider_id}",
                        detail={"count": len(result)})
     return ok(data=result)
 
@@ -158,7 +158,7 @@ async def create_provider(
 ) -> ApiResponse[LlmProviderResponse]:
     """创建 LLM 供应商（经办/负责人；api_key 落库为 Fernet 密文，未配置主密钥时拒绝保存）"""
     item = await service.create_provider(payload)
-    await record_audit(session, user, "llm.provider.create", f"llm_provider#{item.id}",
+    await record_audit(user, "llm.provider.create", f"llm_provider#{item.id}",
                        {"name": item.name})
     return created(item)
 
@@ -173,7 +173,7 @@ async def update_provider(
 ) -> ApiResponse[LlmProviderResponse]:
     """更新 LLM 供应商（经办/负责人；PATCH 语义，api_key 留空不修改）"""
     item = await service.update_provider(provider_id, payload, **_actor(user))
-    await record_audit(session, user, "llm.provider.update", f"llm_provider#{provider_id}")
+    await record_audit(user, "llm.provider.update", f"llm_provider#{provider_id}")
     return updated(item)
 
 
@@ -186,7 +186,7 @@ async def delete_provider(
 ) -> ApiResponse[dict]:
     """删除 LLM 供应商（经办/负责人；激活位随行删除，无激活行时运行时配置走 yml/env 兜底）"""
     result = await service.delete_provider(provider_id, **_actor(user))
-    await record_audit(session, user, "llm.provider.delete", f"llm_provider#{provider_id}")
+    await record_audit(user, "llm.provider.delete", f"llm_provider#{provider_id}")
     return deleted(data=result)
 
 
@@ -199,7 +199,7 @@ async def activate_provider(
 ) -> ApiResponse[LlmProviderResponse]:
     """激活热切换（经办/负责人；单激活互斥，目标行置 active、其余清零）"""
     item = await service.activate_provider(provider_id, **_actor(user))
-    await record_audit(session, user, "llm.provider.activate", f"llm_provider#{provider_id}")
+    await record_audit(user, "llm.provider.activate", f"llm_provider#{provider_id}")
     return updated(item)
 
 
@@ -212,7 +212,7 @@ async def deactivate_provider(
 ) -> ApiResponse[LlmProviderResponse]:
     """取消激活（全部下线走 yml/env 兜底；行保留可再激活）"""
     item = await service.deactivate_provider(provider_id, **_actor(user))
-    await record_audit(session, user, "llm.provider.deactivate", f"llm_provider#{provider_id}")
+    await record_audit(user, "llm.provider.deactivate", f"llm_provider#{provider_id}")
     return updated(item)
 
 
@@ -225,6 +225,6 @@ async def test_provider_connectivity(
 ) -> ApiResponse[LlmProviderTestResponse]:
     """连通性测试（经办/负责人；测该行地址，不要求 LiteLLM 存活）"""
     result = await service.test_connectivity(provider_id, **_actor(user))
-    await record_audit(session, user, "llm.provider.test", f"llm_provider#{provider_id}",
+    await record_audit(user, "llm.provider.test", f"llm_provider#{provider_id}",
                        {"ok": result.ok})
     return ok(result)

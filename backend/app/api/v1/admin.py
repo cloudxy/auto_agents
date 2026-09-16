@@ -84,7 +84,7 @@ async def admin_create_user(
 ):
     """创建账户（平台超管；角色分配 role 单源，归属公司可选）"""
     created = await service.create_user(payload)
-    await record_audit(session, user, "user.create", f"user#{created.id}",
+    await record_audit(user, "user.create", f"user#{created.id}",
                        detail={"username": created.username, "role": created.role, "tenant_id": created.tenant_id})
     return ok(data=created.model_dump())
 
@@ -99,7 +99,7 @@ async def admin_update_user(
 ):
     """编辑账户：角色分配/启停/归属调整（防自锁：不可降级/停用/删除自己）"""
     updated = await service.update_user(user_id, payload, actor_id=int(user.id))
-    await record_audit(session, user, "user.update", f"user#{user_id}", detail=payload.model_dump(exclude_unset=True))
+    await record_audit(user, "user.update", f"user#{user_id}", detail=payload.model_dump(exclude_unset=True))
     return ok(data=updated.model_dump())
 
 
@@ -112,7 +112,7 @@ async def admin_delete_user(
 ):
     """软删除账户（防删自己；防删最后一个平台超管；种子 admin 不可删）"""
     await service.delete_user(user_id, actor_id=int(user.id))
-    await record_audit(session, user, "user.delete", f"user#{user_id}")
+    await record_audit(user, "user.delete", f"user#{user_id}")
     return ok(data={"id": user_id, "deleted": True})
 
 
@@ -129,7 +129,7 @@ async def admin_restore_user(
     重复恢复 no-op（GWT-93.9）；成功上报 user_restored（GWT-92.8）。
     """
     restored = await service.restore_user(user_id, actor_id=int(user.id))
-    await record_audit(session, user, "user.restore", f"user#{user_id}")
+    await record_audit(user, "user.restore", f"user#{user_id}")
     return ok(data=restored.model_dump())
 
 
@@ -178,7 +178,7 @@ async def create_tenant_minimal(
     """新建公司（最小语义：名称+可选 slug；配额/到期走平台运营台编辑；事务由 service 持有 ADR-0007）"""
     result = await service.create_tenant_minimal(
         str(body.get("name") or ""), slug=str(body.get("slug") or "") or None)
-    await record_audit(session, user, "tenant.create", f"tenant#{result['id']}",
+    await record_audit(user, "tenant.create", f"tenant#{result['id']}",
                        detail={"name": str(body.get("name") or "").strip(), "slug": result["slug"]})
     return created(data={"id": result["id"], "slug": result["slug"]})
 
@@ -193,7 +193,7 @@ async def patch_tenant(
 ):
     """名称/套餐/配额/到期编辑（平台超管；改名冲突域与平台租户守卫在 service 单点 T-26/T-27）"""
     await service.patch_tenant(tenant_id, body)
-    await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
+    await record_audit(user, "tenant.update", f"tenant#{tenant_id}", detail=body)
     return ok(data={"id": tenant_id, "updated": True})
 
 
@@ -221,8 +221,7 @@ async def put_power_market_switch(
     from backend.services.power_market.flag import set_power_market_enabled
 
     enabled = set_power_market_enabled(body.enabled)
-    await record_audit(
-        session, user, "power_market.switch", "POWER_MARKET.ENABLED",
+    await record_audit(user, "power_market.switch", "POWER_MARKET.ENABLED",
         detail={"enabled": enabled},
     )
     return ok(data={"enabled": enabled})
@@ -255,7 +254,7 @@ async def discard_dead_item(
         from platform_core.exceptions import NotFoundException
 
         raise NotFoundException(resource=f"死信 #{index}")
-    await record_audit(session, user, "dead_item.discard", f"dead_item#{index}")
+    await record_audit(user, "dead_item.discard", f"dead_item#{index}")
     return ok(data={"index": index, "removed": True})
 
 
@@ -268,7 +267,7 @@ async def clear_dead_items(
     from backend.services.dead_item_service import DeadItemService
 
     removed = await DeadItemService().clear()
-    await record_audit(session, user, "dead_item.clear", f"dead_items:{removed}")
+    await record_audit(user, "dead_item.clear", f"dead_items:{removed}")
     return ok(data={"removed": removed})
 
 
@@ -313,7 +312,7 @@ async def put_notify_config(
     if not updates:
         raise ValidationException(message="无可更新字段（webhook_url/dingtalk_url/wechat_work_url）")
     await service.upsert_configs(updates, description="通知渠道 URL（运营面配置）")
-    await record_audit(session, user, "notify_config.update", "notify_config",
+    await record_audit(user, "notify_config.update", "notify_config",
                        detail={k: (v[:40] + "…") if len(v) > 40 else v for k, v in updates.items()})
     return ok(data={"updated": sorted(updates.keys())})
 
