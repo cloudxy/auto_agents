@@ -304,8 +304,23 @@ post_review_fixes:
       test_qa8_src_sync_without_retract_param_never_deletes 钉死默认安全行为。
     verified: test_t19_governance_retract.py 8 passed；test_t29_sources.py 22 passed。
   - {id: QA-9, status: fixed, note: "随 QA-1 一并修（同一函数），见上"}
-  - {id: QA-10, status: open, note: "minor，本轮未排期"}
-  - {id: QA-11, status: open, note: "minor，本轮未排期"}
+  - id: QA-10
+    severity: minor
+    status: fixed
+    commit: dbf1f33
+    note: >
+      confirm_tree_import 响应补 batch_id（uuid4().hex[:12]）；
+      emit_import_completed 的 batch_id 从未传值的问题一并修，类型 int→str。
+    verified: test_governance_events.py 8 passed；git stash 验证过修复前失败。
+  - id: QA-11
+    severity: minor
+    status: fixed
+    commit: acbd32f
+    note: >
+      get_public 预览分支补 install_count（sorting.install_count_for 复用
+      hot 排序同一份 alive 订阅计数口径）；前端测试补 install_count=3 正向
+      用例（原只有 =0 负向用例，空洞断言）。
+    verified: test_public_detail_preview.py 12 passed；admin AssetDetailDrawer 8 passed。
   - id: QA-12
     severity: minor
     status: fixed
@@ -320,9 +335,34 @@ post_review_fixes:
       projection.py/service.py 的 getattr(row,"featured"/"examples",...) 简化成
       直接属性访问（迁移已落地，getattr 防御不到 SQL 层未知列错误，防御强度
       不一致本身是没想清楚的信号）。
-  - {id: QA-14, status: open, note: "minor，本轮未排期"}
-  - {id: QA-15, status: open, note: "minor，本轮未排期"}
-  - {id: QA-16, status: open, note: "minor，本轮未排期；证据终态化留给下一轮 verify"}
+  - id: QA-14
+    severity: minor
+    status: fixed
+    commit: 791bd8c
+    note: >
+      prune 响应的 live_total 实际是对账候选口径（排除 team/源注册表行/
+      expert 遗留型），T-15 toast 却当"存活"呈现。拆成 reconcile_total
+      （对账 oracle）+ 真实 live_total（COUNT 全部存活行）。
+    verified: test_prune_missing.py 12 passed；git stash 验证过修复前失败（2==5）。
+  - id: QA-15
+    severity: minor
+    status: fixed
+    commit: 36a35a6
+    note: >
+      游离 agent 用 frontmatter name 作 slug，同目录两文件同名会静默互相
+      覆盖。改用磁盘文件名 stem（天然唯一）；_scan_loose 补遍历式重复检测
+      写 logger.warning。
+    verified: test_tree_import.py 15 passed；git stash 验证过修复前失败（1==2）。
+  - id: QA-16
+    severity: minor
+    status: fixed
+    commit: pending
+    note: >
+      T-00-evidence.md §3/§6 贴的是中间态（1 failed, 1868 passed），违反
+      _lessons.md ESC-8，替换成本轮最后一次全量重跑终态（1954 passed / 0
+      failed）；T-11-T-15-frontend-fix-evidence.md §3 的"T-12 GWT-07.x 仍
+      未写"与 T-12-evidence.md/state.yaml 矛盾（T-12 早已补齐），改为指向
+      T-12-evidence.md 的关闭说明。
 k_decisions_note: >
   2026-09-16 操作者确认："prune 过滤方式、retract 参数化、record_audit 去留、
   scan-experts 退役、new-api 删除时机、市场开闸时间：按照你的推荐来，但是

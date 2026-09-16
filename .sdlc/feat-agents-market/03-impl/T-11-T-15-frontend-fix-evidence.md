@@ -27,6 +27,10 @@ $ node node_modules/.bin/jest --maxWorkers=2 src/pages/Capabilities.{import,gove
 28 passed       （T-12 旧向导面 + 治理壳）
 ```
 
-## 3. 遗留
+## 3. 遗留（QA-16 更新：已由 T-12 补齐，原"仍未写"记录已过时）
 
-- T-12 的 **GWT-07.x 前端用例仍未写**（目录选择器组件已在，后端 T-07 本轮才落地）。
+- ~~T-12 的 GWT-07.x 前端用例仍未写~~——本文件写下此记录时后端 T-07 尚未
+  落地；T-07 落地后 T-12 已补齐目录导入前端用例（`ImportTreePicker.test.tsx`，
+  非票面原写的 `Capabilities.import.test.tsx`，理由见
+  `03-impl/T-12-evidence.md` §1），10 passed，见该证据文件 §2。
+  `state.yaml.implement_progress.done` 含 T-12 与此一致，本条遗留已关闭。

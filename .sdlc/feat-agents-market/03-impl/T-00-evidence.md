@@ -23,30 +23,35 @@ feature 基底成立；后续任何票不得使这些用例转红。
 - `backend/services/power_market/agents_hub.py`（logger 入口顺序）
 - `backend/services/power_market/agents_hub_scan.py`（模块 logger + collect 入口日志）
 
-## 3. 自测证据（修复后全量重跑）
+## 3. 自测证据（QA-16 终态替换：此前贴的是中间态，违反 `_lessons.md` ESC-8）
+
+> 2026-09-16 补：本节原贴 `1 failed, 1868 passed`（首轮中间态），全文再无一次
+> 「0 failed」全量输出，但 §6 自检却勾了"pytest 全量绿"——这正是 `_lessons.md`
+> ESC-8 描述的问题（证据须为终态，中间态输出禁入）。以下替换为 QA-1～QA-16
+> 全部修复后、本轮最后一次全量重跑的终态输出（含本文件所有历史缺陷修复 +
+> feat-agents-market 评审 16 条 finding 的全部后续修复，非本票单独产出）。
 
 ```
-$ uv run pytest -q backend/tests -p no:cacheprovider
-1 failed, 1868 passed, 41 skipped, 8 warnings in 169.05s   ← 首轮（WIP 缺陷 1 的第二处白名单）
-$ uv run pytest -q backend/tests/test_skill_public_api.py::test_public_fields_whitelist_enforced -p no:cacheprovider
-1 passed in 1.43s                                          ← 缺陷 1 第二处修复
-$ uv run pytest -q backend/tests/test_agents_hub_sync.py backend/tests/test_openapi_routes_golden.py -p no:cacheprovider
-3 passed in 1.59s                                          ← WIP 链路 + golden 专项复核
+$ uv run pytest -q backend/tests
+1954 passed, 41 skipped, 8 warnings in 295.72s (0:04:55)
+exit: 0
 
 $ uv run ruff check backend platform_core scripts
-warning: Invalid `# noqa` directive on platform_core/models/llm_provider_model.py:48 ...（既有无关告警）
 All checks passed!
 exit: 0
 
 $ bash tools/check/arch.sh
-（修复前）❌ R10: service 方法入口缺 logger — agents_hub.py:23 / agents_hub_scan.py:37，共 2 处违规，exit 2
-（修复后）✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥，全部通过）
+✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥，全部通过）
+exit: 0
+
+$ uv run pytest -q backend/tests/test_openapi_routes_golden.py
+1 passed in 1.75s
 exit: 0
 ```
 
-注：全量 pytest 分两段执行（首轮 `-x` 模式定位首个失败后转全量复核）；未加 `--timeout`
-（本仓库无 pytest-timeout 插件，加参直接 usage error——环境备忘已记录）。
-WIP 专项（test_agents_hub_sync + golden）修复后单独复核通过，全量 1868 passed 无其余红。
+原始缺陷修复记录（下表，历史保留）：WIP 首轮全量验证发现的 2 类缺陷（公开投影
+白名单遗漏 logo/background、R10 两处入口缺 logger）已在当轮修复并被后续全量
+重跑覆盖，不再单独复核。
 
 ## 4. capability_assets live 行数基线（本地 MySQL，可达）
 
@@ -62,11 +67,11 @@ live_total=182 by_type={'agent': 18, 'command': 18, 'skill': 146} alembic_head=0
 - pytest 无 `--timeout` 参数可用（无 pytest-timeout 插件）；后续票沿用 `-p no:cacheprovider` 即可，全量 ~170s 无饿死。
 - 本地 MySQL head=049 与 WIP 基底一致，无强升需求。
 
-## 6. 交票自检
+## 6. 交票自检（QA-16 终态更新，见 §3）
 
-- [x] pytest 全量绿（缺陷修复后 1868 passed + 2 白名单修复点单独复核绿）
+- [x] pytest 全量绿（终态：1954 passed / 41 skipped / 0 failed，见 §3）
 - [x] ruff 退出码 0
-- [x] arch.sh 退出码 0（修复 R10 后）
+- [x] arch.sh 退出码 0
 - [x] golden 一致（test_openapi_routes_golden.py 通过）
-- [x] live 行数基线记录在案（MySQL 直查）
+- [x] live 行数基线记录在案（MySQL 直查，见 §4）
 - [x] WIP 文件零回退（仅日志顺序/白名单测试同步，无功能回退）
