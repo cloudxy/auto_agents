@@ -190,6 +190,7 @@ const CatalogTab: React.FC<Props> = ({
         canSubscribe={canSubscribe}
         onSubscribe={onSubscribe}
         onClose={() => setDetailRow(null)}
+        preview
       />
     </div>
   )

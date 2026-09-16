@@ -35,7 +35,7 @@ jest.mock('../../hooks/usePermission', () => ({
 import { ConfigProvider, message } from 'antd'
 import CatalogTab from './CatalogTab'
 import {
-  EXAMPLES_LIMIT_COPY, EXAMPLES_EMPTY,
+  EXAMPLES_LIMIT_COPY, EXAMPLES_EMPTY, EXAMPLES_LOAD_FAIL,
 } from './ExamplesModal'
 import {
   fetchPublicCapability, listAssets, patchExamples, patchFeatured, pruneMissingAssets,
@@ -111,6 +111,9 @@ test('T-11 示例弹窗：读公开详情 examples → 编辑保存调 patchExam
   fireEvent.click(await screen.findByRole('button', { name: '示例' }))
   const modal = document.querySelector('.ant-modal') as HTMLElement
   expect(await within(modal).findByDisplayValue('现有示例')).toBeInTheDocument()
+  // QA-3 修复回归：示例读源必须带 preview=true，否则闸关/unlisted 资产读到
+  // 空列表，保存即静默覆盖已维护内容（finding QA-3 原文）
+  expect(fetchDetail).toHaveBeenCalledWith('skill', 'demo-skill', true)
   fireEvent.change(within(modal).getByLabelText('示例 1'), { target: { value: '  新示例  ' } })
   fireEvent.click(within(modal).getByRole('button', { name: '保存' }))
   await waitFor(() => expect(saveExamples).toHaveBeenCalledWith('skill', 'demo-skill', ['新示例']))
@@ -127,6 +130,19 @@ test('T-11 示例空态句 + 上限内联错误（超 200 字前端拦截）', a
   fireEvent.change(within(modal).getByLabelText('示例 1'), { target: { value: 'x'.repeat(201) } })
   fireEvent.click(within(modal).getByRole('button', { name: '保存' }))
   expect(await within(modal).findByText(EXAMPLES_LIMIT_COPY)).toBeInTheDocument()
+  expect(saveExamples).not.toHaveBeenCalled()
+})
+
+test('QA-3 读示例失败：锁保存按钮，不静默退化成空列表被保存覆盖', async () => {
+  fetchDetail.mockRejectedValue(new Error('网络错误'))
+  renderTab()
+  fireEvent.click(await screen.findByRole('button', { name: '示例' }))
+  const modal = document.querySelector('.ant-modal') as HTMLElement
+  expect(await within(modal).findByText(EXAMPLES_LOAD_FAIL)).toBeInTheDocument()
+  // 读失败时不展示「还没有示例」空态句（会被管理员误当真的没有示例）
+  expect(within(modal).queryByText(EXAMPLES_EMPTY)).not.toBeInTheDocument()
+  expect(within(modal).getByRole('button', { name: '保存' })).toBeDisabled()
+  fireEvent.click(within(modal).getByRole('button', { name: '保存' }))
   expect(saveExamples).not.toHaveBeenCalled()
 })
 
@@ -213,6 +229,8 @@ test('T-10 治理行入口：名称单元格点开详情抽屉', async () => {
   })
   renderTab()
   fireEvent.click(await screen.findByRole('button', { name: '查看 演示技能 详情' }))
-  await waitFor(() => expect(fetchDetail).toHaveBeenCalledWith('skill', 'demo-skill'))
+  // QA-2 修复回归：治理面开抽屉必须恒 preview=true（否则 unlisted 资产 404，
+  // 刚导入的资产在治理面永远看不到详情——finding QA-2 后果链原文）
+  await waitFor(() => expect(fetchDetail).toHaveBeenCalledWith('skill', 'demo-skill', true))
   await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
 })

@@ -32,6 +32,9 @@ type Props = {
   canSubscribe: boolean
   onSubscribe: (type: string, name: string) => void
   onClose: () => void
+  /** QA-2 修复：超管预览/治理面必须为 true 才能豁免闸与 listed 过滤读到详情，
+   * 否则闸关或 unlisted 资产一律 404（详情加载失败）。 */
+  preview?: boolean
 }
 
 const mdBodyOf = (data: PublicCapabilityCard | undefined): string => {
@@ -45,11 +48,11 @@ const formatDate = (raw?: string | null): string => {
 }
 
 const AssetDetailDrawer: React.FC<Props> = ({
-  open, assetType, name, canSubscribe, onSubscribe, onClose,
+  open, assetType, name, canSubscribe, onSubscribe, onClose, preview,
 }) => {
   const query = useQuery({
-    queryKey: ['admin', 'public-capability-detail', assetType, name],
-    queryFn: () => fetchPublicCapability(assetType, name),
+    queryKey: ['admin', 'public-capability-detail', assetType, name, Boolean(preview)],
+    queryFn: () => fetchPublicCapability(assetType, name, preview),
     enabled: open && Boolean(assetType) && Boolean(name),
     retry: false,
   })

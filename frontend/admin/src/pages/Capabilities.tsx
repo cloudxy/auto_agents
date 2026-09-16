@@ -111,6 +111,7 @@ const Capabilities: React.FC = () => {
           canSubscribe={role !== 'viewer'}
           onSubscribe={(type, name) => setTarget({ type, name })}
           onExitPreview={() => setShelfPreview(false)}
+          preview
         />
       ) : (
       <Tabs

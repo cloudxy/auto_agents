@@ -1,8 +1,12 @@
 /**
  * T-11（附加 d / GWT-04.5 邻面）：示例维护弹窗——治理表格行操作。
- * 读源 = 公开详情 payload 的 examples（预览态豁免后 unlisted 也可读）；
+ * 读源 = 公开详情 payload 的 examples（preview=true 请求参数豁免闸与 listed
+ * 过滤后 unlisted 也可读——QA-2/QA-3 修复前这里从未真正传 preview，闸关/
+ * unlisted 一律读到空，保存即用空列表覆盖已维护内容）；
  * 写源 = PATCH /capabilities/{t}/{n}/examples。上限 20 条 × 200 字（422 就近内联错误）。
  * 失败保留输入（弹窗不关、内容不清——最招投诉的反例，edge-states §7.1）。
+ * QA-3：读失败与读到空是两个不同的态，混为一谈会让「读失败」被当成「真的
+ * 没有示例」保存掉——读失败必须锁保存按钮，不能沉默退化成空列表。
  */
 import React, { useEffect, useState } from 'react'
 import { Alert, Button, Empty, Input, Modal, Space, Typography, message } from 'antd'
@@ -20,6 +24,7 @@ export const EXAMPLES_EMPTY = '还没有示例。维护后，详情页会展示�
 export const EXAMPLES_LIMIT_COPY = `示例最多 ${EXAMPLES_LIMIT} 条，每条不超过 ${EXAMPLE_MAX_CHARS} 字`
 export const EXAMPLES_ADD = '添加示例'
 export const EXAMPLES_SAVING = '保存中…'
+export const EXAMPLES_LOAD_FAIL = '示例读取失败，请重试后再保存'
 
 type Props = {
   open: boolean
@@ -33,15 +38,17 @@ const ExamplesModal: React.FC<Props> = ({ open, asset, onClose, onSaved }) => {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [limitError, setLimitError] = useState(false)
+  const [loadError, setLoadError] = useState(false)
 
   useEffect(() => {
     if (!open || !asset) return undefined
     let alive = true
     setLoading(true)
     setLimitError(false)
-    fetchPublicCapability(asset.asset_type, asset.name)
+    setLoadError(false)
+    fetchPublicCapability(asset.asset_type, asset.name, true)
       .then((detail) => { if (alive) setItems([...(detail.examples || [])]) })
-      .catch(() => { if (alive) setItems([]) })
+      .catch(() => { if (alive) { setLoadError(true); setItems([]) } })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
   }, [open, asset])
@@ -60,7 +67,7 @@ const ExamplesModal: React.FC<Props> = ({ open, asset, onClose, onSaved }) => {
   }
 
   const submit = async () => {
-    if (!asset || saving) return
+    if (!asset || saving || loadError) return
     const trimmed = items.map((s) => s.trim()).filter((s) => s.length > 0)
     if (trimmed.length > EXAMPLES_LIMIT || trimmed.some((s) => s.length > EXAMPLE_MAX_CHARS)) {
       setLimitError(true)
@@ -93,14 +100,20 @@ const ExamplesModal: React.FC<Props> = ({ open, asset, onClose, onSaved }) => {
       destroyOnHidden
       footer={[
         <Button key="cancel" disabled={saving} onClick={onClose}>取消</Button>,
-        <Button key="save" type="primary" loading={saving} onClick={() => { void submit() }}>
+        <Button
+          key="save" type="primary" loading={saving} disabled={loading || loadError}
+          onClick={() => { void submit() }}
+        >
           {saving ? EXAMPLES_SAVING : '保存'}
         </Button>,
       ]}
     >
       {loading ? <Text type="secondary">正在读取现有示例…</Text> : (
         <>
-          {items.length === 0 ? (
+          {loadError ? (
+            <Alert type="error" role="alert" title={EXAMPLES_LOAD_FAIL} style={{ marginBottom: 12 }} />
+          ) : null}
+          {!loadError && items.length === 0 ? (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={EXAMPLES_EMPTY} />
           ) : null}
           <Space direction="vertical" style={{ width: '100%' }} size="middle">
