@@ -1,9 +1,10 @@
 /**
  * T-09 结账：W2 主钮「提交开通」；未配通道仍可待支付；闭集待支付/已开通。
- * 禁 live 收银台；租户闭集待支付/已开通；重复提交只「已有待支付」。
+ * 在线通道（支付宝/微信）已配商户凭据时，提交后/重开页面可拿到真实收银台
+ * 链接/二维码（channel 未选或未配置时仍走原有人工确认收款语义不变）。
  */
 import React, { useState } from 'react'
-import { Alert, Button, Skeleton, Typography, message } from 'antd'
+import { Alert, Button, Radio, Skeleton, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 
@@ -13,7 +14,6 @@ import {
   CHECKOUT_OFFLINE_OPEN,
   CHECKOUT_OFFLINE_PAY,
   CHECKOUT_OPEN_FAILED,
-  CHECKOUT_PENDING_COPY,
   CHECKOUT_PENDING_EXISTS,
   CHECKOUT_PENDING_EXISTS_COPY,
   CHECKOUT_PRODUCTS,
@@ -31,11 +31,14 @@ import {
   PRICING_PATH,
 } from '../constants/collectCopy'
 import {
+  CHANNEL_LABEL,
   createCheckout,
+  fetchPayIntent,
   listMyOrders,
   previewCheckout,
   type CheckoutPreview,
   type OrderRow,
+  type PayChannel,
 } from '../services/billing'
 import { apiErrorCode } from '../utils/collectBlock'
 import { apiErrorMessage } from '../utils/errorMessage'
@@ -69,12 +72,46 @@ const findOpenOrder = (orders: OrderRow[] | undefined, orderId: number | null): 
   return orders.find((row) => row.id === orderId)
 }
 
+const selectableChannels = (data: CheckoutPreview | undefined): CheckoutPreview['channels'] =>
+  (data?.channels || []).filter((c) => c.selectable)
+
+/** 在线支付真实网关产出的收银台链接/二维码。channel 已配置但网关调用失败时
+ * pay_url/qr_code_image 均为 null——不展示错误态（订单本身合法，等人工确认
+ * 收款即可），只是没有在线支付这条路可走。 */
+const PayIntentPanel: React.FC<{
+  channel: Exclude<PayChannel, 'offline'>
+  loading: boolean
+  payUrl: string | null
+  qrCodeImage: string | null
+}> = ({ channel, loading, payUrl, qrCodeImage }) => {
+  if (loading) return <Skeleton.Button active style={{ marginBottom: 16 }} />
+  if (channel === 'alipay' && payUrl) {
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <Button type="primary" href={payUrl} target="_blank" rel="noopener noreferrer">
+          前往支付宝支付
+        </Button>
+      </div>
+    )
+  }
+  if (channel === 'wechat' && qrCodeImage) {
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <Text style={{ display: 'block', marginBottom: 8 }}>微信扫码支付</Text>
+        <img src={qrCodeImage} alt="微信支付二维码" width={200} height={200} />
+      </div>
+    )
+  }
+  return null
+}
+
 const Checkout: React.FC = () => {
   const queryClient = useQueryClient()
   const [params] = useSearchParams()
   const product = params.get('product') || DEFAULT_UPGRADE_PRODUCT
   const knownProduct = (CHECKOUT_PRODUCTS as readonly string[]).includes(product)
   const [dupHint, setDupHint] = useState(false)
+  const [selectedChannel, setSelectedChannel] = useState<Exclude<PayChannel, 'offline'> | undefined>(undefined)
 
   const previewQuery = useQuery({
     queryKey: ['billing-checkout', product],
@@ -96,7 +133,7 @@ const Checkout: React.FC = () => {
   }
 
   const submitMutation = useMutation({
-    mutationFn: () => createCheckout({ product }),
+    mutationFn: () => createCheckout({ product, channel: selectedChannel }),
     onSuccess: () => {
       setDupHint(false)
       invalidate()
@@ -120,6 +157,15 @@ const Checkout: React.FC = () => {
   const openStatus = openOrder?.status || ''
   const fulfilled = isFulfilledStatus(openStatus)
   const pending = Boolean(orderId && !fulfilled) || dupHint
+  const onlineChannel = openOrder?.channel === 'alipay' || openOrder?.channel === 'wechat'
+  // 按需重取在线支付链接/二维码：只在自己这笔待支付订单选了在线通道时才发
+  // 请求；未选/线下通道/已开通/已履约都不发（不产生无意义请求）
+  const payIntentQuery = useQuery({
+    queryKey: ['billing-pay-intent', orderId],
+    queryFn: () => fetchPayIntent(orderId as number),
+    enabled: Boolean(orderId) && onlineChannel && openStatus === 'checkout_pending',
+    retry: false,
+  })
 
   const onSubmit = () => {
     if (isOffline()) {
@@ -212,15 +258,37 @@ const Checkout: React.FC = () => {
         />
       )}
 
+      {!fulfilled && pending && onlineChannel && (
+        <PayIntentPanel
+          channel={openOrder?.channel as Exclude<PayChannel, 'offline'>}
+          loading={payIntentQuery.isPending}
+          payUrl={payIntentQuery.data?.pay_url ?? null}
+          qrCodeImage={payIntentQuery.data?.qr_code_image ?? null}
+        />
+      )}
+
       {!fulfilled && !pending && (
-        <Button
-          type="primary"
-          disabled={submitMutation.isPending}
-          loading={submitMutation.isPending}
-          onClick={onSubmit}
-        >
-          {submitMutation.isPending ? CHECKOUT_SUBMIT_LOADING : CHECKOUT_SUBMIT}
-        </Button>
+        <>
+          {selectableChannels(data).length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <Text style={{ display: 'block', marginBottom: 8 }}>支付方式（可不选，线下人工确认收款）</Text>
+              <Radio.Group
+                value={selectedChannel}
+                onChange={(e) => setSelectedChannel(e.target.value)}
+                options={selectableChannels(data).map((c) => ({ label: CHANNEL_LABEL[c.channel], value: c.channel }))}
+                optionType="button"
+              />
+            </div>
+          )}
+          <Button
+            type="primary"
+            disabled={submitMutation.isPending}
+            loading={submitMutation.isPending}
+            onClick={onSubmit}
+          >
+            {submitMutation.isPending ? CHECKOUT_SUBMIT_LOADING : CHECKOUT_SUBMIT}
+          </Button>
+        </>
       )}
     </div>
   )
