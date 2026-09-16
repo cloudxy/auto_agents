@@ -128,6 +128,21 @@ async def create_order(
     return created(order, message="升级申请已提交，等待管理员确认收款")
 
 
+@router.get("/orders/{order_id}/pay-intent", response_model=ApiResponse[OrderOut])
+async def regenerate_pay_intent(
+    order_id: int,
+    user: CurrentUser = Depends(get_current_user),
+    service: BillingService = Depends(_svc),
+) -> ApiResponse[OrderOut]:
+    """按需重取在线支付链接/二维码（未持久化，见 BillingService.regenerate_pay_intent）。
+    只在自己企业的订单上生效——跨企业订单号走 tenant_id 核对，不是路径参数就能查。
+    """
+    if user.tenant_id is None:
+        raise BusinessException("需要租户上下文")
+    order = await service.regenerate_pay_intent(order_id, user.tenant_id)
+    return ok(data=order)
+
+
 @router.get("/orders", response_model=ApiResponse[list[OrderOut]])
 async def list_orders(
     user: CurrentUser = Depends(get_current_user),

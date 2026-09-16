@@ -95,7 +95,8 @@ class OrderOut(BaseModel):
     # 在线支付真实网关产出（channel 已配商户凭据且网关调用成功时才有值；
     # 未配置/网关调用失败时为 None——照常走人工确认收款，不阻断下单）
     pay_url: Optional[str] = None       # 支付宝：可直接跳转的收银台链接
-    qr_code_url: Optional[str] = None   # 微信：code_url，前端渲染成二维码
+    qr_code_url: Optional[str] = None   # 微信：原始 code_url（复制链接用）
+    qr_code_image: Optional[str] = None  # 微信：code_url 渲染的 SVG data URI，前端 <img src> 直接用
 
     @computed_field  # type: ignore[prop-decorator]
     @property
