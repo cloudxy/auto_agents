@@ -236,3 +236,51 @@ def test_qa5_md_path_reads_legacy_body_on_relative_and_absolute_root(
         assert got.json()["data"]["skill_md"] == body
     finally:
         settings.set("SKILLS.LIBRARY_ROOT", original)
+
+
+# ---------- QA-11：预览态 install_count（OQ-D3 裁定过，实现一直没接） ----------
+
+def test_qa11_preview_detail_carries_alive_install_count(db_client, db_session):
+    """OQ-D3 裁定预览态显示订阅计数，但 get_public 一直没填这个字段——前端
+    抽屉的「已订阅 N 次」恒不出现。种 3 条 alive 订阅，断言预览详情带
+    install_count=3；再种一条软删订阅，断言不计入（alive 谓词与 hot 排序
+    同一口径）。
+    """
+    from backend.tests.t25_support import seed_tenant
+    from platform_core.models.capability import CapabilityInstall
+
+    admin = make_platform_admin_headers(db_session)
+    _seed(db_session, name="qa11-skill")
+    tid = seed_tenant(db_session, slug="qa11-co")
+
+    async def _install(hosts, *, alive=True):
+        async with db_session() as s:
+            asset_id = (await s.execute(
+                select(CapabilityAsset.id).where(CapabilityAsset.name == "qa11-skill")
+            )).scalar_one()
+            for host in hosts:
+                row = CapabilityInstall(
+                    tenant_id=tid, asset_id=int(asset_id), host=host, enabled=1, trusted=0,
+                )
+                if not alive:
+                    from datetime import datetime, timezone
+                    row.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                s.add(row)
+            await s.commit()
+
+    asyncio.run(_install(["grok", "zcode", "kimi"]))
+    asyncio.run(_install(["claude-code"], alive=False))
+
+    got = db_client.get(_detail("qa11-skill"), params={"preview": "true"}, headers=admin)
+    assert got.status_code == 200, got.text
+    assert got.json()["data"]["install_count"] == 3  # 软删的第 4 条不计入
+
+
+def test_qa11_preview_detail_zero_installs(db_client, db_session):
+    """无订阅时字段仍存在且为 0（不是缺字段），前端才能正确走"不显示"分支。"""
+    admin = make_platform_admin_headers(db_session)
+    _seed(db_session, name="qa11-zero-skill")
+
+    got = db_client.get(_detail("qa11-zero-skill"), params={"preview": "true"}, headers=admin)
+    assert got.status_code == 200, got.text
+    assert got.json()["data"]["install_count"] == 0
