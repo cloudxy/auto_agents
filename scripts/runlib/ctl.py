@@ -16,7 +16,7 @@ def parse_argv(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Auto Agents 统一启停",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="默认 start 全部。setup 一键初始化。已运行则跳过；restart/reload 强制重启。",
+        epilog="默认 start 全部。setup 一键初始化。sync-agents 同步 .agents 到能力市场。已运行则跳过；restart/reload 强制重启。",
     )
     parser.add_argument("--env", choices=["local", "dev", "prod"], default=None)
     parser.add_argument("--list", action="store_true", help="列出爬虫后退出")
@@ -24,8 +24,8 @@ def parse_argv(argv: list[str] | None = None) -> argparse.Namespace:
     ns = parser.parse_args(argv)
 
     words = list(ns.words)
-    if words and words[0] == "setup":
-        ns.action = "setup"
+    if words and words[0] in ("setup", "sync-agents"):
+        ns.action = words[0]
         ns.targets = []
         return ns
 
@@ -61,8 +61,19 @@ def _prepare_frontend(targets: list[str]) -> None:
         ensure_workspaces(skip=False)
 
 
+def cmd_sync_agents(env: str | None) -> int:
+    """同步 .agents → 能力市场。DB 未就绪时打印失败但不阻断调用方。"""
+    cmd = [sys.executable, str(ROOT / "scripts" / "sync_agents_hub.py")]
+    if env:
+        cmd += ["--env", env]
+    return subprocess.call(cmd, cwd=ROOT)
+
+
 def cmd_start(targets: list[str], env: str | None) -> int:
     _prepare_frontend(targets)
+    sync_rc = cmd_sync_agents(env)
+    if sync_rc != 0:
+        print("agents_hub 同步未成功，继续启动进程")
     ok = True
     for name in targets:
         if is_running(name):
@@ -115,6 +126,8 @@ def main() -> int:
         return list_spiders(ns.env)
     if ns.action == "setup":
         return subprocess.call(["bash", str(ROOT / "init_project.sh")], cwd=ROOT)
+    if ns.action == "sync-agents":
+        return cmd_sync_agents(ns.env)
     dispatch = {
         "start": lambda: cmd_start(ns.targets, ns.env),
         "stop": lambda: cmd_stop(ns.targets),

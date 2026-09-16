@@ -7,9 +7,9 @@ API V1 版本路由聚合器
 """
 from fastapi import APIRouter
 from . import (
-    admin, ai, api_keys, auth, billing, capabilities, configs, health,
-    internal_fixture_tenants, litellm_admin, llm_providers, members, newapi,
-    ops_contact, outbound_keys, payment_credentials, product_events,
+    admin, ai, api_keys, auth, billing, capabilities, capabilities_gov, configs,
+    health, internal_fixture_tenants, litellm_admin, llm_providers, members,
+    newapi, ops_contact, outbound_keys, payment_credentials, product_events,
     public_skills, rbac, relay, root, skills, spiders, tenant_signup,
     tenant_usage,
 )
@@ -33,6 +33,8 @@ router.include_router(members.router, prefix="/members", tags=["members"])
 router.include_router(tenant_usage.router, prefix="/tenants/me", tags=["tenants"])
 router.include_router(tenant_signup.router, prefix="/public", tags=["public"])
 router.include_router(ops_contact.router, prefix="/public", tags=["public"])
+# feat-agents-market：gov（静态治理段）必须先于 capabilities（含二段式动态段）挂载
+router.include_router(capabilities_gov.router, prefix="/capabilities", tags=["capabilities"])
 router.include_router(capabilities.router, prefix="/capabilities", tags=["capabilities"])
 router.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
 router.include_router(billing.router, prefix="/billing", tags=["billing"])

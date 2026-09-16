@@ -81,6 +81,17 @@ def _library_root() -> Path:
     return root if root.is_absolute() else Path.cwd() / root
 
 
+def _landing_root() -> Path:
+    """legacy 导入落盘根（AD-4c / OQ-2「执行统一」）：capability-library → .agents。
+
+    单通道北极星：所有导入通道落到同一真相源，同步/对账/详情正文读取才有
+    唯一口径。沙箱与限额逻辑完全不动——本改动只换落盘根（GWT-07.8 能力不回退）。
+    """
+    from backend.services.power_market.agents_hub import agents_root
+
+    return agents_root()
+
+
 def _make_sandbox() -> Path:
     from config import settings
 
@@ -119,7 +130,7 @@ def _dir_files(pkg: Path) -> list[tuple[str, Path]]:
 def _contained_write(dest: Path, data: bytes) -> None:
     """写入前双重收容断言：目标必须落在资产目录内（GWT-100.7 兜底）"""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if not dest.resolve().is_relative_to(_library_root().resolve()):
+    if not dest.resolve().is_relative_to(_landing_root().resolve()):
         raise OSError(f"越界写入拒绝: {dest}")
     dest.write_bytes(data)
 
@@ -340,7 +351,7 @@ class AssetImportService:
 
     def _land(self, p: PendingAsset) -> None:
         """落盘资产目录（限定 capability-library 对应子目录，NFR-04）"""
-        root = _library_root()
+        root = _landing_root()
         if p.single_file:
             _contained_write(root / _TYPE_DIRS[p.asset_type] / f"{p.name}.md",
                              p.files[0][1].read_bytes())
@@ -354,7 +365,12 @@ class AssetImportService:
 
     @staticmethod
     def _file_path(p: PendingAsset) -> str:
-        rel = f"{_TYPE_DIRS[p.asset_type]}/{p.name}"
+        """AD-4c：落盘根切 .agents 后，file_path 同步带 `.agents/` 前缀——
+
+        详情正文分流（AD-5a）与 prune 判别式（AD-3/QA-7R）都以该前缀识别
+        「hub 来源行」，前缀不带会让导入行被当成 legacy 行。
+        """
+        rel = f".agents/{_TYPE_DIRS[p.asset_type]}/{p.name}"
         return f"{rel}.md" if p.single_file else rel
 
     async def _open_batch(self, origin: str, actor: str) -> AssetImportBatch:

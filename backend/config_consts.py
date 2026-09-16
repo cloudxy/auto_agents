@@ -16,6 +16,7 @@ STALE_TASK_HOURS ×3 / USAGE_FLUSH_INTERVAL ×3 等）；剩余低频调用点�
 
 # ---- 技能域 ----
 SKILLS_LIBRARY_ROOT = "capability-library"
+SKILLS_AGENTS_ROOT = ".agents"  # .agents 真相源根（feat-agents-market FR-01 同步/导入/prune）
 SKILLS_SCORING_ENABLED = False
 SKILLS_PUBLIC_RATE_PER_MIN = 60
 

@@ -2,6 +2,8 @@
 SKILLS:
   # 能力资产库根目录（P6 泛化：下分 skills/plugins/experts/teams/）；相对仓库根或绝对路径
   LIBRARY_ROOT: "capability-library"
+  # .agents 真相源根（feat-agents-market：同步/目录导入落盘/失源清理的统一根）；相对仓库根或绝对路径
+  AGENTS_ROOT: ".agents"
   # lifespan 启动时是否增量扫描一次（本地单机语义）
   SCAN_ON_STARTUP: false
   SCORING:

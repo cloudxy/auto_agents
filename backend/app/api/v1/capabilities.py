@@ -125,19 +125,9 @@ async def backfill_first_party_listing(
     return ok(data=data)
 
 
-@router.post("/scan-plugins")
-async def scan_plugins(
-    user: CurrentUser = Depends(require_platform_admin_or_404),
-    session: AsyncSession = Depends(get_async_db),
-):
-    """扫描 capability-library/plugins/（plugin.json 解析入库；仅平台超管）"""
-    from backend.app.api._helpers import record_audit
-    from backend.services.plugin_service import PluginService
-
-    result = await PluginService(session).scan_plugins()
-    await record_audit(session, user, "plugin.scan", "plugins",
-                       detail={"total": result.get("total")})
-    return ok(data=result)
+# feat-agents-market AD-1：破坏性扫描入口 POST /scan-plugins 已删除
+# （软删根因 plugin_service._retract_missing_plugins 一并退役；.agents 同步走
+#   capabilities_gov.sync_agents-hub，非破坏 upsert，GWT-01.3 验收线）。
 
 
 @router.get("/plugins/{name}")

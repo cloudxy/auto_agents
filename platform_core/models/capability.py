@@ -83,6 +83,16 @@ class CapabilityAsset(SoftDeleteMixin, AuditMixin, Base):
     origin_plugin_name = Column(
         String(128), nullable=True, comment="父插件目录名；第一方无父插件则 NULL",
     )
+    logo = Column(String(512), nullable=True, comment="icon 相对仓库路径")
+    background = Column(String(512), nullable=True, comment="背景图相对仓库路径")
+    featured = Column(
+        SmallInteger, nullable=False, server_default="0",
+        comment="精选权重（feat-agents-market FR-04 综合/最热序）；0=非精选",
+    )
+    examples = Column(
+        JSON, nullable=True,
+        comment="详情示例区（feat-agents-market FR-05）；NULL/空=隐藏示例区",
+    )
     alias_origin_refs = Column(JSON, nullable=True, comment="被折叠的路径集，非查询列")
     writable = Column(
         SmallInteger, nullable=False, default=1, server_default="1",

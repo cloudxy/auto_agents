@@ -11,7 +11,6 @@
 管理端写（require_platform_admin；租户 admin / viewer 403 + 零落库 + leftover）：
 - POST /api/v1/capabilities/plugins/{name}/verify
 管理端写（require_platform_admin_or_404；租户 404 同形 + 零落库 + leftover）：
-- POST /api/v1/capabilities/scan-plugins
 - POST /api/v1/capabilities/scan-experts
 - PATCH /api/v1/capabilities/{type}/{name}/listing
 - POST /api/v1/capabilities/teams（T-37 / GWT-101.5：与「页面不存在」同形）
@@ -19,6 +18,9 @@
 - GET  /api/v1/public/capabilities                官网能力市场（五类枚举；非法 type 失败）
 
 T-04 改写：现网「viewer 可扫 200」金标作废（GWT-06.4）。正面路径走 platform_admin_client。
+feat-agents-market AD-1：scan-plugins 端点退役（破坏性软删根因），其端点行为
+覆盖由 test_sync_endpoint.py 的 sync-agents-hub 用例承接；本文件插件播种改为
+直插行（manifest 同 cap_library 夹具）。
 """
 import asyncio
 import json
@@ -93,16 +95,39 @@ def _query_all(db_session, stmt):
     return asyncio.run(_go())
 
 
-def _seed_via_http_scan(db_client, headers: dict | None = None):
-    """经 HTTP 扫描端点播种插件 + 专家（调用方须已是 platform_admin 特权或带超管 Bearer）"""
+def _seed_plugin_row(db_session):
+    """直插插件资产行 + 细节行（feat-agents-market：扫描播种端点已退役）"""
+
+    async def _go():
+        async with db_session() as s:
+            asset = CapabilityAsset(
+                asset_type="plugin", name=PLUGIN_NAME, title="演示插件",
+                category="plugin", status="stable", source_type="self_built",
+                listing_state="listed", sync_state="ok", license="MIT",
+            )
+            s.add(asset)
+            await s.flush()
+            s.add(CapabilityPlugin(
+                asset_id=asset.id, version="1.2.3", author="qa", license="MIT",
+                manifest={"name": PLUGIN_NAME, "description": "演示插件",
+                          "version": "1.2.3"},
+                bundled_skills=[], mcp_servers={}, hooks={}, commands={},
+            ))
+            await s.commit()
+
+    asyncio.run(_go())
+
+
+def _seed_via_http_scan(db_client, db_session, headers: dict | None = None):
+    """播种插件（直插）+ 专家（HTTP scan-experts；调用方须已是特权或带超管 Bearer）"""
+    _seed_plugin_row(db_session)
     kw = {"headers": headers} if headers else {}
-    p = db_client.post("/api/v1/capabilities/scan-plugins", **kw)
     e = db_client.post("/api/v1/capabilities/scan-experts", **kw)
-    assert p.status_code == 200 and e.status_code == 200, (p.text, e.text)
+    assert e.status_code == 200, e.text
 
 
-def _seed_via_http_scan_headers(db_client, headers: dict):
-    _seed_via_http_scan(db_client, headers=headers)
+def _seed_via_http_scan_headers(db_client, db_session, headers: dict):
+    _seed_via_http_scan(db_client, db_session, headers=headers)
 
 
 def _denied_logs(db_session):
@@ -115,100 +140,16 @@ def _denied_logs(db_session):
 
 
 # ---------------------------------------------------------------------------
-# POST /api/v1/capabilities/scan-plugins
+# POST /api/v1/capabilities/scan-plugins（已退役——feat-agents-market AD-1）
+# 端点级行为覆盖由 test_sync_endpoint.py（sync-agents-hub）承接。
 # ---------------------------------------------------------------------------
 
-def test_scan_plugins_ok(db_client, platform_admin_client, db_engine, db_session, cap_library):
-    """平台超管扫描：200 摘要 + asset/detail 落库 + 审计（GWT-06.1）"""
-    resp = db_client.post("/api/v1/capabilities/scan-plugins")
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    assert data["total"] == 1
-    assert data["succeeded"] == 1
-    assert data["failed"] == 0
 
-    assets = _query_all(db_session, select(CapabilityAsset).where(
-        CapabilityAsset.asset_type == "plugin"))
-    assert len(assets) == 1  # 副作用：恰好一条插件资产
-    assert assets[0].name == PLUGIN_NAME
-    details = _query_all(db_session, select(CapabilityPlugin))
-    assert len(details) == 1
-    assert details[0].version == "1.2.3"
-    assert details[0].mcp_servers == {}
-
-    logs = _query_all(db_session, select(OperationLog).where(
-        OperationLog.action == "plugin.scan",
-    ))
-    assert len(logs) == 1
-    log = logs[0]
-    assert log.action == "plugin.scan"
-    assert log.target == "plugins"
-    assert log.actor_id == 1
-    assert log.actor_name == "test-platform-admin"
-
-
-def test_scan_plugins_bad_dir_counted_failed(db_client, platform_admin_client, db_engine, db_session, cap_library):
-    """缺 plugin.json 的目录：单插件失败不中断整批（failed=1），坏目录零落库"""
-    (cap_library / "plugins" / "broken-plugin").mkdir()
-    resp = db_client.post("/api/v1/capabilities/scan-plugins")
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["total"] == 2
-    assert data["succeeded"] == 1
-    assert data["failed"] == 1
-    assert data["failed_names"] == ["broken-plugin"]
-
-    names = {a.name for a in _query_all(db_session, select(CapabilityAsset).where(
-        CapabilityAsset.asset_type == "plugin"))}
-    assert names == {PLUGIN_NAME}  # 坏目录零落库
-
-
-def test_scan_plugins_anonymous_401(client):
-    assert client.post("/api/v1/capabilities/scan-plugins").status_code == 401
-
-
-def test_scan_plugins_viewer_404_zero_write(db_client, viewer_client, db_session, cap_library):
-    """GWT-06.4 / FR-U12：仅登录查看者扫描 → 404 同形且零落库"""
-    resp = viewer_client.post("/api/v1/capabilities/scan-plugins")
+def test_retired_scan_plugins_gone_for_everyone(db_client, platform_admin_client):
+    """AD-1 验收：破坏性扫描入口不存在——超管直打也 404（路由已删）"""
+    resp = platform_admin_client.post("/api/v1/capabilities/scan-plugins")
     assert resp.status_code == 404
-    assert resp.json()["code"] == "HTTP_404"
-    assert "抱歉" not in resp.text
-    assert _query_all(db_session, select(CapabilityAsset)) == []
-    assert _denied_logs(db_session)
-
-
-def test_scan_plugins_tenant_admin_404_leftover(db_client, admin_client, db_session, cap_library):
-    """GWT-U12.3：租户公司管理员扫描 → 404 同形；目录不变；留下越权记录"""
-    resp = admin_client.post("/api/v1/capabilities/scan-plugins")
-    assert resp.status_code == 404
-    assert resp.json()["code"] == "HTTP_404"
-    assert "抱歉" not in resp.text
-    assert _query_all(db_session, select(CapabilityAsset)) == []
-    logs = _denied_logs(db_session)
-    assert len(logs) == 1
-    assert logs[0].action == "authz.denied"
-    assert "scan-plugins" in logs[0].target
-
-
-def test_scan_plugins_zero_packages_actionable_empty(
-    db_client, platform_admin_client, db_session, tmp_path,
-):
-    """GWT-06.2：可同步的包为 0 → 可行动空态，不是静默成功"""
-    from config import settings
-
-    original = settings.get("SKILLS.LIBRARY_ROOT")
-    settings.set("SKILLS.LIBRARY_ROOT", str(tmp_path))
-    (tmp_path / "plugins").mkdir()
-    try:
-        resp = platform_admin_client.post("/api/v1/capabilities/scan-plugins")
-    finally:
-        settings.set("SKILLS.LIBRARY_ROOT", original)
-    assert resp.status_code == 200, resp.text
-    data = resp.json()["data"]
-    assert data["total"] == 0
-    assert data.get("empty") is True
-    assert "没有可同步的包" in data["message"]
-    assert _query_all(db_session, select(CapabilityAsset)) == []
+    assert db_client.post("/api/v1/capabilities/scan-plugins").status_code == 404
 
 
 def test_list_capabilities_empty_actionable(db_client, platform_admin_client):
@@ -222,12 +163,11 @@ def test_list_capabilities_empty_actionable(db_client, platform_admin_client):
     assert data.get("message")
 
 
-def test_platform_admin_scan_refresh_sees_new_package(
+def test_platform_admin_catalog_sees_seeded_plugin(
     db_client, platform_admin_client, db_engine, db_session, cap_library,
 ):
-    """GWT-20.1：超管扫描到新包，刷新目录，新包出现（不得静默 0 行）"""
-    scan = platform_admin_client.post("/api/v1/capabilities/scan-plugins")
-    assert scan.status_code == 200, scan.text
+    """GWT-20.1 后继：目录出现已同步插件（不得静默 0 行）"""
+    _seed_plugin_row(db_session)
     listing = platform_admin_client.get(
         "/api/v1/capabilities", params={"type": "plugin"},
     )
@@ -248,7 +188,7 @@ def test_platform_admin_scan_refresh_sees_new_package(
 
 def test_plugin_detail_contract(db_client, platform_admin_client, db_engine, db_session, cap_library):
     """契约：插件详情 200 + manifest 投影（B5 修复路由遮蔽后可用）"""
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
     resp = db_client.get(f"/api/v1/capabilities/plugins/{PLUGIN_NAME}")
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
@@ -264,7 +204,7 @@ def test_plugin_detail_anonymous_401(client):
 
 def test_plugin_verify_no_mcp_unknown(db_client, platform_admin_client, db_engine, db_session, cap_library):
     """未声明 MCP servers 的插件验证 → unknown（可上架）；健康态落库（PIT-6）"""
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
     resp = db_client.post(f"/api/v1/capabilities/plugins/{PLUGIN_NAME}/verify")
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
@@ -277,7 +217,7 @@ def test_plugin_verify_no_mcp_unknown(db_client, platform_admin_client, db_engin
 
 
 def test_plugin_verify_unknown_404(db_client, platform_admin_client, db_engine, db_session, cap_library):
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
     resp = db_client.post("/api/v1/capabilities/plugins/ghost/verify")
     assert resp.status_code == 404
     assert resp.json()["code"] == "NOT_FOUND"
@@ -330,7 +270,7 @@ def test_plugin_verify_tenant_admin_404_row_unchanged(
     from conftest import make_platform_admin_headers
 
     seed_auth = make_platform_admin_headers(db_session)
-    _seed_via_http_scan_headers(db_client, seed_auth)
+    _seed_via_http_scan_headers(db_client, db_session, seed_auth)
     before = _query_all(db_session, select(CapabilityPlugin))
     assert before and before[0].health_status == "unknown"
     resp = admin_client.post(f"/api/v1/capabilities/plugins/{PLUGIN_NAME}/verify")
@@ -365,7 +305,7 @@ def test_scan_experts_anonymous_401(client):
 
 def test_expert_detail_contract(db_client, platform_admin_client, db_engine, db_session, cap_library):
     """契约：专家详情 200 + tools/model_pref 投影（B5 修复路由遮蔽后可用）"""
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
     resp = db_client.get(f"/api/v1/capabilities/experts/{EXPERT_NAME}")
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
@@ -384,7 +324,7 @@ def test_expert_detail_anonymous_401(client):
 
 def test_capability_detail_ok_and_404(db_client, platform_admin_client, db_engine, db_session, cap_library):
     """统一详情路由：动态段 (asset_type, name) 二段式不被 /plugins /experts 吞掉"""
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
     resp = db_client.get(f"/api/v1/capabilities/expert/{EXPERT_NAME}")
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
@@ -413,7 +353,7 @@ TEAM_BODY = {
 
 
 def test_team_upsert_create_then_update(db_client, platform_admin_client, db_engine, db_session, cap_library):
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
 
     resp = db_client.post("/api/v1/capabilities/teams", json=TEAM_BODY)
     assert resp.status_code == 200, resp.text
@@ -436,7 +376,7 @@ def test_team_upsert_create_then_update(db_client, platform_admin_client, db_eng
 
 def test_team_upsert_dangling_ref_422(db_client, platform_admin_client, db_engine, db_session, cap_library):
     """悬空专家引用 → 422，且零落库（副作用断言：无 expert_team 行）"""
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
     resp = db_client.post("/api/v1/capabilities/teams", json={
         **TEAM_BODY, "members": ["ghost-expert"]})
     assert resp.status_code == 422, resp.text
@@ -459,7 +399,7 @@ def test_team_upsert_tenant_404_same_shape_zero_rows(
     零团队落库，留越权记录。GWT-20.3 Then（拒绝且行不变）同时保持。"""
     from conftest import make_platform_admin_headers
 
-    _seed_via_http_scan_headers(db_client, make_platform_admin_headers(db_session))
+    _seed_via_http_scan_headers(db_client, db_session, make_platform_admin_headers(db_session))
     for tenant_client in (operator_client, admin_client):
         resp = tenant_client.post("/api/v1/capabilities/teams", json=TEAM_BODY)
         assert resp.status_code == 404
@@ -476,7 +416,7 @@ def test_team_mixed_members_expert_union_agent_route(
     """GWT-101.1/101.2（T-37，HTTP 面）：agent 成员可提交；详情/导出带类型标注"""
     from backend.tests.fr33_support import fr33_asset, seed_rows
 
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
     seed_rows(db_session, [fr33_asset(
         asset_type="agent", name="g101-agent", category="cat-g", title="调研智能体")])
 
@@ -501,7 +441,7 @@ def test_team_agent_dangling_route_422(
     db_client, platform_admin_client, db_engine, db_session, cap_library,
 ):
     """智能体悬空引用 → 422 中文句 + 零落库（T-37）"""
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
     resp = db_client.post("/api/v1/capabilities/teams", json={
         **TEAM_BODY, "members": [{"type": "agent", "name": "ghost-agent"}]})
     assert resp.status_code == 422, resp.text
@@ -512,7 +452,7 @@ def test_team_agent_dangling_route_422(
 
 def test_team_detail_contract(db_client, platform_admin_client, db_engine, db_session, cap_library):
     """契约：专家团详情 200 + leader/members/workflow 投影（B5 修复路由遮蔽后可用）"""
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
     assert db_client.post("/api/v1/capabilities/teams", json=TEAM_BODY).status_code == 200
 
     resp = db_client.get("/api/v1/capabilities/teams/review-team")
@@ -529,7 +469,7 @@ def test_team_detail_anonymous_401(client):
 
 
 def test_team_export_ok_and_404(db_client, platform_admin_client, db_engine, db_session, cap_library):
-    _seed_via_http_scan(db_client)
+    _seed_via_http_scan(db_client, db_session)
     assert db_client.post("/api/v1/capabilities/teams", json=TEAM_BODY).status_code == 200
 
     resp = db_client.get("/api/v1/capabilities/teams/review-team/export")
@@ -553,6 +493,10 @@ _PUBLIC_WHITELIST = {
     "name", "title", "description", "category", "tier", "score",
     "status", "source_url", "source_author", "updated_at", "asset_type",
     "listing_state", "license", "subscribable", "hosts", "slash",
+    # feat-agents-market WIP：logo/background 以相对媒体 href 外发（无本机绝对路径）
+    "logo", "background",
+    # feat-agents-market T-06：featured 随 items 外发（AD-6 综合序权重）
+    "featured",
 }
 
 
