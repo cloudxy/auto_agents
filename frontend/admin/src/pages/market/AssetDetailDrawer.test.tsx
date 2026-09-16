@@ -75,7 +75,7 @@ test('GWT-05.1 正常：banner/头像/标签/示例区/md 正文（表格与代�
     skill_md: '# 数据库设计\n\n| 步骤 | 说明 |\n| --- | --- |\n| DBML | 建模 |\n\n```bash\ndbml-cli\n```',
     examples: ['输入 DBML 产出迁移'],
     origin_plugin_name: 'sdlc-workflow',
-    featured: true,
+    featured: 1,
   }))
   const { container } = renderDrawer()
   await waitFor(() => expect(screen.getByTestId('asset-drawer')).toBeInTheDocument())

@@ -82,14 +82,17 @@ const CatalogTab: React.FC<Props> = ({
 
   const toggleFeatured = async (row: AssetRow) => {
     if (starPending) return
-    const next = !row.featured
+    // QA-12：featured 后端恒返回 number（0/1），PATCH 请求体仍是 boolean——
+    // 两个类型别混用，本地乐观更新用 number，请求参数单独转 boolean。
+    const wasFeatured = Boolean(row.featured)
+    const next = !wasFeatured
     setStarPending(row.id)
     // 乐观更新：行数据先翻转，失败回滚（edge-states §7.1）
-    replace({ ...row, featured: next })
+    replace({ ...row, featured: next ? 1 : 0 })
     try {
       replace(await patchFeatured(row.asset_type, row.name, next))
     } catch (e) {
-      replace({ ...row, featured: !next })
+      replace({ ...row, featured: wasFeatured ? 1 : 0 })
       message.error(`操作失败：${apiErrorMessage(e, '请稍后重试')}`)
     } finally {
       setStarPending(null)

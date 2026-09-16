@@ -264,7 +264,9 @@ class PowerMarketService:
             item["body_md"] = cmd.body_md
         if item["asset_type"] == "agent":
             item["persona_md"] = await self._persona_md(row.id)
-        item["examples"] = getattr(row, "examples", None) or []
+        # 同 QA-13 模式（examples 列随 050 迁移落地，getattr 防御不到 SQL 层
+        # 未知列错误）：只留 ORM 侧真实存在时的默认值归一化。
+        item["examples"] = row.examples or []
         item["gate_open"] = is_power_market_enabled()
         if preview:
             item["preview"] = True

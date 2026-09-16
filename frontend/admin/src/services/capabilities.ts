@@ -18,8 +18,9 @@ export interface AssetRow {
   listing_state?: string
   listed_at?: string | null
   source_type?: string
-  /** T-05 列（FR-04）：治理目录精选星标 */
-  featured?: boolean
+  /** T-05 列（FR-04）：治理目录精选星标。QA-4：list_catalog 之前不投影本
+   * 字段，星标刷新即丢；QA-12：后端恒返回 int（0/1），不是 boolean。 */
+  featured?: number
 }
 
 export interface PluginVerifyResult {
@@ -273,7 +274,7 @@ export interface PublicCapabilityCard {
   preview?: boolean
   install_count?: number | null
   origin_plugin_name?: string | null
-  featured?: boolean
+  featured?: number
   logo?: string | null
   background?: string | null
   updated_at?: string | null
@@ -309,7 +310,7 @@ export type PublicShelfItem = {
   logo?: string | null
   background?: string | null
   origin_plugin_name?: string | null
-  featured?: boolean
+  featured?: number
   updated_at?: string | null
 }
 

@@ -9,6 +9,7 @@ AD-5c 的豁免边界是本文件的重点：preview 只豁免 `listing_state` �
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -187,3 +188,51 @@ def test_detail_projects_examples_and_gate_open(db_client, db_session):
     data = got.json()["data"]
     assert data["examples"] == []          # 未维护 → 空列表 → 前端隐藏区块
     assert data["gate_open"] is True
+
+
+# ---------- QA-5：_md_path legacy 分支绝对/相对根回归 ----------
+
+def test_qa5_md_path_reads_legacy_body_on_relative_and_absolute_root(
+    db_client, db_session, tmp_path, monkeypatch,
+):
+    """相对 HEAD 回归：projection._md_path 的 legacy 分支（file_path 不带
+    `.agents/` 前缀）曾在 `SKILLS.LIBRARY_ROOT` 为**绝对路径**时整个丢掉
+    `rel`——读的是 `<LIBRARY_ROOT>/SKILL.md`（通常不存在→恒空正文；恰好
+    存在则读到别的资产的正文），而不是 `<LIBRARY_ROOT>/<rel>/SKILL.md`。
+    默认配置 `SKILLS.LIBRARY_ROOT="capability-library"` 是相对路径，绝对
+    分支此前零覆盖，回归静默通过。参数化相对/绝对两种配置，断言同一
+    legacy 行都读到正文。
+    """
+    from config import settings
+
+    body = "# legacy 正文\n真实内容"
+    skill_dir_name = "legacy-skill"
+
+    def _write_skill(root: Path) -> None:
+        d = root / skill_dir_name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(body, encoding="utf-8")
+
+    original = settings.get("SKILLS.LIBRARY_ROOT")
+    try:
+        # 绝对路径配置：曾经被 bug 影响的分支
+        abs_root = tmp_path / "abs-library"
+        _write_skill(abs_root)
+        settings.set("SKILLS.LIBRARY_ROOT", str(abs_root))
+        _seed(db_session, name="qa5-abs", file_path=skill_dir_name)
+        got = db_client.get(_detail("qa5-abs"))
+        assert got.status_code == 200, got.text
+        assert got.json()["data"]["skill_md"] == body
+
+        # 相对路径配置：默认口径，修复前后都应正确（防止"修好绝对分支时
+        # 顺手改坏相对分支"）。chdir 到 tmp_path，不碰真实仓库 cwd。
+        rel_root_name = "rel-library"
+        monkeypatch.chdir(tmp_path)
+        _write_skill(tmp_path / rel_root_name)
+        settings.set("SKILLS.LIBRARY_ROOT", rel_root_name)
+        _seed(db_session, name="qa5-rel", file_path=skill_dir_name)
+        got = db_client.get(_detail("qa5-rel"))
+        assert got.status_code == 200, got.text
+        assert got.json()["data"]["skill_md"] == body
+    finally:
+        settings.set("SKILLS.LIBRARY_ROOT", original)
