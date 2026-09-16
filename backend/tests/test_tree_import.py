@@ -354,6 +354,45 @@ def test_ad4g_loose_agent_and_command_land_and_collect(
     assert ("agent", "solo") in names and ("command", "ping") in names
 
 
+def test_qa15_loose_agents_colliding_frontmatter_name_both_land(
+    db_client, platform_admin_client, db_session, agents_root,
+):
+    """QA-15 回归：两份游离 agent .md 文件名不同，但 frontmatter name 撞了
+    （曾经的 slug 来源）——两份都必须各自入库，不能因为 slug 撞车让第二份
+    的 upsert 静默覆盖第一份刚 flush 的行（同 (asset_type, name) 唯一键
+    命中同一行，磁盘两份文件对应库里一行，一份资产悄悄不可见）。slug 改用
+    磁盘文件名（stem，同目录天然唯一）后，两份各自成行。
+    """
+    files = {
+        "up/agents/alpha-agent.md": "---\nname: shared-name\ndescription: 甲\n---\n甲的人设正文\n",
+        "up/agents/beta-agent.md": "---\nname: shared-name\ndescription: 乙\n---\n乙的人设正文\n",
+    }
+    got = platform_admin_client.post(CONFIRM, files=_parts(files))
+    assert got.status_code == 200, got.text
+    out = got.json()["data"]
+    assert out["created"] == 2 and out["failed"] == []  # 都成功入库，不是二选一
+
+    live = _live(db_session)
+    assert ("agent", "alpha-agent") in live
+    assert ("agent", "beta-agent") in live
+    assert len(live) == 2  # 不是撞成一行
+
+    from platform_core.models.capability import CapabilityExpert
+
+    async def _personas():
+        async with db_session() as s:
+            rows = (await s.execute(
+                select(CapabilityAsset.name, CapabilityExpert.persona_md)
+                .join(CapabilityExpert, CapabilityExpert.asset_id == CapabilityAsset.id)
+                .where(CapabilityAsset.name.in_(["alpha-agent", "beta-agent"]))
+            )).all()
+            return {name: persona for name, persona in rows}
+
+    personas = asyncio.run(_personas())
+    assert personas["alpha-agent"] == "甲的人设正文"
+    assert personas["beta-agent"] == "乙的人设正文"  # 各自的正文没有互相覆盖
+
+
 # ---------- GWT-07.7 / 07.10 越权 ----------
 
 def test_gwt_07_7_tenant_admin_404_zero_write(

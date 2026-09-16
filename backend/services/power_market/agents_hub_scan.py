@@ -60,6 +60,16 @@ def _scan_loose(root: Path) -> list[HubItem]:
     if (root / "commands").is_dir():
         for raw in _fold_commands(root, {}):
             items.append(_command_item(root, root, None, raw))
+    # QA-15：游离资产没有 plugin__ 前缀这层唯一性保护，任何未来改动都可能
+    # 重新引入 slug 撞车——遍历式兜底：同 (asset_type, name) 出现第二次就
+    # 警告，不吞掉、不去重（去重会让某一份文件的内容悄悄消失，交给同步
+    # upsert 层的唯一键报错，这里只负责让人能第一时间发现是撞车不是别的）。
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        key = (item.asset_type, item.name)
+        if key in seen:
+            logger.warning(f"游离资产 slug 撞车 | type={item.asset_type} name={item.name}")
+        seen.add(key)
     return items
 
 
@@ -252,7 +262,14 @@ def _agent_item(md: Path, agents_dir: Path, agents_root: Path, plugin: str | Non
     logo = _dir_icon(agents_dir, stem)
     bg = _dir_background(agents_dir, stem)
     local = (meta.get("name") or stem).strip()
-    slug = f"{plugin}__{local}" if plugin else local
+    # QA-15：游离资产（plugin=None）的 slug 之前直接用 frontmatter name——
+    # 两份游离 .md 若 frontmatter 里 name 撞了，第二个 upsert 会更新到第一
+    # 个刚 flush 的行（同 (asset_type, name) 唯一键），磁盘两份文件对应一行，
+    # 一份资产静默不可见，prune 对账也少算。插件内 agent 靠 `plugin__` 前缀
+    # 保证唯一，游离资产没有这层保护——改用磁盘文件名（stem，同目录内天然
+    # 唯一，操作系统不允许重名文件）当 slug，frontmatter name 只做展示用途
+    # （title 字段仍取 local，不受影响）。
+    slug = f"{plugin}__{local}" if plugin else stem
     tools = _tools_list(meta.get("tools") or "")
     return HubItem(
         asset_type="agent", name=slug[:128], title=local[:256],
