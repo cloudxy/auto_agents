@@ -33,41 +33,60 @@ class PaymentNotifyService:
         self.creds = PaymentChannelCredentialRepository(session)
 
     async def handle(self, channel: str, payload: ChannelNotifyIn) -> None:
+        """HMAC 四要素夹具通路（沙箱/CI 用；真实支付宝/微信签名走
+        `handle_verified_fields`，见 backend/app/external_api/v1/payment_gateways.py）。
+        """
         logger.info(f"处理通道通知 | channel={channel} order_no={payload.order_no}")
         if channel not in _ONLINE:
             return
-        order = await self._verify(channel, payload)
-        if order is None:
-            return
-        status = str(payload.trade_status or "")
-        oid = int(order.id)
-        if status == _OK:
-            await self._on_success(order, payload)
-            return
-        if status in _FAIL:
-            await self._on_fail(oid, int(order.tenant_id), str(order.product_code or ""),
-                                channel, status)
-
-    async def _verify(self, channel: str, payload: ChannelNotifyIn) -> Optional[Order]:
-        logger.info(f"验真通道通知 | channel={channel} order_no={payload.order_no}")
         fields = self._fields(payload)
         if fields is None:
             logger.info("通道通知缺字段或非闭集状态，保持未开通")
-            return None
+            return
         secret, merchant = await self._current_secret(channel)
         if not secret or not merchant:
             logger.info(f"通道无当前凭据，保持未开通 | channel={channel}")
-            return None
+            return
         if not mac_matches(secret, str(payload.sign or ""), channel=channel, **fields):
             logger.info("通道通知未视为真通知，保持未开通")
-            return None
-        order = await self.orders.get_by_order_no(fields["order_no"])
+            return
+        await self.handle_verified_fields(
+            channel,
+            order_no=fields["order_no"], merchant_no=fields["merchant_no"],
+            amount_cents=fields["amount_cents"], trade_status=fields["trade_status"],
+            channel_trade_no=payload.channel_trade_no,
+        )
+
+    async def handle_verified_fields(
+        self, channel: str, *, order_no: str, merchant_no: str, amount_cents: int,
+        trade_status: str, channel_trade_no: Optional[str] = None,
+    ) -> None:
+        """签名已由调用方验过（HMAC 夹具 或 真实网关 RSA2/APIv3 AEAD）后的
+        统一处理入口：订单查找 + 四要素核对 + CAS 状态机，两条验真前门共用
+        同一套状态转移逻辑，避免真实网关接入时把状态机重写一遍带出新缺陷。
+        """
+        order = await self.orders.get_by_order_no(order_no)
         if order is None:
             logger.info("通道通知订单号无对应待支付，保持未开通")
-            return None
-        if not self._four_match(order, channel, merchant, fields):
-            return None
-        return order
+            return
+        fields = {
+            "order_no": order_no, "merchant_no": merchant_no,
+            "amount_cents": amount_cents, "trade_status": trade_status,
+        }
+        if not self._four_match(order, channel, merchant_no, fields):
+            return
+        if trade_status == _OK:
+            payload = ChannelNotifyIn(
+                order_no=order_no, merchant_no=merchant_no, amount_cents=amount_cents,
+                trade_status=trade_status, channel_trade_no=channel_trade_no,
+            )
+            await self._on_success(order, payload)
+            return
+        if trade_status in _FAIL:
+            await self._on_fail(
+                int(order.id), int(order.tenant_id), str(order.product_code or ""),
+                channel, trade_status,
+            )
 
     def _fields(self, payload: ChannelNotifyIn) -> Optional[dict]:
         order_no = str(payload.order_no or "").strip()

@@ -141,6 +141,7 @@ PATCH /api/v1/spiders/tasks/{task_id}
 PATCH /api/v1/spiders/templates/{template_id}
 PATCH /api/v1/tenants/me/quota
 POST /api/v1/admin/internal-fixture-tenants
+POST /api/v1/admin/payment-credentials/{channel}/validate
 POST /api/v1/admin/tenants
 POST /api/v1/admin/users
 POST /api/v1/admin/users/{user_id}/restore
@@ -208,6 +209,8 @@ POST /api/v1/spiders/schedules
 POST /api/v1/spiders/tasks/{task_id}/control
 POST /api/v1/spiders/templates
 POST /api/v1/spiders/templates/{template_id}/run
+POST /external/v1/payments/alipay/notify
+POST /external/v1/payments/wechat/notify
 POST /external/v1/webhooks/spider/callback
 PUT /api/v1/admin/notify-config
 PUT /api/v1/admin/payment-credentials
