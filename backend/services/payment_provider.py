@@ -21,6 +21,7 @@ from backend.services.payment_gateways.secrets_schema import (
     parse_alipay_secrets,
     parse_wechat_secrets,
 )
+from backend.services.payment_gateways.qr import code_url_to_svg_data_uri
 from backend.services.payment_gateways.wechat_gateway import WechatGateway
 from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
@@ -35,7 +36,8 @@ class PaymentIntent:
     status: str
     channel: str
     checkout_url: Optional[str] = None  # 支付宝：可直接跳转/新窗口打开的收银台链接
-    qr_code_url: Optional[str] = None   # 微信：code_url，前端渲染成二维码扫码
+    qr_code_url: Optional[str] = None   # 微信：原始 code_url（复制链接用）
+    qr_code_image: Optional[str] = None  # 微信：code_url 渲染成的 SVG data URI，前端直接 <img src>
     note: str = ""
 
 
@@ -109,7 +111,10 @@ async def _wechat_intent(
         )
 
     code_url = await asyncio.to_thread(_build)
-    return PaymentIntent(status="pending", channel="wechat", qr_code_url=code_url)
+    qr_image = code_url_to_svg_data_uri(code_url)
+    return PaymentIntent(
+        status="pending", channel="wechat", qr_code_url=code_url, qr_code_image=qr_image,
+    )
 
 
 async def create_payment_intent(

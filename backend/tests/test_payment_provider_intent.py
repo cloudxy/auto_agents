@@ -150,6 +150,8 @@ def test_configured_wechat_builds_qr_via_stubbed_gateway(db_client, db_session, 
     intent = asyncio.run(_go())
     assert intent.channel == "wechat"
     assert intent.qr_code_url == "weixin://wxpay/bizpayurl?pr=stubbed"
+    assert intent.qr_code_image is not None
+    assert intent.qr_code_image.startswith("data:image/svg+xml;base64,")
     assert intent.checkout_url is None
 
 
@@ -180,6 +182,40 @@ def test_checkout_attaches_pay_url_when_channel_configured(db_client, db_session
     assert data["pay_url"] is not None
     assert data["pay_url"].startswith("https://openapi")
     assert data["qr_code_url"] is None
+
+
+def test_pay_intent_endpoint_regenerates_link_without_reissuing_order(db_client, db_session, monkeypatch):
+    """刷新结账页 / 二次打开时按需重取链接——不建新单，不改订单状态。"""
+    from config import settings
+
+    monkeypatch.setattr(settings, "get", _patched_get(settings.get, {
+        "PAYMENT.PUBLIC_BASE_URL": "https://app.example.com",
+    }))
+    seed_plans(db_session)
+    owner, _tid = make_tenant_owner_headers(db_session, slug="qa-pay-intent")
+    put_channel(db_client, db_session, "alipay", secret=_alipay_secrets_json())
+
+    created = db_client.post(CHECKOUT, headers=owner, json={"product": "plan_pro", "channel": "alipay"})
+    assert created.status_code == 201, created.text
+    order_id = created.json()["data"]["id"]
+
+    resp = db_client.get(f"/api/v1/billing/orders/{order_id}/pay-intent", headers=owner)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["pay_url"] is not None
+    assert data["status"] == "checkout_pending"
+
+
+def test_pay_intent_endpoint_rejects_other_tenants_order(db_client, db_session):
+    seed_plans(db_session)
+    owner_a, _tid_a = make_tenant_owner_headers(db_session, slug="qa-pi-a")
+    owner_b, _tid_b = make_tenant_owner_headers(db_session, slug="qa-pi-b")
+    created = db_client.post(CHECKOUT, headers=owner_a, json={"product": "plan_pro"})
+    assert created.status_code == 201, created.text
+    order_id = created.json()["data"]["id"]
+
+    resp = db_client.get(f"/api/v1/billing/orders/{order_id}/pay-intent", headers=owner_b)
+    assert resp.status_code == 404
 
 
 def test_checkout_tolerates_gateway_failure_and_still_creates_order(db_client, db_session):
