@@ -62,7 +62,7 @@ async def update_definition(
 ) -> ApiResponse[SpiderDefinitionResponse]:
     """启停代码爬虫（4.4：写 spider_definitions.enabled，仅 admin）"""
     definition = await service.update_definition(name, payload.enabled)
-    await record_audit(session, user, "definition.update", f"definition#{name}",
+    await record_audit(user, "definition.update", f"definition#{name}",
                  {"enabled": payload.enabled})
     return updated(definition)
 
@@ -76,7 +76,7 @@ async def create_definition(
 ) -> ApiResponse[SpiderDefinitionResponse]:
     """新建爬虫定义（手动登记，来源标记 manual；仅管理员）"""
     definition = await service.create_definition(payload)
-    await record_audit(session, user, "definition.create", f"definition#{payload.name}",
+    await record_audit(user, "definition.create", f"definition#{payload.name}",
                  {"type": payload.type, "source": "manual"})
     return created(definition)
 
@@ -96,7 +96,7 @@ async def update_definition_meta(
     生效，不影响在跑任务（入队时 params 已快照）。
     """
     definition = await service.update_definition_meta(name, payload)
-    await record_audit(session, user, "definition.update_meta", f"definition#{name}",
+    await record_audit(user, "definition.update_meta", f"definition#{name}",
                  payload.model_dump(exclude_unset=True))
     return updated(definition)
 
@@ -110,7 +110,7 @@ async def delete_definition(
 ) -> ApiResponse[dict]:
     """删除采集方案（FR-103 / GWT-103.2/103.3：经办可删；被任务引用拒绝并列引用）"""
     result = await service.delete_definition(name)
-    await record_audit(session, user, "definition.delete", f"definition#{name}")
+    await record_audit(user, "definition.delete", f"definition#{name}")
     return deleted(data=result)
 
 

@@ -151,9 +151,9 @@ class TestAlertRuleAudit:
         assert resp.data.id == 5
         audit.assert_awaited_once()
         args = audit.await_args.args
-        assert args[2] == "alert_rule.create"
-        assert args[3] == "alert_rule#5"
-        assert args[4] == {"name": "r1", "rule_type": "task_timeout", "spider": None}
+        assert args[1] == "alert_rule.create"  # K3：签名去掉 session
+        assert args[2] == "alert_rule#5"
+        assert args[3] == {"name": "r1", "rule_type": "task_timeout", "spider": None}
 
     @pytest.mark.asyncio
     async def test_update_alert_rule_records_audit(self):
@@ -170,9 +170,9 @@ class TestAlertRuleAudit:
         assert resp.data.enabled is False
         audit.assert_awaited_once()
         args = audit.await_args.args
-        assert args[2] == "alert_rule.update"
-        assert args[3] == "alert_rule#5"
-        assert args[4] == {"enabled": False}
+        assert args[1] == "alert_rule.update"  # K3：签名去掉 session
+        assert args[2] == "alert_rule#5"
+        assert args[3] == {"enabled": False}
 
     @pytest.mark.asyncio
     async def test_delete_alert_rule_records_audit(self):
@@ -186,8 +186,8 @@ class TestAlertRuleAudit:
         assert resp.data == {"rule_id": 5, "deleted": True}
         audit.assert_awaited_once()
         args = audit.await_args.args
-        assert args[2] == "alert_rule.delete"
-        assert args[3] == "alert_rule#5"
+        assert args[1] == "alert_rule.delete"  # K3：签名去掉 session
+        assert args[2] == "alert_rule#5"
 
 
 # ---------------- register 限流（429 + 计数） ----------------

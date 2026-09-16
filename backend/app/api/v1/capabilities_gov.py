@@ -47,8 +47,7 @@ async def sync_agents_hub(
     logger.info(f"capabilities_gov.sync_agents_hub | user={user.username}")
     data = await run_sync(session, hub_agents_root(), actor="manual")
     await session.commit()
-    await record_audit(
-        session, user, "agents_hub.sync", ".agents",
+    await record_audit(user, "agents_hub.sync", ".agents",
         detail={"total": data.get("total"), "inserted": data.get("inserted"),
                 "updated": data.get("updated"), "failed": data.get("failed")},
     )
@@ -77,8 +76,7 @@ async def prune_missing_assets(
     data = await run_prune(session, hub_agents_root(), dry_run=dry_run)
     if not dry_run:
         await session.commit()
-    await record_audit(
-        session, user, "assets.prune_missing", ".agents",
+    await record_audit(user, "assets.prune_missing", ".agents",
         detail={"pruned": len(data.get("pruned") or []),
                 "live_total": data.get("live_total"),
                 "disk_total": data.get("disk_total"), "dry_run": dry_run},
@@ -106,8 +104,7 @@ async def patch_capability_featured(
         f"type={asset_type} name={name} featured={payload.featured}"
     )
     data = await set_featured(session, asset_type, name, payload.featured)
-    await record_audit(
-        session, user, "asset.featured", f"{asset_type}#{name}",
+    await record_audit(user, "asset.featured", f"{asset_type}#{name}",
         detail={"featured": data["featured"]},
     )
     return ok(data=data)
@@ -134,8 +131,7 @@ async def patch_capability_examples(
         f"type={asset_type} name={name} n={len(payload.examples)}"
     )
     data = await set_examples(session, asset_type, name, payload.examples)
-    await record_audit(
-        session, user, "asset.examples", f"{asset_type}#{name}",
+    await record_audit(user, "asset.examples", f"{asset_type}#{name}",
         detail={"count": len(data["examples"])},
     )
     return ok(data=data)
@@ -212,8 +208,7 @@ async def confirm_tree_import_endpoint(
         assets_created=data["created"], assets_updated=data["updated"],
         assets_skipped=len(data["skipped"]), actor_user_id=user.id,
     )
-    await record_audit(
-        session, user, "assets.import_tree", ".agents",
+    await record_audit(user, "assets.import_tree", ".agents",
         detail={"created": data["created"], "updated": data["updated"],
                 "failed": len(data["failed"]), "skipped": len(data["skipped"])},
     )

@@ -114,8 +114,7 @@ async def trigger_probe(
     accepted, batch_id, reason = await ChannelProbeService().trigger_manual_probe(
         payload.gateway_ref,
     )
-    await record_audit(
-        session, user, "newapi.probe.trigger", f"gateway:{payload.gateway_ref}",
+    await record_audit(user, "newapi.probe.trigger", f"gateway:{payload.gateway_ref}",
         {"accepted": accepted, "batch_id": batch_id},
     )
     return ok(ProbeTriggerResponse(
@@ -143,8 +142,7 @@ async def set_channel_config(
 ) -> ApiResponse[ChannelConfigUpdateResult]:
     """int 路径 expand 写窗口配置（channel_id 类型不改）"""
     info = await service.set_config(channel_id, payload)
-    await record_audit(
-        session, user, "newapi.channel_config.set", f"channel:{channel_id}",
+    await record_audit(user, "newapi.channel_config.set", f"channel:{channel_id}",
         {"limit_quota": info.limit_quota, "window_hours": info.window_hours,
          "cooldown_seconds": info.cooldown_seconds},
     )
@@ -160,8 +158,7 @@ async def clear_channel_config(
 ) -> ApiResponse[ChannelConfigUpdateResult]:
     """清除 int 路径配置"""
     previous = await service.clear_config(channel_id)
-    await record_audit(
-        session, user, "newapi.channel_config.clear", f"channel:{channel_id}",
+    await record_audit(user, "newapi.channel_config.clear", f"channel:{channel_id}",
         {"previous": previous.model_dump() if previous else None},
     )
     return ok(ChannelConfigUpdateResult(
@@ -182,8 +179,7 @@ async def set_model_config(
 ) -> ApiResponse[GatewayConfigUpdateResult]:
     """按 string gateway_ref 写窗口配置"""
     info = await service.set_config_ref(gateway_ref, payload)
-    await record_audit(
-        session, user, "newapi.channel_config.set", f"gateway:{gateway_ref}",
+    await record_audit(user, "newapi.channel_config.set", f"gateway:{gateway_ref}",
         {"limit_quota": info.limit_quota},
     )
     return ok(GatewayConfigUpdateResult(gateway_ref=gateway_ref, config=info))
@@ -200,8 +196,7 @@ async def clear_model_config(
     user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> ApiResponse[GatewayConfigUpdateResult]:
     previous = await service.clear_config_ref(gateway_ref)
-    await record_audit(
-        session, user, "newapi.channel_config.clear", f"gateway:{gateway_ref}",
+    await record_audit(user, "newapi.channel_config.clear", f"gateway:{gateway_ref}",
         {"previous": previous.model_dump() if previous else None},
     )
     return ok(GatewayConfigUpdateResult(
@@ -218,8 +213,7 @@ async def write_gateway_model(
 ) -> ApiResponse[GatewayModelResponse]:
     """改/登记平台网关模型（GWT-70.3 非超管拒绝）"""
     info = await service.register_model(payload)
-    await record_audit(
-        session, user, "newapi.gateway_model.set", f"gateway:{info.gateway_ref}",
+    await record_audit(user, "newapi.gateway_model.set", f"gateway:{info.gateway_ref}",
         {"model_name": info.model_name},
     )
     return ok(info)
@@ -234,8 +228,7 @@ async def register_platform_upstream(
 ) -> ApiResponse[GatewayModelResponse]:
     """登记平台上游（GWT-70.3 非超管拒绝）"""
     info = await service.register_upstream(payload)
-    await record_audit(
-        session, user, "newapi.gateway_upstream.set", f"gateway:{info.gateway_ref}",
+    await record_audit(user, "newapi.gateway_upstream.set", f"gateway:{info.gateway_ref}",
         {"api_base": info.api_base},
     )
     return ok(info)

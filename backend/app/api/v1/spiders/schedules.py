@@ -52,7 +52,7 @@ async def create_schedule(
     schedule = await service.create_schedule(
         payload, tenant_id=await task_actor_tenant_id(user, session),
     )
-    await record_audit(session, user, "schedule.create", payload.spider_name,
+    await record_audit(user, "schedule.create", payload.spider_name,
                  {"cron": payload.cron_expr, "enabled": payload.enabled})
     return created(schedule)
 
@@ -67,7 +67,7 @@ async def update_schedule(
 ) -> ApiResponse[SpiderScheduleResponse]:
     """更新调度计划（启停 / 改表达式 / 改参数；仅管理员）"""
     schedule = await service.update_schedule(schedule_id, payload)
-    await record_audit(session, user, "schedule.update", f"schedule#{schedule_id}",
+    await record_audit(user, "schedule.update", f"schedule#{schedule_id}",
                  payload.model_dump(exclude_unset=True))
     return updated(schedule)
 
@@ -81,7 +81,7 @@ async def delete_schedule(
 ) -> ApiResponse[dict]:
     """删除调度计划（仅管理员）"""
     result = await service.delete_schedule(schedule_id)
-    await record_audit(session, user, "schedule.delete", f"schedule#{schedule_id}")
+    await record_audit(user, "schedule.delete", f"schedule#{schedule_id}")
     return deleted(data=result)
 
 
@@ -107,7 +107,7 @@ async def create_alert_rule(
     """创建告警规则（仅管理员）"""
     svc = _pkg.AlertService(session)
     result = await svc.create_rule(body.model_dump())
-    await _pkg.record_audit(session, user, "alert_rule.create", f"alert_rule#{result['id']}",
+    await _pkg.record_audit(user, "alert_rule.create", f"alert_rule#{result['id']}",
                  {"name": body.name, "rule_type": body.rule_type, "spider": body.spider_name})
     return created(AlertRuleResponse(**result))
 
@@ -122,7 +122,7 @@ async def update_alert_rule(
     """更新告警规则（仅管理员）"""
     svc = _pkg.AlertService(session)
     result = await svc.update_rule(rule_id, body.model_dump(exclude_unset=True))
-    await _pkg.record_audit(session, user, "alert_rule.update", f"alert_rule#{rule_id}",
+    await _pkg.record_audit(user, "alert_rule.update", f"alert_rule#{rule_id}",
                  body.model_dump(exclude_unset=True))
     return updated(AlertRuleResponse(**result))
 
@@ -136,7 +136,7 @@ async def delete_alert_rule(
     """删除告警规则（仅管理员）"""
     svc = _pkg.AlertService(session)
     result = await svc.delete_rule(rule_id)
-    await _pkg.record_audit(session, user, "alert_rule.delete", f"alert_rule#{rule_id}")
+    await _pkg.record_audit(user, "alert_rule.delete", f"alert_rule#{rule_id}")
     return deleted(data=result)
 
 

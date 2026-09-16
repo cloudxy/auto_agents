@@ -41,8 +41,7 @@ async def put_payment_credential(
 ):
     logger.info(f"超管保存商户凭据 | user={user.username} channel={payload.channel}")
     view = await service.put(payload, actor=user.username)
-    await record_audit(
-        session, user, "payment_credential.put", payload.channel,
+    await record_audit(user, "payment_credential.put", payload.channel,
         detail={"channel": payload.channel, "key_version": view.key_version},
     )
     return ok(data=view.model_dump(mode="json"))
@@ -57,7 +56,7 @@ async def delete_payment_credential(
 ):
     logger.info(f"超管删除商户凭据 | user={user.username} channel={channel}")
     await service.delete_channel(channel, actor=user.username)
-    await record_audit(session, user, "payment_credential.delete", channel)
+    await record_audit(user, "payment_credential.delete", channel)
     return deleted(data={"channel": channel, "configured": False})
 
 
