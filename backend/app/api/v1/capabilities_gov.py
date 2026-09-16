@@ -207,6 +207,7 @@ async def confirm_tree_import_endpoint(
         session, actor_role=user.role or "", source="directory", files=len(parts),
         assets_created=data["created"], assets_updated=data["updated"],
         assets_skipped=len(data["skipped"]), actor_user_id=user.id,
+        batch_id=data.get("batch_id"),
     )
     await record_audit(user, "assets.import_tree", ".agents",
         detail={"created": data["created"], "updated": data["updated"],
