@@ -96,17 +96,26 @@ async def register_capability_source(
 @router.post("/sources/{name}/sync")
 async def sync_capability_source(
     name: str,
+    retract: bool = Query(False, description="源里已经没有的行是否软删收回；缺省=只 upsert，不收回"),
     user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
-    """触发 src_sync。第三方新行保持 unlisted。"""
+    """触发 src_sync。第三方新行保持 unlisted。
+
+    QA-8：收回缺失行是破坏性动作，必须显式 `?retract=true` 才执行（与
+    「同步通道默认永不隐式软删」的全局口径对齐）；不传时本次同步只
+    upsert，源里消失的行原样保留待下次显式收回。
+    """
     from backend.app.api._helpers import record_audit
 
-    data = await market.sync_source(name)
+    data = await market.sync_source(name, retract=retract)
     await record_audit(
         session, user, "source.sync", f"source#{name}",
-        detail={"succeeded": data.get("succeeded"), "failed": data.get("failed")},
+        detail={
+            "succeeded": data.get("succeeded"), "failed": data.get("failed"),
+            "retract": retract,
+        },
     )
     return ok(data=data)
 
@@ -158,22 +167,11 @@ async def verify_plugin(
     return ok(data=result)
 
 
-# ---------- P6 C5/C6：专家域（扫描/详情/组队） ----------
-
-
-@router.post("/scan-experts")
-async def scan_experts(
-    user: CurrentUser = Depends(require_platform_admin_or_404),
-    session: AsyncSession = Depends(get_async_db),
-):
-    """扫描 capability-library/experts/（subagent 格式解析入库；仅平台超管）"""
-    from backend.app.api._helpers import record_audit
-    from backend.services.expert_service import ExpertService
-
-    result = await ExpertService(session).scan_experts()
-    await record_audit(session, user, "expert.scan", "experts",
-                       detail={"total": result.get("total")})
-    return ok(data=result)
+# ---------- P6 C5/C6：专家域（详情/组队） ----------
+# POST /scan-experts 已退役（K4）：扫的是 capability-library/experts/，OQ-2
+# 切根到 .agents 后该目录已不存在于仓库，每次扫描恒空——保留端点只会让
+# 管理员误以为「扫描成功、0 条」是正常结果。ExpertService.scan_experts()
+# 方法本身保留（接受显式 root 参数，供内部/测试按需从任意目录导入专家）。
 
 
 @router.get("/experts/{name}")

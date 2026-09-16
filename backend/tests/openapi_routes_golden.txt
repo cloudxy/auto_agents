@@ -164,7 +164,6 @@ POST /api/v1/capabilities/import
 POST /api/v1/capabilities/import/tree/confirm
 POST /api/v1/capabilities/import/tree/preview
 POST /api/v1/capabilities/plugins/{name}/verify
-POST /api/v1/capabilities/scan-experts
 POST /api/v1/capabilities/sources
 POST /api/v1/capabilities/sources/{name}/sync
 POST /api/v1/capabilities/sync-agents-hub

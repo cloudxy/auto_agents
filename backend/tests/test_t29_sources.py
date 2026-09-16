@@ -94,8 +94,9 @@ def _register(client, name: str, uri: str, kind: str = "local"):
     return client.post(_SRC, json={"name": name, "source_kind": kind, "uri": uri})
 
 
-def _sync(client, name: str):
-    return client.post(f"{_SRC}/{name}/sync")
+def _sync(client, name: str, *, retract: bool = False):
+    params = {"retract": "true"} if retract else None
+    return client.post(f"{_SRC}/{name}/sync", params=params)
 
 
 def test_adr_0012_uq_asset_type_name_alive_unchanged():
@@ -591,7 +592,7 @@ def test_src_sync_retracts_commands_removed_from_manifest(
     (cmd_dir / "drop-me.md").unlink()
     manifest["commands"] = {"/keep-me": {"name": "keep-me", "description": "留"}}
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    second = _sync(platform_admin_client, "src-cmd-retract")
+    second = _sync(platform_admin_client, "src-cmd-retract", retract=True)
     assert second.status_code == 200, second.text
     alive = _query(db_session, select(CapabilityAsset).where(
         CapabilityAsset.asset_type == "command",

@@ -365,9 +365,9 @@ class PowerMarketService:
         logger.info("power_market.register_source")
         return await SourceRegistry(self.session).register(payload, actor=actor)
 
-    async def sync_source(self, name: str) -> dict:
-        logger.info(f"power_market.sync_source | name={name}")
-        return await SourceSync(self.session).sync(name)
+    async def sync_source(self, name: str, *, retract: bool = False) -> dict:
+        logger.info(f"power_market.sync_source | name={name} retract={retract}")
+        return await SourceSync(self.session).sync(name, retract=retract)
 
     async def backfill_first_party(self) -> dict:
         logger.info("power_market.backfill_first_party")
