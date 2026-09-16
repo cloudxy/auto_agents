@@ -12,10 +12,14 @@ jest.mock('../services/billing', () => ({
   createCheckout: jest.fn(),
   createOrder: jest.fn(),
   listMyOrders: jest.fn(),
+  fetchPayIntent: jest.fn(),
+  CHANNEL_LABEL: { offline: '线下转账', alipay: '支付宝', wechat: '微信支付' },
 }))
 
 import Checkout from './Checkout'
-import { createCheckout, createOrder, listMyOrders, previewCheckout } from '../services/billing'
+import {
+  createCheckout, createOrder, fetchPayIntent, listMyOrders, previewCheckout,
+} from '../services/billing'
 
 const GOLD_SUBMIT = '提交开通'
 const GOLD_PENDING = '待支付'
@@ -68,6 +72,7 @@ beforeEach(() => {
   ;(createCheckout as jest.Mock).mockReset()
   ;(createOrder as jest.Mock).mockReset()
   ;(listMyOrders as jest.Mock).mockReset()
+  ;(fetchPayIntent as jest.Mock).mockReset()
   ;(listMyOrders as jest.Mock).mockResolvedValue([])
 })
 
@@ -241,4 +246,71 @@ test('illegal product is 没有这个商品, no POST', async () => {
   expect(await screen.findByText('没有这个商品。')).toBeInTheDocument()
   expect(previewCheckout).not.toHaveBeenCalled()
   expect(createCheckout).not.toHaveBeenCalled()
+})
+
+test('selectable channel renders picker; submit sends chosen channel', async () => {
+  ;(previewCheckout as jest.Mock).mockResolvedValue({
+    product: 'plan_pro',
+    channels: [
+      { channel: 'alipay', configured: true, selectable: true },
+      { channel: 'wechat', configured: true, selectable: true },
+    ],
+    empty_state: null, can_pay: true, order_id: null, amount_cents: 29900,
+  })
+  ;(createCheckout as jest.Mock).mockResolvedValue({
+    id: 20, status: 'checkout_pending', product_code: 'plan_pro', amount_cents: 29900, channel: 'alipay',
+  })
+  renderCheckout()
+  expect(await screen.findByText('支付宝')).toBeInTheDocument()
+  fireEvent.click(screen.getByText('支付宝'))
+  fireEvent.click(screen.getByRole('button', { name: GOLD_SUBMIT }))
+  await waitFor(() => expect(createCheckout).toHaveBeenCalledWith({ product: 'plan_pro', channel: 'alipay' }))
+})
+
+test('online pending order with pay_url renders alipay CTA (no forbidden copy)', async () => {
+  ;(previewCheckout as jest.Mock).mockResolvedValue({
+    product: 'plan_pro', channels: NONE, empty_state: null, can_pay: false, order_id: 21, amount_cents: 29900,
+  })
+  ;(listMyOrders as jest.Mock).mockResolvedValue([
+    { id: 21, status: 'checkout_pending', product_code: 'plan_pro', amount_cents: 29900, channel: 'alipay' },
+  ])
+  ;(fetchPayIntent as jest.Mock).mockResolvedValue({
+    id: 21, status: 'checkout_pending', channel: 'alipay',
+    pay_url: 'https://openapi.alipay.com/gateway.do?sign=abc',
+  })
+  renderCheckout()
+  expect(await screen.findByText(GOLD_PENDING)).toBeInTheDocument()
+  const link = await screen.findByRole('link', { name: '前往支付宝支付' })
+  expect(link).toHaveAttribute('href', 'https://openapi.alipay.com/gateway.do?sign=abc')
+  expect(fetchPayIntent).toHaveBeenCalledWith(21)
+  assertNoForbidden()
+})
+
+test('online pending order with qr_code_image renders wechat QR (no forbidden copy)', async () => {
+  ;(previewCheckout as jest.Mock).mockResolvedValue({
+    product: 'plan_pro', channels: NONE, empty_state: null, can_pay: false, order_id: 22, amount_cents: 29900,
+  })
+  ;(listMyOrders as jest.Mock).mockResolvedValue([
+    { id: 22, status: 'checkout_pending', product_code: 'plan_pro', amount_cents: 29900, channel: 'wechat' },
+  ])
+  ;(fetchPayIntent as jest.Mock).mockResolvedValue({
+    id: 22, status: 'checkout_pending', channel: 'wechat',
+    qr_code_image: 'data:image/svg+xml;base64,AAAA',
+  })
+  renderCheckout()
+  expect(await screen.findByText(GOLD_PENDING)).toBeInTheDocument()
+  expect(await screen.findByAltText('微信支付二维码')).toHaveAttribute('src', 'data:image/svg+xml;base64,AAAA')
+  assertNoForbidden()
+})
+
+test('offline channel pending order does not call fetchPayIntent', async () => {
+  ;(previewCheckout as jest.Mock).mockResolvedValue({
+    product: 'plan_pro', channels: NONE, empty_state: null, can_pay: false, order_id: 23, amount_cents: 29900,
+  })
+  ;(listMyOrders as jest.Mock).mockResolvedValue([
+    { id: 23, status: 'checkout_pending', product_code: 'plan_pro', amount_cents: 29900, channel: null },
+  ])
+  renderCheckout()
+  expect(await screen.findByText(GOLD_PENDING)).toBeInTheDocument()
+  expect(fetchPayIntent).not.toHaveBeenCalled()
 })
