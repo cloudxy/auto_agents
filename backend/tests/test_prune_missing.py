@@ -313,6 +313,63 @@ def test_qa7r_hub_agent_orphan_with_side_row_pruned(
         settings.set("SKILLS.AGENTS_ROOT", original)
 
 
+# ---------- QA-6：存量 capability-library 行磁盘源仍在，不得误判失源 ----------
+
+
+def test_qa6_legacy_skill_with_real_library_source_survives(
+    db_client, platform_admin_client, db_session, tmp_path,
+):
+    """legacy skill 行（无 .agents 前缀 + 磁盘源仍在 capability-library）
+    prune 后仍 live——OQ-2 切根只处理了新写路径，prune 的磁盘集只扫 .agents，
+    不能把"扫描器没往那看"当成"真的没有磁盘源"。用仓库长期稳定的一等夹具
+    资产 example-pdf-extractor（多处既有测试同样依赖其磁盘常在）。
+    """
+    from config import settings
+
+    agents = _agents_tree(tmp_path)
+    _seed(db_session, [
+        _row(name="example-pdf-extractor", file_path="capability-library/skills/example-pdf-extractor"),
+    ])
+    original = settings.get("SKILLS.AGENTS_ROOT")
+    settings.set("SKILLS.AGENTS_ROOT", str(agents))
+    try:
+        resp = platform_admin_client.post(_PRUNE)
+        assert resp.status_code == 200, resp.text
+        pruned = {(p["asset_type"], p["name"]) for p in resp.json()["data"]["pruned"]}
+        assert ("skill", "example-pdf-extractor") not in pruned
+
+        row = _q(db_session, select(CapabilityAsset).where(
+            CapabilityAsset.name == "example-pdf-extractor"))[0]
+        assert row.deleted_at is None
+    finally:
+        settings.set("SKILLS.AGENTS_ROOT", original)
+
+
+def test_qa6_true_orphan_without_any_disk_source_still_pruned(
+    db_client, platform_admin_client, db_session, tmp_path,
+):
+    """真孤儿行（file_path 指向的路径哪里都不存在）不受 QA-6 保护，仍被
+    剪除——不是全称保护 legacy 行，是"磁盘源真的还在就别删"。回归
+    test_gwt_02_1 已覆盖的 dead-skill/oh-story__export 断言，这里单独钉死
+    避免以后有人把 QA-6 实现成"非 .agents 前缀一律不删"。
+    """
+    from config import settings
+
+    agents = _agents_tree(tmp_path)
+    _seed(db_session, [
+        _row(name="truly-gone-skill", file_path="capability-library/skills/does-not-exist-anywhere"),
+    ])
+    original = settings.get("SKILLS.AGENTS_ROOT")
+    settings.set("SKILLS.AGENTS_ROOT", str(agents))
+    try:
+        resp = platform_admin_client.post(_PRUNE)
+        assert resp.status_code == 200, resp.text
+        pruned = {(p["asset_type"], p["name"]) for p in resp.json()["data"]["pruned"]}
+        assert ("skill", "truly-gone-skill") in pruned
+    finally:
+        settings.set("SKILLS.AGENTS_ROOT", original)
+
+
 # ---------- GWT-02.5 / GWT-02.6 越权 ----------
 
 
