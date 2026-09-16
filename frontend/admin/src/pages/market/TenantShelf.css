@@ -21,23 +21,131 @@
   min-width: 160px;
 }
 
+/* T-08（edge-states §4）：280px 网格 + 16px gap，宽内容区自然三列 */
 .tenant-shelf__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
+  transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.tenant-shelf__card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
+/* 刷新中保旧卡：半透明 + aria-busy（不变骨架，edge-states §4.1） */
+.tenant-shelf__grid--stale {
+  opacity: 0.6;
+}
+
+/* 顶部 2px 不定式进度条；<200ms 防闪烁由动画延迟承担 */
+.tenant-shelf__progress {
+  position: relative;
+  overflow: hidden;
+  height: 2px;
   margin-bottom: 8px;
+  border-radius: 2px;
+  background: var(--color-surface-sunken);
 }
 
-.tenant-shelf__title {
+.tenant-shelf__progress::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 40%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--color-primary);
+  animation: tenant-shelf-indeterminate 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-delay: 200ms;
+}
+
+@keyframes tenant-shelf-indeterminate {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+
+/* 卡片四要素（NFR-U1）：原生 button 整卡可点（键盘可达 + Enter 触发） */
+.shelf-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  border: 1px solid var(--color-border, #d9d9d9);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgba(0, 21, 41, 0.06);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  font: inherit;
+  color: inherit;
+}
+
+.shelf-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 12px rgba(0, 21, 41, 0.12);
+}
+
+.shelf-card:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.shelf-card__banner {
+  display: block;
+  height: 72px;
+  border-radius: 8px 8px 0 0;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--color-surface-sunken);
+}
+
+.shelf-card__head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 12px;
+}
+
+.shelf-card__titles {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shelf-card__title {
+  font-size: 14px;
   font-weight: 600;
+  line-height: 1.5;
   color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf-card__subtitle {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf-card .shelf-card__desc,
+.shelf-card__desc {
+  padding: 0 12px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.shelf-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 12px 12px;
 }
 
 .tenant-shelf__skel {
@@ -55,6 +163,17 @@
 .tenant-shelf__error p,
 .tenant-shelf__empty p {
   margin: 0 0 8px;
+}
+
+.tenant-shelf__empty-hint {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.tenant-shelf__empty-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .tenant-shelf__echo {

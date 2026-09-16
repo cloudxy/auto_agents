@@ -6,16 +6,18 @@
  */
 import React, { useRef, useState } from 'react'
 import {
-  Alert, Button, Empty, Input, Modal, Skeleton, Space, Steps, Tag, Typography, theme,
+  Alert, Button, Collapse, Empty, Input, Modal, Skeleton, Space, Steps, Tag, Typography, theme,
 } from 'antd'
 import {
   AppstoreOutlined, CodeOutlined, FolderOpenOutlined, QuestionOutlined,
   RobotOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
+import type { InputRef } from 'antd'
 import type { AxiosProgressEvent } from 'axios'
 
 import { importAssets, type ImportItemResult, type ImportResult } from '../../services/capabilities'
 import { apiErrorMessage } from '../../utils/errorMessage'
+import ImportTreePicker from './ImportTreePicker'
 import {
   IMPORT_CANCEL, IMPORT_CHOOSE_HINT, IMPORT_DIR_LABEL, IMPORT_DIR_PLACEHOLDER,
   IMPORT_EMPTY_BATCH, IMPORT_ENTRY, IMPORT_EXCLUSIVE, IMPORT_FINISH, IMPORT_NETWORK_FAIL,
@@ -45,6 +47,10 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
 }
 
 const typeLabel = (t: string): string => IMPORT_TYPE_LABELS[t] || t
+
+/** NFR-08：webkitdirectory 能力探测——不支持则目录按钮不渲染、高级项直接展开 */
+const isTreeDirSupported = (): boolean => typeof document !== 'undefined'
+  && 'webkitdirectory' in document.createElement('input')
 
 const hasResponse = (e: unknown): boolean => (
   typeof e === 'object' && e !== null
@@ -87,7 +93,13 @@ const ImportWizard: React.FC<Props> = ({ open, onCancel, onFinished }) => {
   const [parsing, setParsing] = useState(false)
   const [failure, setFailure] = useState<Failure | null>(null)
   const [result, setResult] = useState<ImportResult | null>(null)
+  /** T-12：目录模式（webkitdirectory）嵌套向导 + 高级服务器路径折叠面板 */
+  const [treeOpen, setTreeOpen] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState<string[]>(
+    isTreeDirSupported() ? [] : ['srv'],
+  )
   const fileInput = useRef<HTMLInputElement | null>(null)
+  const dirInput = useRef<InputRef | null>(null)
   const { token } = theme.useToken()
 
   const hasFiles = files.length > 0
@@ -185,6 +197,16 @@ const ImportWizard: React.FC<Props> = ({ open, onCancel, onFinished }) => {
             data-testid="import-file-input"
           />
           <Space wrap>
+            {isTreeDirSupported() ? (
+              <Button
+                type="primary"
+                icon={<FolderOpenOutlined />}
+                disabled={hasDirectory || hasFiles || pending}
+                onClick={() => setTreeOpen(true)}
+              >
+                选择目录
+              </Button>
+            ) : null}
             <Button
               icon={<FolderOpenOutlined />}
               disabled={hasDirectory || pending}
@@ -202,20 +224,32 @@ const ImportWizard: React.FC<Props> = ({ open, onCancel, onFinished }) => {
             </div>
           ) : null}
         </div>
-        <div>
-          <label htmlFor="import-directory" style={{ display: 'block' }}>
-            {IMPORT_DIR_LABEL}
-          </label>
-          <Input
-            id="import-directory"
-            value={directory}
-            disabled={hasFiles || pending}
-            placeholder={IMPORT_DIR_PLACEHOLDER}
-            onChange={(e) => setDirectory(e.target.value)}
-            style={{ marginTop: 4 }}
-          />
-          {hasFiles ? <Text type="secondary">{IMPORT_EXCLUSIVE}</Text> : null}
-        </div>
+        <Collapse
+          items={[{
+            key: 'srv',
+            label: '高级：服务器路径',
+            forceRender: true,
+            children: (
+              <div>
+                <label htmlFor="import-directory" style={{ display: 'block' }}>
+                  {IMPORT_DIR_LABEL}
+                </label>
+                <Input
+                  id="import-directory"
+                  ref={dirInput}
+                  value={directory}
+                  disabled={hasFiles || pending}
+                  placeholder={IMPORT_DIR_PLACEHOLDER}
+                  onChange={(e) => setDirectory(e.target.value)}
+                  style={{ marginTop: 4 }}
+                />
+                {hasFiles ? <Text type="secondary">{IMPORT_EXCLUSIVE}</Text> : null}
+              </div>
+            ),
+          }]}
+          activeKey={advancedOpen}
+          onChange={(keys) => setAdvancedOpen(Array.isArray(keys) ? keys : [keys])}
+        />
       </Space>
       {pending ? (
         <div style={{ marginTop: 16 }} aria-live="polite">
@@ -279,6 +313,24 @@ const ImportWizard: React.FC<Props> = ({ open, onCancel, onFinished }) => {
         style={{ marginBottom: 16 }}
       />
       {phase === 'select' ? selectBody : resultBody}
+      {treeOpen ? (
+        <ImportTreePicker
+          open
+          onCancel={(treeImported) => {
+            setTreeOpen(false)
+            onCancel(treeImported || imported)
+          }}
+          onFinished={() => {
+            setTreeOpen(false)
+            onFinished()
+          }}
+          onUseServerPath={() => {
+            setTreeOpen(false)
+            setAdvancedOpen(['srv'])
+            setTimeout(() => { dirInput.current?.focus() }, 0)
+          }}
+        />
+      ) : null}
     </Modal>
   )
 }
