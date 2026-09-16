@@ -167,6 +167,43 @@ def test_gwt_08_2_import_failed_carries_error_type(
     assert any("emit_import_failed" in ln for ln in loguru_sink)
 
 
+def test_qa7_import_failed_survives_dirty_session_rollback(
+    db_client, platform_admin_client, db_session, agents_root, monkeypatch,
+):
+    """QA-7 回归：confirm_tree_import 在会话已经写脏（至少一个 item 真实
+    upsert 成功）之后再失败——之前的代码在 capabilities_gov 的 except 里
+    直接拿脏会话发 emit_import_failed，SQLite 单写库下独立会话撞写锁、
+    250ms 认输的兜底 add+flush 落在已失败事务上抛 PendingRollbackError，
+    被外层宽 except 吞掉、事件永久丢失。修复后 except 先 rollback 再发事件，
+    这里必须仍能查到 import_failed。
+    """
+    import backend.services.power_market.hub_import as hub_import_mod
+    from platform_core.exceptions import BusinessException
+    from platform_core.models.capability import CapabilityAsset
+
+    async def _dirty_then_raise(session, parts, *, agents_root):
+        # 模拟"部分 item 真实成功"：直接写脏当前主会话（与线上收尾 flush
+        # 抛错前、已有若干 upsert 成功落在同一事务里的状态等价）
+        session.add(CapabilityAsset(
+            asset_type="skill", name="qa7-dirty-row", category="cat",
+            status="stable", listing_state="unlisted", license="MIT",
+            source_type="self_built", sync_state="ok",
+        ))
+        await session.flush()
+        raise BusinessException(message="qa7 boom：模拟收尾 flush 在脏会话上失败")
+
+    monkeypatch.setattr(hub_import_mod, "confirm_tree_import", _dirty_then_raise)
+
+    got = platform_admin_client.post(
+        TREE_CONFIRM, files=_parts({"up/qa7-skill/SKILL.md": SKILL_MD.format(name="qa7-skill")}),
+    )
+    assert got.status_code >= 400
+
+    admin = make_platform_admin_headers(db_session)
+    rows = _rows(db_client, admin, "import_failed")
+    assert rows, "import_failed 未进 product_events（QA-7：脏会话回滚缺失会导致这里丢事件）"
+
+
 # ---------- GWT-08.4 detail_opened ----------
 
 def test_gwt_08_4_detail_opened_on_normal_and_preview(

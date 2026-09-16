@@ -195,6 +195,12 @@ async def confirm_tree_import_endpoint(
     try:
         data = await confirm_tree_import(session, parts, agents_root=hub_agents_root())
     except Exception as exc:  # noqa: BLE001 先发 import_failed 再按原异常上抛
+        # QA-7：confirm_tree_import 内部的 flush() 若在这里抛出，主会话已经
+        # 脏（accumulated upsert 未提交）；emit_import_failed 兜底到主会话
+        # 追加事件前必须先回滚，否则 SQLite 250ms 认输 fallback 时会落在
+        # 一个已失败的事务上（PendingRollbackError），事件被外层宽 except
+        # 吞掉、永久丢失。回滚后主会话干净，独立会话与兜底路径都能正常提交。
+        await session.rollback()
         await emit_import_failed(
             session, actor_role=user.role or "", error_type=type(exc).__name__,
             actor_user_id=user.id,

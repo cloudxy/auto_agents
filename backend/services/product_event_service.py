@@ -73,6 +73,13 @@ async def _persist_event(session: AsyncSession, fields: dict[str, Any]) -> None:
                 # 单写库不做长等：主路径持写锁时 250ms 内认输走下面的兜底，
                 # 而不是干等 connect_args 的 30s（CI 全量曾因此每次同步 +33s）。
                 await extra.execute(text("PRAGMA busy_timeout=250"))
+            elif bind.dialect.name == "mysql":
+                # QA-7：MySQL 默认 innodb_lock_wait_timeout=50s，独立会话撞主
+                # 路径持有的行锁会同步阻塞 50 秒才失败——生产路径正常不会走到
+                # 这条分支（MySQL 多连接互不阻塞是常态），但一旦撞上就是 50s
+                # 同步卡死，与 SQLite 的 250ms 短等不对称。会话级设置，不影响
+                # 其他连接。
+                await extra.execute(text("SET SESSION innodb_lock_wait_timeout = 1"))
             row["is_internal_fixture"] = await _fixture_snapshot(extra, row.get("tenant_id"))
             extra.add(ProductEvent(**row))
             await extra.commit()
