@@ -254,16 +254,86 @@ post_review_fixes:
       "读到空"，读失败锁保存按钮 + 提示，不再静默退化成空列表被保存覆盖。
       新增回归：CatalogTab.test.tsx「QA-3 读示例失败：锁保存按钮」。
     verified: 随 QA-2 一并跑 admin 全量 Jest（380 passed）。
-  - {id: QA-4, status: open}
-  - {id: QA-5, status: open}
-  - {id: QA-6, status: open}
-  - {id: QA-7, status: open}
-  - {id: QA-8, status: open}
+  - id: QA-4
+    severity: major
+    status: fixed
+    commit: 255ac89
+    note: capability_service.list_catalog 补 featured 投影（int(r.featured or 0)）。
+    verified: 全量 backend/tests 1924 passed；admin 全量 Jest 380 passed。
+  - id: QA-5
+    severity: major
+    status: fixed
+    commit: 255ac89
+    note: >
+      projection._md_path legacy 分支绝对路径丢 rel 的回归，改一行
+      `(library if library.is_absolute() else Path.cwd() / library) / rel`。
+      新增参数化回归 test_qa5_md_path_reads_legacy_body_on_relative_and_absolute_root，
+      git stash 验证过修复前失败。
+    verified: test_public_detail_preview.py 10 passed；全量 backend/tests 1924 passed。
+  - id: QA-6
+    severity: major
+    status: fixed
+    commit: 7ae095f
+    note: >
+      _legacy_library_source_still_on_disk 精确判定——只在 capability-library
+      磁盘路径真不存在时才剪除（真孤儿），磁盘源仍在（如
+      capability-library/skills/example-pdf-extractor）则保护。K1 用户确认
+      按"过滤"而非"数据迁移"执行。
+    verified: >
+      test_prune_missing.py 11 passed（9 既有 + 2 新，含真孤儿仍被剪除的负向
+      钉死用例）；git stash 验证过修复前失败。
+  - id: QA-7
+    severity: major
+    status: fixed
+    commit: e2fc1dd
+    note: >
+      confirm_tree_import_endpoint 的 except 块补 await session.rollback()
+      再 emit_import_failed（脏会话直接兜底会撞 PendingRollbackError 丢事件）；
+      product_event_service 补 MySQL SET SESSION innodb_lock_wait_timeout=1
+      分支。新增 test_qa7_import_failed_survives_dirty_session_rollback，
+      monkeypatch 造脏会话后失败，git stash 验证过修复前事件确实丢失。
+    verified: test_governance_events.py 8 passed；全量 backend/tests 1950 passed。
+  - id: QA-8
+    severity: major
+    status: fixed
+    commit: fd1136f
+    note: >
+      K2 用户确认按"参数化"（而非 xfail 豁免）执行：sources/{name}/sync 的
+      收回缺失行改为显式 ?retract=true，不传时只 upsert。
+      test_t19_governance_retract.py 全部收回相关调用补显式参数，新增
+      test_qa8_src_sync_without_retract_param_never_deletes 钉死默认安全行为。
+    verified: test_t19_governance_retract.py 8 passed；test_t29_sources.py 22 passed。
   - {id: QA-9, status: fixed, note: "随 QA-1 一并修（同一函数），见上"}
-  - {id: QA-10, status: open}
-  - {id: QA-11, status: open}
-  - {id: QA-12, status: open}
-  - {id: QA-13, status: open}
-  - {id: QA-14, status: open}
-  - {id: QA-15, status: open}
-  - {id: QA-16, status: open}
+  - {id: QA-10, status: open, note: "minor，本轮未排期"}
+  - {id: QA-11, status: open, note: "minor，本轮未排期"}
+  - id: QA-12
+    severity: minor
+    status: fixed
+    commit: 255ac89
+    note: capabilities.ts 三处 featured?:boolean 统一改 number，匹配后端恒返回 int。
+  - id: QA-13
+    severity: minor
+    status: fixed
+    commit: 255ac89
+    note: >
+      platform_core/models/capability.py featured 列补 default=0；
+      projection.py/service.py 的 getattr(row,"featured"/"examples",...) 简化成
+      直接属性访问（迁移已落地，getattr 防御不到 SQL 层未知列错误，防御强度
+      不一致本身是没想清楚的信号）。
+  - {id: QA-14, status: open, note: "minor，本轮未排期"}
+  - {id: QA-15, status: open, note: "minor，本轮未排期"}
+  - {id: QA-16, status: open, note: "minor，本轮未排期；证据终态化留给下一轮 verify"}
+k_decisions_note: >
+  2026-09-16 操作者确认："prune 过滤方式、retract 参数化、record_audit 去留、
+  scan-experts 退役、new-api 删除时机、市场开闸时间：按照你的推荐来，但是
+  能力中心模块开启，可以超级管理员可以手动在后台开启与关闭"。
+k_decisions:
+  - {id: K1, decision: "prune 加过滤条件（非数据迁移）", status: done, maps_to: QA-6}
+  - {id: K2, decision: "retract 参数化（非 xfail 豁免）", status: done, maps_to: QA-8}
+  - {id: K3, decision: "record_audit 去掉 session 形参（88 处调用点）", status: done, commit: 52c9e50}
+  - {id: K4, decision: "退役 POST /scan-experts", status: done, commit: "fd1136f(端点)+7e7303b(测试收尾)"}
+  - {id: K5, decision: "new-api 物理删除延后到 Phase 3（先 410 观察一周）", status: deferred_by_design}
+  - id: K6
+    decision: "能力市场保持现状：POWER_MARKET.ENABLED 默认 false，超管经 PowerMarketSwitch 手动开关"
+    status: confirmed_no_change_needed
+    note: 现有 PowerMarketSwitch 组件 + PUT /admin/power-market 端点已经就是这个设计，未发现需要改动的地方。
