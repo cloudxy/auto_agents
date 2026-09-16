@@ -201,7 +201,7 @@ def test_gwt_88_1_skill_retract_after_src_sync(
     assert db_client.post(_SRC, headers=pa, json={
         "name": "src-t19-skill", "source_kind": "local", "uri": str(tree),
     }).status_code in (200, 201)
-    assert db_client.post(f"{_SRC}/src-t19-skill/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-skill/sync", headers=pa, params={"retract": "true"}).status_code == 200
 
     for local in ("keep-me", "drop-me"):
         _fixture_public_ready(db_session, "skill", f"t19-pack__{local}")
@@ -210,7 +210,7 @@ def test_gwt_88_1_skill_retract_after_src_sync(
     assert "t19-pack__drop-me" in _public_names(db_client, _PUB_SKILLS)
 
     shutil.rmtree(plugin / "skills" / "drop-me")
-    assert db_client.post(f"{_SRC}/src-t19-skill/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-skill/sync", headers=pa, params={"retract": "true"}).status_code == 200
 
     names, data = _catalog_names(db_client, pa, "skill")
     assert "t19-pack__drop-me" not in names
@@ -224,6 +224,37 @@ def test_gwt_88_1_skill_retract_after_src_sync(
     assert gone is not None
     assert gone.deleted_at is not None
     assert gone.sync_state == "gone"
+
+
+def test_qa8_src_sync_without_retract_param_never_deletes(
+    db_client, db_session, library_root,
+):
+    """QA-8：src_sync 的收回曾是隐式副作用，contract 断言「旧扫描端点是唯一
+    破坏入口」并不成立——这条通道本身就在写 deleted_at。改成显式参数后，
+    不传 `?retract=true`（含只传 POST 无 query 的默认调用）必须整批 upsert，
+    zero 软删——即便源里的文件已经被删掉。
+    """
+    pa = make_platform_admin_headers(db_session)
+    tree = library_root / "src-t19-noretract"
+    plugin = _write_plugin(tree, "t19-noretract-pack", ["keep-me", "drop-me"])
+    assert db_client.post(_SRC, headers=pa, json={
+        "name": "src-t19-noretract", "source_kind": "local", "uri": str(tree),
+    }).status_code in (200, 201)
+    assert db_client.post(
+        f"{_SRC}/src-t19-noretract/sync", headers=pa, params={"retract": "true"},
+    ).status_code == 200
+
+    shutil.rmtree(plugin / "skills" / "drop-me")
+    # 默认调用（不传 retract）——源里已经没有 drop-me，但这次同步不该删它
+    resp = db_client.post(f"{_SRC}/src-t19-noretract/sync", headers=pa)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["retracted"] == {"plugin": 0, "skill": 0, "command": 0}
+
+    still_live = _one(db_session, select(CapabilityAsset).where(
+        CapabilityAsset.name == "t19-noretract-pack__drop-me"))
+    assert still_live is not None
+    assert still_live.deleted_at is None
+    assert still_live.sync_state != "gone"
 
 
 # ---------- GWT-88.2 插件收回（.agents 同步非破坏 + src_sync 收回） ----------
@@ -278,7 +309,7 @@ def test_gwt_88_2_plugin_retract_after_src_sync(
     assert db_client.post(_SRC, headers=pa, json={
         "name": "src-t19-plugin", "source_kind": "local", "uri": str(tree),
     }).status_code in (200, 201)
-    assert db_client.post(f"{_SRC}/src-t19-plugin/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-plugin/sync", headers=pa, params={"retract": "true"}).status_code == 200
 
     for name in ("t19-pkg-a", "t19-pkg-b"):
         _fixture_public_ready(db_session, "plugin", name)
@@ -287,7 +318,7 @@ def test_gwt_88_2_plugin_retract_after_src_sync(
     assert "t19-pkg-b" in _public_names(db_client, _PUB_CAPS, type_="plugin")
 
     shutil.rmtree(tree / "t19-pkg-b")
-    assert db_client.post(f"{_SRC}/src-t19-plugin/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-plugin/sync", headers=pa, params={"retract": "true"}).status_code == 200
 
     names, _ = _catalog_names(db_client, pa, "plugin")
     assert "t19-pkg-b" not in names
@@ -392,13 +423,13 @@ def test_gwt_88_5_command_retract_no_regression(
     assert db_client.post(_SRC, headers=pa, json={
         "name": "src-t19-cmd", "source_kind": "local", "uri": str(tree),
     }).status_code in (200, 201)
-    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa, params={"retract": "true"}).status_code == 200
     assert "t19-cmd-pack__drop-cmd" in _catalog_names(db_client, pa, "command")[0]
 
     (cmd_dir / "drop-cmd.md").unlink()
     manifest["commands"] = {"/keep-cmd": {"name": "keep-cmd", "description": "留"}}
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa, params={"retract": "true"}).status_code == 200
 
     names, data = _catalog_names(db_client, pa, "command")
     assert "t19-cmd-pack__drop-cmd" not in names
@@ -406,6 +437,6 @@ def test_gwt_88_5_command_retract_no_regression(
     assert data["total"] == 1
 
     # 再同步一次：不得回潮
-    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa, params={"retract": "true"}).status_code == 200
     names, _ = _catalog_names(db_client, pa, "command")
     assert "t19-cmd-pack__drop-cmd" not in names

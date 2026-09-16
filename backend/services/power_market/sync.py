@@ -43,17 +43,17 @@ class SourceSync:
         self.session = session
         self.registry = SourceRegistry(session)
 
-    async def sync(self, name: str) -> dict:
-        logger.info(f"power_market.src_sync | source={name}")
+    async def sync(self, name: str, *, retract: bool = False) -> dict:
+        logger.info(f"power_market.src_sync | source={name} retract={retract}")
         cm = await _try_sync_lock(name)
         async with cm as lock:
             if lock is None:
                 raise BusinessException(
                     message="同步进行中", code=SYNC_IN_PROGRESS_CODE, status_code=409,
                 )
-            return await self._sync_locked(name)
+            return await self._sync_locked(name, retract=retract)
 
-    async def _sync_locked(self, name: str) -> dict:
+    async def _sync_locked(self, name: str, *, retract: bool) -> dict:
         source = await self.registry.get_source(name)
         job = SkillJob(
             job_type="src_sync", status="running", total=0, succeeded=0, failed=0,
@@ -62,7 +62,7 @@ class SourceSync:
         self.session.add(job)
         await self.session.flush()
         job_id = int(job.id)
-        result = await self._run_packages(source)
+        result = await self._run_packages(source, retract=retract)
         job.total = result["total"]
         job.succeeded = result["succeeded"]
         job.failed = result["failed"]
@@ -82,7 +82,7 @@ class SourceSync:
         )
         return result
 
-    async def _run_packages(self, source: CapabilitySource) -> dict:
+    async def _run_packages(self, source: CapabilitySource, *, retract: bool) -> dict:
         root = Path(source.uri).expanduser()
         packages = _iter_packages(root)
         succeeded, failed = 0, 0
@@ -96,8 +96,13 @@ class SourceSync:
                 failed += 1
                 failed_items.append({"name": pkg.name, "reason": str(exc)})
                 logger.warning(f"源同步包失败 | source={source.name} pkg={pkg.name} err={exc}")
-        retracted = await self._retract_missing_rows(
-            source, {pkg.name for pkg in packages}, keeps,
+        # QA-8：收回缺失行曾经是同步的隐式副作用，与「同步通道永不隐式软删」
+        # 的全局口径矛盾（agents_hub 同步通道就是非破坏的）。改成显式参数——
+        # 不传 retract=true 时本次同步只 upsert，不收回任何行；调用方明确要
+        # 做"源里已经没有 = 收回"这个破坏性动作时才传。
+        retracted = (
+            await self._retract_missing_rows(source, {pkg.name for pkg in packages}, keeps)
+            if retract else {"plugin": 0, "skill": 0, "command": 0}
         )
         return {
             "total": len(packages), "succeeded": succeeded, "failed": failed,

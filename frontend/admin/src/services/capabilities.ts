@@ -113,6 +113,9 @@ export const registerSource = (body: {
 }): Promise<SourceRow> =>
   api.post('/capabilities/sources', body).then((r) => unwrap<SourceRow>(r))
 
+/** QA-8：后端默认只 upsert，不收回源里已消失的行（收回是破坏性动作，需要
+ * 显式 retract=true）——这里保持不传，与后端安全默认对齐；治理台如果要暴露
+ * "收回缺失行"，走单独的显式入口，不应该悄悄夹带在普通同步按钮里。 */
 export const syncSource = (name: string): Promise<{ succeeded: number; failed: number }> =>
   api.post(`/capabilities/sources/${encodeURIComponent(name)}/sync`)
     .then((r) => unwrap<{ succeeded: number; failed: number }>(r))
@@ -220,9 +223,6 @@ export const patchExamples = (
 export const verifyPlugin = (name: string): Promise<PluginVerifyResult> =>
   api.post(`/capabilities/plugins/${encodeURIComponent(name)}/verify`)
     .then((r) => unwrap<PluginVerifyResult>(r))
-
-export const scanExperts = (): Promise<void> =>
-  api.post('/capabilities/scan-experts').then(() => undefined)
 
 export const createTeam = (payload: Record<string, unknown>): Promise<void> =>
   api.post('/capabilities/teams', payload).then(() => undefined)
