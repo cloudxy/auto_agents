@@ -40,9 +40,31 @@ export interface paths {
         };
         /**
          * Get Permissions
-         * @description 获取当前用户的权限列表（按角色动态返回，角色已在鉴权时快照）
+         * @description 获取当前用户的权限列表（roles 表 DB 单源；角色管理页改动即时生效）
+         *
+         *     DB miss（表空/角色被删）回退内置硬编码映射——登录链路不被配置问题阻断。
          */
         get: operations["get_permissions_api_v1_auth_permissions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/menus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Dynamic Menus
+         * @description 动态菜单（menus 表按权限过滤下发；DB miss/异常回退空——前端用静态配置兜底）
+         */
+        get: operations["get_dynamic_menus_api_v1_auth_menus_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -179,6 +201,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/health/deep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health Deep
+         * @description 深探测健康检查（T11）：MySQL SELECT 1 + Redis PING，任一失败返回 503
+         *
+         *     与既有端点的区别：本文件其余端点失败时仍返回 200（unhealthy 只写在 body，
+         *     供人工浏览）；Docker HEALTHCHECK / deploy/watchdog.sh 按 HTTP 状态码判定，
+         *     对它们而言恒 200 等于浅探测——依赖挂掉仍"健康"是 2026-08 冻结事故的
+         *     发现盲区之一（复盘：docs/ops/incident-2026-08-backend-freeze.md）。
+         *     探测逻辑复用上方 health_db/health_redis（单一事实源），不另起实现。
+         */
+        get: operations["health_deep_api_v1_health_deep_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/spiders/tasks": {
         parameters: {
             query?: never;
@@ -211,6 +259,8 @@ export interface paths {
         /**
          * Run Spider
          * @description 入队一次爬虫任务（params 为 JSON 字符串，如 '{"urls": ["https://..."]}'；可指定优先级）
+         *
+         *     守卫走 require_enqueue_operator（GWT-87.3）：只读直调拒绝句为同族中文。
          */
         post: operations["run_spider_api_v1_spiders_run_post"];
         delete?: never;
@@ -392,7 +442,7 @@ export interface paths {
         };
         /**
          * Export Results
-         * @description 导出指定任务的全部采集结果（下载附件，流式传输避免大任务内存峰值）
+         * @description 导出指定任务的非候选结果（csv/json；单次最多 100 条；空窗不下载）
          */
         get: operations["export_results_api_v1_spiders_results__task_id__export_get"];
         put?: never;
@@ -452,7 +502,7 @@ export interface paths {
         };
         /**
          * List Spider Files
-         * @description 代码爬虫文件清单（4.4：只读文件元数据 + 关联启停状态）
+         * @description 已登记代码爬虫文件清单（T-41：源码清单不并入方案视图——未登记文件与内部项不列出）
          */
         get: operations["list_spider_files_api_v1_spiders_files_get"];
         put?: never;
@@ -475,7 +525,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Definition
-         * @description 删除爬虫定义（存在历史任务引用时拒绝；仅管理员）
+         * @description 删除采集方案（FR-103 / GWT-103.2/103.3：经办可删；被任务引用拒绝并列引用）
          */
         delete: operations["delete_definition_api_v1_spiders_definitions__name__delete"];
         options?: never;
@@ -522,7 +572,11 @@ export interface paths {
         head?: never;
         /**
          * Update Definition Meta
-         * @description 编辑爬虫定义元信息（标题/描述；仅管理员）
+         * @description 编辑采集方案（FR-103 / GWT-103.1：元信息 + 定义参数；经办可编辑，只读 403）
+         *
+         *     定义参数按类型：api 型 urls/headers；flow 型流程字段（落注册来源计划）；
+         *     代码型仅元信息（服务层拒绝并给说明句）。名称/类型不可改；编辑对后续任务
+         *     生效，不影响在跑任务（入队时 params 已快照）。
          */
         patch: operations["update_definition_meta_api_v1_spiders_definitions__name__meta_patch"];
         trace?: never;
@@ -702,7 +756,7 @@ export interface paths {
         put?: never;
         /**
          * Run From Template
-         * @description 从模板创建并运行任务
+         * @description 从模板创建并运行任务（入队入口：守卫走 require_enqueue_operator，GWT-87.3）
          */
         post: operations["run_from_template_api_v1_spiders_templates__template_id__run_post"];
         delete?: never;
@@ -740,11 +794,62 @@ export interface paths {
         };
         /**
          * List Users
-         * @description 用户列表（用户管理页陈列，不含密码哈希）
+         * @description 用户列表（用户管理页陈列，不含密码哈希；status=deleted 为已删筛选）
          */
         get: operations["list_users_api_v1_admin_users_get"];
         put?: never;
+        /**
+         * Admin Create User
+         * @description 创建账户（平台超管；角色分配 role 单源，归属公司可选）
+         */
+        post: operations["admin_create_user_api_v1_admin_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
         post?: never;
+        /**
+         * Admin Delete User
+         * @description 软删除账户（防删自己；防删最后一个平台超管；种子 admin 不可删）
+         */
+        delete: operations["admin_delete_user_api_v1_admin_users__user_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Admin Update User
+         * @description 编辑账户：角色分配/启停/归属调整（防自锁：不可降级/停用/删除自己）
+         */
+        patch: operations["admin_update_user_api_v1_admin_users__user_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/users/{user_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Restore User
+         * @description 恢复软删账户（T-24 / FR-93；仅平台超管，租户直打 404 同形 GWT-93.6）
+         *
+         *     占用冲突（username 同租户在册 / email 全局在册）→ 400 中文句；
+         *     重复恢复 no-op（GWT-93.9）；成功上报 user_restored（GWT-92.8）。
+         */
+        post: operations["admin_restore_user_api_v1_admin_users__user_id__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -780,11 +885,15 @@ export interface paths {
         };
         /**
          * List Tenants
-         * @description 租户列表（平台超管）
+         * @description 租户列表（平台超管；非超管 404 同形）
          */
         get: operations["list_tenants_api_v1_admin_tenants_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create Tenant Minimal
+         * @description 新建公司（最小语义：名称+可选 slug；配额/到期走平台运营台编辑；事务由 service 持有 ADR-0007）
+         */
+        post: operations["create_tenant_minimal_api_v1_admin_tenants_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -806,9 +915,317 @@ export interface paths {
         head?: never;
         /**
          * Patch Tenant
-         * @description 套餐/配额/到期编辑（平台超管）
+         * @description 名称/套餐/配额/到期编辑（平台超管；改名冲突域与平台租户守卫在 service 单点 T-26/T-27）
          */
         patch: operations["patch_tenant_api_v1_admin_tenants__tenant_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/power-market": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Power Market Switch
+         * @description 市场总开关（超管可读；租户公司管理员拒绝且开关不变，GWT-U11.3）。
+         */
+        get: operations["get_power_market_switch_api_v1_admin_power_market_get"];
+        /**
+         * Put Power Market Switch
+         * @description 超管打开/关闭能力市场总开关。yaml 默认 false；本写覆盖运行时。
+         */
+        put: operations["put_power_market_switch_api_v1_admin_power_market_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/dead-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Dead Items
+         * @description 查看结果回流死信（缺 task_id 等无法归属的载荷留档）
+         */
+        get: operations["list_dead_items_api_v1_admin_dead_items_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Clear Dead Items
+         * @description 清空死信队列（排障终态动作）
+         */
+        delete: operations["clear_dead_items_api_v1_admin_dead_items_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/dead-items/{index}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Discard Dead Item
+         * @description 丢弃单条死信（按队列 index）
+         */
+        delete: operations["discard_dead_item_api_v1_admin_dead_items__index__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/notify-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Notify Config
+         * @description 通知渠道配置（三渠道 URL；密钥类仍走 env，不入库不入此接口）
+         */
+        get: operations["get_notify_config_api_v1_admin_notify_config_get"];
+        /**
+         * Put Notify Config
+         * @description 更新通知渠道 URL（空串=清除覆盖，回退 settings 默认）
+         */
+        put: operations["put_notify_config_api_v1_admin_notify_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/webhook-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Webhook Status
+         * @description Webhook 配置状态（B6 工单 91）：只读展示，密钥仅回显配置态（布尔）不回显值
+         *
+         *     密钥经 env/.env 注入（AUTO_AGENTS_WEBHOOK__SECRET_KEY），刻意不经
+         *     system_configs 落库——API 无法读出明文，仅暴露「已配置/未配置」。
+         */
+        get: operations["webhook_status_api_v1_admin_webhook_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rbac/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Roles
+         * @description 角色列表 + 权限码目录（DB 单源：roles/permissions 表；miss 回退内置）
+         */
+        get: operations["list_roles_api_v1_rbac_roles_get"];
+        put?: never;
+        /**
+         * Create Role
+         * @description 新建自定义角色（role_key 唯一；权限码集合可后配）
+         */
+        post: operations["create_role_api_v1_rbac_roles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rbac/roles/{role_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Role
+         * @description 编辑角色（权限分配：permissions 集合全量提交；/auth/permissions 即时生效）
+         */
+        put: operations["update_role_api_v1_rbac_roles__role_key__put"];
+        post?: never;
+        /**
+         * Delete Role
+         * @description 删除角色（内置禁删；有用户在用禁删）
+         */
+        delete: operations["delete_role_api_v1_rbac_roles__role_key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rbac/departments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Departments
+         * @description 部门列表（按租户；软删行排除；含成员计数）
+         */
+        get: operations["list_departments_api_v1_rbac_departments_get"];
+        put?: never;
+        /**
+         * Create Department
+         * @description 创建部门（租户内名唯一）
+         */
+        post: operations["create_department_api_v1_rbac_departments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rbac/departments/{department_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Department
+         * @description 编辑部门（改名/说明；成员挂接走用户管理）
+         */
+        put: operations["update_department_api_v1_rbac_departments__department_id__put"];
+        post?: never;
+        /**
+         * Delete Department
+         * @description 软删除部门（成员 department_id 置空回退未分组）
+         */
+        delete: operations["delete_department_api_v1_rbac_departments__department_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rbac/menus/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Menu Tree
+         * @description 菜单管理树（管理视角：含隐藏项，运营面全量编辑）
+         */
+        get: operations["menu_tree_api_v1_rbac_menus_tree_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rbac/menus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Menu */
+        post: operations["create_menu_api_v1_rbac_menus_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rbac/menus/{menu_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Menu */
+        put: operations["update_menu_api_v1_rbac_menus__menu_id__put"];
+        post?: never;
+        /**
+         * Delete Menu
+         * @description 删除菜单（级联删除子菜单；物理删——菜单无审计追溯需求，变更走操作审计）
+         */
+        delete: operations["delete_menu_api_v1_rbac_menus__menu_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rbac/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Permissions
+         * @description 权限资源清单（DB 单源；miss 回退内置目录）
+         */
+        get: operations["list_permissions_api_v1_rbac_permissions_get"];
+        put?: never;
+        /** Create Permission */
+        post: operations["create_permission_api_v1_rbac_permissions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rbac/permissions/{permission_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Permission */
+        put: operations["update_permission_api_v1_rbac_permissions__permission_id__put"];
+        post?: never;
+        /** Delete Permission */
+        delete: operations["delete_permission_api_v1_rbac_permissions__permission_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/configs/": {
@@ -841,8 +1258,7 @@ export interface paths {
         get?: never;
         /**
          * Update Config
-         * @description 更新单个配置项（仅管理员，写入审计；set_config 内部已提交业务事务，
-         *     审计记录由 record_audit 单独提交）
+         * @description 更新单个配置项（仅平台超管，租户写 404 同形；不声称官网已同步）。
          */
         put: operations["update_config_api_v1_configs__key__put"];
         post?: never;
@@ -976,7 +1392,7 @@ export interface paths {
         put?: never;
         /**
          * Create Provider
-         * @description 创建 LLM 供应商（仅管理员；api_key 落库为 Fernet 密文，未配置主密钥时拒绝保存）
+         * @description 创建 LLM 供应商（经办/负责人；api_key 落库为 Fernet 密文，未配置主密钥时拒绝保存）
          */
         post: operations["create_provider_api_v1_llm_providers_post"];
         delete?: never;
@@ -1139,13 +1555,13 @@ export interface paths {
         get?: never;
         /**
          * Update Provider
-         * @description 更新 LLM 供应商（仅管理员；PATCH 语义，api_key 留空不修改）
+         * @description 更新 LLM 供应商（经办/负责人；PATCH 语义，api_key 留空不修改）
          */
         put: operations["update_provider_api_v1_llm_providers__provider_id__put"];
         post?: never;
         /**
          * Delete Provider
-         * @description 删除 LLM 供应商（仅管理员；激活位随行删除，无激活行时运行时配置走 yml/env 兜底）
+         * @description 删除 LLM 供应商（经办/负责人；激活位随行删除，无激活行时运行时配置走 yml/env 兜底）
          */
         delete: operations["delete_provider_api_v1_llm_providers__provider_id__delete"];
         options?: never;
@@ -1163,9 +1579,29 @@ export interface paths {
         get?: never;
         /**
          * Activate Provider
-         * @description 激活热切换（仅管理员；单激活互斥，目标行置 active、其余清零）
+         * @description 激活热切换（经办/负责人；单激活互斥，目标行置 active、其余清零）
          */
         put: operations["activate_provider_api_v1_llm_providers__provider_id__activate_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm/providers/{provider_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Deactivate Provider
+         * @description 取消激活（全部下线走 yml/env 兜底；行保留可再激活）
+         */
+        put: operations["deactivate_provider_api_v1_llm_providers__provider_id__deactivate_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1184,7 +1620,7 @@ export interface paths {
         put?: never;
         /**
          * Test Provider Connectivity
-         * @description 连通性测试（仅管理员；一次性 10s client 发 1-token 请求，结果不落库）
+         * @description 连通性测试（经办/负责人；测该行地址，不要求 LiteLLM 存活）
          */
         post: operations["test_provider_connectivity_api_v1_llm_providers__provider_id__test_post"];
         delete?: never;
@@ -1202,7 +1638,7 @@ export interface paths {
         };
         /**
          * Get Overview
-         * @description 中转站总览：远程渠道列表（异常降级 available=false）+ 本地事件/探针统计
+         * @description 值班总览：网关模型（异常降级 available=false）+ 本地事件/探针统计
          */
         get: operations["get_overview_api_v1_newapi_overview_get"];
         put?: never;
@@ -1242,11 +1678,33 @@ export interface paths {
         };
         /**
          * List Probe Results
-         * @description 渠道真伪探针结果分页（时间倒序；本地表，始终可用）
+         * @description 探针结果分页（时间倒序；本地表，始终可用）
          */
         get: operations["list_probe_results_api_v1_newapi_probe_results_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/newapi/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Probe
+         * @description T-33 / GWT-98.4：立即探测单渠道（触发即返回 accepted+batch_id，不阻塞轮询循环）。
+         *
+         *     GWT-98.7：非平台超管 = 404 同形（守卫先于 handler 失败，零渠道/事件副作用）。
+         */
+        post: operations["trigger_probe_api_v1_newapi_probe_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1262,7 +1720,7 @@ export interface paths {
         };
         /**
          * List Channels With Config
-         * @description 渠道列表 + 调度配置合并视图（渠道级 > 全局默认；远程不可达返回业务码 502）
+         * @description 网关模型 + 调度配置；远端不可达返回空列表（200，不 502）
          */
         get: operations["list_channels_with_config_api_v1_newapi_channels_get"];
         put?: never;
@@ -1283,15 +1741,76 @@ export interface paths {
         get?: never;
         /**
          * Set Channel Config
-         * @description 写入渠道级额度配置（limit_quota=0 表示显式关闭该渠道调度）
+         * @description int 路径 expand 写窗口配置（channel_id 类型不改）
          */
         put: operations["set_channel_config_api_v1_newapi_channels__channel_id__config_put"];
         post?: never;
         /**
          * Clear Channel Config
-         * @description 清除渠道级配置（该渠道回退全局默认额度；无全局默认则退出纳管）
+         * @description 清除 int 路径配置
          */
         delete: operations["clear_channel_config_api_v1_newapi_channels__channel_id__config_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/newapi/models/{gateway_ref}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Model Config
+         * @description 按 string gateway_ref 写窗口配置
+         */
+        put: operations["set_model_config_api_v1_newapi_models__gateway_ref__config_put"];
+        post?: never;
+        /** Clear Model Config */
+        delete: operations["clear_model_config_api_v1_newapi_models__gateway_ref__config_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/newapi/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Gateway Model
+         * @description 改/登记平台网关模型（GWT-70.3 非超管拒绝）
+         */
+        post: operations["write_gateway_model_api_v1_newapi_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/newapi/upstreams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Platform Upstream
+         * @description 登记平台上游（GWT-70.3 非超管拒绝）
+         */
+        post: operations["register_platform_upstream_api_v1_newapi_upstreams_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1308,7 +1827,7 @@ export interface paths {
         put?: never;
         /**
          * Scan Skills
-         * @description 全量/增量扫描 capability-library（admin）
+         * @description 全量/增量扫描 capability-library（仅平台超管）；事务由 service 持有（ADR-0007）
          */
         post: operations["scan_skills_api_v1_skills_scan_post"];
         delete?: never;
@@ -1430,7 +1949,7 @@ export interface paths {
         };
         /**
          * List Skill Candidates
-         * @description 市场采集候选（待人工审核转正）
+         * @description 市场采集候选（待人工审核转正；仅超管，非超管 404 同形）
          */
         get: operations["list_skill_candidates_api_v1_skills_candidates_get"];
         put?: never;
@@ -1453,6 +1972,10 @@ export interface paths {
         /**
          * Approve Skill Candidate
          * @description 候选转正：走 import-url 正式管线（人工闸门）
+         *
+         *     importer 经模块属性请求期取值注入（T6 解环：skill_service 不反向依赖
+         *     skill_import_service；该取值点同时是存量测试 monkeypatch
+         *     skill_import_service.SkillImportService 的生效缝）。
          */
         post: operations["approve_skill_candidate_api_v1_skills_candidates__result_id__approve_post"];
         delete?: never;
@@ -1621,7 +2144,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/public/skills": {
+    "/api/v1/public/capabilities/aliases": {
         parameters: {
             query?: never;
             header?: never;
@@ -1629,30 +2152,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Public List Skills
-         * @description 公开列表：仅发布态 + 白名单投影 + 按 IP 限流
+         * Public Reserved Aliases
+         * @description PIT-1 静态段：不得被 /{type}/{name} 吞掉。解析走动态详情。
          */
-        get: operations["public_list_skills_api_v1_public_skills_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/public/skills/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Public Get Skill
-         * @description 公开详情：未发布一律 404（不泄露存在性差异）
-         */
-        get: operations["public_get_skill_api_v1_public_skills__name__get"];
+        get: operations["public_reserved_aliases_api_v1_public_capabilities_aliases_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1670,9 +2173,131 @@ export interface paths {
         };
         /**
          * Public List Capabilities
-         * @description 官网能力广场：四类资产公开列表（仅发布态 + 白名单投影 + IP 限流）
+         * @description 官网能力市场：FR-33 查询侧闸再分页（非法 type 失败；未选=全部）。
+         *
+         *     AD-5c：平台管理员带 preview=true 时跳闸预览（租户/匿名 preview 被忽略）。
+         *     AD-6：sort=smart|latest|hot（缺省/非法=smart）；hot 无计数降级回 sort_applied。
          */
         get: operations["public_list_capabilities_api_v1_public_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/capabilities/{asset_type}/{name}/media/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public Capability Media
+         * @description 货架卡片图：只吐 .agents 下已入库的 icon/background。
+         *
+         *     AD-5c：管理员 preview=true 豁免闸与 listed 分量；租户/匿名不变。
+         */
+        get: operations["public_capability_media_api_v1_public_capabilities__asset_type___name__media__kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/capabilities/{asset_type}/{name}/subscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Public Subscribe Capability
+         * @description 订阅提交：未上架/黑名单/从不存在短名 → MARKET_NOT_FOUND JSON（非 HTML 404）。
+         */
+        post: operations["public_subscribe_capability_api_v1_public_capabilities__asset_type___name__subscribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/capabilities/{asset_type}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public Get Capability
+         * @description 公开详情：非 FR-33 可见 → 商店不存在句 HTML。
+         *
+         *     AD-5c：管理员 preview=true 预览（豁免闸 + listed 分量，payload 带标记）；
+         *     GWT-08.4：非预览成功读触发 detail_opened 治理事件。
+         */
+        get: operations["public_get_capability_api_v1_public_capabilities__asset_type___name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/skills/{name}/subscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Public Subscribe Skill */
+        post: operations["public_subscribe_skill_api_v1_public_skills__name__subscribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/skills/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Public Get Skill */
+        get: operations["public_get_skill_api_v1_public_skills__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public List Skills
+         * @description 公开技能列表：默认 type=skill；与 /public/capabilities 同一五类枚举。
+         */
+        get: operations["public_list_skills_api_v1_public_skills_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1715,7 +2340,11 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Member
+         * @description 删除成员（软删：owner 与当前登录账号不可删；收件箱随账号清理，审计保留）
+         */
+        delete: operations["delete_member_api_v1_members__member_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -1745,6 +2374,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/members/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Member Audit Logs
+         * @description 成员操作审计·租户视角（B6）：本租户成员的近期高危操作留痕
+         *
+         *     平台审计全量仍在 /admin/audit-logs（平台超管）；此处按租户收窄，
+         *     经 actor_id ∈ 本租户 users 过滤（行级隔离之外的显式维度收口）。
+         */
+        get: operations["member_audit_logs_api_v1_members_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/me/usage": {
         parameters: {
             query?: never;
@@ -1754,7 +2406,7 @@ export interface paths {
         };
         /**
          * Tenant Usage Overview
-         * @description 本租户用量看板（当月；三指标 vs 配额 + LLM 按供应商分摊）
+         * @description 本租户用量看板（Asia/Shanghai 月；只读成员可看进度，不能改套餐）
          */
         get: operations["tenant_usage_overview_api_v1_tenants_me_usage_get"];
         put?: never;
@@ -1763,6 +2415,84 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/me/usage/by-member": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tenant Usage By Member
+         * @description 成员维度用量分摊（任务创建数按成员聚合；只读可见）
+         */
+        get: operations["tenant_usage_by_member_api_v1_tenants_me_usage_by_member_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/me/delivery-webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Delivery Webhook */
+        get: operations["get_delivery_webhook_api_v1_tenants_me_delivery_webhook_get"];
+        /** Put Delivery Webhook */
+        put: operations["put_delivery_webhook_api_v1_tenants_me_delivery_webhook_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/me/quota/upgrade-intent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quota Upgrade Intent
+         * @description 申请提升分角色着陆（GWT-U02.6/U02.7）：不创建待支付。
+         */
+        get: operations["quota_upgrade_intent_api_v1_tenants_me_quota_upgrade_intent_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/me/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Tenant Quota
+         * @description 改套餐写权：只读 403。本波不可自助改套餐（申请提升走联系说明）。
+         */
+        patch: operations["patch_tenant_quota_api_v1_tenants_me_quota_patch"];
         trace?: never;
     };
     "/api/v1/public/tenant/signup": {
@@ -1779,8 +2509,163 @@ export interface paths {
          * @description 企业注册：公司名 + 管理员邮箱/密码 → tenant + owner（免费档默认配额）
          *
          *     限流 fail-closed：Redis 故障时拒绝（无鉴权写面不可放行滥用流量）。
+         *     事务由 service 持有（ADR-0007）。
+         *     已登录且已有企业的成员（含只读）提交：422 SIGNUP_INCOMPLETE，不改写他人租户。
          */
         post: operations["tenant_signup_api_v1_public_tenant_signup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/ops-contact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ops Contact */
+        get: operations["get_ops_contact_api_v1_public_ops_contact_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/sync-agents-hub": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Agents Hub
+         * @description 手动同步 .agents → capability_assets（非破坏 upsert；仅平台超管）。
+         *
+         *     重复触发幂等（GWT-01.2）；任何失败路径不软删行（GWT-01.3）；
+         *     失败上抛 → 统一异常处理器 500 + sync_failed 事件（GWT-08.3）。
+         */
+        post: operations["sync_agents_hub_api_v1_capabilities_sync_agents_hub_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/assets/prune-missing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prune Missing Assets
+         * @description 失源行清理（FR-02；仅平台超管）：live 行 − 磁盘可识别集 → 软删。
+         *
+         *     排除 team/源注册表行/expert 遗留型（QA-7R 判别式见 agents_hub）；幂等；
+         *     dry_run=true 返回执行态同构 pruned 预览且不写 deleted_at。
+         */
+        post: operations["prune_missing_assets_api_v1_capabilities_assets_prune_missing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/{asset_type}/{name}/featured": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Capability Featured
+         * @description 精选开关（FR-04 / GWT-04.5；仅平台超管，越权 404）。
+         *
+         *     同步不重置本列（agents_hub._desired 白名单不含 featured，db-spec §9）。
+         */
+        patch: operations["patch_capability_featured_api_v1_capabilities__asset_type___name__featured_patch"];
+        trace?: never;
+    };
+    "/api/v1/capabilities/{asset_type}/{name}/examples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Capability Examples
+         * @description 详情示例区维护（附加 d / AD-7；仅平台超管，越权 404）。
+         *
+         *     上限 20 条 × 200 字由 PatchExamplesRequest 校验（超限 422）；
+         *     空列表 = 取消维护 → 详情投影空列表 → 前端隐藏区块（GWT-05.3）。
+         */
+        patch: operations["patch_capability_examples_api_v1_capabilities__asset_type___name__examples_patch"];
+        trace?: never;
+    };
+    "/api/v1/capabilities/import/tree/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Tree Import Endpoint
+         * @description 目录导入预览（FR-07 / AD-4d；仅平台超管，越权 404）。
+         *
+         *     不写库不落盘：判型清单 + 跳过清单 + 四类计数；取消 = 不发 confirm。
+         */
+        post: operations["preview_tree_import_endpoint_api_v1_capabilities_import_tree_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/import/tree/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Tree Import Endpoint
+         * @description 目录导入确认（FR-07 / AD-4e；仅平台超管，越权 404）。
+         *
+         *     落盘统一 .agents + upsert 入库；单项失败入 failed 清单不整批回滚（GWT-07.5）；
+         *     成功发 import_completed、异常发 import_failed 后按原异常上抛（GWT-08.1/08.2）。
+         */
+        post: operations["confirm_tree_import_endpoint_api_v1_capabilities_import_tree_confirm_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1796,7 +2681,7 @@ export interface paths {
         };
         /**
          * List Capabilities
-         * @description 统一资产列表（管理端）
+         * @description 超管=治理目录；租户=货架（关旗「能力市场未开放」，不含未上架）。
          */
         get: operations["list_capabilities_api_v1_capabilities_get"];
         put?: never;
@@ -1807,7 +2692,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/capabilities/{asset_type}/{name}": {
+    "/api/v1/capabilities/sources": {
         parameters: {
             query?: never;
             header?: never;
@@ -1815,19 +2700,23 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Capability Detail
-         * @description 统一详情（治理字段 + 类型化细节由各域端点补充）
+         * List Capability Sources
+         * @description 源列表。仅超管。
          */
-        get: operations["get_capability_detail_api_v1_capabilities__asset_type___name__get"];
+        get: operations["list_capability_sources_api_v1_capabilities_sources_get"];
         put?: never;
-        post?: never;
+        /**
+         * Register Capability Source
+         * @description 登记源。url 类失败说明未支持。
+         */
+        post: operations["register_capability_source_api_v1_capabilities_sources_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/capabilities/scan-plugins": {
+    "/api/v1/capabilities/sources/{name}/sync": {
         parameters: {
             query?: never;
             header?: never;
@@ -1837,10 +2726,34 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Scan Plugins
-         * @description 扫描 capability-library/plugins/（plugin.json 解析入库）
+         * Sync Capability Source
+         * @description 触发 src_sync。第三方新行保持 unlisted。
+         *
+         *     QA-8：收回缺失行是破坏性动作，必须显式 `?retract=true` 才执行（与
+         *     「同步通道默认永不隐式软删」的全局口径对齐）；不传时本次同步只
+         *     upsert，源里消失的行原样保留待下次显式收回。
          */
-        post: operations["scan_plugins_api_v1_capabilities_scan_plugins_post"];
+        post: operations["sync_capability_source_api_v1_capabilities_sources__name__sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/backfill-first-party": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill First Party Listing
+         * @description 第一方已发布/推荐 → listed；host_compat 保持 NULL。非迁移。
+         */
+        post: operations["backfill_first_party_listing_api_v1_capabilities_backfill_first_party_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1887,26 +2800,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/capabilities/scan-experts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Scan Experts
-         * @description 扫描 capability-library/experts/（subagent 格式解析入库）
-         */
-        post: operations["scan_experts_api_v1_capabilities_scan_experts_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/capabilities/experts/{name}": {
         parameters: {
             query?: never;
@@ -1938,7 +2831,10 @@ export interface paths {
         put?: never;
         /**
          * Upsert Team
-         * @description 专家团定义（团长/成员引用校验；执行引擎二期）
+         * @description 专家团定义（团长=专家；成员=专家∪智能体，T-37 / GWT-101；执行引擎不做）。
+         *
+         *     越权 404 同形（GWT-101.5：租户直打与「页面不存在」同形，不走 403 信封）。
+         *     members 兼容两种形态：名称字符串（按专家）或 {"type": "expert"|"agent", "name"}。
          */
         post: operations["upsert_team_api_v1_capabilities_teams_post"];
         delete?: never;
@@ -1982,6 +2878,751 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Assets
+         * @description 统一导入通道（仅平台超管；非超管直打 404 同形，GWT-100.6）。
+         *
+         *     multipart 文件（单 .md 或 zip 包，可多选）**或**服务器本地目录路径；
+         *     沙箱解包 + 四类判定分发（skill/agent/command/plugin，GWT-100.4）；
+         *     部分成功逐条中文原因（100.2/100.3）；超大拒绝含上限数字（100.5）；
+         *     路径逃逸条目拒绝且资产目录外零新文件（100.7，NFR-04/SEC-11）；
+         *     幂等=类型+名称（100.8）；产物未上架、不触发执行（PC-2）；完成上报
+         *     asset_imported（GWT-92.9）。
+         */
+        post: operations["import_assets_api_v1_capabilities_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/installs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Capability Installs
+         * @description 本企业安装行（T-25 可查询；T-26 展示/卸载）。
+         */
+        get: operations["list_capability_installs_api_v1_capabilities_installs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/installs/{install_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Capability Install
+         * @description 软删这一行。不沿合集边级联。unlist/黑名单经办可卸。
+         */
+        delete: operations["delete_capability_install_api_v1_capabilities_installs__install_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Capability Install
+         * @description 改启用/信任。黑名单/软删行只读这两列；只读角色走 MARKET_READONLY_ROLE。
+         */
+        patch: operations["patch_capability_install_api_v1_capabilities_installs__install_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/capabilities/{asset_type}/{name}/correct": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correct Capability Asset
+         * @description D5：第三方纠正不可用，不写源树。
+         */
+        post: operations["correct_capability_asset_api_v1_capabilities__asset_type___name__correct_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/{asset_type}/{name}/listing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Capability Listing
+         * @description 上架三态。与验证/治理 status 分闸。listed_at unlist 不清空。
+         */
+        patch: operations["patch_capability_listing_api_v1_capabilities__asset_type___name__listing_patch"];
+        trace?: never;
+    };
+    "/api/v1/capabilities/{asset_type}/{name}/license-override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch License Override
+         * @description 特例放行。仅超管。收回不拆已订行与引用解析。
+         */
+        patch: operations["patch_license_override_api_v1_capabilities__asset_type___name__license_override_patch"];
+        trace?: never;
+    };
+    "/api/v1/capabilities/{asset_type}/{name}/alias": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Capability Alias
+         * @description 指定/改人工短名。仅超管。撞存活目录短名或存活 alias → 409。
+         */
+        put: operations["put_capability_alias_api_v1_capabilities__asset_type___name__alias_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/{asset_type}/{name}/subscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Subscribe Capability
+         * @description 订这一行到一个宿主。不礼包、不占三类配额。
+         */
+        post: operations["subscribe_capability_api_v1_capabilities__asset_type___name__subscribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/{asset_type}/{name}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Capability References
+         * @description 超管/系统引用列表（FR-36）。忽略子行 listing；黑名单/软删跳过并审计。
+         */
+        get: operations["list_capability_references_api_v1_capabilities__asset_type___name__references_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/capabilities/{asset_type}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Capability Detail
+         * @description 统一详情（治理字段 + 类型化细节由各域端点补充）
+         *
+         *     注意：本路由为二段式动态段，必须保持在文件末尾注册，否则遮蔽
+         *     /plugins/{name} /experts/{name} /teams/{name} 三条静态详情路由（恒 404）。
+         *     非超管不发出本机绝对路径（GWT-14.1/14.2）；相对库路径可保留。
+         */
+        get: operations["get_capability_detail_api_v1_capabilities__asset_type___name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Api Keys */
+        get: operations["list_api_keys_api_v1_api_keys_get"];
+        put?: never;
+        /** Create Api Key */
+        post: operations["create_api_key_api_v1_api_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/api-keys/{key_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Api Key */
+        post: operations["revoke_api_key_api_v1_api_keys__key_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Plans */
+        get: operations["list_plans_api_v1_billing_plans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Checkout
+         * @description 打开结账：不建单、不验真。静态段先于 /orders/{id}。
+         */
+        get: operations["preview_checkout_api_v1_billing_checkout_get"];
+        put?: never;
+        /**
+         * Create Checkout
+         * @description 买方创建待支付。不验真、不履约。
+         */
+        post: operations["create_checkout_api_v1_billing_checkout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/notify/{channel}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Channel Notify
+         * @description 通道通知入口：无 JWT。验真失败也 200，不开通、无 payment_succeeded。
+         */
+        post: operations["channel_notify_api_v1_billing_notify__channel__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/subscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Subscription */
+        get: operations["get_subscription_api_v1_billing_subscription_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Orders */
+        get: operations["list_orders_api_v1_billing_orders_get"];
+        put?: never;
+        /**
+         * Create Order
+         * @description 提交线下升级申请（FR-50）。
+         *
+         *     角色判定在 Service（业务规则，GWT-50.7/50.8：经办/只读 → 找管理员句，
+         *     不再走 403 FORBIDDEN），Router 只做协议转换。
+         */
+        post: operations["create_order_api_v1_billing_orders_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/orders/{order_id}/pay-intent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Regenerate Pay Intent
+         * @description 按需重取在线支付链接/二维码（未持久化，见 BillingService.regenerate_pay_intent）。
+         *     只在自己企业的订单上生效——跨企业订单号走 tenant_id 核对，不是路径参数就能查。
+         */
+        get: operations["regenerate_pay_intent_api_v1_billing_orders__order_id__pay_intent_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/admin/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pending Orders */
+        get: operations["list_pending_orders_api_v1_billing_admin_orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/orders/{order_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Order */
+        post: operations["confirm_order_api_v1_billing_orders__order_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/litellm/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Litellm Keys */
+        get: operations["list_litellm_keys_api_v1_litellm_keys_get"];
+        put?: never;
+        /** Create Litellm Key */
+        post: operations["create_litellm_key_api_v1_litellm_keys_post"];
+        /** Delete Litellm Key */
+        delete: operations["delete_litellm_key_api_v1_litellm_keys_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/litellm/spend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Litellm Spend */
+        get: operations["litellm_spend_api_v1_litellm_spend_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Public Event
+         * @description 官网页浏览 / CTA 埋点。限流 fail-open；持久化失败仍 200（不挡主路径）。
+         */
+        post: operations["ingest_public_event_api_v1_public_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/product-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Query Product Events
+         * @description 超管按发生时间查询产品事实。非超管 HTTP 404 同形。
+         */
+        get: operations["query_product_events_api_v1_product_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/internal-fixture-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Internal Fixture Tenants */
+        get: operations["list_internal_fixture_tenants_api_v1_admin_internal_fixture_tenants_get"];
+        put?: never;
+        /** Add Internal Fixture Tenant */
+        post: operations["add_internal_fixture_tenant_api_v1_admin_internal_fixture_tenants_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/internal-fixture-tenants/{tenant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Internal Fixture Tenant */
+        delete: operations["remove_internal_fixture_tenant_api_v1_admin_internal_fixture_tenants__tenant_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/payment-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Payment Credentials */
+        get: operations["list_payment_credentials_api_v1_admin_payment_credentials_get"];
+        /** Put Payment Credential */
+        put: operations["put_payment_credential_api_v1_admin_payment_credentials_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/payment-credentials/{channel}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Payment Credential */
+        delete: operations["delete_payment_credential_api_v1_admin_payment_credentials__channel__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/payment-credentials/{channel}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate Payment Credential
+         * @description 离线校验已保存密钥包的 JSON 形状 + 密钥格式（不发起真实网络请求，
+         *     不代表在线支付一定能跑通——那要看支付宝/微信那边商户资质是否真实有效）。
+         */
+        post: operations["validate_payment_credential_api_v1_admin_payment_credentials__channel__validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/relay/sku": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sku Page */
+        get: operations["get_sku_page_api_v1_relay_sku_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/relay/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Groups */
+        get: operations["list_groups_api_v1_relay_groups_get"];
+        put?: never;
+        /** Create Group */
+        post: operations["create_group_api_v1_relay_groups_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/relay/groups/{group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Group */
+        patch: operations["update_group_api_v1_relay_groups__group_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/relay/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tokens */
+        get: operations["list_tokens_api_v1_relay_tokens_get"];
+        put?: never;
+        /** Issue Token */
+        post: operations["issue_token_api_v1_relay_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/relay/tokens/by-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage By Plaintext
+         * @description 令牌凭证读本企业用量。明文不回写；失败 404 同形。
+         */
+        get: operations["usage_by_plaintext_api_v1_relay_tokens_by_key_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/relay/tokens/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Token
+         * @description 令牌详情（用量回写触发点；GWT-60.2/60.3，db-spec §12）。
+         *
+         *     网关不可达 → 数据为本地缓存（数字不显示「已用完」），message 走
+         *     GWT-60.5「平台 LLM 网关不可达」句族——不是套餐句。
+         */
+        get: operations["get_token_api_v1_relay_tokens__token_id__get"];
+        put?: never;
+        post?: never;
+        /** Revoke Token */
+        delete: operations["revoke_token_api_v1_relay_tokens__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/relay/tokens/refresh-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Token Usage
+         * @description 显式刷新本企业令牌用量（按页批量触发点；QA-08：列表渲染不走此面）。
+         *
+         *     网关不可达 → 502 LLM_GATEWAY_UNREACHABLE（60.5 句族，失败可见，非套餐句）。
+         */
+        post: operations["refresh_token_usage_api_v1_relay_tokens_refresh_usage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/outbound/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Keys */
+        get: operations["list_keys_api_v1_outbound_keys_get"];
+        put?: never;
+        /** Issue Key */
+        post: operations["issue_key_api_v1_outbound_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/outbound/keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Key */
+        delete: operations["revoke_key_api_v1_outbound_keys__key_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2096,14 +3737,11 @@ export interface paths {
         };
         /**
          * Get Spider Data
-         * @description 公开数据查询端点 — 按爬虫名称分页查询采集结果
+         * @description 公开数据查询 — 按爬虫名分页拉本企业非候选结果
          *
-         *     认证：X-API-Key Header，统一走 _require_api_key（与 status/results/stats
-         *     同一鉴权逻辑）；未配置 API Key 或密钥不匹配时一律 401。
-         *     可选参数：
-         *       - page / page_size：分页
-         *       - start_time / end_time：时间范围过滤（ISO 8601）
-         *       - fields：逗号分隔的字段名，如 "url,title,content"（响应字段裁剪）
+         *     认证：X-API-Key 只命中本企业未吊销出站拉数钥匙（FR-M20）。
+         *     sk- / 租户 API Key / KEY_BINDINGS / 乱填 → 401，响应不含结果行。
+         *     可选参数：page / page_size / start_time / end_time / fields。
          */
         get: operations["get_spider_data_external_v1_public_data__spider_name__get"];
         put?: never;
@@ -2174,10 +3812,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/external/v1/payments/alipay/notify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Alipay Notify
+         * @description 支付宝异步通知：form 编码，字段名见官方文档（out_trade_no/trade_status/
+         *     total_amount/seller_id/trade_no）。响应体必须是纯文本 "success"。
+         */
+        post: operations["alipay_notify_external_v1_payments_alipay_notify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/external/v1/payments/wechat/notify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wechat Notify
+         * @description 微信支付 v3 异步通知：JSON body + Wechatpay-* 签名头，resource 字段
+         *     AEAD 加密。响应必须是 {"code":"SUCCESS","message":"成功"} 且 HTTP 200。
+         */
+        post: operations["wechat_notify_external_v1_payments_wechat_notify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AdminUserCreateRequest
+         * @description 平台超管创建账户（用户管理页）
+         */
+        AdminUserCreateRequest: {
+            /** Username */
+            username: string;
+            /** Email */
+            email: string;
+            /** Password */
+            password: string;
+            /**
+             * Role
+             * @default operator
+             */
+            role: string;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            /** Tenant Id */
+            tenant_id?: number | null;
+        };
+        /**
+         * AdminUserUpdateRequest
+         * @description 平台超管编辑账户：角色分配 / 启停 / 归属调整 / 部门挂接
+         */
+        AdminUserUpdateRequest: {
+            /** Role */
+            role?: string | null;
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Tenant Id */
+            tenant_id?: number | null;
+            /** Department Id */
+            department_id?: number | null;
+        };
         /**
          * AiPlanCreate
          * @description 创建 AI 采集计划请求（html_snippet 可选，预置后跳过在线抓取）
@@ -2315,6 +4033,70 @@ export interface components {
             /** Enabled */
             enabled?: boolean | null;
         };
+        /** ApiKeyCreate */
+        ApiKeyCreate: {
+            /** Name */
+            name: string;
+            /** Scopes */
+            scopes?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * ApiKeyCreated
+         * @description 仅创建响应携带一次明文。
+         */
+        ApiKeyCreated: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Key Prefix */
+            key_prefix: string;
+            /** Scopes */
+            scopes?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Revoked At */
+            revoked_at?: string | null;
+            /** Last Used At */
+            last_used_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Tenant Id */
+            tenant_id?: number | null;
+            /** Plaintext */
+            plaintext: string;
+        };
+        /** ApiKeyOut */
+        ApiKeyOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Key Prefix */
+            key_prefix: string;
+            /** Scopes */
+            scopes?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Revoked At */
+            revoked_at?: string | null;
+            /** Last Used At */
+            last_used_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Tenant Id */
+            tenant_id?: number | null;
+        };
         /**
          * ApiResponse
          * @description 统一 API 响应格式
@@ -2396,6 +4178,56 @@ export interface components {
              */
             request_id?: string | null;
         };
+        /** ApiResponse[ApiKeyCreated] */
+        ApiResponse_ApiKeyCreated_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["ApiKeyCreated"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[ApiKeyOut] */
+        ApiResponse_ApiKeyOut_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["ApiKeyOut"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
         /** ApiResponse[ChannelConfigUpdateResult] */
         ApiResponse_ChannelConfigUpdateResult_: {
             /**
@@ -2415,6 +4247,81 @@ export interface components {
             message: string;
             /** @description 响应数据 */
             data?: components["schemas"]["ChannelConfigUpdateResult"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[GatewayConfigUpdateResult] */
+        ApiResponse_GatewayConfigUpdateResult_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["GatewayConfigUpdateResult"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[GatewayModelResponse] */
+        ApiResponse_GatewayModelResponse_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["GatewayModelResponse"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[LitellmKeyOut] */
+        ApiResponse_LitellmKeyOut_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["LitellmKeyOut"] | null;
             /**
              * Request Id
              * @description 请求追踪 ID
@@ -2490,6 +4397,209 @@ export interface components {
             message: string;
             /** @description 响应数据 */
             data?: components["schemas"]["NewapiOverviewResponse"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[NoneType] */
+        ApiResponse_NoneType_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /**
+             * Data
+             * @description 响应数据
+             */
+            data?: null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[OrderOut] */
+        ApiResponse_OrderOut_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["OrderOut"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[OutboundKeyIssuedOut] */
+        ApiResponse_OutboundKeyIssuedOut_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["OutboundKeyIssuedOut"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[OutboundKeyOut] */
+        ApiResponse_OutboundKeyOut_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["OutboundKeyOut"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[ProbeTriggerResponse] */
+        ApiResponse_ProbeTriggerResponse_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["ProbeTriggerResponse"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[RelayGroupOut] */
+        ApiResponse_RelayGroupOut_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["RelayGroupOut"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[RelaySkuPageOut] */
+        ApiResponse_RelaySkuPageOut_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["RelaySkuPageOut"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[RelayTokenOut] */
+        ApiResponse_RelayTokenOut_: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["RelayTokenOut"] | null;
             /**
              * Request Id
              * @description 请求追踪 ID
@@ -2746,6 +4856,31 @@ export interface components {
              */
             request_id?: string | null;
         };
+        /** ApiResponse[Union[SubscriptionOut, NoneType]] */
+        ApiResponse_Union_SubscriptionOut__NoneType__: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /** @description 响应数据 */
+            data?: components["schemas"]["SubscriptionOut"] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
         /** ApiResponse[WorkerNodeListResponse] */
         ApiResponse_WorkerNodeListResponse_: {
             /**
@@ -2801,8 +4936,8 @@ export interface components {
              */
             request_id?: string | null;
         };
-        /** ApiResponse[list[ChannelWithConfigResponse]] */
-        ApiResponse_list_ChannelWithConfigResponse__: {
+        /** ApiResponse[list[ApiKeyOut]] */
+        ApiResponse_list_ApiKeyOut__: {
             /**
              * Success
              * @description 请求是否成功
@@ -2822,7 +4957,35 @@ export interface components {
              * Data
              * @description 响应数据
              */
-            data?: components["schemas"]["ChannelWithConfigResponse"][] | null;
+            data?: components["schemas"]["ApiKeyOut"][] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[list[GatewayModelWithConfigResponse]] */
+        ApiResponse_list_GatewayModelWithConfigResponse__: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /**
+             * Data
+             * @description 响应数据
+             */
+            data?: components["schemas"]["GatewayModelWithConfigResponse"][] | null;
             /**
              * Request Id
              * @description 请求追踪 ID
@@ -2851,6 +5014,146 @@ export interface components {
              * @description 响应数据
              */
             data?: components["schemas"]["LlmProviderResponse"][] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[list[OrderOut]] */
+        ApiResponse_list_OrderOut__: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /**
+             * Data
+             * @description 响应数据
+             */
+            data?: components["schemas"]["OrderOut"][] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[list[OutboundKeyOut]] */
+        ApiResponse_list_OutboundKeyOut__: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /**
+             * Data
+             * @description 响应数据
+             */
+            data?: components["schemas"]["OutboundKeyOut"][] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[list[PlanOut]] */
+        ApiResponse_list_PlanOut__: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /**
+             * Data
+             * @description 响应数据
+             */
+            data?: components["schemas"]["PlanOut"][] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[list[RelayGroupOut]] */
+        ApiResponse_list_RelayGroupOut__: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /**
+             * Data
+             * @description 响应数据
+             */
+            data?: components["schemas"]["RelayGroupOut"][] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** ApiResponse[list[RelayTokenOut]] */
+        ApiResponse_list_RelayTokenOut__: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /**
+             * Data
+             * @description 响应数据
+             */
+            data?: components["schemas"]["RelayTokenOut"][] | null;
             /**
              * Request Id
              * @description 请求追踪 ID
@@ -2914,6 +5217,53 @@ export interface components {
              * @description 请求追踪 ID
              */
             request_id?: string | null;
+        };
+        /** ApiResponse[list[dict[str, Any]]] */
+        ApiResponse_list_dict_str__Any___: {
+            /**
+             * Success
+             * @description 请求是否成功
+             */
+            success: boolean;
+            /**
+             * Code
+             * @description 业务状态码
+             */
+            code: string;
+            /**
+             * Message
+             * @description 响应消息
+             */
+            message: string;
+            /**
+             * Data
+             * @description 响应数据
+             */
+            data?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
+             * Request Id
+             * @description 请求追踪 ID
+             */
+            request_id?: string | null;
+        };
+        /** Body_confirm_tree_import_endpoint_api_v1_capabilities_import_tree_confirm_post */
+        Body_confirm_tree_import_endpoint_api_v1_capabilities_import_tree_confirm_post: {
+            /** Files */
+            files: string[];
+        };
+        /** Body_import_assets_api_v1_capabilities_import_post */
+        Body_import_assets_api_v1_capabilities_import_post: {
+            /** File */
+            file?: string[];
+            /** Directory */
+            directory?: string;
+        };
+        /** Body_preview_tree_import_endpoint_api_v1_capabilities_import_tree_preview_post */
+        Body_preview_tree_import_endpoint_api_v1_capabilities_import_tree_preview_post: {
+            /** Files */
+            files: string[];
         };
         /**
          * ChannelConfigInfo
@@ -3003,6 +5353,26 @@ export interface components {
             created_at?: string | null;
         };
         /**
+         * ChannelNotifyIn
+         * @description 通道通知体。缺校验字段由服务层当未验真（HTTP 仍 200）。
+         */
+        ChannelNotifyIn: {
+            /** Order No */
+            order_no?: string | null;
+            /** Merchant No */
+            merchant_no?: string | null;
+            /** Amount Cents */
+            amount_cents?: number | null;
+            /** Trade Status */
+            trade_status?: string | null;
+            /** Channel Trade No */
+            channel_trade_no?: string | null;
+            /** Sign */
+            sign?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * ChannelProbeResultResponse
          * @description 探针结果响应快照
          */
@@ -3041,105 +5411,43 @@ export interface components {
             /** Created At */
             created_at?: string | null;
         };
-        /**
-         * ChannelWithConfigResponse
-         * @description 渠道快照 + 调度配置合并视图（GET /newapi/channels）
-         */
-        ChannelWithConfigResponse: {
+        /** CheckoutCreate */
+        CheckoutCreate: {
             /**
-             * Id
-             * @description new-api 渠道 ID
+             * Product
+             * @enum {string}
              */
-            id: number;
-            /**
-             * Name
-             * @default
-             */
-            name: string;
-            /**
-             * Status
-             * @description 1 启用 / 2 人工禁用 / 3 自动禁用
-             * @default 0
-             */
-            status: number;
-            /**
-             * Type
-             * @description 渠道类型常量（new-api common/constants）
-             * @default 0
-             */
-            type: number;
-            /**
-             * Used Quota
-             * @description 已用额度（quota 单位）
-             */
-            used_quota?: number | null;
-            /**
-             * Balance
-             * @description 余额（美元，以上游返回为准）
-             */
-            balance?: number | null;
-            /**
-             * Response Time
-             * @description 测速延迟（毫秒，-1=未测）
-             */
-            response_time?: number | null;
-            /**
-             * Test Time
-             * @description 上次测速 unix 时间（秒）
-             */
-            test_time?: number | null;
-            /**
-             * Models
-             * @description 模型列表（逗号分隔）
-             */
-            models?: string | null;
-            /**
-             * Group
-             * @description 分组
-             */
-            group?: string | null;
-            /**
-             * Base Url
-             * @description 渠道上游地址
-             */
-            base_url?: string | null;
-            /**
-             * Priority
-             * @description 权重优先级
-             */
-            priority?: number | null;
-            /**
-             * Weight
-             * @description 权重
-             */
-            weight?: number | null;
-            /**
-             * Created Time
-             * @description 创建 unix 时间（秒）
-             */
-            created_time?: number | null;
-            /**
-             * Extra
-             * @description 未知字段的宽松透传（敏感字段已剔除）
-             */
-            extra?: {
-                [key: string]: unknown;
-            };
-            /** @description 渠道级配置（Redis hash，未配置为 null） */
-            config?: components["schemas"]["ChannelConfigInfo"] | null;
-            /** @description 生效配置（渠道级 > 全局默认） */
-            effective: components["schemas"]["ChannelConfigInfo"];
-            /**
-             * Effective Source
-             * @description 生效来源：channel（渠道级）/ global（全局默认）/ none（未纳管）
-             * @default none
-             */
-            effective_source: string;
+            product: "plan_pro" | "plan_enterprise" | "relay";
+            /** Channel */
+            channel?: ("alipay" | "wechat") | null;
         };
         /** ConfigUpdate */
         ConfigUpdate: {
             /** Value */
             value: string;
+        };
+        /** CorrectRequest */
+        CorrectRequest: {
+            /** Category */
+            category?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Score */
+            score?: number | null;
+        };
+        /** CreateSourceRequest */
+        CreateSourceRequest: {
+            /** Name */
+            name: string;
+            /** Source Kind */
+            source_kind: string;
+            /** Uri */
+            uri: string;
+            /**
+             * Is Enabled
+             * @default 1
+             */
+            is_enabled: number;
         };
         /**
          * DefinitionCreateRequest
@@ -3170,13 +5478,25 @@ export interface components {
         };
         /**
          * DefinitionUpdateMetaRequest
-         * @description 爬虫定义元信息局部更新（仅 admin，不含启停/名称）
+         * @description 采集方案编辑（FR-103 / GWT-103.1：经办可编辑，不含启停/名称/类型）
+         *
+         *     title/description 为元信息；params 为定义参数（按类型）：
+         *     - api 型：{"urls": [...], "headers": {...}}（字段集源自 yml SPIDER_TYPES.api.fields）
+         *     - flow 型：流程字段 {"urls": [...], "selectors": [...], "pagination": {...}, ...}
+         *     - 代码型（web/custom）：不可编辑 params（服务层拒绝并给出说明句）
          */
         DefinitionUpdateMetaRequest: {
             /** Title */
             title?: string | null;
             /** Description */
             description?: string | null;
+            /**
+             * Params
+             * @description 定义参数（api 型 urls/headers；flow 型流程字段）；缺省=不改
+             */
+            params?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * DefinitionUpdateRequest
@@ -3186,10 +5506,222 @@ export interface components {
             /** Enabled */
             enabled: boolean;
         };
+        /** DeliveryWebhookIn */
+        DeliveryWebhookIn: {
+            /** Url */
+            url?: string | null;
+        };
+        /** DepartmentCreateRequest */
+        DepartmentCreateRequest: {
+            /** Tenant Id */
+            tenant_id: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string;
+        };
+        /** DepartmentUpdateRequest */
+        DepartmentUpdateRequest: {
+            /** Name */
+            name?: string;
+            /** Description */
+            description?: string;
+        };
+        /**
+         * GatewayConfigUpdateResult
+         * @description 按 gateway_ref 写入/清除窗口配置
+         */
+        GatewayConfigUpdateResult: {
+            /** Gateway Ref */
+            gateway_ref: string;
+            /**
+             * Cleared
+             * @default false
+             */
+            cleared: boolean;
+            config?: components["schemas"]["ChannelConfigInfo"] | null;
+        };
+        /**
+         * GatewayModelResponse
+         * @description 平台 LLM 网关模型/部署快照（无完整上游 Key）
+         */
+        GatewayModelResponse: {
+            /**
+             * Gateway Ref
+             * @description 稳定字符串引用（模型名或 deployment id）
+             */
+            gateway_ref: string;
+            /**
+             * Model Name
+             * @default
+             */
+            model_name: string;
+            /**
+             * Deployment Id
+             * @description LiteLLM model_info.id
+             */
+            deployment_id?: string | null;
+            /**
+             * Mode
+             * @description chat/embedding 等
+             */
+            mode?: string | null;
+            /**
+             * Api Base
+             * @description 上游地址（非密钥）
+             */
+            api_base?: string | null;
+            /**
+             * Api Key Masked
+             * @description 仅掩码；完整 Key 不回传
+             */
+            api_key_masked?: string | null;
+            /**
+             * Extra
+             * @description 未知字段（敏感字段已剔除）
+             */
+            extra?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Duty Row Status
+             * @description 行态：live / spoofed / offline；探针 original → live
+             */
+            duty_row_status?: string | null;
+            /**
+             * Duty Row Status Text
+             * @description 行状态文字；live 时为「活」
+             */
+            duty_row_status_text?: string | null;
+        };
+        /**
+         * GatewayModelWithConfigResponse
+         * @description 网关模型 + 调度配置合并视图（GET /newapi/channels）
+         */
+        GatewayModelWithConfigResponse: {
+            /**
+             * Gateway Ref
+             * @description 稳定字符串引用（模型名或 deployment id）
+             */
+            gateway_ref: string;
+            /**
+             * Model Name
+             * @default
+             */
+            model_name: string;
+            /**
+             * Deployment Id
+             * @description LiteLLM model_info.id
+             */
+            deployment_id?: string | null;
+            /**
+             * Mode
+             * @description chat/embedding 等
+             */
+            mode?: string | null;
+            /**
+             * Api Base
+             * @description 上游地址（非密钥）
+             */
+            api_base?: string | null;
+            /**
+             * Api Key Masked
+             * @description 仅掩码；完整 Key 不回传
+             */
+            api_key_masked?: string | null;
+            /**
+             * Extra
+             * @description 未知字段（敏感字段已剔除）
+             */
+            extra?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Duty Row Status
+             * @description 行态：live / spoofed / offline；探针 original → live
+             */
+            duty_row_status?: string | null;
+            /**
+             * Duty Row Status Text
+             * @description 行状态文字；live 时为「活」
+             */
+            duty_row_status_text?: string | null;
+            /** @description 模型级配置（Redis hash，未配置为 null） */
+            config?: components["schemas"]["ChannelConfigInfo"] | null;
+            /** @description 生效配置（模型级 > 全局默认） */
+            effective: components["schemas"]["ChannelConfigInfo"];
+            /**
+             * Effective Source
+             * @description 生效来源：channel（模型级）/ global（全局默认）/ none（未纳管）
+             * @default none
+             */
+            effective_source: string;
+        };
+        /**
+         * GatewayModelWriteRequest
+         * @description 改平台网关模型（超管写面）
+         */
+        GatewayModelWriteRequest: {
+            /** Model Name */
+            model_name: string;
+            /** Gateway Ref */
+            gateway_ref?: string | null;
+            /** Litellm Params */
+            litellm_params?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * GatewayUpstreamWriteRequest
+         * @description 登记平台上游（超管写面）
+         */
+        GatewayUpstreamWriteRequest: {
+            /** Gateway Ref */
+            gateway_ref: string;
+            /** Api Base */
+            api_base: string;
+            /** Model Name */
+            model_name?: string | null;
+            /** Litellm Params */
+            litellm_params?: {
+                [key: string]: unknown;
+            };
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** InternalFixtureTenantCreate */
+        InternalFixtureTenantCreate: {
+            /** Tenant Id */
+            tenant_id: number;
+        };
+        /** LitellmKeyCreate */
+        LitellmKeyCreate: {
+            /** Key Alias */
+            key_alias: string;
+            /** Max Budget */
+            max_budget?: number | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /** LitellmKeyOut */
+        LitellmKeyOut: {
+            /** Key Alias */
+            key_alias?: string | null;
+            /** Token */
+            token?: string | null;
+            /** Max Budget */
+            max_budget?: number | null;
+            /** Spend */
+            spend?: number | null;
+            /** Raw */
+            raw?: {
+                [key: string]: unknown;
+            };
         };
         /**
          * LlmProviderCreate
@@ -3291,6 +5823,11 @@ export interface components {
              * @default true
              */
             enabled: boolean;
+            /**
+             * Tenant Id
+             * @description 所属租户；NULL=平台级行
+             */
+            tenant_id?: number | null;
             /** Remark */
             remark?: string | null;
             /** Created At */
@@ -3382,12 +5919,17 @@ export interface components {
         };
         /**
          * LoginRequest
-         * @description 登录请求
+         * @description 登录请求（T5 决策 A：tenant_slug 为未来租户级登录入口预留）
+         *
+         *     tenant_slug 暂不消费（可选、缺省走密码消歧，现有前端零改动）；租户级
+         *     登录入口（子域名/租户选择页）上线时，届时带 slug 精确 (tenant, username) 查询。
+         *     username 兼作登录标识（FR-83）：含 @ 时后端按注册邮箱解析——上限 100
+         *     对齐 users.email 列与注册侧容量，否则 51–100 字符的注册邮箱无法凭邮箱登录。
          */
         LoginRequest: {
             /**
              * Username
-             * @description 用户名
+             * @description 登录标识（注册邮箱或用户名）
              */
             username: string;
             /**
@@ -3395,6 +5937,47 @@ export interface components {
              * @description 密码
              */
             password: string;
+            /**
+             * Tenant Slug
+             * @description 租户标识（预留字段，暂不消费）
+             */
+            tenant_slug?: string | null;
+        };
+        /** MenuCreateRequest */
+        MenuCreateRequest: {
+            /**
+             * Parent Id
+             * @description 父菜单（NULL=顶级）
+             */
+            parent_id?: number;
+            /** Name */
+            name: string;
+            /** Path */
+            path?: string;
+            /** Icon */
+            icon?: string;
+            /** Permission */
+            permission?: string;
+            /**
+             * Sort Order
+             * @default 100
+             */
+            sort_order: number;
+        };
+        /** MenuUpdateRequest */
+        MenuUpdateRequest: {
+            /** Name */
+            name?: string;
+            /** Path */
+            path?: string;
+            /** Icon */
+            icon?: string;
+            /** Permission */
+            permission?: string;
+            /** Sort Order */
+            sort_order?: number;
+            /** Visible */
+            visible?: boolean;
         };
         /**
          * NewapiChannelResponse
@@ -3488,15 +6071,16 @@ export interface components {
         };
         /**
          * NewapiOverviewResponse
-         * @description 中转站总览（远程渠道 + 本地统计）
+         * @description 值班总览（网关模型/部署 + 本地统计）
          *
-         *     远程不可达/开关关闭时 available=false 并附 reason（HTTP 仍 200，页面降级展示），
-         *     本地统计（events_24h / latest_batch_*）始终返回（本地表，不依赖 new-api 可达）。
+         *     管理面不可达时 available=false（HTTP 仍 200，不 500）。
+         *     空态 71.2 / 降级 71.3 冻结句在 empty_state / degrade_state。
+         *     本地统计始终返回。channels 一周期保留为空（不再映射 new-api 渠道）。
          */
         NewapiOverviewResponse: {
             /**
              * Available
-             * @description new-api 管理面是否可达
+             * @description LLM 网关管理面是否可达
              * @default true
              */
             available: boolean;
@@ -3506,13 +6090,38 @@ export interface components {
              */
             reason?: string | null;
             /**
+             * Empty State
+             * @description 71.2 / U25.2 空态句
+             */
+            empty_state?: string | null;
+            /**
+             * Degrade State
+             * @description 71.3 / U25.4 降级句
+             */
+            degrade_state?: string | null;
+            /**
+             * Duty Page State
+             * @description 页级三态 empty / degrade / live；互斥，有活行时不得 empty/degrade
+             */
+            duty_page_state?: string | null;
+            /**
+             * Models
+             * @description 网关模型列表
+             */
+            models?: components["schemas"]["GatewayModelResponse"][];
+            /**
+             * Deployments
+             * @description 网关部署列表
+             */
+            deployments?: components["schemas"]["GatewayModelResponse"][];
+            /**
              * Channels
-             * @description 渠道列表
+             * @description expand：不再填充 new-api 渠道
              */
             channels?: components["schemas"]["NewapiChannelResponse"][];
             /**
              * Total
-             * @description 渠道总数
+             * @description 模型/部署条数
              * @default 0
              */
             total: number;
@@ -3534,6 +6143,144 @@ export interface components {
             latest_batch_verdicts?: {
                 [key: string]: number;
             };
+        };
+        /**
+         * OrderConfirmIn
+         * @description 超管确认收款。order_id 若出现必须等于路径 id（GWT-M31.5）。
+         */
+        OrderConfirmIn: {
+            /** Order Id */
+            order_id?: number | null;
+        };
+        /** OrderCreate */
+        OrderCreate: {
+            /** Plan Id */
+            plan_id: number;
+            /**
+             * Channel
+             * @default offline
+             * @enum {string}
+             */
+            channel: "offline" | "alipay" | "wechat";
+        };
+        /**
+         * OrderOut
+         * @description 订单读模型（GWT-50.3）：档位名称 + 状态 + 金额（用户可见=元，与定价页同一数字）。
+         */
+        OrderOut: {
+            /** Id */
+            id: number;
+            /** Plan Id */
+            plan_id?: number | null;
+            /** Amount Cents */
+            amount_cents: number;
+            /** Status */
+            status: string;
+            /** Channel */
+            channel?: string | null;
+            /** Paid At */
+            paid_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Tenant Id */
+            tenant_id?: number | null;
+            /** Product Code */
+            product_code?: string | null;
+            /** Order No */
+            order_no?: string | null;
+            /** Channel Trade No */
+            channel_trade_no?: string | null;
+            /** Merchant Id Snapshot */
+            merchant_id_snapshot?: string | null;
+            /** Fail Reason */
+            fail_reason?: string | null;
+            /** Late Notify At */
+            late_notify_at?: string | null;
+            /** Verified At */
+            verified_at?: string | null;
+            /** Fulfilled At */
+            fulfilled_at?: string | null;
+            /** Unpaid At */
+            unpaid_at?: string | null;
+            /**
+             * Plan Name
+             * @default
+             */
+            plan_name: string;
+            /** Tenant Name */
+            tenant_name?: string | null;
+            /** Pay Url */
+            pay_url?: string | null;
+            /** Qr Code Url */
+            qr_code_url?: string | null;
+            /** Qr Code Image */
+            qr_code_image?: string | null;
+            /**
+             * Amount Yuan
+             * @description 用户可见金额（元）：amount_cents/100，免心算分（GWT-50.3，Q-PRICE 不撤 ¥299）。
+             */
+            readonly amount_yuan: number;
+        };
+        /** OutboundKeyCreate */
+        OutboundKeyCreate: {
+            /** Name */
+            name?: string | null;
+        };
+        /**
+         * OutboundKeyIssuedOut
+         * @description 签发响应：明文只回这一次。
+         */
+        OutboundKeyIssuedOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name?: string | null;
+            /** Key Prefix */
+            key_prefix: string;
+            /**
+             * Status
+             * @description active=已签发；revoked=已吊销（revoked_at 派生）
+             */
+            status: string;
+            /** Revoked At */
+            revoked_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Plaintext Key
+             * @description 明文钥匙；仅签发响应返回一次，库内只存 hash
+             */
+            plaintext_key: string;
+        };
+        /**
+         * OutboundKeyOut
+         * @description 列表/详情行：只见前缀与状态（GWT-51.8），不见明文。
+         */
+        OutboundKeyOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name?: string | null;
+            /** Key Prefix */
+            key_prefix: string;
+            /**
+             * Status
+             * @description active=已签发；revoked=已吊销（revoked_at 派生）
+             */
+            status: string;
+            /** Revoked At */
+            revoked_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** PaginatedData[AiPlanResponse] */
         PaginatedData_AiPlanResponse_: {
@@ -3800,6 +6547,138 @@ export interface components {
              */
             request_id?: string | null;
         };
+        /** PatchExamplesRequest */
+        PatchExamplesRequest: {
+            /** Examples */
+            examples: string[];
+        };
+        /** PatchFeaturedRequest */
+        PatchFeaturedRequest: {
+            /** Featured */
+            featured: boolean;
+        };
+        /** PatchInstallRequest */
+        PatchInstallRequest: {
+            /** Enabled */
+            enabled?: number | null;
+            /** Trusted */
+            trusted?: number | null;
+        };
+        /** PatchLicenseOverrideRequest */
+        PatchLicenseOverrideRequest: {
+            /** Public License Override */
+            public_license_override: number;
+        };
+        /** PatchListingRequest */
+        PatchListingRequest: {
+            /** Listing State */
+            listing_state: string;
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+        };
+        /**
+         * PaymentChannelCredentialPut
+         * @description 超管保存/轮换：secrets 为明文整包，服务端 Fernet 后落库。
+         */
+        PaymentChannelCredentialPut: {
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "alipay" | "wechat";
+            /** Merchant No */
+            merchant_no: string;
+            /** Secrets */
+            secrets: string;
+        };
+        /** PermissionCreateRequest */
+        PermissionCreateRequest: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /**
+             * Group Name
+             * @default 自定义
+             */
+            group_name: string;
+            /**
+             * Ptype
+             * @default btn
+             */
+            ptype: string;
+            /** Description */
+            description?: string;
+        };
+        /** PermissionUpdateRequest */
+        PermissionUpdateRequest: {
+            /** Name */
+            name?: string;
+            /** Group Name */
+            group_name?: string;
+            /** Description */
+            description?: string;
+        };
+        /** PlanOut */
+        PlanOut: {
+            /** Id */
+            id: number;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Price Cents */
+            price_cents: number;
+            /** Period */
+            period: string;
+            /** Quota Json */
+            quota_json?: string | null;
+            /** Is Public */
+            is_public: number;
+        };
+        /** PowerMarketSwitchBody */
+        PowerMarketSwitchBody: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
+         * ProbeTriggerRequest
+         * @description T-33 / GWT-98.4：立即探测请求（对单个网关渠道发起一次探针）
+         */
+        ProbeTriggerRequest: {
+            /**
+             * Gateway Ref
+             * @description 网关模型 string 引用
+             */
+            gateway_ref: string;
+        };
+        /**
+         * ProbeTriggerResponse
+         * @description 立即探测回执：触发即返回（accepted + batch_id），探测在后台执行不阻塞轮询循环
+         */
+        ProbeTriggerResponse: {
+            /**
+             * Accepted
+             * @description true = 已受理（同渠道在飞时复用原批次）
+             */
+            accepted: boolean;
+            /** Gateway Ref */
+            gateway_ref: string;
+            /**
+             * Batch Id
+             * @description 探测批次 id（manual- 前缀；未受理为空）
+             * @default
+             */
+            batch_id: string;
+            /**
+             * Reason
+             * @description 未受理原因（用户可见中文）
+             */
+            reason?: string | null;
+        };
         /**
          * ProbeVerdict
          * @description 探针判定枚举
@@ -3848,6 +6727,30 @@ export interface components {
             models: components["schemas"]["ProviderModelEntry"][];
         };
         /**
+         * PublicEventIn
+         * @description 官网无鉴权埋点（仅页浏览 / CTA；失败由服务层吞掉）
+         */
+        PublicEventIn: {
+            /**
+             * Event Name
+             * @enum {string}
+             */
+            event_name: "official_page_viewed" | "official_cta_clicked";
+            /** Anonymous Id */
+            anonymous_id: string;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /** Props */
+            props?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** PutAliasRequest */
+        PutAliasRequest: {
+            /** Slug */
+            slug: string;
+        };
+        /**
          * RegisterRequest
          * @description 注册请求
          */
@@ -3867,6 +6770,158 @@ export interface components {
              * @description 密码（至少8位）
              */
             password: string;
+        };
+        /** RelayGroupCreate */
+        RelayGroupCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Rpm Limit
+             * @default 0
+             */
+            rpm_limit: number;
+            /**
+             * Tpm Limit
+             * @default 0
+             */
+            tpm_limit: number;
+            /** Models */
+            models?: string[];
+        };
+        /** RelayGroupOut */
+        RelayGroupOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Rpm Limit */
+            rpm_limit: number;
+            /** Tpm Limit */
+            tpm_limit: number;
+            /** Models */
+            models?: string[];
+            /** Status */
+            status: string;
+            /** Tenant Id */
+            tenant_id?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** RelayGroupUpdate */
+        RelayGroupUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Rpm Limit */
+            rpm_limit?: number | null;
+            /** Tpm Limit */
+            tpm_limit?: number | null;
+            /** Models */
+            models?: string[] | null;
+            /** Status */
+            status?: string | null;
+        };
+        /**
+         * RelaySkuPageOut
+         * @description 「我的渠道组」SKU 闸读模型。status 来自权益表，不是组行 COUNT。
+         */
+        RelaySkuPageOut: {
+            /** Status */
+            status: string;
+            /** Period End */
+            period_end?: string | null;
+            /** Can Issue */
+            can_issue: boolean;
+            /**
+             * Empty Title
+             * @default
+             */
+            empty_title: string;
+            /**
+             * Empty Hint
+             * @default
+             */
+            empty_hint: string;
+            upgrade?: components["schemas"]["RelayUpgradeOut"] | null;
+        };
+        /** RelayTokenCreate */
+        RelayTokenCreate: {
+            /** Group Id */
+            group_id: number;
+            /** Name */
+            name: string;
+            /**
+             * Quota Tokens
+             * @default -1
+             */
+            quota_tokens: number;
+        };
+        /** RelayTokenOut */
+        RelayTokenOut: {
+            /** Id */
+            id: number;
+            /** Group Id */
+            group_id: number;
+            /** Name */
+            name: string;
+            /** Key Prefix */
+            key_prefix: string;
+            /** Quota Tokens */
+            quota_tokens: number;
+            /** Used Tokens */
+            used_tokens: number;
+            /** Status */
+            status: string;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Revoked At */
+            revoked_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Plaintext Key */
+            plaintext_key?: string | null;
+        };
+        /** RelayUpgradeOut */
+        RelayUpgradeOut: {
+            /** Action */
+            action: string;
+            /** Product */
+            product: string;
+            /** Checkout Path */
+            checkout_path?: string | null;
+            /** Message */
+            message: string;
+        };
+        /**
+         * RoleCreateRequest
+         * @description 新建自定义角色
+         */
+        RoleCreateRequest: {
+            /** Role Key */
+            role_key: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string;
+            /** Permissions */
+            permissions?: string[];
+        };
+        /**
+         * RoleUpdateRequest
+         * @description 角色编辑（显示名/说明/权限码集合）
+         */
+        RoleUpdateRequest: {
+            /** Name */
+            name?: string;
+            /** Description */
+            description?: string;
+            /** Permissions */
+            permissions?: string[];
         };
         /**
          * RunSpiderRequest
@@ -3945,6 +7000,13 @@ export interface components {
              * @default yml_seed
              */
             source: string;
+            /**
+             * Params
+             * @description 定义参数（再次打开编辑时回显新值，GWT-103.1）
+             */
+            params?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * SpiderFileListResponse
@@ -3990,6 +7052,13 @@ export interface components {
              * @default
              */
             description: string;
+            /**
+             * Params
+             * @description 定义参数（T-39：新增任务表单预填默认值）
+             */
+            params?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * SpiderParamField
@@ -4137,6 +7206,11 @@ export interface components {
             retry_count: number;
             /** Error Message */
             error_message?: string | null;
+            /**
+             * Worker Offline
+             * @default false
+             */
+            worker_offline: boolean;
             /** Created At */
             created_at?: string | null;
             /** Updated At */
@@ -4160,6 +7234,24 @@ export interface components {
              * @default []
              */
             fields: components["schemas"]["SpiderParamField"][];
+        };
+        /** SubscribeRequest */
+        SubscribeRequest: {
+            /** Host */
+            host?: string | null;
+        };
+        /** SubscriptionOut */
+        SubscriptionOut: {
+            /** Id */
+            id: number;
+            /** Plan Id */
+            plan_id: number;
+            /** Status */
+            status: string;
+            /** Current Period End */
+            current_period_end?: string | null;
+            /** Tenant Id */
+            tenant_id?: number | null;
         };
         /**
          * TaskControlRequest
@@ -4324,6 +7416,11 @@ export interface components {
              * @description 管理员密码（至少 8 位）
              */
             admin_password: string;
+            /**
+             * Anonymous Id
+             * @description 浏览会话匿名身份
+             */
+            anonymous_id?: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -4437,6 +7534,37 @@ export interface operations {
         };
     };
     get_permissions_api_v1_auth_permissions_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dynamic_menus_api_v1_auth_menus_get: {
         parameters: {
             query?: {
                 key?: string;
@@ -4609,6 +7737,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    health_deep_api_v1_health_deep_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -5785,10 +8944,152 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description active=默认（不含已删）；deleted=已删除；disabled=已停用 */
+                status?: string;
+                /** @description 按登录名筛选 */
+                q?: string | null;
                 key?: string;
             };
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_create_user_api_v1_admin_users_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUserCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_delete_user_api_v1_admin_users__user_id__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_update_user_api_v1_admin_users__user_id__patch: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUserUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_restore_user_api_v1_admin_users__user_id__restore_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                user_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -5885,6 +9186,43 @@ export interface operations {
             };
         };
     };
+    create_tenant_minimal_api_v1_admin_tenants_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     patch_tenant_api_v1_admin_tenants__tenant_id__patch: {
         parameters: {
             query?: {
@@ -5903,6 +9241,812 @@ export interface operations {
                 };
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_power_market_switch_api_v1_admin_power_market_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_power_market_switch_api_v1_admin_power_market_put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PowerMarketSwitchBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_dead_items_api_v1_admin_dead_items_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_dead_items_api_v1_admin_dead_items_delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discard_dead_item_api_v1_admin_dead_items__index__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                index: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notify_config_api_v1_admin_notify_config_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_notify_config_api_v1_admin_notify_config_put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    webhook_status_api_v1_admin_webhook_status_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_roles_api_v1_rbac_roles_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_role_api_v1_rbac_roles_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_role_api_v1_rbac_roles__role_key__put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                role_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_role_api_v1_rbac_roles__role_key__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                role_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_departments_api_v1_rbac_departments_get: {
+        parameters: {
+            query: {
+                tenant_id: number;
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_department_api_v1_rbac_departments_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DepartmentCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_department_api_v1_rbac_departments__department_id__put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                department_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DepartmentUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_department_api_v1_rbac_departments__department_id__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                department_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    menu_tree_api_v1_rbac_menus_tree_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_menu_api_v1_rbac_menus_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_menu_api_v1_rbac_menus__menu_id__put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                menu_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_menu_api_v1_rbac_menus__menu_id__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                menu_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_permissions_api_v1_rbac_permissions_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_permission_api_v1_rbac_permissions_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PermissionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_permission_api_v1_rbac_permissions__permission_id__put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                permission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PermissionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_permission_api_v1_rbac_permissions__permission_id__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                permission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -6656,6 +10800,39 @@ export interface operations {
             };
         };
     };
+    deactivate_provider_api_v1_llm_providers__provider_id__deactivate_put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                provider_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_LlmProviderResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     test_provider_connectivity_api_v1_llm_providers__provider_id__test_post: {
         parameters: {
             query?: {
@@ -6723,7 +10900,7 @@ export interface operations {
     list_events_api_v1_newapi_events_get: {
         parameters: {
             query?: {
-                /** @description 按 new-api 渠道 ID 过滤 */
+                /** @description 按渠道 ID 过滤（BIGINT，类型不改） */
                 channel_id?: number | null;
                 /** @description 页码（1 起） */
                 page?: number;
@@ -6760,7 +10937,7 @@ export interface operations {
     list_probe_results_api_v1_newapi_probe_results_get: {
         parameters: {
             query?: {
-                /** @description 按 new-api 渠道 ID 过滤 */
+                /** @description 按渠道 ID 过滤（BIGINT，类型不改） */
                 channel_id?: number | null;
                 /** @description 页码（1 起） */
                 page?: number;
@@ -6794,6 +10971,41 @@ export interface operations {
             };
         };
     };
+    trigger_probe_api_v1_newapi_probe_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProbeTriggerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_ProbeTriggerResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_channels_with_config_api_v1_newapi_channels_get: {
         parameters: {
             query?: {
@@ -6811,7 +11023,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ApiResponse_list_ChannelWithConfigResponse__"];
+                    "application/json": components["schemas"]["ApiResponse_list_GatewayModelWithConfigResponse__"];
                 };
             };
             /** @description Validation Error */
@@ -6882,6 +11094,146 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiResponse_ChannelConfigUpdateResult_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_model_config_api_v1_newapi_models__gateway_ref__config_put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                gateway_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelConfigInfo"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_GatewayConfigUpdateResult_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_model_config_api_v1_newapi_models__gateway_ref__config_delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                gateway_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_GatewayConfigUpdateResult_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_gateway_model_api_v1_newapi_models_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayModelWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_GatewayModelResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_platform_upstream_api_v1_newapi_upstreams_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayUpstreamWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_GatewayModelResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -7473,18 +11825,37 @@ export interface operations {
             };
         };
     };
-    public_list_skills_api_v1_public_skills_get: {
+    public_reserved_aliases_api_v1_public_capabilities_aliases_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    public_list_capabilities_api_v1_public_capabilities_get: {
         parameters: {
             query?: {
+                type?: string | null;
+                category?: string | null;
+                q?: string | null;
+                host?: string | null;
                 page?: number;
                 page_size?: number;
-                q?: string | null;
-                category?: string | null;
-                status?: string | null;
-                tier?: string | null;
-                source_type?: string | null;
-                industry?: string | null;
-                sort?: string;
+                anonymous_id?: string | null;
+                sort?: string | null;
                 key?: string;
             };
             header?: never;
@@ -7492,6 +11863,150 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    public_capability_media_api_v1_public_capabilities__asset_type___name__media__kind__get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    public_subscribe_capability_api_v1_public_capabilities__asset_type___name__subscribe_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SubscribeRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    public_get_capability_api_v1_public_capabilities__asset_type___name__get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    public_subscribe_skill_api_v1_public_skills__name__subscribe_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SubscribeRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -7546,13 +12061,16 @@ export interface operations {
             };
         };
     };
-    public_list_capabilities_api_v1_public_capabilities_get: {
+    public_list_skills_api_v1_public_skills_get: {
         parameters: {
             query?: {
-                type?: string;
-                category?: string;
+                q?: string | null;
+                category?: string | null;
+                type?: string | null;
+                host?: string | null;
                 page?: number;
                 page_size?: number;
+                anonymous_id?: string | null;
                 key?: string;
             };
             header?: never;
@@ -7628,6 +12146,39 @@ export interface operations {
                 };
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_member_api_v1_members__member_id__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                member_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -7727,7 +12278,199 @@ export interface operations {
             };
         };
     };
+    member_audit_logs_api_v1_members_audit_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     tenant_usage_overview_api_v1_tenants_me_usage_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tenant_usage_by_member_api_v1_tenants_me_usage_by_member_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_delivery_webhook_api_v1_tenants_me_delivery_webhook_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_delivery_webhook_api_v1_tenants_me_delivery_webhook_put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryWebhookIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quota_upgrade_intent_api_v1_tenants_me_quota_upgrade_intent_get: {
+        parameters: {
+            query?: {
+                product?: string;
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_tenant_quota_api_v1_tenants_me_quota_patch: {
         parameters: {
             query?: {
                 key?: string;
@@ -7793,13 +12536,244 @@ export interface operations {
             };
         };
     };
+    get_ops_contact_api_v1_public_ops_contact_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    sync_agents_hub_api_v1_capabilities_sync_agents_hub_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prune_missing_assets_api_v1_capabilities_assets_prune_missing_post: {
+        parameters: {
+            query?: {
+                /** @description true=同构预览不落库（QA-9） */
+                dry_run?: boolean;
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_capability_featured_api_v1_capabilities__asset_type___name__featured_patch: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchFeaturedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_capability_examples_api_v1_capabilities__asset_type___name__examples_patch: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchExamplesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_tree_import_endpoint_api_v1_capabilities_import_tree_preview_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_preview_tree_import_endpoint_api_v1_capabilities_import_tree_preview_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_tree_import_endpoint_api_v1_capabilities_import_tree_confirm_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_confirm_tree_import_endpoint_api_v1_capabilities_import_tree_confirm_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_capabilities_api_v1_capabilities_get: {
         parameters: {
             query?: {
-                /** @description skill/plugin/expert/expert_team */
+                /** @description skill/plugin/command/agent/team（expert/expert_team 一周期可读） */
                 type?: string;
                 category?: string;
                 status?: string;
+                listing_state?: string;
                 q?: string;
                 page?: number;
                 page_size?: number;
@@ -7831,14 +12805,81 @@ export interface operations {
             };
         };
     };
-    get_capability_detail_api_v1_capabilities__asset_type___name__get: {
+    list_capability_sources_api_v1_capabilities_sources_get: {
         parameters: {
             query?: {
                 key?: string;
             };
             header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_capability_source_api_v1_capabilities_sources_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSourceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_capability_source_api_v1_capabilities_sources__name__sync_post: {
+        parameters: {
+            query?: {
+                /** @description 源里已经没有的行是否软删收回；缺省=只 upsert，不收回 */
+                retract?: boolean;
+                key?: string;
+            };
+            header?: never;
             path: {
-                asset_type: string;
                 name: string;
             };
             cookie?: never;
@@ -7865,7 +12906,7 @@ export interface operations {
             };
         };
     };
-    scan_plugins_api_v1_capabilities_scan_plugins_post: {
+    backfill_first_party_listing_api_v1_capabilities_backfill_first_party_post: {
         parameters: {
             query?: {
                 key?: string;
@@ -7938,37 +12979,6 @@ export interface operations {
             path: {
                 name: string;
             };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    scan_experts_api_v1_capabilities_scan_experts_post: {
-        parameters: {
-            query?: {
-                key?: string;
-            };
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -8116,6 +13126,1694 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_assets_api_v1_capabilities_import_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_assets_api_v1_capabilities_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_capability_installs_api_v1_capabilities_installs_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_capability_install_api_v1_capabilities_installs__install_id__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                install_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_capability_install_api_v1_capabilities_installs__install_id__patch: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                install_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchInstallRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correct_capability_asset_api_v1_capabilities__asset_type___name__correct_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_capability_listing_api_v1_capabilities__asset_type___name__listing_patch: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchListingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_license_override_api_v1_capabilities__asset_type___name__license_override_patch: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchLicenseOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_capability_alias_api_v1_capabilities__asset_type___name__alias_put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutAliasRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    subscribe_capability_api_v1_capabilities__asset_type___name__subscribe_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SubscribeRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_capability_references_api_v1_capabilities__asset_type___name__references_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_capability_detail_api_v1_capabilities__asset_type___name__get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                asset_type: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_api_keys_api_v1_api_keys_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_list_ApiKeyOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_api_key_api_v1_api_keys_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_ApiKeyCreated_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_api_key_api_v1_api_keys__key_id__revoke_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                key_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_ApiKeyOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_plans_api_v1_billing_plans_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_list_PlanOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_checkout_api_v1_billing_checkout_get: {
+        parameters: {
+            query?: {
+                product?: string;
+                referrer_surface?: string | null;
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_checkout_api_v1_billing_checkout_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckoutCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_OrderOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    channel_notify_api_v1_billing_notify__channel__post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                channel: "alipay" | "wechat";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelNotifyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_subscription_api_v1_billing_subscription_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_Union_SubscriptionOut__NoneType__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_orders_api_v1_billing_orders_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_list_OrderOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_order_api_v1_billing_orders_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_OrderOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_pay_intent_api_v1_billing_orders__order_id__pay_intent_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_OrderOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pending_orders_api_v1_billing_admin_orders_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_list_OrderOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_order_api_v1_billing_orders__order_id__confirm_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["OrderConfirmIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_OrderOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_litellm_keys_api_v1_litellm_keys_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_list_dict_str__Any___"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_litellm_key_api_v1_litellm_keys_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LitellmKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_LitellmKeyOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_litellm_key_api_v1_litellm_keys_delete: {
+        parameters: {
+            query: {
+                key: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_NoneType_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    litellm_spend_api_v1_litellm_spend_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_list_dict_str__Any___"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_public_event_api_v1_public_events_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicEventIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_product_events_api_v1_product_events_get: {
+        parameters: {
+            query?: {
+                event_name?: string | null;
+                tenant_id?: number | null;
+                occurred_from?: string | null;
+                occurred_to?: string | null;
+                is_internal_fixture?: boolean | null;
+                skip?: number;
+                limit?: number;
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_internal_fixture_tenants_api_v1_admin_internal_fixture_tenants_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_internal_fixture_tenant_api_v1_admin_internal_fixture_tenants_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InternalFixtureTenantCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_internal_fixture_tenant_api_v1_admin_internal_fixture_tenants__tenant_id__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_payment_credentials_api_v1_admin_payment_credentials_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_payment_credential_api_v1_admin_payment_credentials_put: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentChannelCredentialPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_payment_credential_api_v1_admin_payment_credentials__channel__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                channel: "alipay" | "wechat";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validate_payment_credential_api_v1_admin_payment_credentials__channel__validate_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                channel: "alipay" | "wechat";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sku_page_api_v1_relay_sku_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_RelaySkuPageOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_groups_api_v1_relay_groups_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_list_RelayGroupOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_group_api_v1_relay_groups_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelayGroupCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_RelayGroupOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_group_api_v1_relay_groups__group_id__patch: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                group_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelayGroupUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_RelayGroupOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tokens_api_v1_relay_tokens_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_list_RelayTokenOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    issue_token_api_v1_relay_tokens_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelayTokenCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_RelayTokenOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_by_plaintext_api_v1_relay_tokens_by_key_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: {
+                "X-Relay-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_RelayTokenOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_token_api_v1_relay_tokens__token_id__get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                token_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_RelayTokenOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_token_api_v1_relay_tokens__token_id__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                token_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_RelayTokenOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_token_usage_api_v1_relay_tokens_refresh_usage_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_list_RelayTokenOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_keys_api_v1_outbound_keys_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_list_OutboundKeyOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    issue_key_api_v1_outbound_keys_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutboundKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_OutboundKeyIssuedOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_key_api_v1_outbound_keys__key_id__delete: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                key_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_OutboundKeyOut_"];
                 };
             };
             /** @description Validation Error */
@@ -8361,6 +15059,68 @@ export interface operations {
         };
     };
     get_public_stats_external_v1_public_stats_get: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alipay_notify_external_v1_payments_alipay_notify_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    wechat_notify_external_v1_payments_wechat_notify_post: {
         parameters: {
             query?: {
                 key?: string;

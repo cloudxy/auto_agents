@@ -21,7 +21,6 @@ const perm = {
 jest.mock('../services/capabilities', () => ({
   listAssets: jest.fn().mockResolvedValue({ total: 0, items: [] }),
   scanPlugins: jest.fn(),
-  scanExperts: jest.fn(),
   createTeam: jest.fn(),
   verifyPlugin: jest.fn(),
   patchListing: jest.fn(),

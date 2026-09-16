@@ -12,7 +12,6 @@ from platform_core.models.role import Role
 
 LISTING = "/api/v1/capabilities/skill/{}/listing"
 SYNC_HUB = "/api/v1/capabilities/sync-agents-hub"
-SCAN_EXPERTS = "/api/v1/capabilities/scan-experts"
 SCAN_SKILLS = "/api/v1/skills/scan"
 SOURCES = "/api/v1/capabilities/sources"
 CHANNEL_CFG = "/api/v1/newapi/channels/3/config"
@@ -61,8 +60,8 @@ def test_gwt_u12_2_tenant_admin_listing_scan_404(
     _assert_missing_shape(listing, ghost)
     scan = admin_client.post(SYNC_HUB)
     _assert_missing_shape(scan, ghost)
-    experts = admin_client.post(SCAN_EXPERTS)
-    _assert_missing_shape(experts, ghost)
+    # K4：scan-experts 已整条退役（路由表里不存在），对任何调用者都是路由级
+    # 404——不再是这条用例要验证的"平台写面越权守卫"命中，挪出遍历列表。
     skills = admin_client.post(SCAN_SKILLS)
     _assert_missing_shape(skills, ghost)
     sources = admin_client.get(SOURCES)
