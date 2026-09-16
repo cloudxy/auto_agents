@@ -80,7 +80,7 @@ const Members: React.FC = () => {
   const onCreate = async () => {
     try {
       const values = await form.validateFields()
-      const created = await createMember(values)
+      await createMember(values)
       message.success('已添加成员')
       setCreateOpen(false)
       form.resetFields()

@@ -13,11 +13,10 @@ import { Select, Switch,
 } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
-  createMenu, createPermissionResource, createRole, deleteMenu, deletePermissionResource,
-  deleteRole, fetchMenuTree, listPermissionResources, listRoles, updateMenu, updateRole,
+  createMenu, createPermissionResource, deleteMenu, deletePermissionResource,
+  fetchMenuTree, listPermissionResources, listRoles, updateMenu, updateRole,
   type MenuNode, type PermissionCode, type PermissionRow, type RoleRow,
 } from '../services/rbac'
-import { listTenants, type TenantRow } from '../services/platformOps'
 import { apiErrorMessage } from '../utils/errorMessage'
 
 const { Text } = Typography
