@@ -57,6 +57,7 @@ class CapabilityService:
                 "listing_state": r.listing_state,
                 "listed_at": r.listed_at.isoformat() if r.listed_at else None,
                 "source_type": r.source_type,
+                "logo": r.logo, "background": r.background,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             }
             for r in rows

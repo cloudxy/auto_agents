@@ -114,6 +114,12 @@ def test_public_fields_whitelist_enforced(db_client, db_engine, db_session, libr
         "score", "status", "source_url", "source_author", "updated_at", "skill_md",
         "download_count",
         "asset_type", "listing_state", "license", "subscribable", "hosts", "includes",
+        # feat-agents-market WIP：logo/background 以相对媒体 href 外发
+        "logo", "background",
+        # feat-agents-market T-04：CTA 闸语义 + 示例区（spec FR-05 新增投影位）
+        "gate_open", "examples",
+        # feat-agents-market T-06：featured（AD-6 综合序权重）
+        "featured",
     }
     assert set(data.keys()) <= allowed, f"越界字段: {set(data.keys()) - allowed}"
 

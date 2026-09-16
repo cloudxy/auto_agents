@@ -75,6 +75,7 @@ GET /api/v1/product-events
 GET /api/v1/public/capabilities
 GET /api/v1/public/capabilities/aliases
 GET /api/v1/public/capabilities/{asset_type}/{name}
+GET /api/v1/public/capabilities/{asset_type}/{name}/media/{kind}
 GET /api/v1/public/ops-contact
 GET /api/v1/public/skills
 GET /api/v1/public/skills/{name}
@@ -126,6 +127,8 @@ GET /redoc
 PATCH /api/v1/admin/tenants/{tenant_id}
 PATCH /api/v1/admin/users/{user_id}
 PATCH /api/v1/capabilities/installs/{install_id}
+PATCH /api/v1/capabilities/{asset_type}/{name}/examples
+PATCH /api/v1/capabilities/{asset_type}/{name}/featured
 PATCH /api/v1/capabilities/{asset_type}/{name}/license-override
 PATCH /api/v1/capabilities/{asset_type}/{name}/listing
 PATCH /api/v1/members/{member_id}
@@ -153,13 +156,16 @@ POST /api/v1/billing/checkout
 POST /api/v1/billing/notify/{channel}
 POST /api/v1/billing/orders
 POST /api/v1/billing/orders/{order_id}/confirm
+POST /api/v1/capabilities/assets/prune-missing
 POST /api/v1/capabilities/backfill-first-party
 POST /api/v1/capabilities/import
+POST /api/v1/capabilities/import/tree/confirm
+POST /api/v1/capabilities/import/tree/preview
 POST /api/v1/capabilities/plugins/{name}/verify
 POST /api/v1/capabilities/scan-experts
-POST /api/v1/capabilities/scan-plugins
 POST /api/v1/capabilities/sources
 POST /api/v1/capabilities/sources/{name}/sync
+POST /api/v1/capabilities/sync-agents-hub
 POST /api/v1/capabilities/teams
 POST /api/v1/capabilities/{asset_type}/{name}/correct
 POST /api/v1/capabilities/{asset_type}/{name}/subscribe

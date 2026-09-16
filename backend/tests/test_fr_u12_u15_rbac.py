@@ -11,7 +11,7 @@ from platform_core.models.operation_log import OperationLog
 from platform_core.models.role import Role
 
 LISTING = "/api/v1/capabilities/skill/{}/listing"
-SCAN_PLUGINS = "/api/v1/capabilities/scan-plugins"
+SYNC_HUB = "/api/v1/capabilities/sync-agents-hub"
 SCAN_EXPERTS = "/api/v1/capabilities/scan-experts"
 SCAN_SKILLS = "/api/v1/skills/scan"
 SOURCES = "/api/v1/capabilities/sources"
@@ -59,7 +59,7 @@ def test_gwt_u12_2_tenant_admin_listing_scan_404(
         LISTING.format("u122-row"), json={"listing_state": "listed"},
     )
     _assert_missing_shape(listing, ghost)
-    scan = admin_client.post(SCAN_PLUGINS)
+    scan = admin_client.post(SYNC_HUB)
     _assert_missing_shape(scan, ghost)
     experts = admin_client.post(SCAN_EXPERTS)
     _assert_missing_shape(experts, ghost)

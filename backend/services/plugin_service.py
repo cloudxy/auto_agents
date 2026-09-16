@@ -1,6 +1,9 @@
-"""插件资产域服务（P6 C3）：plugin.json 解析 + 扫描入库 + CRUD + MCP 验证"""
-import json
-from backend.config_consts import (SKILLS_LIBRARY_ROOT)
+"""插件资产域服务（P6 C3）：plugin.json 解析 + 插件详情 + MCP 验证
+
+feat-agents-market AD-1：破坏性扫描入口 scan_plugins / _retract_missing_plugins
+已退役（.agents 软删 bug 根因，FR-01 验收线 = 不存在能造成软删的扫描入口）。
+扫描/同步统一走 power_market.agents_hub（.agents 真相源，非破坏 upsert）。
+"""
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -8,10 +11,9 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from platform_core.exceptions import NotFoundException, ValidationException
+from platform_core.exceptions import NotFoundException
 from platform_core.logger import get_logger
 from platform_core.models.capability import CapabilityAsset, CapabilityPlugin
-from platform_core.models.skill import SkillJob
 
 logger = get_logger("service.plugin")
 
@@ -42,158 +44,6 @@ class PluginService:
 
     def __init__(self, session: AsyncSession):
         self.session = session
-
-    async def scan_plugins(self, root: Optional[Path] = None) -> dict:
-        """扫描 capability-library/plugins/：解析 plugin.json → asset + detail upsert
-
-        D16：本入口永远走本机 plugins/ iterdir，不假装已切源注册表。
-        """
-        from config import settings
-
-        logger.info("plugin.scan_plugins.start")
-
-        if root is None:
-            library_root = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT)))
-            root = library_root / "plugins"
-        root = Path(root)
-
-        job = SkillJob(job_type="scan_plugins", status="running", total=0, succeeded=0, failed=0)
-        self.session.add(job)
-        await self.session.flush()
-
-        dirs = sorted(d for d in root.iterdir() if d.is_dir()) if root.exists() else []
-        succeeded, failed = 0, 0
-        failed_names: list[str] = []
-        for plugin_dir in dirs:
-            try:
-                await self._upsert_from_dir(plugin_dir, root)
-                succeeded += 1
-            except Exception as exc:  # noqa: BLE001 单插件失败不中断整批
-                failed += 1
-                failed_names.append(plugin_dir.name)
-                logger.warning(f"插件解析失败 | dir={plugin_dir.name} err={exc}")
-        retracted = await self._retract_missing_plugins({d.name for d in dirs})
-
-        job.total, job.succeeded, job.failed, job.status = len(dirs), succeeded, failed, "done"
-        job.detail = {"failed": failed_names, "retracted": retracted}
-        await self.session.flush()
-        # ADR-0007 D2：快照先于 commit（job 属性 expire 后读取会抛 MissingGreenlet）
-        result = {"total": len(dirs), "succeeded": succeeded, "failed": failed,
-                  "failed_names": failed_names, "retracted": retracted,
-                  "job_id": job.id, "scan_mode": "local_plugins"}
-        if result["total"] == 0:
-            result["empty"] = True
-            result["message"] = "没有可同步的包"
-        await self.session.commit()
-        return result
-
-    async def _upsert_from_dir(self, plugin_dir: Path, root: Path) -> CapabilityAsset:
-        manifest_path = _plugin_manifest_path(plugin_dir)
-        if manifest_path is None:
-            raise ValidationException(message=f"plugin.json 缺失: {plugin_dir.name}", field="url")
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except ValueError as exc:
-            raise ValidationException(message=f"plugin.json 非法 JSON: {exc}", field="url") from exc
-        if not isinstance(manifest, dict) or not manifest.get("name"):
-            raise ValidationException(message="plugin.json 缺 name", field="url")
-
-        name = str(manifest["name"])
-        if name != plugin_dir.name:
-            logger.warning(f"插件名与目录名不一致（以目录名为准）: manifest={name} dir={plugin_dir.name}")
-            name = plugin_dir.name
-
-        # 内嵌技能（bundled skills）：列出 skills/ 子目录名（不递归入 skills 表——它们随插件分发）
-        bundled = []
-        skills_dir = plugin_dir / "skills"
-        if skills_dir.is_dir():
-            bundled = sorted(d.name for d in skills_dir.iterdir() if d.is_dir())
-
-        mcp_servers = manifest.get("mcpServers") or manifest.get("mcp_servers") or {}
-        hooks = manifest.get("hooks") or {}
-        commands = manifest.get("commands") or {}
-
-        asset = await self._load_alive_or_revive(name)
-        if asset is None:
-            asset = CapabilityAsset(
-                asset_type="plugin", name=name,
-                title=str(manifest.get("description") or "")[:_DESCRIPTION_MAX],
-                category="plugin", status="experimental",
-                source_type="self_built",
-                file_path=plugin_dir.relative_to(root.parent).as_posix(),
-                sync_state="ok",
-            )
-            self.session.add(asset)
-            await self.session.flush()
-        else:
-            asset.title = str(manifest.get("description") or "")[:_DESCRIPTION_MAX]
-            asset.sync_state = "ok"
-
-        detail = (await self.session.execute(
-            select(CapabilityPlugin).where(CapabilityPlugin.asset_id == asset.id)
-        )).scalar_one_or_none()
-        if detail is None:
-            detail = CapabilityPlugin(asset_id=asset.id)
-            self.session.add(detail)
-        detail.version = str(manifest.get("version") or "")
-        author = manifest.get("author") or {}
-        detail.author = str(author.get("name", "")) if isinstance(author, dict) else str(author)
-        detail.license = str(manifest.get("license") or "")
-        detail.manifest = manifest
-        detail.bundled_skills = bundled
-        detail.mcp_servers = mcp_servers
-        detail.hooks = hooks
-        detail.commands = commands
-        await self.session.flush()
-        return asset
-
-    async def _retract_missing_plugins(self, keep: set[str]) -> list[str]:
-        """本机 plugins/ 已无目录的插件行软收回（FR-88，GWT-88.2）。
-
-        只动未 attach 源的第一方行（source_id IS NULL）——源注册表行的
-        收回归 src_sync 单一归属。
-        """
-        rows = (await self.session.execute(
-            select(CapabilityAsset).where(
-                CapabilityAsset.asset_type == "plugin",
-                CapabilityAsset.source_id.is_(None),
-                CapabilityAsset.deleted_at.is_(None),
-            )
-        )).scalars().all()
-        now = _utcnow()
-        names: list[str] = []
-        for row in rows:
-            if row.name in keep:
-                continue
-            row.deleted_at = now
-            row.sync_state = "gone"
-            names.append(row.name)
-        if names:
-            logger.info(f"plugin.scan 收回缺失插件 | count={len(names)} names={names}")
-        await self.session.flush()
-        return names
-
-    async def _load_alive_or_revive(self, name: str) -> Optional[CapabilityAsset]:
-        """存活行优先；仅剩软收行时取最新并复活（目录回归，FR-88 软收可逆）"""
-        alive = (await self.session.execute(
-            select(CapabilityAsset).where(
-                CapabilityAsset.asset_type == "plugin",
-                CapabilityAsset.name == name,
-                CapabilityAsset.deleted_at.is_(None),
-            )
-        )).scalars().first()
-        if alive is not None:
-            return alive
-        dead = (await self.session.execute(
-            select(CapabilityAsset).where(
-                CapabilityAsset.asset_type == "plugin",
-                CapabilityAsset.name == name,
-            ).order_by(CapabilityAsset.id.desc())
-        )).scalars().first()
-        if dead is not None:
-            dead.deleted_at = None
-            dead.sync_state = "ok"
-        return dead
 
     async def get_plugin_detail(self, name: str) -> dict:
         """插件详情（asset + detail 投影）"""

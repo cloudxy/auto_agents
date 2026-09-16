@@ -35,18 +35,24 @@ def import_env(tmp_path: Path):
     """库根 + 沙箱根都收进 tmp_path（逃逸断言可快照整个 tmp 区）"""
     from config import settings
 
-    library = tmp_path / "library"
+    # AD-4c/OQ-2：legacy 导入落盘根已由 capability-library 统一切到 .agents，
+    # 故本夹具钉的是 SKILLS.AGENTS_ROOT；LIBRARY_ROOT 一并钉住，防止旧路径残留
+    # 写到仓库真库根（逃逸断言仍可快照整个 tmp 区）。
+    library = tmp_path / "library" / ".agents"
     sandbox = tmp_path / "_sandbox"
     library.mkdir(parents=True)
     originals = (
         settings.get("SKILLS.LIBRARY_ROOT"),
         settings.get("ASSET_IMPORT.SANDBOX_ROOT"),
+        settings.get("SKILLS.AGENTS_ROOT"),
     )
     settings.set("SKILLS.LIBRARY_ROOT", str(library))
     settings.set("ASSET_IMPORT.SANDBOX_ROOT", str(sandbox))
+    settings.set("SKILLS.AGENTS_ROOT", str(library))
     yield {"library": library, "sandbox": sandbox, "area": tmp_path}
     settings.set("SKILLS.LIBRARY_ROOT", originals[0])
     settings.set("ASSET_IMPORT.SANDBOX_ROOT", originals[1])
+    settings.set("SKILLS.AGENTS_ROOT", originals[2])
 
 
 def _zip(entries: dict[str, bytes], symlinks: dict[str, str] | None = None) -> bytes:
@@ -129,7 +135,7 @@ def test_gwt_100_1_single_zip_import_unlisted(db_client, db_session, import_env)
     assert (import_env["library"] / "skills" / "imported-skill" / "SKILL.md").exists()
 
     new_files = _snapshot(import_env["area"]) - before
-    assert new_files == {"library/skills/imported-skill/SKILL.md"}  # 目录外零新文件
+    assert new_files == {"library/.agents/skills/imported-skill/SKILL.md"}  # 目录外零新文件
     assert not import_env["sandbox"].exists() or not any(import_env["sandbox"].iterdir())
 
 
@@ -319,7 +325,7 @@ def test_gwt_100_7_escape_three_forms_zero_leak(db_client, db_session, import_en
 
     # 资产目录外零新文件：tmp 区快照差集只含库内合法产物
     new_files = _snapshot(import_env["area"]) - before
-    assert new_files == {"library/skills/imported-skill/SKILL.md"}
+    assert new_files == {"library/.agents/skills/imported-skill/SKILL.md"}
     assert not (import_env["area"] / "evil-rel.txt").exists()
     rows = _assets(db_session)
     assert [r.name for r in rows] == ["imported-skill"]  # 逃逸携带资产不产生行
