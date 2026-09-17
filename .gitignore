@@ -86,3 +86,5 @@ storage/
 .scratch/
 
 .video_agent/
+
+.sdlc/
