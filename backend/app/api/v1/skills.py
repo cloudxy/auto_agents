@@ -52,7 +52,7 @@ async def scan_skills(
 ):
     """全量/增量扫描 capability-library（仅平台超管）；事务由 service 持有（ADR-0007）"""
     summary = await service.scan_library()
-    await record_audit(session, user, "skill.scan", "skills", detail={"total": summary["total"]})
+    await record_audit(user, "skill.scan", "skills", detail={"total": summary["total"]})
     return ok(data=summary)
 
 
@@ -73,7 +73,7 @@ async def import_skill_from_url(
         category=body.get("category"),
         industries=body.get("industries"),
     )
-    await record_audit(session, user, "skill.import", f"skill#{result['name']}", detail={"url": url})
+    await record_audit(user, "skill.import", f"skill#{result['name']}", detail={"url": url})
     return ok(data=result)
 
 
@@ -95,7 +95,7 @@ async def put_manifest(
 ):
     """启用矩阵写入（保留 `- name` 行格式与注释头，adapters 零改动）"""
     result = await service.update_manifest(str(body.get("tool") or ""), list(body.get("names") or []))
-    await record_audit(session, user, "skill.manifest.update", f"manifest#{result['tool']}")
+    await record_audit(user, "skill.manifest.update", f"manifest#{result['tool']}")
     return ok(data=result)
 
 
@@ -107,7 +107,7 @@ async def sync_adapters(
 ):
     """触发 sync.sh 分发（受 SKILLS.ADAPTER_SYNC.ENABLED 开关约束）"""
     result = await service.sync_adapters()
-    await record_audit(session, user, "skill.adapters.sync", "adapters", detail={"ok": result["ok"]})
+    await record_audit(user, "skill.adapters.sync", "adapters", detail={"ok": result["ok"]})
     return ok(data=result)
 
 
@@ -119,7 +119,7 @@ async def similar_suggest(
 ):
     """AI 辅助同类候选（建议区，不动 similar_to；确认走 similar-confirm）"""
     result = await service.similar_suggest()
-    await record_audit(session, user, "skill.similar.suggest", "skills")
+    await record_audit(user, "skill.similar.suggest", "skills")
     return ok(data=result)
 
 
@@ -133,7 +133,7 @@ async def similar_confirm(
     """人工确认等价簇 → 互写 similar_to"""
     groups = [g for g in (body.get("groups") or []) if isinstance(g, list) and len(g) >= 2]
     result = await service.similar_confirm(groups)
-    await record_audit(session, user, "skill.similar.confirm", "skills", detail={"groups": len(groups)})
+    await record_audit(user, "skill.similar.confirm", "skills", detail={"groups": len(groups)})
     return ok(data=result)
 
 
@@ -164,7 +164,7 @@ async def approve_skill_candidate(
     result = await service.approve_candidate(
         result_id, importer=_skill_import_service.SkillImportService
     )
-    await record_audit(session, user, "skill.candidate.approve", f"candidate#{result_id}")
+    await record_audit(user, "skill.candidate.approve", f"candidate#{result_id}")
     return ok(data=result)
 
 
@@ -177,7 +177,7 @@ async def reject_skill_candidate(
 ):
     """候选拒绝：标记已审；同名已入库技能置 blacklist"""
     result = await service.reject_candidate(result_id)
-    await record_audit(session, user, "skill.candidate.reject", f"candidate#{result_id}")
+    await record_audit(user, "skill.candidate.reject", f"candidate#{result_id}")
     return ok(data=result)
 
 
@@ -242,7 +242,7 @@ async def rescore_skill(
     if not await service.get_by_name(name):
         raise NotFoundException(resource=f"技能 {name}")
     queued = await SkillScoringService.enqueue_rescore(name)
-    await record_audit(session, user, "skill.rescore", f"skill#{name}")
+    await record_audit(user, "skill.rescore", f"skill#{name}")
     return ok(data={"name": name, "queued": queued})
 
 
@@ -263,7 +263,7 @@ async def correct_skill_meta(
     if not payload:
         raise ValidationException(message="无可矫正字段", field="url")
     result = await service.correct_meta(name, reviewer=user.username, payload=payload)
-    await record_audit(session, user, "skill.correct", f"skill#{name}", detail=payload)
+    await record_audit(user, "skill.correct", f"skill#{name}", detail=payload)
     return ok(data=result)
 
 
@@ -276,7 +276,7 @@ async def export_skill_meta(
 ):
     """手动补导出 meta.yaml（写回失败后的恢复路径）"""
     done = await service.export_meta(name)
-    await record_audit(session, user, "skill.export_meta", f"skill#{name}")
+    await record_audit(user, "skill.export_meta", f"skill#{name}")
     return ok(data={"name": name, "written_back": done})
 
 

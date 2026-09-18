@@ -69,7 +69,7 @@ async def run_spider(
         priority=payload.priority,
         tenant_id=await task_actor_tenant_id(user, session),
     )
-    await record_audit(session, user, "task.run", f"task#{task.id}",
+    await record_audit(user, "task.run", f"task#{task.id}",
                  {"spider": payload.spider_name, "priority": payload.priority})
     return created(task, message=ENQUEUE_ACCEPTED_COPY)
 
@@ -96,7 +96,7 @@ async def update_task(
     task = await service.update_task(
         task_id, params=payload.params, priority=payload.priority
     )
-    await record_audit(session, user, "task.update", f"task#{task_id}",
+    await record_audit(user, "task.update", f"task#{task_id}",
                  payload.model_dump(exclude_unset=True))
     return updated(task)
 
@@ -110,7 +110,7 @@ async def delete_task(
 ) -> ApiResponse[dict]:
     """删除任务及其采集结果（running 状态拒绝删除；仅管理员）"""
     result = await service.delete_task(task_id)
-    await record_audit(session, user, "task.delete", f"task#{task_id}")
+    await record_audit(user, "task.delete", f"task#{task_id}")
     return deleted(data=result)
 
 
@@ -124,7 +124,7 @@ async def control_task(
 ) -> ApiResponse[dict]:
     """控制运行中的任务：暂停/恢复/终止（A4；body 必填，缺失时 422）"""
     result = await service.control_task(task_id, payload.action)
-    await record_audit(session, user, "task.control", f"task#{task_id}", {"action": payload.action})
+    await record_audit(user, "task.control", f"task#{task_id}", {"action": payload.action})
     return ok(result)
 
 

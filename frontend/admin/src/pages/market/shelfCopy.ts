@@ -4,11 +4,36 @@ export const MARKET_CLOSED = '能力市场未开放'
 export const MARKET_CLOSED_HINT = '开放后，已上架的能力会出现在这里。'
 export const EMPTY_SHELF = '暂无已上架能力'
 export const EMPTY_SHELF_HINT = '已上架且过许可的能力会出现在这里。'
+/** T-08 整架空新句（edge-states §4.2：预览态给 live_total 治理线索） */
+export const emptyShelfHint = (liveTotal?: number | null): string => (
+  liveTotal != null && liveTotal > 0
+    ? `上架后能力会出现在这里。当前有 ${liveTotal} 个资产未上架。`
+    : '上架后能力会出现在这里。'
+)
 export const FILTER_EMPTY = '没有符合条件的能力'
 export const LOAD_FAIL = '市场列表加载失败'
 export const LOAD_FAIL_HINT = '检查网络后重试'
 export const READONLY_SUBSCRIBE = '当前账号不能订阅，请联系企业管理员'
 export const ENABLE_HOST = '启用到宿主'
+
+/** T-08（FR-03/04，edge-states §10 新增成品句） */
+export const TAB_EMPTY = '暂无该类资产'
+export const tabEmptyHint = (typeText: string): string =>
+  `同步 .agents 后，${typeText} 会出现在这里。`
+export const SYNC_NOW = '立即同步'
+export const GO_GOVERNANCE = '去治理目录'
+export const NO_DESC = '暂无描述'
+export const PREVIEW_BADGE = '预览模式 · 市场未对租户开放，你看到的是上架后的展示效果'
+export const SORT_OPTIONS = [
+  { value: 'smart', label: '综合' },
+  { value: 'hot', label: '最热' },
+  { value: 'latest', label: '最新' },
+] as const
+export type SortKey = (typeof SORT_OPTIONS)[number]['value']
+export const resolveSort = (raw: string | null): SortKey => {
+  const hit = SORT_OPTIONS.find((o) => o.value === raw)
+  return hit ? hit.value : 'smart'
+}
 
 export const PUBLIC_TYPES = [
   { key: 'skill', label: '技能' },
@@ -19,6 +44,10 @@ export const PUBLIC_TYPES = [
 ] as const
 
 export const PUBLIC_KEYS = new Set<string>(PUBLIC_TYPES.map((t) => t.key))
+
+/** T-08：类型中文（卡片副标题兜底 / tab 空态说明 / 标签） */
+export const typeLabelOf = (key: string): string =>
+  PUBLIC_TYPES.find((t) => t.key === key)?.label || key
 
 export const LEGACY_MAP: Record<string, string> = {
   expert: 'agent',

@@ -8,6 +8,7 @@
 | `check/db_ir.sh` | DBML IR lint |
 | `check/db_migrations.sh` | 迁移破坏性变更 |
 | `check/frontend.sh` | 前端工程门禁 |
+| `git/sync_main.sh` | post-checkout 钩子：切分支后自动合并 `origin/main`（fail-open） |
 | `dump_openapi.py` | 离线导出 OpenAPI → 前端 codegen |
 
 ```bash

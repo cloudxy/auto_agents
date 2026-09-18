@@ -34,6 +34,12 @@ export interface OrderRow {
   amount_yuan?: number
   tenant_name?: string
   product_code?: string | null
+  order_no?: string | null
+  /** 在线支付真实网关产出：channel 已配商户凭据且网关调用成功才有值；
+   * 未配置/网关调用失败为 null——照常走人工确认收款，不阻断下单 */
+  pay_url?: string | null
+  qr_code_url?: string | null
+  qr_code_image?: string | null
 }
 
 export interface SubscriptionRow {
@@ -79,6 +85,12 @@ export const createCheckout = (body: {
 
 export const listMyOrders = (): Promise<OrderRow[]> =>
   api.get('/billing/orders').then((r) => unwrap<OrderRow[]>(r) ?? [])
+
+/** 按需重取在线支付链接/二维码（未持久化，每次现取现签，见后端
+ * BillingService.regenerate_pay_intent）。channel 未配置/网关失败时
+ * pay_url/qr_code_url 仍是 null，不算请求失败。 */
+export const fetchPayIntent = (orderId: number): Promise<OrderRow> =>
+  api.get(`/billing/orders/${orderId}/pay-intent`).then((r) => unwrap<OrderRow>(r))
 
 export const createOrder = (plan_id: number, channel: PayChannel = 'offline'): Promise<OrderRow> =>
   api.post('/billing/orders', { plan_id, channel }).then((r) => unwrap<OrderRow>(r))

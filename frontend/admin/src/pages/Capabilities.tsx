@@ -4,7 +4,7 @@
  */
 import React, { useEffect, useState } from 'react'
 import { Button, ConfigProvider, Tabs } from 'antd'
-import { ImportOutlined } from '@ant-design/icons'
+import { EyeOutlined, ImportOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import Skills from './Skills'
@@ -40,6 +40,8 @@ const Capabilities: React.FC = () => {
   const [catalogFocus, setCatalogFocus] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [catalogRefresh, setCatalogRefresh] = useState(0)
+  /** T-13（FR-03 验收路径）：超管货架预览——与租户货架同一数据与口径，闸关下走此通道验收 */
+  const [shelfPreview, setShelfPreview] = useState(false)
 
   useEffect(() => {
     if (bounceType && bounceName) setTarget({ type: bounceType, name: bounceName })
@@ -90,10 +92,28 @@ const Capabilities: React.FC = () => {
     <div data-testid="governance-shell">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
         <PowerMarketSwitch />
-        <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
-          {IMPORT_ENTRY}
-        </Button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button
+            icon={<EyeOutlined />}
+            type={shelfPreview ? 'primary' : 'default'}
+            aria-pressed={shelfPreview}
+            onClick={() => setShelfPreview((v) => !v)}
+          >
+            货架预览
+          </Button>
+          <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+            {IMPORT_ENTRY}
+          </Button>
+        </div>
       </div>
+      {shelfPreview ? (
+        <TenantShelf
+          canSubscribe={role !== 'viewer'}
+          onSubscribe={(type, name) => setTarget({ type, name })}
+          onExitPreview={() => setShelfPreview(false)}
+          preview
+        />
+      ) : (
       <Tabs
         className="market-tabs"
         activeKey={tab}
@@ -128,6 +148,7 @@ const Capabilities: React.FC = () => {
           ) },
         ]}
       />
+      )}
       {importOpen ? (
         <ImportWizard open onCancel={closeImport} onFinished={finishImport} />
       ) : null}

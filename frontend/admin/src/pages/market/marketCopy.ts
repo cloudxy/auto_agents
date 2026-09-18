@@ -54,6 +54,15 @@ export const catalogFocusCopy = (name: string): string => `已定位短名 ${nam
 export const VERIFY = '验证'
 export const DETAIL = '详情'
 
+/** T-02（FR-01，edge-states §7.6 钉句）：同步 .agents 四态文案 */
+export const SYNC_AGENTS = '同步 .agents'
+export const SYNCING = '同步中…'
+export const syncDoneCopy = (added: number, updated: number, unchanged: number): string =>
+  `同步完成：新增 ${added} · 更新 ${updated} · 无变化 ${unchanged}`
+/** 失败句的后半段是非破坏语义的用户可见承诺（FR-01 信任修复点），不可删 */
+export const syncFailCopy = (reason: string): string =>
+  `同步失败：${reason}。已有数据未受影响。`
+
 export const thirdPartyConfirm = (name: string): string =>
   `将把第三方「${name}」标为已上架，商店会对访客可见。确认上架？`
 

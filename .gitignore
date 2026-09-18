@@ -63,22 +63,14 @@ frontend/admin/blob-report/
 deploy/litellm/config.gen.yaml
 
 .claude/*
-!.claude/rules/
-!.claude/skills
-!.claude/plugins
-!.claude/agents/
-!.claude/hooks/
-!.claude/memory/
-!.claude/IDENTITY.md
-!.claude/SOUL.md
-!.claude/MEMORY.md
-!.claude/settings.json
-.claude/settings.local.json
 .lingma/*
 .gemini/*
 ai_tool/*
 .qoder/*
 .idea/*
+.agents/*
+.github/*
+.grok/*
 
 
 storage/
@@ -86,3 +78,5 @@ storage/
 .scratch/
 
 .video_agent/
+
+.sdlc/

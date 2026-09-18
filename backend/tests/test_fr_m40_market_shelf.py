@@ -108,7 +108,7 @@ def test_gwt_m40_3_tenant_governance_is_404(db_client, db_session):
     )
     _same_404(listing, ghost)
     _same_404(db_client.get(SOURCES, headers=owner), ghost)
-    _same_404(db_client.post("/api/v1/capabilities/scan-plugins", headers=owner), ghost)
+    _same_404(db_client.post("/api/v1/capabilities/sync-agents-hub", headers=owner), ghost)
     _same_404(db_client.post("/api/v1/capabilities/import", headers=owner), ghost)
 
 

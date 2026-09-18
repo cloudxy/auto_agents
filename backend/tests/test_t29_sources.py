@@ -13,7 +13,7 @@ from backend.tests.t25_support import bind_actor, seed_listed, seed_tenant, subs
 from platform_core.models.capability import CapabilityAsset
 
 _SRC = "/api/v1/capabilities/sources"
-_SCAN = "/api/v1/capabilities/scan-plugins"
+_SCAN = "/api/v1/capabilities/sync-agents-hub"
 _CAP = "/api/v1/public/capabilities"
 _LISTING = "/api/v1/capabilities/{}/{}/listing"
 _CORRECT = "/api/v1/capabilities/{}/{}/correct"
@@ -94,8 +94,9 @@ def _register(client, name: str, uri: str, kind: str = "local"):
     return client.post(_SRC, json={"name": name, "source_kind": kind, "uri": uri})
 
 
-def _sync(client, name: str):
-    return client.post(f"{_SRC}/{name}/sync")
+def _sync(client, name: str, *, retract: bool = False):
+    params = {"retract": "true"} if retract else None
+    return client.post(f"{_SRC}/{name}/sync", params=params)
 
 
 def test_adr_0012_uq_asset_type_name_alive_unchanged():
@@ -211,45 +212,67 @@ def test_gwt_38_2_partial_failure_keeps_success(
     assert catalog.json()["data"].get("empty") is not True
 
 
-def test_gwt_38_5_d16_fallback_local_scan(
-    db_client, platform_admin_client, db_session, library_root,
+def test_gwt_38_5_d16_fallback_local_sync(
+    db_client, platform_admin_client, db_session, tmp_path,
 ):
+    """D16 后继口径（feat-agents-market）：关旗下 .agents 同步照常工作且不建源注册表行。"""
     from config import settings
 
-    _write_plugin(library_root / "plugins", "local-only")
+    _agents_tree(tmp_path, "local-only")
+    original_agents = settings.get("SKILLS.AGENTS_ROOT")
+    settings.set("SKILLS.AGENTS_ROOT", str(tmp_path))
     original = settings.get("POWER_MARKET.ENABLED")
     settings.set("POWER_MARKET.ENABLED", False)
-    resp = platform_admin_client.post(_SCAN)
-    assert resp.status_code == 200, resp.text
-    body = json.dumps(resp.json(), ensure_ascii=False)
-    assert _SWITCHED not in body
-    from platform_core.models.capability import CapabilitySource
-    sources = _query(db_session, select(CapabilitySource))
-    assert all(s.name != _FAKE_SOURCE for s in sources)
-    plugins = _query(db_session, select(CapabilityAsset).where(
-        CapabilityAsset.asset_type == "plugin",
-    ))
-    assert {p.name for p in plugins} == {"local-only"}
-    settings.set("POWER_MARKET.ENABLED", original)
+    try:
+        resp = platform_admin_client.post(_SCAN)
+        assert resp.status_code == 200, resp.text
+        body = json.dumps(resp.json(), ensure_ascii=False)
+        assert _SWITCHED not in body
+        from platform_core.models.capability import CapabilitySource
+        sources = _query(db_session, select(CapabilitySource))
+        assert all(s.name != _FAKE_SOURCE for s in sources)
+        plugins = _query(db_session, select(CapabilityAsset).where(
+            CapabilityAsset.asset_type == "plugin",
+        ))
+        assert {p.name for p in plugins} == {"local-only"}
+    finally:
+        settings.set("POWER_MARKET.ENABLED", original)
+        settings.set("SKILLS.AGENTS_ROOT", original_agents)
 
 
 def test_gwt_38_5_d16_empty_sources_still_local(
-    db_client, platform_admin_client, db_session, library_root,
+    db_client, platform_admin_client, db_session, tmp_path,
 ):
     from config import settings
 
-    _write_plugin(library_root / "plugins", "still-local")
+    _agents_tree(tmp_path, "still-local")
+    original_agents = settings.get("SKILLS.AGENTS_ROOT")
+    settings.set("SKILLS.AGENTS_ROOT", str(tmp_path))
     original = settings.get("POWER_MARKET.ENABLED")
     settings.set("POWER_MARKET.ENABLED", True)
-    listed = platform_admin_client.get(_SRC)
-    assert listed.status_code == 200, listed.text
-    assert listed.json()["data"]["items"] == [] or listed.json()["data"].get("total", 0) == 0
-    resp = platform_admin_client.post(_SCAN)
-    assert resp.status_code == 200, resp.text
-    assert _SWITCHED not in json.dumps(resp.json(), ensure_ascii=False)
-    from platform_core.models.capability import CapabilitySource
-    assert _query(db_session, select(CapabilitySource)) == []
-    settings.set("POWER_MARKET.ENABLED", original)
+    try:
+        listed = platform_admin_client.get(_SRC)
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["data"]["items"] == [] or listed.json()["data"].get("total", 0) == 0
+        resp = platform_admin_client.post(_SCAN)
+        assert resp.status_code == 200, resp.text
+        assert _SWITCHED not in json.dumps(resp.json(), ensure_ascii=False)
+        from platform_core.models.capability import CapabilitySource
+        assert _query(db_session, select(CapabilitySource)) == []
+    finally:
+        settings.set("POWER_MARKET.ENABLED", original)
+        settings.set("SKILLS.AGENTS_ROOT", original_agents)
+
+
+def _agents_tree(root: Path, plugin_name: str) -> Path:
+    """.agents 形态插件树（plugins/<name>/plugin.json）"""
+    pkg = root / "plugins" / plugin_name
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "plugin.json").write_text(json.dumps({
+        "name": plugin_name, "description": plugin_name, "version": "1.0.0",
+        "license": "MIT",
+    }), encoding="utf-8")
+    return root
 
 
 def test_gwt_38_6_correct_third_party_no_source_tree(
@@ -569,7 +592,7 @@ def test_src_sync_retracts_commands_removed_from_manifest(
     (cmd_dir / "drop-me.md").unlink()
     manifest["commands"] = {"/keep-me": {"name": "keep-me", "description": "留"}}
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    second = _sync(platform_admin_client, "src-cmd-retract")
+    second = _sync(platform_admin_client, "src-cmd-retract", retract=True)
     assert second.status_code == 200, second.text
     alive = _query(db_session, select(CapabilityAsset).where(
         CapabilityAsset.asset_type == "command",

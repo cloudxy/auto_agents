@@ -41,6 +41,7 @@ const MyInstalls = React.lazy(() => import('./pages/MyInstalls'))
 const PlatformOps = React.lazy(() => import('./pages/PlatformOps'))
 const RelayGroups = React.lazy(() => import('./pages/RelayGroups'))
 const OutboundKeys = React.lazy(() => import('./pages/OutboundKeys'))
+const PaymentCredentials = React.lazy(() => import('./pages/PaymentCredentials'))
 const Unauthorized = React.lazy(() => import('./pages/Unauthorized'))
 const NotFound = React.lazy(() => import('./pages/NotFound'))
 const RbacManagement = React.lazy(() => import('./pages/RbacManagement'))
@@ -121,6 +122,7 @@ function App() {
               {/* T-06 出站拉数钥匙（FR-51）：数据工厂组叶，不冒充渠道组（X-KEY） */}
               <Route path="outbound-keys" element={<Page label="outbound-keys"><OutboundKeys /></Page>} />
               <Route path="llm" element={<Page label="llm"><LlmProviders /></Page>} />
+              <Route path="payment-credentials" element={<Page label="payment-credentials"><PaymentCredentials /></Page>} />
               <Route path="logs" element={<Page label="logs"><LogCenter /></Page>} />
               <Route path="data" element={<Page label="data"><Data /></Page>} />
               {/* 平台写面并入主树（T-29 / ADR-0022）：同一布局挂载点，跨组切换不重挂 */}

@@ -1,0 +1,108 @@
+/* T-10（FR-05）：详情抽屉。尺寸/圆角/间距走 edge-states §9 令牌（asset-drawer 节）。 */
+.asset-drawer__banner {
+  height: 120px;
+  border-radius: 12px;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--color-surface-sunken);
+}
+
+.asset-drawer__head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 12px;
+}
+
+.asset-drawer__head-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.asset-drawer__title {
+  margin-bottom: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+}
+
+.asset-drawer__subtitle {
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.asset-drawer__meta {
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.asset-drawer__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.asset-drawer__examples {
+  margin-top: 24px;
+}
+
+.asset-drawer__example {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-primary);
+  background: var(--color-surface-sunken);
+  border-radius: 0 8px 8px 0;
+  overflow-wrap: break-word;
+}
+
+.asset-drawer__body {
+  margin-top: 24px;
+}
+
+.asset-drawer__body .markdown-body {
+  max-height: 60vh;
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.asset-drawer__body .markdown-body pre {
+  overflow-x: auto;
+  padding: 8px 12px;
+  background: var(--color-surface-sunken);
+  border-radius: 8px;
+}
+
+.asset-drawer__body .markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.asset-drawer__body .markdown-body th,
+.asset-drawer__body .markdown-body td {
+  border: 1px solid var(--color-border, #d9d9d9);
+  padding: 4px 8px;
+}
+
+.asset-drawer__empty-md {
+  padding: 12px 0;
+  color: var(--color-text-primary);
+}
+
+.asset-drawer__empty-md p {
+  margin: 0 0 4px;
+}
+
+@media (max-width: 767px) {
+  .asset-drawer {
+    width: 100%;
+  }
+}

@@ -89,24 +89,32 @@ async def register_capability_source(
     from backend.app.api._helpers import record_audit
 
     data = await market.register_source(payload, actor=user.username)
-    await record_audit(session, user, "source.register", f"source#{data['name']}")
+    await record_audit(user, "source.register", f"source#{data['name']}")
     return ok(data=data)
 
 
 @router.post("/sources/{name}/sync")
 async def sync_capability_source(
     name: str,
+    retract: bool = Query(False, description="源里已经没有的行是否软删收回；缺省=只 upsert，不收回"),
     user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     market: PowerMarketService = Depends(_market),
 ):
-    """触发 src_sync。第三方新行保持 unlisted。"""
+    """触发 src_sync。第三方新行保持 unlisted。
+
+    QA-8：收回缺失行是破坏性动作，必须显式 `?retract=true` 才执行（与
+    「同步通道默认永不隐式软删」的全局口径对齐）；不传时本次同步只
+    upsert，源里消失的行原样保留待下次显式收回。
+    """
     from backend.app.api._helpers import record_audit
 
-    data = await market.sync_source(name)
-    await record_audit(
-        session, user, "source.sync", f"source#{name}",
-        detail={"succeeded": data.get("succeeded"), "failed": data.get("failed")},
+    data = await market.sync_source(name, retract=retract)
+    await record_audit(user, "source.sync", f"source#{name}",
+        detail={
+            "succeeded": data.get("succeeded"), "failed": data.get("failed"),
+            "retract": retract,
+        },
     )
     return ok(data=data)
 
@@ -121,23 +129,13 @@ async def backfill_first_party_listing(
     from backend.app.api._helpers import record_audit
 
     data = await market.backfill_first_party()
-    await record_audit(session, user, "source.backfill", "first-party", detail=data)
+    await record_audit(user, "source.backfill", "first-party", detail=data)
     return ok(data=data)
 
 
-@router.post("/scan-plugins")
-async def scan_plugins(
-    user: CurrentUser = Depends(require_platform_admin_or_404),
-    session: AsyncSession = Depends(get_async_db),
-):
-    """扫描 capability-library/plugins/（plugin.json 解析入库；仅平台超管）"""
-    from backend.app.api._helpers import record_audit
-    from backend.services.plugin_service import PluginService
-
-    result = await PluginService(session).scan_plugins()
-    await record_audit(session, user, "plugin.scan", "plugins",
-                       detail={"total": result.get("total")})
-    return ok(data=result)
+# feat-agents-market AD-1：破坏性扫描入口 POST /scan-plugins 已删除
+# （软删根因 plugin_service._retract_missing_plugins 一并退役；.agents 同步走
+#   capabilities_gov.sync_agents-hub，非破坏 upsert，GWT-01.3 验收线）。
 
 
 @router.get("/plugins/{name}")
@@ -163,27 +161,16 @@ async def verify_plugin(
     from backend.services.plugin_service import PluginService
 
     result = await PluginService(session).verify_plugin(name)
-    await record_audit(session, user, "plugin.verify", f"plugin#{name}",
+    await record_audit(user, "plugin.verify", f"plugin#{name}",
                        detail={"health": result["health"]})
     return ok(data=result)
 
 
-# ---------- P6 C5/C6：专家域（扫描/详情/组队） ----------
-
-
-@router.post("/scan-experts")
-async def scan_experts(
-    user: CurrentUser = Depends(require_platform_admin_or_404),
-    session: AsyncSession = Depends(get_async_db),
-):
-    """扫描 capability-library/experts/（subagent 格式解析入库；仅平台超管）"""
-    from backend.app.api._helpers import record_audit
-    from backend.services.expert_service import ExpertService
-
-    result = await ExpertService(session).scan_experts()
-    await record_audit(session, user, "expert.scan", "experts",
-                       detail={"total": result.get("total")})
-    return ok(data=result)
+# ---------- P6 C5/C6：专家域（详情/组队） ----------
+# POST /scan-experts 已退役（K4）：扫的是 capability-library/experts/，OQ-2
+# 切根到 .agents 后该目录已不存在于仓库，每次扫描恒空——保留端点只会让
+# 管理员误以为「扫描成功、0 条」是正常结果。ExpertService.scan_experts()
+# 方法本身保留（接受显式 root 参数，供内部/测试按需从任意目录导入专家）。
 
 
 @router.get("/experts/{name}")
@@ -219,7 +206,7 @@ async def upsert_team(
         workflow_md=str(body.get("workflow_md") or ""),
         title=str(body.get("title") or ""),
     )
-    await record_audit(session, user, "team.upsert", f"team#{team['name']}")
+    await record_audit(user, "team.upsert", f"team#{team['name']}")
     return ok(data=team)
 
 
@@ -279,8 +266,7 @@ async def import_assets(
         data = await service.import_files(payloads, actor=user.username, actor_id=user.id)
     else:
         raise ValidationException(message="未提供导入文件或目录", field="import")
-    await record_audit(
-        session, user, "asset.import", f"batch#{data['batch_id']}",
+    await record_audit(user, "asset.import", f"batch#{data['batch_id']}",
         detail={"origin": data["origin"], "succeeded": data["succeeded"],
                 "failed": data["failed"], "skipped": data["skipped"]},
     )
@@ -334,7 +320,7 @@ async def correct_capability_asset(
 
     body = payload.model_dump(exclude_none=True)
     data = await market.correct_asset(asset_type, name, body)
-    await record_audit(session, user, "asset.correct", f"{asset_type}#{name}")
+    await record_audit(user, "asset.correct", f"{asset_type}#{name}")
     return ok(data=data)
 
 
@@ -351,8 +337,7 @@ async def patch_capability_listing(
     from backend.app.api._helpers import record_audit
 
     data = await market.set_listing(asset_type, name, payload)
-    await record_audit(
-        session, user, "listing.change", f"{asset_type}#{name}",
+    await record_audit(user, "listing.change", f"{asset_type}#{name}",
         detail={"listing_state": data["listing_state"]},
     )
     return ok(data=data)
@@ -371,8 +356,7 @@ async def patch_license_override(
     from backend.app.api._helpers import record_audit
 
     data = await market.set_license_override(asset_type, name, payload)
-    await record_audit(
-        session, user, "license.override", f"{asset_type}#{name}",
+    await record_audit(user, "license.override", f"{asset_type}#{name}",
         detail={"public_license_override": data["public_license_override"]},
     )
     return ok(data=data)
@@ -391,8 +375,7 @@ async def put_capability_alias(
     from backend.app.api._helpers import record_audit
 
     data = await market.set_alias(asset_type, name, payload, actor=user.username)
-    await record_audit(
-        session, user, "alias.set", f"{asset_type}#{name}",
+    await record_audit(user, "alias.set", f"{asset_type}#{name}",
         detail={"slug": data["slug"]},
     )
     return ok(data=data)

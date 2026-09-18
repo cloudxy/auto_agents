@@ -65,7 +65,7 @@ async def create_plan(
         payload, created_by=user.username,
         tenant_id=await task_actor_tenant_id(user, session),
     )
-    await record_audit(session, user, "ai.plan.create", f"ai_plan#{plan.id}",
+    await record_audit(user, "ai.plan.create", f"ai_plan#{plan.id}",
                  {"target_url": payload.target_url})
     return created(plan)
 
@@ -106,7 +106,7 @@ async def trigger_plan(
 ) -> ApiResponse[AiPlanResponse]:
     """触发 LLM 规划（后台执行，立即返回 planning 快照）"""
     plan = await service.launch_plan(plan_id)
-    await record_audit(session, user, "ai.plan.trigger", f"ai_plan#{plan_id}", {"action": "plan"})
+    await record_audit(user, "ai.plan.trigger", f"ai_plan#{plan_id}", {"action": "plan"})
     return ok(plan)
 
 
@@ -119,7 +119,7 @@ async def trigger_test(
 ) -> ApiResponse[AiPlanResponse]:
     """触发 flow_generic 试采（后台执行含自动修复迭代，立即返回快照）"""
     plan = await service.launch_test(plan_id)
-    await record_audit(session, user, "ai.plan.trigger", f"ai_plan#{plan_id}", {"action": "test"})
+    await record_audit(user, "ai.plan.trigger", f"ai_plan#{plan_id}", {"action": "test"})
     return ok(plan)
 
 
@@ -133,7 +133,7 @@ async def register_plan(
     """注册为爬虫定义（M3：内部调 create_definition 与手动登记同级，须 admin；
     校验最近试采通过；source=ai_generated，type=flow）"""
     plan = await service.register(plan_id)
-    await record_audit(session, user, "ai.plan.register", f"ai_plan#{plan_id}",
+    await record_audit(user, "ai.plan.register", f"ai_plan#{plan_id}",
                  {"definition": plan.plan_json.get("registered_definition") if plan.plan_json else None})
     return ok(plan)
 
@@ -147,5 +147,5 @@ async def delete_plan(
 ) -> ApiResponse[dict]:
     """删除 AI 采集计划（仅管理员）"""
     result = await service.delete_plan(plan_id)
-    await record_audit(session, user, "ai.plan.delete", f"ai_plan#{plan_id}")
+    await record_audit(user, "ai.plan.delete", f"ai_plan#{plan_id}")
     return deleted(data=result)

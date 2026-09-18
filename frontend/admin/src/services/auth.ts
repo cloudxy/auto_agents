@@ -1,7 +1,7 @@
 /**
  * 认证服务
  */
-import api, { unwrap, type ApiEnvelope } from './api'
+import api, { unwrap } from './api'
 
 export interface LoginParams {
   username: string

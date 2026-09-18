@@ -381,7 +381,7 @@ bash tools/check/arch.sh      # 退出码 = 违规数（pre-commit 与 CI 自动
 ```bash
 uv run pytest -x -q backend/tests   # 后端测试必须退出码 0
 bash tools/check/arch.sh          # 数据契约改动必跑
-uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type post-checkout
 ```
 
 CI 五阶段：Python lint+test → 架构红线 → DB 迁移门禁 → 前端构建 → Docker 校验。

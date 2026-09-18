@@ -1,4 +1,5 @@
-"""订阅计费：价目、线下挂账、在线结账占坑。验真/履约在 PaymentNotifyService。"""
+"""订阅计费：价目、线下挂账、在线结账（支付宝/微信真实网关）。验真/履约在
+PaymentNotifyService。"""
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -12,6 +13,7 @@ from backend.repositories.payment_channel_credential_repository import (
     PaymentChannelCredentialRepository,
 )
 from backend.services.billing_fulfill import apply_plan_quota, fulfill_checkout_product
+from backend.services.payment_provider import create_payment_intent
 from backend.services.product_event_service import emit_product_event
 from backend.services.quota_service import (
     BUYER_TENANT_ROLES,
@@ -184,8 +186,27 @@ class BillingService:
         out = await self._insert_pending(
             int(tenant_id), product, use_channel, amount, plan, plan_name, merchant,
         )
+        if use_channel:
+            await self._attach_online_intent(out, use_channel, amount, plan_name)
         await self._emit_status(int(tenant_id), product, "pending", actor_user_id, actor_tenant_role)
         return out
+
+    async def _attach_online_intent(
+        self, out: OrderOut, channel: str, amount_cents: int, subject: str,
+    ) -> None:
+        """商户凭据已配置时尝试拿一个真实收银台链接/二维码；失败只记日志不阻断
+        下单——订单已经落库为 checkout_pending，照旧能走人工确认收款兜底。"""
+        try:
+            intent = await create_payment_intent(
+                self.session, channel=channel, order_no=str(out.order_no),
+                amount_cents=amount_cents, subject=subject,
+            )
+        except BusinessException as exc:
+            logger.warning(f"在线支付意图创建失败，回退人工确认收款 | order={out.id} err={exc}")
+            return
+        out.pay_url = intent.checkout_url
+        out.qr_code_url = intent.qr_code_url
+        out.qr_code_image = intent.qr_code_image
 
     async def _emit_status(
         self, tenant_id: int, product: str, status: str,
@@ -290,6 +311,25 @@ class BillingService:
         raise BusinessException(
             message=ORDER_STORY_CLOSED_USER, code="ORDER_STORY_CLOSED", status_code=422,
         )
+
+    async def regenerate_pay_intent(self, order_id: int, tenant_id: int) -> OrderOut:
+        """按需重取在线支付链接/二维码（未持久化，每次现取现签——支付宝页面
+        支付本身就是纯签名操作，不需要缓存；微信 Native 码有效期有限，缓存
+        旧码反而会让租户扫到过期二维码）。租户重开结账页 / 刷新页面时调用，
+        不影响订单状态机（channel 未配置/网关调用失败只是拿不到链接，订单
+        照旧是合法的 checkout_pending，等人工确认收款）。
+        """
+        logger.info(f"重取支付意图 | order={order_id} tenant={tenant_id}")
+        order = await OrderRepository(self.session).get_fresh(order_id)
+        if order is None or int(order.tenant_id) != tenant_id:
+            raise NotFoundException("订单")
+        plan_name = await self._plan_name_of(order)
+        out = self._to_out(order, plan_name)
+        if order.status == "checkout_pending" and order.channel in _ONLINE:
+            await self._attach_online_intent(
+                out, str(order.channel), int(order.amount_cents), plan_name,
+            )
+        return out
 
     async def list_orders(self, tenant_id: int) -> list[OrderOut]:
         logger.info(f"列出订单 | tenant={tenant_id}")

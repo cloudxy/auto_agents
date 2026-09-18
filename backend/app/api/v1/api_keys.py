@@ -37,7 +37,7 @@ async def create_api_key(
     if user.tenant_id is None:
         raise BusinessException("平台超管请在租户上下文中签发 Key")
     created_key = await service.create_key(user.tenant_id, payload, user.username)
-    await record_audit(session, user, "api_key.create", f"key#{created_key.id}")
+    await record_audit(user, "api_key.create", f"key#{created_key.id}")
     return created(created_key)
 
 
@@ -51,5 +51,5 @@ async def revoke_api_key(
     if user.tenant_id is None:
         raise BusinessException("平台超管请在租户上下文中签发 Key")
     out = await service.revoke(user.tenant_id, key_id)
-    await record_audit(session, user, "api_key.revoke", f"key#{key_id}")
+    await record_audit(user, "api_key.revoke", f"key#{key_id}")
     return ok(out)

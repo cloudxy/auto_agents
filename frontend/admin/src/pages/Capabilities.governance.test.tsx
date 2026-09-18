@@ -29,7 +29,6 @@ jest.mock('../services/capabilities', () => ({
   registerSource: jest.fn(),
   syncSource: jest.fn(),
   scanPlugins: jest.fn(),
-  scanExperts: jest.fn(),
   createTeam: jest.fn(),
   verifyPlugin: jest.fn(),
   patchListing: jest.fn(),

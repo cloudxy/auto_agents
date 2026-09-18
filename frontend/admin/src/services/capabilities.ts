@@ -18,6 +18,9 @@ export interface AssetRow {
   listing_state?: string
   listed_at?: string | null
   source_type?: string
+  /** T-05 列（FR-04）：治理目录精选星标。QA-4：list_catalog 之前不投影本
+   * 字段，星标刷新即丢；QA-12：后端恒返回 int（0/1），不是 boolean。 */
+  featured?: number
 }
 
 export interface PluginVerifyResult {
@@ -110,19 +113,120 @@ export const registerSource = (body: {
 }): Promise<SourceRow> =>
   api.post('/capabilities/sources', body).then((r) => unwrap<SourceRow>(r))
 
+/** QA-8：后端默认只 upsert，不收回源里已消失的行（收回是破坏性动作，需要
+ * 显式 retract=true）——这里保持不传，与后端安全默认对齐；治理台如果要暴露
+ * "收回缺失行"，走单独的显式入口，不应该悄悄夹带在普通同步按钮里。 */
 export const syncSource = (name: string): Promise<{ succeeded: number; failed: number }> =>
   api.post(`/capabilities/sources/${encodeURIComponent(name)}/sync`)
     .then((r) => unwrap<{ succeeded: number; failed: number }>(r))
 
-export const scanPlugins = (): Promise<void> =>
-  api.post('/capabilities/scan-plugins').then(() => undefined)
+/** T-02（FR-01）：同步 .agents——非破坏单通道，替代已退役的 scan-plugins。 */
+export interface AgentsHubSyncResult {
+  inserted: number
+  updated: number
+  unchanged: number
+  failed: number
+  total: number
+  failed_items?: Array<{ asset_type: string; name: string; reason?: string }>
+}
+
+export const syncAgentsHub = (): Promise<AgentsHubSyncResult> =>
+  api.post('/capabilities/sync-agents-hub')
+    .then((r) => unwrap<AgentsHubSyncResult>(r))
+
+/** T-15（FR-02）：失源行清理。dry_run=true 只取同构预览不落库。
+ * QA-14：live_total 是治理目录里全部存活行的真实数目；reconcile_total 是
+ * 对账候选集口径（不含 team/源注册表行/expert 遗留型），只用来做
+ * "候选集与磁盘集差值=0"的对账 oracle，不是给人看的"存活"数字。 */
+export interface PruneMissingResult {
+  pruned: Array<{ asset_type: string; name: string }>
+  live_total: number
+  reconcile_total: number
+  disk_total: number
+}
+
+export const pruneMissingAssets = (dryRun = false): Promise<PruneMissingResult> =>
+  api.post('/capabilities/assets/prune-missing', undefined, {
+    params: dryRun ? { dry_run: 'true' } : undefined,
+  }).then((r) => unwrap<PruneMissingResult>(r))
+
+/** T-12（FR-07）：目录导入两段式。filename = webkitRelativePath（服务端按树判型）。 */
+export interface TreeImportAsset {
+  asset_type: string
+  name: string
+  action: 'create' | 'update'
+  origin_path?: string | null
+  bundled?: TreeImportAsset[]
+}
+
+export interface TreeImportSkip { path: string; reason: string }
+
+export interface TreePreviewResult {
+  assets: TreeImportAsset[]
+  skipped: TreeImportSkip[]
+  counts: { skill: number; plugin: number; command: number; agent: number }
+  files_total: number
+}
+
+export interface TreeConfirmResult {
+  created: number
+  updated: number
+  failed: Array<{ name: string; reason: string }>
+  skipped: TreeImportSkip[]
+  batch_id?: string | number | null
+}
+
+const appendTreeFiles = (form: FormData, files: File[]): void => {
+  for (const file of files) {
+    const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+    form.append('files', file, rel || file.name)
+  }
+}
+
+export const previewTreeImport = (
+  files: File[],
+  onUploadProgress?: (event: AxiosProgressEvent) => void,
+): Promise<TreePreviewResult> => {
+  const form = new FormData()
+  appendTreeFiles(form, files)
+  return api.post('/capabilities/import/tree/preview', form, { onUploadProgress })
+    .then((r) => unwrap<TreePreviewResult>(r))
+}
+
+export const confirmTreeImport = (
+  files: File[],
+  onUploadProgress?: (event: AxiosProgressEvent) => void,
+): Promise<TreeConfirmResult> => {
+  const form = new FormData()
+  appendTreeFiles(form, files)
+  return api.post('/capabilities/import/tree/confirm', form, { onUploadProgress })
+    .then((r) => unwrap<TreeConfirmResult>(r))
+}
+
+/** T-11（FR-04/附加 d）：精选开关 + 示例维护（治理门面 PATCH）。 */
+export const patchFeatured = (
+  assetType: string,
+  name: string,
+  featured: boolean,
+): Promise<AssetRow> =>
+  api.patch(
+    `/capabilities/${encodeURIComponent(assetType)}/${encodeURIComponent(name)}/featured`,
+    { featured },
+  ).then((r) => unwrap<AssetRow>(r))
+
+export const patchExamples = (
+  assetType: string,
+  name: string,
+  examples: string[],
+): Promise<AssetRow> =>
+  api.patch(
+    `/capabilities/${encodeURIComponent(assetType)}/${encodeURIComponent(name)}/examples`,
+    { examples },
+  ).then((r) => unwrap<AssetRow>(r))
 
 export const verifyPlugin = (name: string): Promise<PluginVerifyResult> =>
   api.post(`/capabilities/plugins/${encodeURIComponent(name)}/verify`)
     .then((r) => unwrap<PluginVerifyResult>(r))
-
-export const scanExperts = (): Promise<void> =>
-  api.post('/capabilities/scan-experts').then(() => undefined)
 
 export const createTeam = (payload: Record<string, unknown>): Promise<void> =>
   api.post('/capabilities/teams', payload).then(() => undefined)
@@ -157,11 +261,27 @@ export interface SubscribeResult {
 export interface PublicCapabilityCard {
   name: string
   asset_type: string
+  title?: string | null
+  description?: string | null
+  category?: string
   listing_state?: string
   subscribable?: boolean
   hosts?: string[]
   market_closed?: boolean
   message?: string | null
+  /** T-04/T-10 详情增量（contract API #8）：md 正文三源 / 示例 / 闸值 / 预览态 */
+  skill_md?: string | null
+  body_md?: string | null
+  persona_md?: string | null
+  examples?: string[] | null
+  gate_open?: boolean
+  preview?: boolean
+  install_count?: number | null
+  origin_plugin_name?: string | null
+  featured?: number
+  logo?: string | null
+  background?: string | null
+  updated_at?: string | null
 }
 
 export type PublicListQuery = {
@@ -171,6 +291,12 @@ export type PublicListQuery = {
   category?: string
   page?: number
   page_size?: number
+  /** T-08（FR-04）：smart | latest | hot */
+  sort?: string
+  /** QA-2 修复：请求侧 preview 参数（AD-5c 超管预览旁路）——响应里的
+   * `PublicShelfList.preview` 只是回显，真正驱动闸/listed 豁免的是这个请求参数。
+   * 后端只认平台管理员的会话，非管理员传了也被忽略。 */
+  preview?: boolean
 }
 
 export type PublicShelfItem = {
@@ -185,6 +311,11 @@ export type PublicShelfItem = {
   slash?: string | null
   score?: number | null
   tier?: string | null
+  logo?: string | null
+  background?: string | null
+  origin_plugin_name?: string | null
+  featured?: number
+  updated_at?: string | null
 }
 
 export type PublicShelfList = {
@@ -196,6 +327,12 @@ export type PublicShelfList = {
   market_closed?: boolean
   empty?: boolean
   message?: string
+  /** T-06/T-08：hot 无全库计数时服务端回 smart（UI 静默接受，GWT-04.4） */
+  sort_applied?: string
+  /** T-13：管理员预览旁路（AD-5c） */
+  preview?: boolean
+  gate_open?: boolean
+  live_total?: number
 }
 
 const compactPublicQuery = (params: PublicListQuery): Record<string, string | number> => {
@@ -205,6 +342,8 @@ const compactPublicQuery = (params: PublicListQuery): Record<string, string | nu
   if (params.q) query.q = params.q
   if (params.host) query.host = params.host
   if (params.category) query.category = params.category
+  if (params.sort) query.sort = params.sort
+  if (params.preview) query.preview = 'true'
   return query
 }
 
@@ -260,6 +399,8 @@ export const uninstallInstall = (id: number): Promise<{ id: number; deleted: boo
 export const fetchPublicCapability = (
   assetType: string,
   name: string,
+  preview?: boolean,
 ): Promise<PublicCapabilityCard> =>
-  api.get(`/public/capabilities/${encodeURIComponent(assetType)}/${encodeURIComponent(name)}`)
-    .then((r) => unwrap<PublicCapabilityCard>(r))
+  api.get(`/public/capabilities/${encodeURIComponent(assetType)}/${encodeURIComponent(name)}`, {
+    params: preview ? { preview: 'true' } : undefined,
+  }).then((r) => unwrap<PublicCapabilityCard>(r))
