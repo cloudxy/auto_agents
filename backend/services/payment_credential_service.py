@@ -9,6 +9,11 @@ from backend.repositories.payment_channel_credential_repository import (
     PaymentChannelCredentialRepository,
 )
 from backend.services.llm_secret_vault import LlmSecretVault
+from backend.services.payment_gateways.alipay_gateway import AlipayGateway
+from backend.services.payment_gateways.secrets_schema import (
+    parse_alipay_secrets,
+    parse_wechat_secrets,
+)
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
 from platform_core.models.payment_channel_credential import PaymentChannelCredential
@@ -71,6 +76,34 @@ class PaymentCredentialService:
     async def configured_channels(self) -> set[str]:
         logger.info("查询已配置收款通道")
         return await self.repo.configured_channels()
+
+    async def validate_channel(self, channel: PaymentChannel) -> dict:
+        """校验已保存密钥包的 JSON 形状 + 密钥格式（离线，不发起真实网络请求）。
+
+        支付宝侧额外用 cryptography 尝试加载 RSA 私钥/公钥，能提前抓到最常见
+        的"复制密钥时漏了几个字符/贴错文件"问题；微信侧只做 JSON 形状校验——
+        构造真实 WeChatPay 客户端会触发平台证书下载（网络副作用），留给真正
+        创建支付意图时再做，不塞进这个"点一下就想立刻有结果"的校验动作里。
+        """
+        logger.info(f"校验商户凭据格式 | channel={channel}")
+        row = await self.repo.get_by_channel(channel)
+        if row is None:
+            raise NotFoundException("商户凭据")
+        plain = LlmSecretVault.decrypt_api_key(str(row.secrets_encrypted or ""))
+        if not plain:
+            raise BusinessException(
+                message="密钥解密失败（主密钥缺失或密文损坏）",
+                code="PAYMENT_SECRETS_DECRYPT_FAILED",
+            )
+        if channel == "alipay":
+            from config import settings
+
+            secrets = parse_alipay_secrets(plain)
+            gateway_url = str(settings.get("PAYMENT.ALIPAY.GATEWAY", ""))
+            AlipayGateway(secrets, gateway_url=gateway_url)  # 加载 RSA 密钥即校验
+            return {"channel": channel, "valid": True, "checked": "json+rsa_key_load"}
+        parse_wechat_secrets(plain)
+        return {"channel": channel, "valid": True, "checked": "json_shape_only"}
 
     async def _insert_or_rotate(
         self, payload: PaymentChannelCredentialPut, blob: str, actor: str,

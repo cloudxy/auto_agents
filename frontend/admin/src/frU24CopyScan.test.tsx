@@ -29,10 +29,19 @@ jest.mock('./services/capabilities', () => ({
   listPublicAssets: jest.fn(),
 }))
 
-jest.mock('./store/useAuthStore', () => ({
-  useAuthStore: (sel: (s: { user: Record<string, unknown> }) => unknown) =>
-    sel({ user: { tenant_id: 1, tenant_role: 'owner', is_platform_admin: false } }),
-}))
+// zustand 的 hook 两种调用形态都合法：带 selector 取片段，或不带参数取整个 store。
+// TenantShelf（T-08）经 usePermission 走的是**不带 selector** 的 `useAuthStore()`，
+// 故 mock 必须两种都支持，否则渲染即 `sel is not a function`。
+jest.mock('./store/useAuthStore', () => {
+  const state = {
+    user: { tenant_id: 1, tenant_role: 'owner', is_platform_admin: false },
+    isAuthenticated: true,
+  }
+  return {
+    useAuthStore: (sel?: (s: typeof state) => unknown) =>
+      (typeof sel === 'function' ? sel(state) : state),
+  }
+})
 
 import { previewCheckout, listMyOrders } from './services/billing'
 import { fetchRelayPage, fetchRelaySku } from './services/relay'

@@ -1,4 +1,9 @@
-"""能力市场公开读模型：查询侧 FR-33 闸再 COUNT/LIMIT（PIT-5）+ FR-80 测试种子闸。"""
+"""能力市场公开读模型：查询侧 FR-33 闸再 COUNT/LIMIT（PIT-5）+ FR-80 测试种子闸。
+
+feat-agents-market（AD-5）：平台管理员预览旁路 preview=True 跳闸（list/detail/media
+三端点）；detail/media 额外豁免 listed 过滤的 listing_state 分量（unlisted 可读 +
+preview_unlisted 标记，OQ-D1）；投影/媒体 href/md 正文读取已迁 projection.py（AD-11）。
+"""
 from typing import Optional
 
 from sqlalchemy import String, cast, func, not_, or_, select
@@ -9,7 +14,6 @@ from backend.services.power_market.installs import (
     _assert_actor,
     _assert_host,
     _require_tenant,
-    hosts_for_asset,
     insert_install,
     list_tenant_installs,
     patch_live_install,
@@ -18,6 +22,11 @@ from backend.services.power_market.installs import (
 from backend.services.power_market.correct import CorrectGuard
 from backend.services.power_market.license import LicenseWriter
 from backend.services.power_market.listing import ListingWriter
+from backend.services.power_market.projection import (
+    _project as _project_row,
+    _read_skill_md,
+)
+from backend.services.power_market.sorting import _apply_sort, _resolve_sort, install_count_for
 from backend.services.power_market.sources import SourceRegistry
 from backend.services.power_market.sync import SourceSync
 from backend.services.power_market.references import list_runtime_refs
@@ -50,7 +59,6 @@ from backend.services.power_market.types import (
     PatchListingRequest,
     PutAliasRequest,
     _stored_types_for,
-    _to_public_asset_type,
 )
 from platform_core.exceptions import (
     BusinessException,
@@ -60,15 +68,10 @@ from platform_core.exceptions import (
 from platform_core.logger import get_logger
 from platform_core.models.capability import (
     CapabilityAlias, CapabilityAsset, CapabilityCommand, CapabilityComponent,
+    CapabilityExpert,
 )
 
 logger = get_logger("service.power_market")
-
-_PUBLIC_FIELDS = (
-    "name", "title", "description", "category", "tier", "score",
-    "status", "source_url", "source_author", "updated_at", "asset_type",
-    "listing_state", "license",
-)
 
 
 def _license_clause():
@@ -158,10 +161,11 @@ def _apply_list_filters(stmt, category: Optional[str], q: Optional[str], host: O
     return stmt.where(_host_sql(key))
 
 
-def _row_is_fr33(row: CapabilityAsset) -> bool:
+def _row_is_fr33(row: CapabilityAsset, *, allow_unlisted: bool = False) -> bool:
     if row.deleted_at is not None:
         return False
-    if row.listing_state not in LISTING_VISIBLE:
+    # AD-5c：预览态只豁免 listing_state 分量——deleted/status/种子/许可仍全生效
+    if row.listing_state not in LISTING_VISIBLE and not allow_unlisted:
         return False
     if row.status not in GOVERNANCE_PUBLIC:
         return False
@@ -200,19 +204,22 @@ class PowerMarketService:
         host: Optional[str] = None,
         page: int = 1,
         page_size: int = PAGE_SIZE_DEFAULT,
+        preview: bool = False,
+        sort: Optional[str] = None,
     ) -> dict:
         logger.info(
             f"power_market.list_public | type={asset_type} page={page} "
-            f"q={q} host={host} category={category}"
+            f"q={q} host={host} category={category} preview={preview} sort={sort}"
         )
         page_size = self._page_size(page_size)
         page = max(int(page or 1), 1)
-        if not is_power_market_enabled():
+        if not preview and not is_power_market_enabled():
             return closed_list_payload(page=page, page_size=page_size)
         public = self.parse_asset_type(asset_type, default=default)
         stored = None if public is None else _stored_types_for(public)
+        applied = await _resolve_sort(self.session, sort)  # AD-6：hot 无计数降级
         rows, total = await self._list_fr33(
-            stored, category, q, page, page_size, host=host,
+            stored, category, q, page, page_size, host=host, sort=applied,
         )
         sides = await self._command_sides(rows)
         payload = {
@@ -224,7 +231,11 @@ class PowerMarketService:
                 self._project(row, command=sides.get(row.id)) for row in rows
             ],
             "market_closed": False,
+            "sort_applied": applied,
         }
+        if preview:  # AD-5c：管理员预览态跳闸，payload 带实际闸值
+            payload["preview"] = True
+            payload["gate_open"] = is_power_market_enabled()
         if total == 0:
             payload["empty"] = True
             payload["message"] = MSG_EMPTY_SHELF
@@ -232,13 +243,16 @@ class PowerMarketService:
 
     async def get_public(
         self, asset_type: Optional[str], name: str, *, default: Optional[str] = None,
+        preview: bool = False,
     ) -> Optional[dict]:
-        logger.info(f"power_market.get_public | type={asset_type} name={name}")
-        if not is_power_market_enabled():
-            return closed_detail_payload()
+        logger.info(
+            f"power_market.get_public | type={asset_type} name={name} preview={preview}"
+        )
+        if not preview and not is_power_market_enabled():
+            return {**closed_detail_payload(), "gate_open": False}
         public = self.parse_asset_type(asset_type, default=default)
         row = await self._load_named(public, name)
-        if row is None or not _row_is_fr33(row):
+        if row is None or not _row_is_fr33(row, allow_unlisted=preview):
             return None
         sides = await self._command_sides([row])
         cmd = sides.get(row.id)
@@ -248,7 +262,40 @@ class PowerMarketService:
             item["skill_md"] = _read_skill_md(row)
         if cmd is not None:
             item["body_md"] = cmd.body_md
+        if item["asset_type"] == "agent":
+            item["persona_md"] = await self._persona_md(row.id)
+        # 同 QA-13 模式（examples 列随 050 迁移落地，getattr 防御不到 SQL 层
+        # 未知列错误）：只留 ORM 侧真实存在时的默认值归一化。
+        item["examples"] = row.examples or []
+        item["gate_open"] = is_power_market_enabled()
+        if preview:
+            item["preview"] = True
+            item["market_closed"] = False
+            if row.listing_state == "unlisted":
+                item["preview_unlisted"] = True  # 抽屉「未上架」提醒标签（OQ-D1）
+            # QA-11：OQ-D3 裁定预览态显示订阅计数，之前只有前端渲染逻辑，
+            # 后端从没填过这个字段——抽屉的「已订阅 N 次」恒不出现。
+            item["install_count"] = await install_count_for(self.session, row.id)
         return item
+
+    async def get_media_path(
+        self, asset_type: Optional[str], name: str, kind: str,
+        *, preview: bool = False,
+    ) -> Optional[str]:
+        logger.info(
+            f"power_market.get_media_path | type={asset_type} name={name} "
+            f"kind={kind} preview={preview}"
+        )
+        if kind not in ("logo", "background"):
+            return None
+        if not preview and not is_power_market_enabled():
+            return None
+        public = self.parse_asset_type(asset_type)
+        row = await self._load_named(public, name)
+        if row is None or not _row_is_fr33(row, allow_unlisted=preview):
+            return None
+        stored = getattr(row, kind, None)
+        return str(stored) if stored else None
 
     async def subscribe_public(
         self,
@@ -321,9 +368,9 @@ class PowerMarketService:
         logger.info("power_market.register_source")
         return await SourceRegistry(self.session).register(payload, actor=actor)
 
-    async def sync_source(self, name: str) -> dict:
-        logger.info(f"power_market.sync_source | name={name}")
-        return await SourceSync(self.session).sync(name)
+    async def sync_source(self, name: str, *, retract: bool = False) -> dict:
+        logger.info(f"power_market.sync_source | name={name} retract={retract}")
+        return await SourceSync(self.session).sync(name, retract=retract)
 
     async def backfill_first_party(self) -> dict:
         logger.info("power_market.backfill_first_party")
@@ -358,6 +405,7 @@ class PowerMarketService:
         page: int,
         page_size: int,
         host: Optional[str] = None,
+        sort: str = "smart",
     ) -> tuple[list[CapabilityAsset], int]:
         types = stored_types if stored_types else READABLE_ASSET_TYPES
         stmt = select(CapabilityAsset).where(
@@ -371,7 +419,7 @@ class PowerMarketService:
         )).scalar_one()
         offset = (page - 1) * page_size
         rows = (await self.session.execute(
-            stmt.order_by(CapabilityAsset.id.desc()).offset(offset).limit(page_size)
+            _apply_sort(stmt, sort).offset(offset).limit(page_size)
         )).scalars().all()
         return list(rows), int(total)
 
@@ -439,28 +487,10 @@ class PowerMarketService:
     def _project(
         self, row: CapabilityAsset, *, command: Optional[CapabilityCommand] = None,
     ) -> dict:
-        item = {f: getattr(row, f) for f in _PUBLIC_FIELDS if hasattr(row, f)}
-        item["asset_type"] = _to_public_asset_type(row.asset_type)
-        item["updated_at"] = row.updated_at.isoformat() if row.updated_at else None
-        item["score"] = float(row.score) if row.score is not None else None
-        item["subscribable"] = row.listing_state == "listed"
-        item["hosts"] = hosts_for_asset(row)
-        if command is not None:
-            item["slash"] = command.slash
-        return item
+        return _project_row(row, command=command)
 
-
-def _read_skill_md(row: CapabilityAsset) -> str:
-    from pathlib import Path
-
-    from backend.config_consts import SKILLS_LIBRARY_ROOT
-    from config import settings
-
-    rel = (row.file_path or row.name or "").strip()
-    if not rel:
-        return ""
-    md = Path(str(settings.get("SKILLS.LIBRARY_ROOT", SKILLS_LIBRARY_ROOT))) / rel / "SKILL.md"
-    try:
-        return md.read_text(encoding="utf-8") if md.exists() else ""
-    except OSError:
-        return ""
+    async def _persona_md(self, asset_id: int) -> str:
+        detail = (await self.session.execute(
+            select(CapabilityExpert).where(CapabilityExpert.asset_id == asset_id)
+        )).scalar_one_or_none()
+        return (detail.persona_md or "") if detail is not None else ""

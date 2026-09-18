@@ -68,7 +68,7 @@ async def delete_result(
 ) -> ApiResponse[dict]:
     """删除单条采集结果（数据中心清理；仅管理员）"""
     result = await service.delete_result(result_id)
-    await record_audit(session, user, "result.delete", f"result#{result_id}")
+    await record_audit(user, "result.delete", f"result#{result_id}")
     return deleted(data=result)
 
 
@@ -95,7 +95,7 @@ async def export_results(
 ) -> StreamingResponse:
     """导出指定任务的非候选结果（csv/json；单次最多 100 条；空窗不下载）"""
     stream, filename, media_type = await service.export_results(task_id, format)
-    await record_audit(session, user, "result.export", f"task#{task_id}")
+    await record_audit(user, "result.export", f"task#{task_id}")
     return StreamingResponse(
         stream,
         media_type=media_type,

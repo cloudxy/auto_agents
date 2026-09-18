@@ -114,9 +114,23 @@ async def get_current_user(
     )
 
 
+async def optional_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    session: AsyncSession = Depends(get_async_db),
+) -> CurrentUser | None:
+    """可选身份依赖（feat-agents-market AD-5 超管预览旁路）：
+
+    有效 Bearer → 身份快照；无凭据 → None（匿名）。凭据无效不静默——
+    照常抛 401（带坏 token 的请求不能伪装成匿名降级）。
+    """
+    if credentials is None or not credentials.credentials:
+        return None
+    return await get_current_user(request, credentials, session)
+
+
 def require_role(*roles: str) -> Callable:
     """角色守卫依赖工厂：命中任一角色放行，否则 403"""
-
     async def _guard(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
         if user.role not in roles:
             logger.warning(f"权限不足被拒绝 | user={user.username} role={user.role} need={roles}")

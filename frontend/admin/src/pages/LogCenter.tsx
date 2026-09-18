@@ -8,7 +8,7 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Card, Tabs, Table, Tag, Space, Input, Button, DatePicker, Typography, message, Alert,
+  Card, Tabs, Table, Tag, Space, Input, Button, DatePicker, Typography, Alert,
 } from 'antd'
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'

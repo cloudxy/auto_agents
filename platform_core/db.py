@@ -3,7 +3,7 @@ import os
 import sys
 from typing import Dict
 import redis
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
@@ -92,6 +92,7 @@ class DBManager:
                 else:
                     async_engine_kwargs.update(pool_size=5, max_overflow=10)
                 async_engine = create_async_engine(async_url, **async_engine_kwargs)
+                self._arm_mysql_rw_on_checkout(async_engine)
                 self.async_engines[key] = async_engine
                 
                 global_log.success(f"MySQL [{key}] OK: {host}:{port}/{dbname}")
@@ -148,6 +149,18 @@ class DBManager:
         if key not in self.mysql:
             raise KeyError(f"MySQL '{key}' not found.")
         return self.mysql[key]()
+
+    @staticmethod
+    def _arm_mysql_rw_on_checkout(async_engine: AsyncEngine) -> None:
+        """归还/再取连接时清掉 SESSION READ ONLY，避免写路径 1792。"""
+
+        @event.listens_for(async_engine.sync_engine, "checkout")
+        def _force_read_write(dbapi_conn, _connection_record, _connection_proxy):
+            cur = dbapi_conn.cursor()
+            try:
+                cur.execute("SET SESSION TRANSACTION READ WRITE")
+            finally:
+                cur.close()
 
     async def get_async_session(self, key: str = "DEFAULT"):
         if not self._ready:
@@ -223,16 +236,41 @@ async def get_async_db(key: str = "DEFAULT"):
         yield session
 
 
+async def _arm_mysql_read_only(session: AsyncSession) -> bool:
+    bind = session.bind
+    if bind is None or getattr(bind.dialect, "name", "") != "mysql":
+        return False
+    try:
+        await session.execute(text("SET SESSION TRANSACTION READ ONLY"))
+        await session.rollback()
+        return True
+    except Exception:  # noqa: BLE001 只读提示失败不阻断查询
+        return False
+
+
+async def _disarm_mysql_read_only(session: AsyncSession, armed: bool) -> None:
+    if not armed:
+        return
+    try:
+        await session.rollback()
+        await session.execute(text("SET SESSION TRANSACTION READ WRITE"))
+        await session.rollback()
+    except Exception:  # noqa: BLE001 复位失败则丢弃连接，禁止带 READ ONLY 回池
+        await session.invalidate()
+
+
 async def get_async_readonly_db(key: str = "DEFAULT"):
-    """分析读路径（H1）：MySQL 会话 READ ONLY；SQLite 测试态原样。"""
+    """分析读路径（H1）：MySQL 会话 READ ONLY；SQLite 测试态原样。
+
+    SESSION TRANSACTION READ ONLY 粘在连接上。归还连接池前必须 RESET，
+    否则后续写路径（试采 INSERT spider_tasks）会 1792。
+    """
     async for session in get_manager().get_async_session(key):
+        armed = await _arm_mysql_read_only(session)
         try:
-            bind = session.bind
-            if bind is not None and getattr(bind.dialect, "name", "") == "mysql":
-                await session.execute(text("SET SESSION TRANSACTION READ ONLY"))
-        except Exception:  # noqa: BLE001 只读提示失败不阻断查询
-            pass
-        yield session
+            yield session
+        finally:
+            await _disarm_mysql_read_only(session, armed)
 
 def redis_client(key: str = "DEFAULT", db: int = None):
     return get_manager().get_redis(key, db)

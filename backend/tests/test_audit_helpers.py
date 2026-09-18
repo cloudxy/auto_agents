@@ -57,31 +57,31 @@ async def test_record_audit_standalone_swallows_infrastructure_failure():
 
 @pytest.mark.asyncio
 async def test_api_helper_is_pure_delegation():
-    """API 审计钩子只做参数展开与委托（ADR-0007：API 层不碰 session 生命周期）"""
+    """API 审计钩子只做参数展开与委托（ADR-0007：API 层不碰 session 生命周期；
+    K3：签名本身已不接受 session 形参——"API 层不碰 session"从注释约定升级成
+    类型签名强制，不再需要额外测一份"传了也不会被用"）。"""
     import backend.app.api._helpers as helpers
 
     user = CurrentUser(id=7, username="op", role="admin")
     with patch.object(helpers, "record_audit_standalone", AsyncMock()) as standalone:
-        await record_audit(MagicMock(), user, "role.create", "role:viewer", {"k": "v"})
+        await record_audit(user, "role.create", "role:viewer", {"k": "v"})
 
     standalone.assert_awaited_once_with(7, "op", "role.create", "role:viewer", {"k": "v"})
 
 
 @pytest.mark.asyncio
-async def test_api_helper_does_not_commit_request_session_when_standalone_false():
-    """C35-QA-02：standalone 失败不得把请求 session 当降级提交（ADR-0007 D4）"""
+async def test_api_helper_delegation_survives_standalone_returning_false():
+    """C35-QA-02 延伸：standalone 失败（返回 False）时 API 钩子仍只是纯委托，
+    不做任何降级提交尝试——K3 前该断言靠"session.commit 未被调用"证明，
+    现在函数签名里已经没有 session 可供误用，保证是结构性的。"""
     import backend.app.api._helpers as helpers
 
     user = CurrentUser(id=1, username="test-platform-admin", role="admin")
-    session = MagicMock()
-    session.commit = AsyncMock()
     with patch.object(
         helpers, "record_audit_standalone", AsyncMock(return_value=False),
     ) as standalone:
-        await record_audit(session, user, "plugin.scan", "plugins", {"total": 1})
+        await record_audit(user, "plugin.scan", "plugins", {"total": 1})
 
     standalone.assert_awaited_once_with(
         1, "test-platform-admin", "plugin.scan", "plugins", {"total": 1},
     )
-    session.commit.assert_not_awaited()
-    session.commit.assert_not_called()

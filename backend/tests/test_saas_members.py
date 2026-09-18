@@ -344,8 +344,8 @@ def test_delete_member_clears_inbox_and_records_audit(db_client, db_session):
         resp = db_client.delete(f"/api/v1/members/{mid}", headers=_auth("owner"))
     assert resp.status_code == 200
     audit.assert_awaited_once()
-    assert audit.await_args.args[2] == "member.delete"  # (session, user, action, target)
-    assert audit.await_args.args[3] == f"user#{mid}"
+    assert audit.await_args.args[1] == "member.delete"  # K3：签名去掉 session → (user, action, target)
+    assert audit.await_args.args[2] == f"user#{mid}"
 
     async def _count_inbox():
         async with db_session() as s:

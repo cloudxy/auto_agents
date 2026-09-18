@@ -1,0 +1,68 @@
+/* T-09（FR-06）：确定性占位。渐变色值 = edge-states §8 钉定的 8 组（antd 色板深段 5–7 级，
+ * 设计令牌源：02-shape/edge-states.md §9 asset-visual.gradients）。尺寸 §8.6：
+ * 卡片 40×40 r8 / 抽屉 72×72 r12；banner = 同渐变横向拉伸。 */
+.asset-visual {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: #ffffff;
+}
+
+.asset-visual img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.asset-visual--card {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.asset-visual--drawer {
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* 字色 #fff、字号 = 边长×0.4、字重 600（§8.3） */
+.asset-visual--card .asset-visual__letter {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.asset-visual--drawer .asset-visual__letter {
+  font-size: 29px;
+  font-weight: 600;
+}
+
+/* 类型角标 chip：底 rgba(0,0,0,0.28) + 白色图标 14px（§8.4，第二通道为图标形） */
+.asset-visual__chip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+  border-radius: 4px 0 0 0;
+  background: rgba(0, 0, 0, 0.28);
+  color: #ffffff;
+}
+
+.asset-visual--grad-0 { background: linear-gradient(135deg, #0958d9, #1677ff); }
+.asset-visual--grad-1 { background: linear-gradient(135deg, #10239e, #2f54eb); }
+.asset-visual--grad-2 { background: linear-gradient(135deg, #391085, #722ed1); }
+.asset-visual--grad-3 { background: linear-gradient(135deg, #780650, #c41d7f); }
+.asset-visual--grad-4 { background: linear-gradient(135deg, #871400, #fa541c); }
+.asset-visual--grad-5 { background: linear-gradient(135deg, #ad4e00, #d46b08); }
+.asset-visual--grad-6 { background: linear-gradient(135deg, #00504b, #08979c); }
+.asset-visual--grad-7 { background: linear-gradient(135deg, #135200, #389e0d); }

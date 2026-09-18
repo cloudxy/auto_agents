@@ -66,7 +66,7 @@ async def create_group(
 ) -> ApiResponse[RelayGroupOut]:
     tid = require_tenant_id(user.tenant_id)
     out = await service.create_group(tid, user.tenant_role, payload)
-    await record_audit(session, user, "relay.group.create", f"group#{out.id}")
+    await record_audit(user, "relay.group.create", f"group#{out.id}")
     return created(out)
 
 
@@ -80,7 +80,7 @@ async def update_group(
 ) -> ApiResponse[RelayGroupOut]:
     tid = require_tenant_id(user.tenant_id)
     out = await service.update_group(tid, user.tenant_role, group_id, payload)
-    await record_audit(session, user, "relay.group.update", f"group#{group_id}")
+    await record_audit(user, "relay.group.update", f"group#{group_id}")
     return ok(out)
 
 
@@ -108,7 +108,7 @@ async def issue_token(
 ) -> ApiResponse[RelayTokenOut]:
     tid = require_tenant_id(user.tenant_id)
     out = await service.issue_token(tid, user.tenant_role, payload)
-    await record_audit(session, user, "relay.token.issue", f"token#{out.id}")
+    await record_audit(user, "relay.token.issue", f"token#{out.id}")
     return created(out, message=TOKEN_ISSUED_MESSAGE)
 
 
@@ -154,7 +154,7 @@ async def refresh_token_usage(
     """
     tid = require_tenant_id(user.tenant_id)
     tokens = await service.refresh_tokens_usage(tid)
-    await record_audit(session, user, "relay.token.refresh_usage", f"tenant#{tid}")
+    await record_audit(user, "relay.token.refresh_usage", f"tenant#{tid}")
     return ok(tokens, message="令牌用量已按网关最新数据刷新。")
 
 
@@ -167,5 +167,5 @@ async def revoke_token(
 ) -> ApiResponse[RelayTokenOut]:
     tid = require_tenant_id(user.tenant_id)
     out = await service.revoke_token(tid, user.tenant_role, token_id)
-    await record_audit(session, user, "relay.token.revoke", f"token#{token_id}")
+    await record_audit(user, "relay.token.revoke", f"token#{token_id}")
     return ok(out, message="已吊销该渠道组令牌。")

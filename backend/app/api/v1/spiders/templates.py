@@ -43,7 +43,7 @@ async def create_template(
         payload.model_dump(), created_by=user.username,
         tenant_id=await task_actor_tenant_id(user, session),
     )
-    await record_audit(session, user, "template.create", f"template#{template.id}",
+    await record_audit(user, "template.create", f"template#{template.id}",
                  {"name": payload.name, "spider": payload.spider_name})
     return created(template)
 
@@ -60,7 +60,7 @@ async def update_template(
     template = await service.update_template(
         template_id, payload.model_dump(exclude_unset=True)
     )
-    await record_audit(session, user, "template.update", f"template#{template_id}")
+    await record_audit(user, "template.update", f"template#{template_id}")
     return updated(template)
 
 
@@ -73,7 +73,7 @@ async def delete_template(
 ) -> ApiResponse[dict]:
     """删除任务模板"""
     result = await service.delete_template(template_id)
-    await record_audit(session, user, "template.delete", f"template#{template_id}")
+    await record_audit(user, "template.delete", f"template#{template_id}")
     return deleted(data=result)
 
 
@@ -88,6 +88,6 @@ async def run_from_template(
     task = await service.create_task_from_template(
         template_id, tenant_id=await task_actor_tenant_id(user, session),
     )
-    await record_audit(session, user, "task.run_from_template", f"task#{task.id}",
+    await record_audit(user, "task.run_from_template", f"task#{task.id}",
                  {"template_id": template_id})
     return created(task)

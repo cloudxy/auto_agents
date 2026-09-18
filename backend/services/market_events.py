@@ -30,6 +30,21 @@ MARKET_EVENT_NAMES = (
     MARKET_LIST_PAGED,
 )
 
+# ---- feat-agents-market（FR-08）治理埋点四事件 + 详情打开 ----
+SYNC_COMPLETED = "sync_completed"
+SYNC_FAILED = "sync_failed"
+IMPORT_COMPLETED = "import_completed"
+IMPORT_FAILED = "import_failed"
+DETAIL_OPENED = "detail_opened"
+
+GOVERNANCE_EVENT_NAMES = (
+    SYNC_COMPLETED,
+    SYNC_FAILED,
+    IMPORT_COMPLETED,
+    IMPORT_FAILED,
+    DETAIL_OPENED,
+)
+
 # 字面量与 types.py 错误码对齐；本模块禁止 import power_market（R9 环）。
 _REJECT_REASON = {
     "MARKET_COMING_SOON": "coming_soon",
@@ -134,3 +149,77 @@ async def _emit_rejected(session: AsyncSession, user, host, exc) -> None:
     if host:
         props["host"] = host
     await emit_market_event(session, MARKET_SUBSCRIBE_REJECTED, props=props, **_actor(user))
+
+
+# ---- feat-agents-market（FR-08）治理事件投递（GWT-08.1–08.4）----
+
+
+async def emit_sync_completed(
+    session: AsyncSession, *, actor: str, added: int, updated: int, unchanged: int,
+) -> None:
+    logger.info(
+        f"market_events.emit_sync_completed | actor={actor} "
+        f"added={added} updated={updated} unchanged={unchanged}"
+    )
+    await emit_market_event(
+        session, SYNC_COMPLETED,
+        props={"actor": actor, "added": int(added), "updated": int(updated),
+               "unchanged": int(unchanged)},
+    )
+
+
+async def emit_sync_failed(session: AsyncSession, *, actor: str, error_type: str) -> None:
+    logger.info(f"market_events.emit_sync_failed | actor={actor} error_type={error_type}")
+    await emit_market_event(
+        session, SYNC_FAILED,
+        props={"actor": actor, "error_type": (error_type or "")[:128]},
+    )
+
+
+async def emit_import_completed(
+    session: AsyncSession, *, actor_role: str, source: str, files: int,
+    assets_created: int, assets_updated: int, assets_skipped: int,
+    actor_user_id: int | None = None, batch_id: str | None = None,
+) -> None:
+    logger.info(
+        f"market_events.emit_import_completed | source={source} files={files} "
+        f"created={assets_created} updated={assets_updated} skipped={assets_skipped}"
+    )
+    props: dict[str, Any] = {
+        "actor_role": actor_role, "source": source, "files": int(files),
+        "assets_created": int(assets_created), "assets_updated": int(assets_updated),
+        "assets_skipped": int(assets_skipped),
+    }
+    if batch_id is not None:
+        props["batch_id"] = str(batch_id)
+    await emit_market_event(
+        session, IMPORT_COMPLETED, actor_user_id=actor_user_id, props=props,
+    )
+
+
+async def emit_import_failed(
+    session: AsyncSession, *, actor_role: str, error_type: str,
+    actor_user_id: int | None = None,
+) -> None:
+    logger.info(
+        f"market_events.emit_import_failed | error_type={error_type}"
+    )
+    await emit_market_event(
+        session, IMPORT_FAILED, actor_user_id=actor_user_id,
+        props={"actor_role": actor_role, "error_type": (error_type or "")[:128]},
+    )
+
+
+async def emit_detail_opened(
+    session: AsyncSession, *, actor_role: str, asset_type: str, asset_name: str,
+    actor_user_id: int | None = None, tenant_id: int | None = None,
+) -> None:
+    logger.info(
+        f"market_events.emit_detail_opened | role={actor_role} "
+        f"type={asset_type} name={asset_name}"
+    )
+    await emit_market_event(
+        session, DETAIL_OPENED, tenant_id=tenant_id, actor_user_id=actor_user_id,
+        props={"actor_role": actor_role, "asset_type": asset_type,
+               "asset_name": (asset_name or "")[:128]},
+    )

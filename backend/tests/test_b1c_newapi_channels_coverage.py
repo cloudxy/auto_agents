@@ -156,8 +156,8 @@ def test_set_config_admin_writes_relay_hash_and_audits(
 
     audit_mock.assert_awaited_once()
     call_args = audit_mock.await_args.args
-    assert call_args[2] == "newapi.channel_config.set"
-    assert call_args[3] == "channel:3"
+    assert call_args[1] == "newapi.channel_config.set"  # K3：签名去掉 session
+    assert call_args[2] == "channel:3"
 
 
 def test_set_config_ref_writes_relay_string(

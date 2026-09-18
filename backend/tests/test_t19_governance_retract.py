@@ -1,7 +1,8 @@
 """T-19 FR-88 GWT-88.1..88.5：技能/插件同步收回 + 治理目录不含已删行。
 
-三路收回：skills/scan（第一方技能镜像行）、scan-plugins（第一方插件行）、
-src_sync（源注册表行，命令已兑同构扩到技能/插件）。
+收回通道现状：skills/scan（第一方技能镜像行）、src_sync（源注册表行，命令已
+兑同构扩到技能/插件）。feat-agents-market 后 scan-plugins 退役：.agents 同步
+非破坏（FR-01.3），插件失源回收改走 FR-02 显式清理（见 test_prune_missing.py）。
 公开商店过滤已兑（T-13 FR-33 谓词含非软删），本文件叠加断言。
 """
 from __future__ import annotations
@@ -19,7 +20,7 @@ from platform_core.models.capability import CapabilityAsset
 from platform_core.models.skill import Skill
 
 _SCAN_SKILLS = "/api/v1/skills/scan"
-_SCAN_PLUGINS = "/api/v1/capabilities/scan-plugins"
+_SYNC_HUB = "/api/v1/capabilities/sync-agents-hub"
 _CATALOG = "/api/v1/capabilities"
 _SRC = "/api/v1/capabilities/sources"
 _LISTING = "/api/v1/capabilities/{}/{}/listing"
@@ -200,7 +201,7 @@ def test_gwt_88_1_skill_retract_after_src_sync(
     assert db_client.post(_SRC, headers=pa, json={
         "name": "src-t19-skill", "source_kind": "local", "uri": str(tree),
     }).status_code in (200, 201)
-    assert db_client.post(f"{_SRC}/src-t19-skill/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-skill/sync", headers=pa, params={"retract": "true"}).status_code == 200
 
     for local in ("keep-me", "drop-me"):
         _fixture_public_ready(db_session, "skill", f"t19-pack__{local}")
@@ -209,7 +210,7 @@ def test_gwt_88_1_skill_retract_after_src_sync(
     assert "t19-pack__drop-me" in _public_names(db_client, _PUB_SKILLS)
 
     shutil.rmtree(plugin / "skills" / "drop-me")
-    assert db_client.post(f"{_SRC}/src-t19-skill/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-skill/sync", headers=pa, params={"retract": "true"}).status_code == 200
 
     names, data = _catalog_names(db_client, pa, "skill")
     assert "t19-pack__drop-me" not in names
@@ -225,42 +226,76 @@ def test_gwt_88_1_skill_retract_after_src_sync(
     assert gone.sync_state == "gone"
 
 
-# ---------- GWT-88.2 插件收回（scan-plugins 路与 src_sync 路各一） ----------
-
-
-def test_gwt_88_2_plugin_retract_after_scan_plugins(
+def test_qa8_src_sync_without_retract_param_never_deletes(
     db_client, db_session, library_root,
 ):
-    """Given 本机 plugins/ 删除某插件目录且一次扫描结束 Then 治理目录/公开商店不含。"""
+    """QA-8：src_sync 的收回曾是隐式副作用，contract 断言「旧扫描端点是唯一
+    破坏入口」并不成立——这条通道本身就在写 deleted_at。改成显式参数后，
+    不传 `?retract=true`（含只传 POST 无 query 的默认调用）必须整批 upsert，
+    zero 软删——即便源里的文件已经被删掉。
+    """
     pa = make_platform_admin_headers(db_session)
-    keep = _write_plugin(library_root / "plugins", "t19-plug-keep")
-    drop = _write_plugin(library_root / "plugins", "t19-plug-drop")
+    tree = library_root / "src-t19-noretract"
+    plugin = _write_plugin(tree, "t19-noretract-pack", ["keep-me", "drop-me"])
+    assert db_client.post(_SRC, headers=pa, json={
+        "name": "src-t19-noretract", "source_kind": "local", "uri": str(tree),
+    }).status_code in (200, 201)
+    assert db_client.post(
+        f"{_SRC}/src-t19-noretract/sync", headers=pa, params={"retract": "true"},
+    ).status_code == 200
 
-    first = db_client.post(_SCAN_PLUGINS, headers=pa)
-    assert first.status_code == 200, first.text
-    for name in ("t19-plug-keep", "t19-plug-drop"):
-        _fixture_public_ready(db_session, "plugin", name)
-        _list_asset(db_client, pa, "plugin", name)
-    assert "t19-plug-drop" in _catalog_names(db_client, pa, "plugin")[0]
-    assert "t19-plug-drop" in _public_names(db_client, _PUB_CAPS, type_="plugin")
+    shutil.rmtree(plugin / "skills" / "drop-me")
+    # 默认调用（不传 retract）——源里已经没有 drop-me，但这次同步不该删它
+    resp = db_client.post(f"{_SRC}/src-t19-noretract/sync", headers=pa)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["retracted"] == {"plugin": 0, "skill": 0, "command": 0}
 
-    shutil.rmtree(drop)
-    second = db_client.post(_SCAN_PLUGINS, headers=pa)
-    assert second.status_code == 200, second.text
-    assert keep.is_dir()  # 不物理删文件只针对收回行本身；留存目录不动
+    still_live = _one(db_session, select(CapabilityAsset).where(
+        CapabilityAsset.name == "t19-noretract-pack__drop-me"))
+    assert still_live is not None
+    assert still_live.deleted_at is None
+    assert still_live.sync_state != "gone"
 
-    names, data = _catalog_names(db_client, pa, "plugin")
-    assert "t19-plug-drop" not in names
-    assert "t19-plug-keep" in names
-    assert data["total"] == 1
-    assert "t19-plug-drop" not in _public_names(db_client, _PUB_CAPS, type_="plugin")
 
-    gone = _one(db_session, select(CapabilityAsset).where(
-        CapabilityAsset.asset_type == "plugin",
-        CapabilityAsset.name == "t19-plug-drop"))
-    assert gone is not None
-    assert gone.deleted_at is not None
-    assert gone.sync_state == "gone"
+# ---------- GWT-88.2 插件收回（.agents 同步非破坏 + src_sync 收回） ----------
+
+
+def test_sync_agents_hub_never_retracts_missing_plugins(
+    db_client, db_session, tmp_path,
+):
+    """feat-agents-market FR-01.3（scan-plugins 退役后继）：.agents 同步非破坏——
+    磁盘删除插件目录后再同步，既有 live 行不得被软删（回收只来自显式下架
+    或 FR-02 失源行清理）。"""
+    from config import settings
+
+    pa = make_platform_admin_headers(db_session)
+    agents = tmp_path / ".agents"
+    keep = _write_plugin(agents / "plugins", "t19-plug-keep")
+    drop = _write_plugin(agents / "plugins", "t19-plug-drop")
+    original = settings.get("SKILLS.AGENTS_ROOT")
+    settings.set("SKILLS.AGENTS_ROOT", str(agents))
+    try:
+        first = db_client.post(_SYNC_HUB, headers=pa)
+        assert first.status_code == 200, first.text
+        names, _ = _catalog_names(db_client, pa, "plugin")
+        assert set(names) == {"t19-plug-keep", "t19-plug-drop"}
+
+        shutil.rmtree(drop)
+        second = db_client.post(_SYNC_HUB, headers=pa)
+        assert second.status_code == 200, second.text
+        assert keep.is_dir()
+
+        # 非破坏：目录消失后行仍在（治理目录可见），无新增 deleted_at
+        names, data = _catalog_names(db_client, pa, "plugin")
+        assert set(names) == {"t19-plug-keep", "t19-plug-drop"}
+        assert data["total"] == 2
+        rows = _query(db_session, select(CapabilityAsset).where(
+            CapabilityAsset.asset_type == "plugin",
+            CapabilityAsset.deleted_at.is_not(None),
+        ))
+        assert rows == []
+    finally:
+        settings.set("SKILLS.AGENTS_ROOT", original)
 
 
 def test_gwt_88_2_plugin_retract_after_src_sync(
@@ -274,7 +309,7 @@ def test_gwt_88_2_plugin_retract_after_src_sync(
     assert db_client.post(_SRC, headers=pa, json={
         "name": "src-t19-plugin", "source_kind": "local", "uri": str(tree),
     }).status_code in (200, 201)
-    assert db_client.post(f"{_SRC}/src-t19-plugin/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-plugin/sync", headers=pa, params={"retract": "true"}).status_code == 200
 
     for name in ("t19-pkg-a", "t19-pkg-b"):
         _fixture_public_ready(db_session, "plugin", name)
@@ -283,7 +318,7 @@ def test_gwt_88_2_plugin_retract_after_src_sync(
     assert "t19-pkg-b" in _public_names(db_client, _PUB_CAPS, type_="plugin")
 
     shutil.rmtree(tree / "t19-pkg-b")
-    assert db_client.post(f"{_SRC}/src-t19-plugin/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-plugin/sync", headers=pa, params={"retract": "true"}).status_code == 200
 
     names, _ = _catalog_names(db_client, pa, "plugin")
     assert "t19-pkg-b" not in names
@@ -388,13 +423,13 @@ def test_gwt_88_5_command_retract_no_regression(
     assert db_client.post(_SRC, headers=pa, json={
         "name": "src-t19-cmd", "source_kind": "local", "uri": str(tree),
     }).status_code in (200, 201)
-    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa, params={"retract": "true"}).status_code == 200
     assert "t19-cmd-pack__drop-cmd" in _catalog_names(db_client, pa, "command")[0]
 
     (cmd_dir / "drop-cmd.md").unlink()
     manifest["commands"] = {"/keep-cmd": {"name": "keep-cmd", "description": "留"}}
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa, params={"retract": "true"}).status_code == 200
 
     names, data = _catalog_names(db_client, pa, "command")
     assert "t19-cmd-pack__drop-cmd" not in names
@@ -402,6 +437,6 @@ def test_gwt_88_5_command_retract_no_regression(
     assert data["total"] == 1
 
     # 再同步一次：不得回潮
-    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa).status_code == 200
+    assert db_client.post(f"{_SRC}/src-t19-cmd/sync", headers=pa, params={"retract": "true"}).status_code == 200
     names, _ = _catalog_names(db_client, pa, "command")
     assert "t19-cmd-pack__drop-cmd" not in names

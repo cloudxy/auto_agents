@@ -41,8 +41,7 @@ async def put_payment_credential(
 ):
     logger.info(f"超管保存商户凭据 | user={user.username} channel={payload.channel}")
     view = await service.put(payload, actor=user.username)
-    await record_audit(
-        session, user, "payment_credential.put", payload.channel,
+    await record_audit(user, "payment_credential.put", payload.channel,
         detail={"channel": payload.channel, "key_version": view.key_version},
     )
     return ok(data=view.model_dump(mode="json"))
@@ -57,5 +56,19 @@ async def delete_payment_credential(
 ):
     logger.info(f"超管删除商户凭据 | user={user.username} channel={channel}")
     await service.delete_channel(channel, actor=user.username)
-    await record_audit(session, user, "payment_credential.delete", channel)
+    await record_audit(user, "payment_credential.delete", channel)
     return deleted(data={"channel": channel, "configured": False})
+
+
+@router.post("/{channel}/validate")
+async def validate_payment_credential(
+    channel: PaymentChannel,
+    user: CurrentUser = Depends(require_platform_admin_or_404),
+    service: PaymentCredentialService = Depends(_svc),
+):
+    """离线校验已保存密钥包的 JSON 形状 + 密钥格式（不发起真实网络请求，
+    不代表在线支付一定能跑通——那要看支付宝/微信那边商户资质是否真实有效）。
+    """
+    logger.info(f"超管校验商户凭据 | user={user.username} channel={channel}")
+    data = await service.validate_channel(channel)
+    return ok(data=data)

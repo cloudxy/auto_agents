@@ -46,7 +46,7 @@ async def issue_key(
 ) -> ApiResponse[OutboundKeyIssuedOut]:
     tid = require_tenant_id(user.tenant_id)
     out = await service.issue_key(tid, user.id, user.tenant_role, payload)
-    await record_audit(session, user, "outbound.key.issue", f"key#{out.id}")
+    await record_audit(user, "outbound.key.issue", f"key#{out.id}")
     return created(out, message=ISSUE_SUCCESS_MESSAGE)
 
 
@@ -59,5 +59,5 @@ async def revoke_key(
 ) -> ApiResponse[OutboundKeyOut]:
     tid = require_tenant_id(user.tenant_id)
     out = await service.revoke_key(tid, user.tenant_role, key_id)
-    await record_audit(session, user, "outbound.key.revoke", f"key#{key_id}")
+    await record_audit(user, "outbound.key.revoke", f"key#{key_id}")
     return ok(out, message="已吊销该出站拉数钥匙。")

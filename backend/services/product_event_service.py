@@ -3,6 +3,8 @@ import inspect
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from backend.repositories.product_event_repository import ProductEventRepository
@@ -64,11 +66,38 @@ async def _persist_event(session: AsyncSession, fields: dict[str, Any]) -> None:
         bind = await bind
     if not isinstance(bind, AsyncEngine):
         raise RuntimeError("product event persist needs AsyncEngine bind")
-    async with AsyncSession(bind, expire_on_commit=False) as extra:
-        row = dict(fields)
-        row["is_internal_fixture"] = await _fixture_snapshot(extra, row.get("tenant_id"))
-        extra.add(ProductEvent(**row))
-        await extra.commit()
+    row = dict(fields)
+    try:
+        async with AsyncSession(bind, expire_on_commit=False) as extra:
+            if bind.dialect.name == "sqlite":
+                # 单写库不做长等：主路径持写锁时 250ms 内认输走下面的兜底，
+                # 而不是干等 connect_args 的 30s（CI 全量曾因此每次同步 +33s）。
+                await extra.execute(text("PRAGMA busy_timeout=250"))
+            elif bind.dialect.name == "mysql":
+                # QA-7：MySQL 默认 innodb_lock_wait_timeout=50s，独立会话撞主
+                # 路径持有的行锁会同步阻塞 50 秒才失败——生产路径正常不会走到
+                # 这条分支（MySQL 多连接互不阻塞是常态），但一旦撞上就是 50s
+                # 同步卡死，与 SQLite 的 250ms 短等不对称。会话级设置，不影响
+                # 其他连接。
+                await extra.execute(text("SET SESSION innodb_lock_wait_timeout = 1"))
+            row["is_internal_fixture"] = await _fixture_snapshot(extra, row.get("tenant_id"))
+            extra.add(ProductEvent(**row))
+            await extra.commit()
+        return
+    except OperationalError as exc:
+        # 单写库（SQLite：本仓库 CI 主 pytest job 的默认口径）下，主路径若已 flush
+        # 过写操作就持着库级写锁，独立会话必然 `database is locked` 超时 →
+        # 事实被上层 try/except 吞掉、**永久丢失**（feat-agents-market T-14 实测：
+        # sync_completed/import_completed 在事务内发射时 100% 丢）。
+        # 兜底：退回主会话追加。代价是事实与主路径同生共死（弱于独立会话的保证），
+        # 但「弱保证」严格优于「丢事件」，且 MySQL 生产路径不会走到这里。
+        logger.warning(
+            f"产品事件独立会话被写锁挡住，退回主会话追加 | "
+            f"name={row.get('event_name')} err={exc}"
+        )
+    row["is_internal_fixture"] = await _fixture_snapshot(session, row.get("tenant_id"))
+    session.add(ProductEvent(**row))
+    await session.flush()
 
 
 async def emit_product_event(session: AsyncSession, event_name: str, *, tenant_id: int | None = None, actor_user_id: int | None = None, anonymous_id: str | None = None, role: str | None = None, props: dict[str, Any] | None = None, occurred_at: datetime | None = None) -> None:
