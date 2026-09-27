@@ -19,18 +19,38 @@ from backend.app.responses import (
     ok,
     paginated_from_offset,
 )
-from backend.services.ai_planner_service import AiPlannerService
+from backend.services.ai_planner_service import (
+    PLANNING_DISABLED_COPY,
+    PLANNING_READONLY_COPY,
+    AiPlannerService,
+    planning_is_open,
+)
+from platform_core.exceptions import BusinessException
 from platform_core.db import get_async_db
+from platform_core.logger import get_logger
 from platform_core.schemas.ai_plan import (
     AiPlanCreate,
     AiPlanResponse,
 )
 
 router = APIRouter()
+logger = get_logger("api")
 
 
 def _service(session: AsyncSession = Depends(get_async_db)) -> AiPlannerService:
     return AiPlannerService(session)
+
+
+async def require_planning_operator(
+    user: CurrentUser = Depends(require_login),
+) -> CurrentUser:
+    """规划提交守卫：只读拒绝句「当前账号不能开始规划」，可见处无 FORBIDDEN。"""
+    if user.role not in ("admin", "operator"):
+        logger.warning(f"只读提交规划被拒绝 | user={user.username} role={user.role}")
+        raise BusinessException(
+            message=PLANNING_READONLY_COPY, code="PLANNING_ROLE_NOT_ALLOWED",
+        )
+    return user
 
 
 @router.post("/plans", response_model=ApiResponse[AiPlanResponse])
@@ -38,13 +58,14 @@ async def create_plan(
     payload: AiPlanCreate,
     service: AiPlannerService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_planning_operator),
 ) -> ApiResponse[AiPlanResponse]:
     """创建 AI 采集计划（draft，target_url 必填；html_snippet 可选降级离线规划）"""
     plan = await service.create_plan(
-        payload, created_by=user.username, tenant_id=task_actor_tenant_id(user),
+        payload, created_by=user.username,
+        tenant_id=await task_actor_tenant_id(user, session),
     )
-    await record_audit(session, user, "ai.plan.create", f"ai_plan#{plan.id}",
+    await record_audit(user, "ai.plan.create", f"ai_plan#{plan.id}",
                  {"target_url": payload.target_url})
     return created(plan)
 
@@ -60,7 +81,10 @@ async def list_plans(
 ) -> PaginatedResponse[AiPlanResponse]:
     """AI 采集计划分页列表（支持状态过滤）"""
     resp = await service.list_plans(skip=skip, limit=limit, status=status)
-    return paginated_from_offset(items=resp.items, total=resp.total, skip=skip, limit=limit)
+    message = PLANNING_DISABLED_COPY if not planning_is_open() else "查询成功"
+    return paginated_from_offset(
+        items=resp.items, total=resp.total, skip=skip, limit=limit, message=message,
+    )
 
 
 @router.get("/plans/{plan_id}", response_model=ApiResponse[AiPlanResponse])
@@ -78,11 +102,11 @@ async def trigger_plan(
     plan_id: int = Path(..., ge=1),
     service: AiPlannerService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_planning_operator),
 ) -> ApiResponse[AiPlanResponse]:
     """触发 LLM 规划（后台执行，立即返回 planning 快照）"""
     plan = await service.launch_plan(plan_id)
-    await record_audit(session, user, "ai.plan.trigger", f"ai_plan#{plan_id}", {"action": "plan"})
+    await record_audit(user, "ai.plan.trigger", f"ai_plan#{plan_id}", {"action": "plan"})
     return ok(plan)
 
 
@@ -95,7 +119,7 @@ async def trigger_test(
 ) -> ApiResponse[AiPlanResponse]:
     """触发 flow_generic 试采（后台执行含自动修复迭代，立即返回快照）"""
     plan = await service.launch_test(plan_id)
-    await record_audit(session, user, "ai.plan.trigger", f"ai_plan#{plan_id}", {"action": "test"})
+    await record_audit(user, "ai.plan.trigger", f"ai_plan#{plan_id}", {"action": "test"})
     return ok(plan)
 
 
@@ -109,7 +133,7 @@ async def register_plan(
     """注册为爬虫定义（M3：内部调 create_definition 与手动登记同级，须 admin；
     校验最近试采通过；source=ai_generated，type=flow）"""
     plan = await service.register(plan_id)
-    await record_audit(session, user, "ai.plan.register", f"ai_plan#{plan_id}",
+    await record_audit(user, "ai.plan.register", f"ai_plan#{plan_id}",
                  {"definition": plan.plan_json.get("registered_definition") if plan.plan_json else None})
     return ok(plan)
 
@@ -123,5 +147,5 @@ async def delete_plan(
 ) -> ApiResponse[dict]:
     """删除 AI 采集计划（仅管理员）"""
     result = await service.delete_plan(plan_id)
-    await record_audit(session, user, "ai.plan.delete", f"ai_plan#{plan_id}")
+    await record_audit(user, "ai.plan.delete", f"ai_plan#{plan_id}")
     return deleted(data=result)

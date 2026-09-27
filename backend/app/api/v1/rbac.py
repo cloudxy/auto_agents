@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_admin, require_platform_admin
+from backend.app.api.deps import CurrentUser, require_admin, require_platform_admin_or_404
 from backend.app.responses import created, ok, updated
 from backend.services.rbac_service import RbacService
 from platform_core.db import get_async_db
@@ -87,7 +87,7 @@ class DepartmentUpdateRequest(RequestBody):
 
 @router.get("/roles")
 async def list_roles(
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
     service: RbacService = Depends(_service),
 ):
     """角色列表 + 权限码目录（DB 单源：roles/permissions 表；miss 回退内置）"""
@@ -112,26 +112,26 @@ async def list_roles(
 @router.post("/roles", status_code=201)
 async def create_role(
     payload: RoleCreateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
     """新建自定义角色（role_key 唯一；权限码集合可后配）"""
     result = await service.create_role(payload.model_dump(), builtin_codes=_BUILTIN_CODES)
-    await record_audit(session, user, "role.create", f"role:{result['role_key']}")
+    await record_audit(user, "role.create", f"role:{result['role_key']}")
     return created(data=result)
 
 
 @router.delete("/roles/{role_key}")
 async def delete_role(
     role_key: str,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
     """删除角色（内置禁删；有用户在用禁删）"""
     await service.delete_role(role_key)
-    await record_audit(session, user, "role.delete", f"role:{role_key}")
+    await record_audit(user, "role.delete", f"role:{role_key}")
     return ok(data={"role_key": role_key, "deleted": True})
 
 
@@ -139,14 +139,14 @@ async def delete_role(
 async def update_role(
     role_key: str,
     payload: RoleUpdateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
     """编辑角色（权限分配：permissions 集合全量提交；/auth/permissions 即时生效）"""
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
     result = await service.update_role(role_key, changes, builtin_codes=_BUILTIN_CODES)
-    await record_audit(session, user, "role.update", f"role:{role_key}",
+    await record_audit(user, "role.update", f"role:{role_key}",
                        detail={"fields": sorted(changes.keys())})
     logger.info(f"角色更新 | role={role_key} perms={len(result['permissions'])}")
     return updated(data=result)
@@ -173,7 +173,7 @@ async def create_department(
 ):
     """创建部门（租户内名唯一）"""
     result = await service.create_department(payload.model_dump())
-    await record_audit(session, user, "department.create", f"department#{result['id']}",
+    await record_audit(user, "department.create", f"department#{result['id']}",
                        detail={"tenant_id": result["tenant_id"], "name": result["name"]})
     return created(data={"id": result["id"], "name": result["name"]})
 
@@ -189,7 +189,7 @@ async def update_department(
     """编辑部门（改名/说明；成员挂接走用户管理）"""
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
     await service.update_department(department_id, changes)
-    await record_audit(session, user, "department.update", f"department#{department_id}", detail=changes)
+    await record_audit(user, "department.update", f"department#{department_id}", detail=changes)
     return updated(data={"id": department_id, **changes})
 
 
@@ -202,7 +202,7 @@ async def delete_department(
 ):
     """软删除部门（成员 department_id 置空回退未分组）"""
     await service.delete_department(department_id)
-    await record_audit(session, user, "department.delete", f"department#{department_id}")
+    await record_audit(user, "department.delete", f"department#{department_id}")
     return ok(data={"id": department_id, "deleted": True})
 
 
@@ -228,7 +228,7 @@ class MenuUpdateRequest(RequestBody):
 
 @router.get("/menus/tree")
 async def menu_tree(
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
     service: RbacService = Depends(_service),
 ):
     """菜单管理树（管理视角：含隐藏项，运营面全量编辑）"""
@@ -247,12 +247,12 @@ async def menu_tree(
 @router.post("/menus", status_code=201)
 async def create_menu(
     payload: MenuCreateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
     menu_id = await service.create_menu(payload.model_dump())
-    await record_audit(session, user, "menu.create", f"menu#{menu_id}", detail={"name": payload.name})
+    await record_audit(user, "menu.create", f"menu#{menu_id}", detail={"name": payload.name})
     return created(data={"id": menu_id})
 
 
@@ -260,26 +260,26 @@ async def create_menu(
 async def update_menu(
     menu_id: int,
     payload: MenuUpdateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
     await service.update_menu(menu_id, changes)
-    await record_audit(session, user, "menu.update", f"menu#{menu_id}", detail=changes)
+    await record_audit(user, "menu.update", f"menu#{menu_id}", detail=changes)
     return updated(data={"id": menu_id, **changes})
 
 
 @router.delete("/menus/{menu_id}")
 async def delete_menu(
     menu_id: int,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
     """删除菜单（级联删除子菜单；物理删——菜单无审计追溯需求，变更走操作审计）"""
     await service.delete_menu(menu_id)
-    await record_audit(session, user, "menu.delete", f"menu#{menu_id}")
+    await record_audit(user, "menu.delete", f"menu#{menu_id}")
     return ok(data={"id": menu_id, "deleted": True})
 
 
@@ -301,7 +301,7 @@ class PermissionUpdateRequest(RequestBody):
 
 @router.get("/permissions")
 async def list_permissions(
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
     service: RbacService = Depends(_service),
 ):
     """权限资源清单（DB 单源；miss 回退内置目录）"""
@@ -317,12 +317,12 @@ async def list_permissions(
 @router.post("/permissions", status_code=201)
 async def create_permission(
     payload: PermissionCreateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
     result = await service.create_permission(payload.model_dump())
-    await record_audit(session, user, "permission.create", result["code"])
+    await record_audit(user, "permission.create", result["code"])
     return created(data={"id": result["id"], "code": result["code"]})
 
 
@@ -330,23 +330,23 @@ async def create_permission(
 async def update_permission(
     permission_id: int,
     payload: PermissionUpdateRequest,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
     code = await service.update_permission(permission_id, changes)
-    await record_audit(session, user, "permission.update", code, detail=changes)
+    await record_audit(user, "permission.update", code, detail=changes)
     return updated(data={"id": permission_id, **changes})
 
 
 @router.delete("/permissions/{permission_id}")
 async def delete_permission(
     permission_id: int,
-    user: CurrentUser = Depends(require_platform_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
     code = await service.delete_permission(permission_id)
-    await record_audit(session, user, "permission.delete", code)
+    await record_audit(user, "permission.delete", code)
     return ok(data={"id": permission_id, "deleted": True})

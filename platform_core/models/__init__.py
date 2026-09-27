@@ -27,6 +27,8 @@ from platform_core.models.llm_provider import LlmProvider
 from platform_core.models.channel_event import ChannelEvent
 from platform_core.models.channel_probe_result import ChannelProbeResult
 from platform_core.models.product_event import ProductEvent
+from platform_core.models.internal_fixture_tenant import InternalFixtureTenant
+from platform_core.models.asset_import import AssetImportBatch, AssetImportItem
 from platform_core.models.llm_token_usage import LlmTokenUsage
 from platform_core.models.skill import Skill, SkillJob, SkillReview
 from platform_core.models.llm_provider_model import LlmProviderModel
@@ -40,23 +42,33 @@ from platform_core.models.workflow import (
 from platform_core.models.archive import ArchiveRecord
 from platform_core.models.i18n import I18nLocale, I18nTranslation
 from platform_core.models.system_cache import SystemCache
+from platform_core.models.billing import Order, Plan, TenantSubscription
+from platform_core.models.payment_channel_credential import PaymentChannelCredential
+from platform_core.models.relay import RelayGroup, RelayToken
+from platform_core.models.relay_sku_entitlement import RelaySkuEntitlement
+from platform_core.models.outbound_key import OutboundKey
 from platform_core.models.role import Role
 from platform_core.models.department import Department
 from platform_core.models.menu import Menu
 from platform_core.models.permission import Permission
+from platform_core.models.api_key import ApiKey
+from platform_core.models.billing import Order, Plan, TenantSubscription
 
 __all__ = [
     "Base", "SpiderTask", "SpiderResult", "SpiderSchedule", "SpiderDefinition",
     "User", "OperationLog", "SystemConfig", "AlertRule", "TaskTemplate", "AiPlan",
     "LlmProvider", "ChannelEvent", "ChannelProbeResult", "LlmTokenUsage",
-    "ProductEvent",
+    "ProductEvent", "InternalFixtureTenant", "AssetImportBatch", "AssetImportItem",
     "Skill", "SkillReview", "SkillJob", "LlmProviderModel", "Tenant", "TenantMixin", "CapabilityAsset", "CapabilityPlugin",
     "CapabilityExpert", "CapabilityTeam", "CapabilityCommand", "CapabilityComponent",
     "CapabilityInstall", "CapabilitySource", "CapabilityAlias",
+    "Plan", "TenantSubscription", "Order", "PaymentChannelCredential",
+    "RelaySkuEntitlement", "RelayGroup", "RelayToken", "OutboundKey",
     "SoftDeleteMixin", "AuditMixin",
     # DB 升级 2026-09 Phase B/C 横切功能表
     "Tag", "Tagging", "Attachment", "Notification", "ResourceVersion",
     "WorkflowDefinition", "WorkflowInstance", "WorkflowStep", "WorkflowTransition",
     "ArchiveRecord", "I18nLocale", "I18nTranslation", "SystemCache",
-    "Role", "Department", "Menu", "Permission",
+    "Role", "Department", "Menu", "Permission", "ApiKey",
+    "Plan", "TenantSubscription", "Order",
 ]

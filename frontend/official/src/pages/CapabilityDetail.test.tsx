@@ -1,5 +1,6 @@
 /**
- * T-24：详情正文纯文本（GWT-32.4）；出处不泄漏未上架父插件（GWT-32.5）。
+ * T-11 FR-U13：商店详情不可信正文纯文本（GWT-U13.1/2/3）。
+ * 出处不泄漏未上架父插件仍钉在本页（GWT-32.5）。
  */
 import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -17,7 +18,7 @@ import CapabilityDetail from './CapabilityDetail'
 
 const fetchDetail = getPublicAsset as jest.MockedFunction<typeof getPublicAsset>
 
-export const XSS_PAYLOAD = '<script>alert("xss")</script> <img src=x onerror=alert(1)>'
+export const XSS_PAYLOAD = '<script>alert(1)</script> <img src=x onerror=alert(1)>'
 
 const listedSkill = (over: Partial<PublicAssetDetail> = {}): PublicAssetDetail => ({
   asset_type: 'skill',
@@ -65,11 +66,29 @@ afterEach(() => {
   else process.env.REACT_APP_ADMIN_URL = ORIG_ADMIN_URL
 })
 
-test('GWT-32.4 skill body is text: script source visible, no script/img nodes', async () => {
+test('GWT-U13.1 skill body is text: <script>alert(1)</script> visible, no script/img from body', async () => {
+  const alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => {})
   fetchDetail.mockResolvedValue(listedSkill())
   const { container } = renderDetail('/capabilities/skill/child-skill')
   const body = await screen.findByTestId('skill-md')
-  expect(body.textContent).toContain('<script>')
+  expect(body.textContent).toContain('<script>alert(1)</script>')
+  expect(body.textContent).toContain('<img src=x onerror=alert(1)>')
+  expect(body.innerHTML).toContain('&lt;script&gt;')
+  expect(body.querySelector('script')).toBeNull()
+  expect(body.querySelector('img')).toBeNull()
+  expect(container.querySelector('script')).toBeNull()
+  expect(container.querySelector('img[src="x"]')).toBeNull()
+  expect(container.querySelector('img[onerror]')).toBeNull()
+  expect(alertSpy).not.toHaveBeenCalled()
+  expect(document.body.textContent || '').not.toContain('当前可买')
+  alertSpy.mockRestore()
+})
+
+test('GWT-U13.2 empty skill_md shows 暂无说明 and does not execute script', async () => {
+  fetchDetail.mockResolvedValue(listedSkill({ skill_md: '', body_md: '' }))
+  const { container } = renderDetail('/capabilities/skill/child-skill')
+  expect(await screen.findByTestId('skill-md-empty')).toHaveTextContent('暂无说明')
+  expect(screen.queryByTestId('skill-md')).not.toBeInTheDocument()
   expect(container.querySelector('script')).toBeNull()
   expect(container.querySelector('img[src="x"]')).toBeNull()
 })
@@ -99,14 +118,19 @@ test('listed parent origin renders a store link when href is present', async () 
   expect(origin.textContent).toContain('已上架父插件')
 })
 
-test('unlisted GET shows official 404 copy, not empty detail or 已下架', async () => {
-  fetchDetail.mockRejectedValue({ response: { status: 404, data: '<html></html>' } })
-  renderDetail('/capabilities/plugin/unlisted-x')
+test('GWT-U13.3 unlisted GET is store-missing copy, body not rendered, no script', async () => {
+  fetchDetail.mockRejectedValue({
+    response: { status: 404, data: `<html><body>${XSS_PAYLOAD}</body></html>` },
+  })
+  const { container } = renderDetail('/capabilities/plugin/unlisted-x')
   expect(await screen.findByText('页面不存在，可能已被移除或地址有误')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '返回首页' })).toBeInTheDocument()
   expect(screen.queryByText('已下架')).not.toBeInTheDocument()
   expect(screen.queryByText('能力详情加载失败。检查网络后重试。')).not.toBeInTheDocument()
   expect(screen.queryByTestId('skill-md')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('skill-md-empty')).not.toBeInTheDocument()
+  expect(container.querySelector('script')).toBeNull()
+  expect(container.querySelector('img[src="x"]')).toBeNull()
 })
 
 test('load failure shows retry copy, not empty success', async () => {
@@ -121,6 +145,22 @@ test('offline failure uses offline copy', async () => {
   fetchDetail.mockRejectedValue(new Error('offline'))
   renderDetail('/capabilities/skill/child-skill')
   expect(await screen.findByText('打不开这份说明：网络不可用。连接恢复后重试。')).toBeInTheDocument()
+})
+
+test('GWT-U11.2 closed detail is 能力市场未开放, body not rendered', async () => {
+  fetchDetail.mockResolvedValue(listedSkill({
+    market_closed: true,
+    message: '能力市场未开放',
+    subscribable: false,
+    skill_md: XSS_PAYLOAD,
+  }))
+  renderDetail('/capabilities/skill/u112-skill')
+  expect(await screen.findByText('能力市场未开放')).toBeInTheDocument()
+  expect(screen.queryByText('开放后，已上架的能力会出现在这里。')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('skill-md')).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: '登录后订阅' })).not.toBeInTheDocument()
+  expect(document.body.textContent || '').not.toContain(XSS_PAYLOAD)
+  expect(document.body.textContent || '').not.toContain('当前可买')
 })
 
 test('coming_soon has preview mark, no subscribe, no gift-pack or enable-host copy', async () => {
@@ -180,7 +220,7 @@ test('GWT-39.1 command detail shows slash, body as text, subscribe, not plugin J
     listing_state: 'listed',
     subscribable: true,
     slash: 'sdlc',
-    body_md: '<script>alert("xss")</script>',
+    body_md: XSS_PAYLOAD,
     hosts: ['grok', 'zcode', 'kimi', 'claude'],
     includes: [],
   })
@@ -188,7 +228,9 @@ test('GWT-39.1 command detail shows slash, body as text, subscribe, not plugin J
   expect(await screen.findByRole('heading', { name: '跑任务' })).toBeInTheDocument()
   expect(screen.getByTestId('command-slash')).toHaveTextContent('/sdlc')
   const body = screen.getByTestId('skill-md')
-  expect(body.textContent).toContain('<script>')
+  expect(body.textContent).toContain('<script>alert(1)</script>')
+  expect(body.querySelector('script')).toBeNull()
+  expect(body.querySelector('img')).toBeNull()
   expect(container.querySelector('script')).toBeNull()
   const cta = screen.getByRole('link', { name: '登录后订阅' })
   expect(cta.getAttribute('href') || '').toContain('subscribeType=command')

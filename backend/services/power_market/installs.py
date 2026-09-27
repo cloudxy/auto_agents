@@ -27,7 +27,7 @@ from backend.services.power_market.types import (
     PUBLIC_HOSTS,
     _to_public_asset_type,
 )
-from platform_core.exceptions import BusinessException, NotFoundException, ValidationException
+from platform_core.exceptions import BusinessException, ValidationException
 from platform_core.logger import get_logger
 from platform_core.models.capability import CapabilityAsset, CapabilityInstall
 
@@ -218,7 +218,7 @@ async def _load_live_pair(session: AsyncSession, tenant_id: int, install_id: int
         )
     )).first()
     if row is None:
-        raise NotFoundException("安装行")
+        raise BusinessException(message="Not Found", code="HTTP_404", status_code=404)
     return row
 
 

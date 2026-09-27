@@ -199,12 +199,17 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
         return [(str(d), int(n)) for d, n in result.all()]
 
     async def find_by_content_hash(
-        self, content_hash: str, tenant_id: Optional[int] = None
+        self,
+        content_hash: str,
+        tenant_id: Optional[int] = None,
+        spider_name: Optional[str] = None,
     ) -> Optional[SpiderResult]:
-        """按 (tenant_id, content_hash) 复合查重（增量去重，S1 接线：跨租户互不可见）"""
+        """按 (tenant_id, spider_name, content_hash) 查重（B6；跨租户互不可见）"""
         stmt = select(SpiderResult).where(SpiderResult.content_hash == content_hash)
         if tenant_id is not None:
             stmt = stmt.where(SpiderResult.tenant_id == tenant_id)
+        if spider_name:
+            stmt = stmt.where(SpiderResult.spider_name == spider_name)
         result = await self.session.execute(stmt.limit(1))
         return result.scalar_one_or_none()
 
@@ -230,10 +235,10 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
         返回空列表（total 仍为真实计数），防止深分页全表扫描。
         """
         filters = []
-        if spider_name:
-            filters.append(SpiderResult.spider_name == spider_name)
         if tenant_id is not None:
             filters.append(SpiderResult.tenant_id == tenant_id)
+        if spider_name:
+            filters.append(SpiderResult.spider_name == spider_name)
         if keyword:
             kw = f"%{keyword}%"
             filters.append(

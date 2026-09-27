@@ -1,6 +1,7 @@
-"""LiteLLM 值班面：模型 / 部署 / spend / budget HTTP（httpx）。
+"""LiteLLM 值班面：模型 / 部署 / spend / budget / Key 管理 HTTP（httpx）。
 
 仅管理 HTTP。backend 不持网关库连接。值班/探针（T-18/T-19）只 import 本模块，不走 chat。
+渠道组令牌（ADR-0019，T-08）经 generate_key/delete_key 登记与作废虚拟 Key。
 """
 from typing import Any, Optional
 
@@ -99,3 +100,84 @@ async def update_model(
 ) -> Any:
     logger.info("LiteLLM POST /model/update")
     return await _http_json("POST", "/model/update", json_body=body, transport=transport)
+
+
+async def generate_key(
+    body: dict[str, Any],
+    *,
+    transport: Optional[httpx.AsyncBaseTransport] = None,
+) -> Any:
+    """POST /key/generate：登记虚拟 Key（ADR-0019 渠道组令牌）。
+
+    响应含明文 key——只由签发路径回传一次，调用方禁止落库/入日志。
+    """
+    logger.info("LiteLLM POST /key/generate")
+    return await _http_json("POST", "/key/generate", json_body=body, transport=transport)
+
+
+async def delete_key(
+    body: dict[str, Any],
+    *,
+    transport: Optional[httpx.AsyncBaseTransport] = None,
+) -> Any:
+    """POST /key/delete：作废虚拟 Key（吊销路径）。
+
+    v1.100.0 KeyRequest 只收 keys / key_aliases；明文不落库 → 按 key_aliases
+    引用作废（OpenAPI 实读核对，ADR-0019）。
+    """
+    logger.info("LiteLLM POST /key/delete")
+    return await _http_json("POST", "/key/delete", json_body=body, transport=transport)
+
+
+def _normalize_spend_logs(raw: Any, *, page: int, page_size: int) -> dict:
+    """把 /spend/logs 的 list 收成观察面用的 {data, total_pages}。"""
+    if isinstance(raw, dict) and isinstance(raw.get("data"), list):
+        return raw
+    rows = raw if isinstance(raw, list) else []
+    return {
+        "data": rows,
+        "total": len(rows),
+        "page": int(page),
+        "page_size": int(page_size),
+        "total_pages": 1,
+        "total_is_capped": False,
+    }
+
+
+async def get_key_info(
+    key: str,
+    *,
+    transport: Optional[httpx.AsyncBaseTransport] = None,
+) -> Any:
+    """GET /key/info：单 Key 行（用量观察点之一，ADR-0019 决策 3 / T-09）。
+
+    v1.100.0 实读：query 参数 ``key`` 收 **明文或其 sha256 hash**（网关侧
+    token 列即 hash）。调用方只持本地 ``key_hash``（== sha256(明文)），
+    明文永不出库。响应 ``info`` 含 spend / last_active / key_alias；
+    Key 已作废时网关 404。
+    """
+    logger.info("LiteLLM GET /key/info")
+    return await _http_json("GET", "/key/info", params={"key": key}, transport=transport)
+
+
+async def list_key_spend_logs(
+    api_key_hash: str,
+    *,
+    page: int = 1,
+    page_size: int = 100,
+    transport: Optional[httpx.AsyncBaseTransport] = None,
+) -> Any:
+    """GET /spend/logs?api_key=<sha256>：按虚拟 Key 过滤（T-09 用量观察）。
+
+    v1.100.0 实读：``/spend/logs/v2`` 无起止日期会 400，且行上常缺
+    ``api_key`` / ``key_alias`` / ``total_tokens``。v1 ``/spend/logs`` 带
+    ``api_key`` 返回 list，row.total_tokens 可累计。调用方只持本地
+    ``key_hash``（明文永不出库）。
+    """
+    logger.info("LiteLLM GET /spend/logs (key filter)")
+    raw = await _http_json(
+        "GET", "/spend/logs",
+        params={"api_key": api_key_hash},
+        transport=transport,
+    )
+    return _normalize_spend_logs(raw, page=page, page_size=page_size)

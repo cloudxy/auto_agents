@@ -72,8 +72,9 @@ def test_gwt_37_3_tenant_admin_cannot_list(db_client, admin_client, db_session):
     resp = admin_client.patch(
         _listing_url("skill", "g373-row"), json={"listing_state": "listed"},
     )
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
+    assert "抱歉" not in resp.text
     row = _query_all(db_session, select(CapabilityAsset).where(
         CapabilityAsset.name == "g373-row",
     ))[0]
@@ -85,7 +86,8 @@ def test_gwt_37_3_viewer_cannot_list(db_client, viewer_client, db_session):
     resp = viewer_client.patch(
         _listing_url("skill", "g373-view"), json={"listing_state": "listed"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     row = _query_all(db_session, select(CapabilityAsset).where(
         CapabilityAsset.name == "g373-view",
     ))[0]
@@ -152,12 +154,13 @@ def test_gwt_40_1_no_mcp_unknown_can_list(
     assert detail.json()["data"]["health_status"] == "unknown"
 
 
-def test_gwt_40_3_tenant_verify_forbidden(
+def test_gwt_40_3_tenant_verify_404(
     db_client, admin_client, db_session,
 ):
     _seed_plugin(db_session, "g403-plug")
     resp = admin_client.post(_VERIFY.format("g403-plug"))
-    assert resp.status_code == 403
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     plugin = _query_all(db_session, select(CapabilityPlugin))[0]
     assert plugin.health_status == "unknown"
 

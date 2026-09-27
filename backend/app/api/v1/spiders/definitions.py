@@ -48,7 +48,7 @@ async def list_spider_files(
     service: SpiderRegistryService = Depends(_registry_service),
     _user: CurrentUser = Depends(require_login),
 ) -> ApiResponse[SpiderFileListResponse]:
-    """代码爬虫文件清单（4.4：只读文件元数据 + 关联启停状态）"""
+    """已登记代码爬虫文件清单（T-41：源码清单不并入方案视图——未登记文件与内部项不列出）"""
     return ok(await service.spider_files())
 
 
@@ -62,7 +62,7 @@ async def update_definition(
 ) -> ApiResponse[SpiderDefinitionResponse]:
     """启停代码爬虫（4.4：写 spider_definitions.enabled，仅 admin）"""
     definition = await service.update_definition(name, payload.enabled)
-    await record_audit(session, user, "definition.update", f"definition#{name}",
+    await record_audit(user, "definition.update", f"definition#{name}",
                  {"enabled": payload.enabled})
     return updated(definition)
 
@@ -76,7 +76,7 @@ async def create_definition(
 ) -> ApiResponse[SpiderDefinitionResponse]:
     """新建爬虫定义（手动登记，来源标记 manual；仅管理员）"""
     definition = await service.create_definition(payload)
-    await record_audit(session, user, "definition.create", f"definition#{payload.name}",
+    await record_audit(user, "definition.create", f"definition#{payload.name}",
                  {"type": payload.type, "source": "manual"})
     return created(definition)
 
@@ -87,11 +87,16 @@ async def update_definition_meta(
     name: str = Path(..., min_length=1, max_length=50),
     service: SpiderRegistryService = Depends(_registry_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[SpiderDefinitionResponse]:
-    """编辑爬虫定义元信息（标题/描述；仅管理员）"""
+    """编辑采集方案（FR-103 / GWT-103.1：元信息 + 定义参数；经办可编辑，只读 403）
+
+    定义参数按类型：api 型 urls/headers；flow 型流程字段（落注册来源计划）；
+    代码型仅元信息（服务层拒绝并给说明句）。名称/类型不可改；编辑对后续任务
+    生效，不影响在跑任务（入队时 params 已快照）。
+    """
     definition = await service.update_definition_meta(name, payload)
-    await record_audit(session, user, "definition.update_meta", f"definition#{name}",
+    await record_audit(user, "definition.update_meta", f"definition#{name}",
                  payload.model_dump(exclude_unset=True))
     return updated(definition)
 
@@ -101,11 +106,11 @@ async def delete_definition(
     name: str = Path(..., min_length=1, max_length=50),
     service: SpiderRegistryService = Depends(_registry_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[dict]:
-    """删除爬虫定义（存在历史任务引用时拒绝；仅管理员）"""
+    """删除采集方案（FR-103 / GWT-103.2/103.3：经办可删；被任务引用拒绝并列引用）"""
     result = await service.delete_definition(name)
-    await record_audit(session, user, "definition.delete", f"definition#{name}")
+    await record_audit(user, "definition.delete", f"definition#{name}")
     return deleted(data=result)
 
 

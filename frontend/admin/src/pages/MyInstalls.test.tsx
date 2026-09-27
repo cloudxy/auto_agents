@@ -82,13 +82,28 @@ test('GWT-35.1 two rows both present and can uninstall', async () => {
   expect(screen.getAllByRole('button', { name: '卸载' })[0]).not.toBeDisabled()
 })
 
-test('GWT-35.2 empty copy and back to market', async () => {
+test('GWT-35.2 / GWT-M24 empty is 还没有安装, not 能力市场未开放', async () => {
   list.mockResolvedValue({ total: 0, items: [] })
   renderPage()
-  expect(await screen.findByText(EMPTY_COPY)).toBeInTheDocument()
+  expect(await screen.findByText('还没有安装')).toBeInTheDocument()
+  expect(screen.getByText(EMPTY_COPY)).toBeInTheDocument()
   const cta = screen.getByRole('link', { name: EMPTY_CTA })
   expect(cta).toHaveAttribute('href', expect.stringMatching(/\/capabilities$/))
   expect(screen.queryByText(LOAD_FAIL)).not.toBeInTheDocument()
+  expect(screen.queryByText('能力市场未开放')).not.toBeInTheDocument()
+  expect(screen.queryByText('还没有订阅的能力。去能力市场看看已上架的能力。')).not.toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: '源' })).not.toBeInTheDocument()
+  expect(screen.queryByTestId('governance-shell')).not.toBeInTheDocument()
+})
+
+test('GWT-M24 cross-tenant 404 is same-shape, not empty installs', async () => {
+  list.mockRejectedValue({ response: { status: 404, data: { code: 'NOT_FOUND' } } })
+  renderPage()
+  expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /返回工作台/ })).toBeInTheDocument()
+  expect(screen.queryByText('还没有安装')).not.toBeInTheDocument()
+  expect(screen.queryByText('能力市场未开放')).not.toBeInTheDocument()
+  expect(screen.queryByText(/抱歉/)).not.toBeInTheDocument()
 })
 
 test('GWT-35.3 unlist residual stays, delisted, operator can uninstall, resubscribe disabled', async () => {

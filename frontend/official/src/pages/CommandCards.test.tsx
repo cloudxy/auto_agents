@@ -17,7 +17,7 @@ import Capabilities from './Capabilities'
 
 const fetchList = listPublicAssets as jest.MockedFunction<typeof listPublicAssets>
 
-const EMPTY = '还没有上架的能力'
+const EMPTY = '暂无已上架能力'
 const FILTER_EMPTY = '没有符合条件的能力'
 const FAIL = '市场列表加载失败'
 const JSON_SHELF = ['plugin.json', '"commands"', '/shelf-slash']

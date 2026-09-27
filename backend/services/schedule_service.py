@@ -1,9 +1,10 @@
 """爬虫定时调度服务 - 对标 Crawlab 定时任务（Cron）
 
 组成：
-- ScheduleService：调度计划 CRUD（创建时校验 cron 合法性 / 同爬虫唯一）
+- ScheduleService：调度计划 CRUD（创建时校验 cron 合法性 / 同租户唯一）
 - SpiderScheduler：后台触发循环（随 Backend lifespan 启动）
-  每轮 tick 抢 Redis 互斥锁（多实例防重）→ 扫描到期计划 → 复用
+  每轮 tick 抢 Redis 互斥锁（多实例防重）→ 评估 queue_depth 告警规则
+  （T-42 / FR-105，读 AlertRule 行按租户排队深度）→ 扫描到期计划 → 复用
   SpiderService.enqueue() 入队（活跃键冲突则跳过本次触发）→ 推进
   last_run_at / next_run_at
 
@@ -23,13 +24,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories.spider_definition_repository import SpiderDefinitionRepository
 from backend.repositories.spider_schedule_repository import SpiderScheduleRepository
 from backend.repositories.spider_task_repository import SpiderTaskRepository
+from backend.services.alert_service import AlertService
 from backend.services.spider_common import require_enqueue_tenant
 from backend.services.spider_service import SpiderService
 from config import settings
 from platform_core.db import get_manager
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
-from platform_core.queues import SCHEDULER_LOCK_KEY, TASK_QUEUE_PRIORITIES, distributed_lock, task_queue
+from platform_core.queues import SCHEDULER_LOCK_KEY, distributed_lock
 from platform_core.schemas.spider import (
     ScheduleRequest,
     ScheduleUpdateRequest,
@@ -159,7 +161,12 @@ class ScheduleService:
 
 
 class SpiderScheduler:
-    """后台触发循环：扫描到期计划并入队任务（多实例用 Redis 锁互斥）"""
+    """后台触发循环：扫描到期计划并入队任务（多实例用 Redis 锁互斥）
+
+    每 tick 附带 queue_depth 告警规则评估（T-42 / FR-105：读 AlertRule 行，
+    按规则所属租户的排队任务深度评估，命中经通知渠道发送 + notifications
+    命中行 + 静默窗，见 AlertService.evaluate_queue_depth）。
+    """
 
     def __init__(self):
         self._running = False
@@ -231,6 +238,10 @@ class SpiderScheduler:
                 return  # 其他实例已在执行本轮
             now = datetime.now()
             async with AsyncSession(self._engine()) as session:
+                # T-42（FR-105）：queue_depth 告警规则评估随每 tick 运行
+                # （不依赖到期计划；GWT-105.1「一个调度检查周期」），
+                # 持锁内单实例执行防多实例重复通知
+                await self._evaluate_queue_depth(session)
                 repo = SpiderScheduleRepository(session)
                 due_list = await repo.list_due(now)
                 for schedule in due_list:
@@ -242,11 +253,22 @@ class SpiderScheduler:
                         return
                     await self._fire(session, repo, schedule, now)
 
+    async def _evaluate_queue_depth(self, session: AsyncSession) -> None:
+        """评估 queue_depth 告警规则（每 tick；SCHEDULER.QUEUE_DEPTH_WARN
+        配置日志路径已退役，规则行评估是 queue_depth 唯一输出口径）
+
+        告警评估失败不挡调度（logger 记，GWT-105.1）。
+        """
+        try:
+            service = AlertService(session)
+            await service.evaluate_queue_depth()
+        except Exception as e:  # noqa: BLE001 告警失败不挡调度循环
+            logger.warning(f"queue_depth 告警评估失败（不挡调度）: {e}")
+
     async def _fire(self, session, repo, schedule, now: datetime) -> None:
         """触发一条到期计划：入队任务并推进触发时刻
 
         智能调度扩展：
-        - 队列深度监控：触发前检查三级队列，超阈值告警
         - 动态优先级：根据历史成功率/时长自动调整
         - 时段感知：静默时段内非 high 优先级跳过触发
 
@@ -254,9 +276,6 @@ class SpiderScheduler:
         仍推进 next_run_at，避免下一轮重复触发造成日志风暴。
         """
         spider_name = schedule.spider_name
-
-        # ── 0. 队列深度监控 ──
-        await self._check_queue_depth()
 
         # ── 1. 解析调度策略（存在 params JSON 的 _strategy 字段） ──
         strategy = self._parse_strategy(schedule.params)
@@ -298,16 +317,6 @@ class SpiderScheduler:
         await self._advance_schedule(repo, schedule, now)
         if triggered:
             logger.info(f"调度触发完成: schedule_id={schedule.id}, spider={spider_name}")
-
-    async def _check_queue_depth(self) -> None:
-        """检查三级队列深度，超阈值记录告警日志（Redis 不可用时静默跳过）"""
-        if self._redis is None:
-            return
-        warn_threshold = int(settings.get("SCHEDULER.QUEUE_DEPTH_WARN", 50))
-        for p in TASK_QUEUE_PRIORITIES:
-            depth = await self._redis.llen(task_queue(p))
-            if depth > warn_threshold:
-                logger.warning(f"队列堆积告警: priority={p}, depth={depth}")
 
     @staticmethod
     def _parse_strategy(params_json: Optional[str]) -> str:

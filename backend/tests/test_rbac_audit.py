@@ -206,6 +206,14 @@ def test_role_permissions_mapping():
     assert "menu:llm" in _ROLE_PERMISSIONS["operator"]
     assert "menu:newapi" not in _ROLE_PERMISSIONS["operator"]
     assert "btn:create" not in _ROLE_PERMISSIONS["viewer"]
+    assert "menu:members" in _ROLE_PERMISSIONS["viewer"]
+    assert "menu:usage" in _ROLE_PERMISSIONS["viewer"]
+    assert "menu:relay" in _ROLE_PERMISSIONS["viewer"]
+    assert "menu:spiders.nodes" in _ROLE_PERMISSIONS["viewer"]
+    assert "menu:spiders.nodes" in _ROLE_PERMISSIONS["operator"]
+    assert "menu:spiders.nodes" in _ROLE_PERMISSIONS["admin"]
+    assert "menu:relay" in _ROLE_PERMISSIONS["operator"]
+    assert "menu:relay" in _ROLE_PERMISSIONS["admin"]
 
 
 # ---------------- HTTP 级门禁（无 override，证明真实生效） ----------------

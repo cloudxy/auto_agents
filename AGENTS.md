@@ -71,7 +71,7 @@ uv run python run.py stop                  # 停止全部
 uv run python run.py restart               # 强制重启
 uv run pytest -x -q backend/tests          # 后端测试
 bash tools/check/arch.sh                 # 架构合规检查
-uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type post-checkout
 ```
 
 环境切换：所有入口接受 `--env {local,dev,prod}`。本地联调全栈：`docker compose up --build`（backend + MySQL 8 + Redis 7；compose 已设 `AUTO_AGENTS_API__HOST=0.0.0.0`）。
@@ -86,6 +86,8 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 ## Skill 路由（`.agents/`）
 
 中枢契约见 `.agents/README.md`。项目 skill 在 `.agents/skills/`（`.claude/skills` 指向它）。产品扫描走 `capability-library/`（**技能治理在主 API `v1/skills` + `v1/capabilities`**）。
+
+`.agents/agents/*.md` 与 `.agents/commands/*.md` 是**顶层游离资产位**（feat-agents-market OQ-1）：目录导入落盘与同步扫描都认这两处，不属于任何插件；目录不存在时行为与扩展前一致。
 
 第三方插件正文只在 `~/.zcode/local-plugins/`。仓库内只在 `.agents/plugins/<name>` 放符号链接。Grok/Claude 启用子集：`sdlc-workflow` / `dev-team` / `drama-skills` / `oh-story`。`superpowers` / `mattpocock-skills` 只留在农场给产品扫描（已含于 `dev-team`）。跳过 `sdlc-workflow-eval-workspace`。
 

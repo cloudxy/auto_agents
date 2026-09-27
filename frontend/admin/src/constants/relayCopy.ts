@@ -1,0 +1,17 @@
+/** T-20 / T-25 屏 13–14 锁句。禁 FR-U24 四字。 */
+
+export const RELAY_PAGE_TITLE = '我的渠道组'
+export const RELAY_LOAD_FAILED = '渠道组加载失败。检查网络后重试。'
+export const RELAY_SKU_NONE = '未开通中转'
+export const RELAY_SKU_NONE_HINT = '开通后才能查看本企业用量并签发令牌。'
+export const RELAY_SKU_EXPIRED = '中转已到期'
+export const RELAY_SKU_EXPIRED_HINT = '到期后不能签发新令牌，已签发的令牌也不能再用。'
+export const RELAY_UPGRADE_CTA = '去升级'
+export const RELAY_TOKENS_EMPTY = '还没有令牌'
+export const RELAY_CANNOT_ISSUE = '当前账号不能签发，请联系企业管理员'
+export const RELAY_PLAINTEXT_ONCE = '明文只显示这一次，关闭后无法再查看明文。'
+export const RELAY_ISSUED_TOAST = '已签发'
+export const RELAY_COPIED_TOAST = '已复制令牌'
+export const RELAY_OFFLINE_ISSUE = '网络不可用，没有产生令牌。'
+export const RELAY_OFFLINE_UPGRADE = '网络不可用。连接恢复后再去结账。'
+export const RELAY_SKU_INACTIVE = 'RELAY_SKU_INACTIVE'

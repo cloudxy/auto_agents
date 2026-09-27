@@ -1,8 +1,8 @@
 /**
- * T-01 定价分档：免费档 → /register；付费档预告不可购买；GWT-70.4 文案。
+ * T-21 定价：免费档 → /register；专业/企业「去结账」进 checkout?product=。
  */
 import React from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 import { FREE_TIER_FEATURE_COPY } from '@auto-agents/frontend-shared'
@@ -19,7 +19,7 @@ const GWT_01_1 = {
 const FORBIDDEN_GATEWAY = '直连平台网关'
 const FORBIDDEN_RELAY_TOKEN = '我的中转令牌'
 const FORBIDDEN_CLAIMS = ['抽取准确率', '已校准', '官方认证', '正品保证'] as const
-const PREVIEW_ITEMS = ['工单支持', '中转站渠道组分配', '私有技能库', '专属客户成功'] as const
+const ENTERPRISE_ITEMS = ['工单支持', '中转站渠道组分配', '私有技能库', '专属客户成功'] as const
 
 function featureRow(label: string): HTMLElement {
   return screen.getByText((_, node) =>
@@ -70,27 +70,31 @@ test('free-tier primary CTA goes to register', () => {
 test('NFR-07 Pricing primary CTAs have 44px touch target', () => {
   renderPricing()
   assertTouchTarget(screen.getByRole('link', { name: /免费注册/ }))
+  screen.getAllByRole('link', { name: '去结账' }).forEach(assertTouchTarget)
 })
 
-test('paid-tier primary CTA does not go to register', () => {
+test('GWT-U35.1/5 paid-tier 去结账 goes to checkout not register', () => {
   renderPricing()
-  const paid = screen.getAllByRole('button', { name: '预告不可购买' })
-  expect(paid.length).toBe(2)
-  paid.forEach((btn) => {
-    expect(btn).not.toHaveAttribute('href', '/register')
-    expect(btn.closest('a')).toBeNull()
+  const paid = screen.getAllByRole('link', { name: '去结账' })
+  expect(paid).toHaveLength(2)
+  expect(paid[0]).toHaveAttribute('href', 'http://localhost:9112/billing/checkout?product=plan_pro')
+  expect(paid[1]).toHaveAttribute('href', 'http://localhost:9112/billing/checkout?product=plan_enterprise')
+  paid.forEach((link) => {
+    const href = link.getAttribute('href') || ''
+    expect(href).not.toContain('/register')
+    expect(href).not.toMatch(/[?&]product=plan_ent(?:&|$)/)
   })
-
-  fireEvent.click(paid[0])
-  expect(screen.getByText('该档尚未开通购买。')).toBeInTheDocument()
-  const contact = screen.getByRole('link', { name: '联系平台' })
-  expect(contact.getAttribute('href') || '').toMatch(/^mailto:/)
-  expect(contact.getAttribute('href') || '').not.toContain('/register')
-  expect(document.body.textContent || '').not.toContain('现在就能买到并开通')
-  expect(document.body.textContent || '').not.toContain('再开一家免费企业')
+  const copy = document.body.textContent || ''
+  expect(copy).not.toContain('预告不可购买')
+  expect(copy).not.toContain('尚未开通购买')
+  expect(copy).not.toContain('当前可买')
+  expect(copy).not.toContain('支付已通')
+  expect(copy).not.toContain('联系升级')
+  expect(screen.queryByRole('link', { name: '联系平台' })).toBeNull()
+  expect(copy).not.toContain('mailto:')
 })
 
-test('closed-set B items are preview not currently buyable', () => {
+test('closed-set B items are listed without 预告 tag', () => {
   renderPricing()
   const copy = document.body.textContent || ''
   expect(FREE_TIER_FEATURE_COPY.task_concurrency).toBe(GWT_01_1.concurrencyPhrase)
@@ -99,20 +103,13 @@ test('closed-set B items are preview not currently buyable', () => {
   expect(copy).toContain(GWT_01_1.concurrencyPhrase)
   expect(copy).toContain(GWT_01_1.storagePhrase)
   expect(copy).toContain(GWT_01_1.tokensPhrase)
-  ;([GWT_01_1.concurrencyPhrase, GWT_01_1.storagePhrase, GWT_01_1.tokensPhrase] as const).forEach((label) => {
-    const row = screen.getByText((_, node) => {
-      if (node?.tagName !== 'P') return false
-      return (node.textContent || '').replace(/\s+/g, ' ').trim() === `✓ ${label}`
-    })
-    expect(row.textContent || '').not.toContain('预告')
-  })
   expect(copy).toContain('工单支持')
   expect(copy).toContain('中转站渠道组分配')
   expect(copy).toContain('私有技能库')
   expect(copy).toContain('专属客户成功')
-  expect(screen.getAllByText('预告').length).toBeGreaterThan(0)
-  PREVIEW_ITEMS.forEach((label) => {
-    expect(featureRow(label).textContent || '').toContain('预告')
+  expect(screen.queryAllByText('预告')).toHaveLength(0)
+  ENTERPRISE_ITEMS.forEach((label) => {
+    expect(featureRow(label).textContent || '').not.toContain('预告')
   })
 })
 
@@ -131,6 +128,17 @@ test('test_no_accuracy_or_certification_copy', () => {
   FORBIDDEN_CLAIMS.forEach((phrase) => expect(copy).not.toContain(phrase))
 })
 
+test('test_no_currently_buyable_relay_copy_gwt_60_9', () => {
+  renderPricing()
+  const copy = document.body.textContent || ''
+  expect(copy).not.toContain('当前可买')
+  expect(copy).not.toContain('支付已通')
+  expect(copy).not.toContain('可买中转')
+  expect(copy).not.toContain('开通即送中转')
+  const relayRow = featureRow('中转站渠道组分配')
+  expect(relayRow.textContent || '').toContain('中转站渠道组分配')
+})
+
 test('pricing source has no session branch (GWT-01.3)', () => {
   const fs = require('fs') as typeof import('fs')
   const path = require('path') as typeof import('path')
@@ -138,5 +146,5 @@ test('pricing source has no session branch (GWT-01.3)', () => {
   expect(src).not.toMatch(/useAuthStore|isAuthenticated|sessionStorage/)
   renderPricing()
   expect(screen.getByRole('link', { name: /免费注册/ })).toBeInTheDocument()
-  expect(screen.getAllByRole('button', { name: '预告不可购买' })).toHaveLength(2)
+  expect(screen.getAllByRole('link', { name: '去结账' })).toHaveLength(2)
 })

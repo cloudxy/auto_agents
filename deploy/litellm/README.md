@@ -233,3 +233,45 @@ server {
 | `postgres` | `16.10-alpine` | Docker Hub `library/postgres` tag_status=active |
 
 本 compose **无** Redis 服务。多副本时再加，并在 runbook 写明跨副本限流依赖。
+
+---
+
+## 十、L1 影子对照（不改生产路径）
+
+L1 交付的是**影子对照与配置导出**，不是根 `docker-compose.yml` 里的 sidecar。
+生产流量默认仍走自研直连；治理层走 HTTP Admin API（`LITELLM.ADMIN.ENABLED`）。
+
+| 交付物 | 位置 |
+|---|---|
+| 独立 compose（本目录） | `deploy/litellm/docker-compose.yml`（pin `ghcr.io/berriai/litellm:v1.100.0`） |
+| 配置导出器 + CLI | `backend/services/litellm/exporter.py` + `backend/scripts/export_litellm_config.py` |
+| 影子只读对比器 | `backend/services/litellm/shadow.py`（零外呼，不发真实 LLM 调用） |
+| 镜像版本守卫 | `backend/tests/test_litellm_version_guard.py` + `backend/services/litellm/guard.py` |
+| 配置 | `config/default/litellm.yml`（`LITELLM.*`） |
+
+```bash
+# 生成配置（读 llm_providers enabled 行 + models 子表 → 静态 yaml）
+uv run python backend/scripts/export_litellm_config.py
+# 生成文件：deploy/litellm/config.gen.yaml（明文 Key，已 gitignore；FR-14 不进跟踪树）
+# --redacted-sample 可输出脱敏样例（key 掩码）用于工单/日志留证
+
+docker compose -f deploy/litellm/docker-compose.yml up -d
+curl -sS http://127.0.0.1:4000/health/liveliness
+```
+
+`shadow.py`：输入「自研候选链对某请求的供应商选择」与「导出的 config」，输出两侧
+路由决策对照表（`model→provider` 映射差异、cooldown 状态差异）。**只读对比，
+不发起任何真实 LLM 调用、不连接 proxy**。
+
+**cooldown 分层共存**：自研 cooldown（`ai_planner/_cooldown.py`）是 Redis 计数——
+跨进程共享、键 = provider+model、连通成功清零，作用于**内部直连路径**；
+LiteLLM router 的 `allowed_fails`+`cooldown_time` 是 **proxy 进程内存态**
+（多副本不共享），作用于**中转站路径**。两者分层共存；shadow 对照表对冷却态
+差异标 `known_layering=True`（记录维度，不算配置错误）。
+
+| 票 | 衔接点 |
+|---|---|
+| L2 渠道配置面 | `backend/services/litellm/admin_client.py` + `/api/v1/litellm/*`（平台超管）；禁直连 LiteLLM 库 |
+| L3 虚拟键+计费 | 注册 `attach_free_plan` → `ensure_tenant_key`（Admin 未启用则跳过） |
+| L4 内部调用切流 | `llm_common.runtime` PROXY 路由开关；shadow 对照表是 A/B 基线 |
+| L5 退役清理 | new-api 残留删除（本目录不承载 new-api） |

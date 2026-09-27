@@ -11,6 +11,8 @@ import asyncio
 import pytest
 from sqlalchemy import func, inspect as sa_inspect, select
 
+pytestmark = pytest.mark.mysql_fidelity
+
 from platform_core.models.user import User
 
 # 独立事实源：platform_core/models/ 下模型文件的表名清单
@@ -45,6 +47,11 @@ ALL_ORM_TABLES = {
     "capability_sources",
     "capability_aliases",
     "product_events",
+    # T-01 内部测试企业名单（upgrade-four-pillars N1，迁移 045）
+    "internal_fixture_tenants",
+    # T-35 能力资产导入两表（迁移 043）
+    "asset_import_batches",
+    "asset_import_items",
     # DB 升级 2026-09 Phase B/C 横切功能表（13 张）
     "tags",
     "taggings",
@@ -64,6 +71,18 @@ ALL_ORM_TABLES = {
     "departments",
     "menus",
     "permissions",
+    "api_keys",
+    # 账务/渠道组骨架（018c369，迁移 040）
+    "plans",
+    "tenant_subscriptions",
+    "orders",
+    "relay_groups",
+    "relay_tokens",
+    # T-14 N3 结账 widen + 凭据 + 中转 SKU 权益（迁移 046）
+    "payment_channel_credentials",
+    "relay_sku_entitlements",
+    # 出站拉数钥匙（feat-product-complete T-04，迁移 041）
+    "outbound_keys",
 }
 
 
@@ -129,7 +148,7 @@ async def test_isolation_writer_b_same_unique_key_succeeds(db_session):
         assert stored.role == "viewer"
 
 
-def test_db_client_reads_seeded_data(db_engine, db_client, admin_client, db_session):
+def test_db_client_reads_seeded_data(db_engine, db_client, platform_admin_client, db_session):
     """端点与测试断言走同一引擎同一库：种子数据经真实 API 可见（含统一信封形状）"""
     asyncio.run(_seed_one(db_session, "endpoint-probe"))
 

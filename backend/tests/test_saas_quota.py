@@ -89,9 +89,9 @@ async def test_usage_overview_shape(db_session):
         s.add_all([
             SpiderTask(spider_name="a", tenant_id=tid, status="running", params="{}"),
             LlmTokenUsage(tenant_id=tid, provider_name="provider:1", model="m",
-                          stat_date=date(2026, 9, 1), total_tokens=50),
+                          stat_date=date(2026, 9, 1), total_tokens=50, cost_cents=120),
             LlmTokenUsage(tenant_id=tid, provider_name="provider:2", model="m",
-                          stat_date=date(2026, 9, 2), total_tokens=30),
+                          stat_date=date(2026, 9, 2), total_tokens=30, cost_cents=30),
         ])
         await s.commit()
     async with db_session() as s:
@@ -99,6 +99,8 @@ async def test_usage_overview_shape(db_session):
     assert overview["usage"]["task_concurrency"] == 1
     assert overview["usage"]["llm_tokens_month"] == 80
     assert overview["llm_by_provider"] == {"provider:1": 50, "provider:2": 30}
+    assert overview["cost_by_provider"] == {"provider:1": 120, "provider:2": 30}
+    assert overview["cost_cents_total"] == 150
     assert overview["quota"]["task_concurrency"] == DEFAULT_QUOTA["task_concurrency"]
 
 

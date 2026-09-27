@@ -33,12 +33,15 @@ from platform_core.queues import (
     ACTIVE_TASK_TTL,
     DEAD_ITEM_QUEUE,
     ITEM_QUEUE,
+    ITEM_REDO_QUEUE,
     LEGACY_ACTIVE_TASK_PREFIX,
     TASK_CONTROL_KEY,
     TASK_LOG_OFFSET_KEY,
     TASK_QUEUE_PRIORITIES,
     TASK_RESULTS_KEY,
+    item_hold_queue,
     task_queue,
+    tenant_active_key,
 )
 from platform_core.models.spider_result import SpiderResult
 from backend.repositories.spider_result_repository import SpiderResultRepository
@@ -285,6 +288,11 @@ class SpiderTaskConsumer:
             active_key = ACTIVE_TASK_KEY.format(spider_name=spider_name)
             await self._redis.sadd(active_key, task_id)
             await self._redis.expire(active_key, ACTIVE_TASK_TTL)
+            raw_tid = msg.get("tenant_id")
+            if isinstance(raw_tid, int):
+                tkey = tenant_active_key(raw_tid, spider_name)
+                await self._redis.sadd(tkey, task_id)
+                await self._redis.expire(tkey, ACTIVE_TASK_TTL)
             # 记录当前日志文件偏移量：供日志隔离切出本任务区间（各并发任务各自记录）
             await self._record_log_offset(task_id)
             # 3. 投递 start URL（scrapy-redis 约定键 `<spider_name>:start_urls`）
@@ -566,6 +574,8 @@ class SpiderTaskConsumer:
             try:
                 # 批量弹出（count=N）：一次往返取多条，显著减少逐条 blpop 的往返开销
                 raws = await self._redis.lpop(ITEM_QUEUE, count=self._POP_COUNT)
+                if not raws:
+                    raws = await self._redis.lpop(ITEM_REDO_QUEUE, count=self._POP_COUNT)
                 for raw in raws or []:
                     try:
                         message = json.loads(raw)
@@ -605,6 +615,10 @@ class SpiderTaskConsumer:
                 raise
             except Exception as e:  # noqa: BLE001
                 logger.error(f"ingest 循环异常: {e}")
+                if batch:
+                    await self._park_messages(ITEM_REDO_QUEUE, batch)
+                    batch.clear()
+                    batch_counts.clear()
                 await asyncio.sleep(1)
 
         # 退出前 flush 残余批次
@@ -646,9 +660,11 @@ class SpiderTaskConsumer:
             # ── 1. 加载批次内涉及的 task params（增量去重 + 多存储目标）──
             task_params_cache: dict[int, dict] = {}
             task_store_cache: dict[int, list[str]] = {}
+            task_row_cache: dict[int, object] = {}
             task_owner_cache: dict[int, Optional[int]] = {}
             for tid in counts:
                 task = await SpiderTaskRepository(session).get_by_id(tid)
+                task_row_cache[tid] = task
                 params = {}
                 if task and task.params:
                     try:
@@ -675,6 +691,8 @@ class SpiderTaskConsumer:
                 spider_name = msg.get("spider_name", "")
                 item = msg.get("item") or {}
                 item_type = msg.get("item_type", "BaseItem")
+                task_row = task_row_cache.get(task_id)
+                _ = task_row  # 保留行缓存：去重/归属仍以 owner_id 为准
 
                 # B1：数据质量评分（与 _ingest 一致，pop 避免进 extra）
                 quality_score = item.pop("_quality_score", None)
@@ -690,7 +708,9 @@ class SpiderTaskConsumer:
                 # 增量去重（B5）：task params.incremental=true 时跳过重复
                 params = task_params_cache.get(task_id, {})
                 if params.get("incremental") and content_hash:
-                    existing = await result_repo.find_by_content_hash(content_hash, tenant_id=owner_id)
+                    existing = await result_repo.find_by_content_hash(
+                        content_hash, tenant_id=owner_id, spider_name=spider_name
+                    )
                     if existing:
                         logger.debug(
                             f"增量去重：重复内容已跳过: hash={content_hash}, url={url_val}"
@@ -724,14 +744,41 @@ class SpiderTaskConsumer:
                 )
                 mirror_msgs.append((task_id, msg))
 
-            # ── 3. 批量插入（含租户配额·结果存储检查；归属=入队企业，禁止 NULL 平台入站）──
+            # ── 3. 配额按租户旁路，禁止单租户超额冻结全平台批次（归属=入队企业）──
             if instances:
-                _tenants = {owner for owner in task_owner_cache.values() if owner}
-                for tid in _tenants:
-                    from backend.services.quota_service import QuotaService
+                from backend.services.quota_service import QuotaExceededException, QuotaService
 
-                    await QuotaService(session).check_result_storage(tid)
-                session.add_all(instances)
+                quota_ok: set[int] = set()
+                quota_blocked: set[int] = set()
+                kept_instances: list[SpiderResult] = []
+                kept_mirrors: list[tuple[int, dict]] = []
+                held: dict[int, list[dict]] = {}
+                for inst, (tid, msg) in zip(instances, mirror_msgs):
+                    t_id = inst.tenant_id
+                    if isinstance(t_id, int) and t_id in quota_blocked:
+                        held.setdefault(t_id, []).append(msg)
+                        counts[tid] = max(0, counts.get(tid, 1) - 1)
+                        continue
+                    if isinstance(t_id, int) and t_id not in quota_ok:
+                        try:
+                            await QuotaService(session).check_result_storage(t_id)
+                            quota_ok.add(t_id)
+                        except QuotaExceededException:
+                            quota_blocked.add(t_id)
+                            held.setdefault(t_id, []).append(msg)
+                            counts[tid] = max(0, counts.get(tid, 1) - 1)
+                            logger.warning(
+                                f"结果存储配额超限，消息旁路 hold 队列: tenant={t_id}"
+                            )
+                            continue
+                    kept_instances.append(inst)
+                    kept_mirrors.append((tid, msg))
+                instances = kept_instances
+                mirror_msgs = kept_mirrors
+                if instances:
+                    session.add_all(instances)
+                for t_id, parked in held.items():
+                    await self._park_messages(item_hold_queue(t_id), parked)
 
             # ── 4. 批量累加 result_count ──
             await SpiderTaskRepository(session).batch_increment_result_counts(counts)
@@ -751,6 +798,16 @@ class SpiderTaskConsumer:
             f"批量落库完成: {len(messages)} 条消息, "
             f"{len(instances)} 条入库, {len(counts)} 个任务"
         )
+
+    async def _park_messages(self, queue: str, messages: list[dict]) -> None:
+        """把已出队消息写入旁路队列，避免配额/flush 失败时内存无界或丢批。"""
+        if not messages or self._redis is None:
+            return
+        payload = [json.dumps(m, ensure_ascii=False, default=str) for m in messages]
+        try:
+            await self._redis.rpush(queue, *payload)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"旁路入队失败 queue={queue} n={len(payload)}: {e}")
 
     async def _mirror_batch(
         self,
@@ -819,7 +876,9 @@ class SpiderTaskConsumer:
                         pass
                 if params.get("incremental") and content_hash:
                     existing = await SpiderResultRepository(session).find_by_content_hash(
-                        content_hash, tenant_id=owner_id
+                        content_hash,
+                        tenant_id=owner_id,
+                        spider_name=spider_name or None,
                     )
                     if existing:
                         logger.debug(f"增量去重：重复内容已跳过: hash={content_hash}, url={url_val}")

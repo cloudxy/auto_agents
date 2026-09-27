@@ -13,6 +13,7 @@ import { Tabs } from 'antd'
 import { listTenants, patchTenant, type TenantRow } from '../services/platformOps'
 import { clearDeadItems, discardDeadItem, listDeadItems, type DeadItem } from '../services/deadItems'
 import { apiErrorMessage } from '../utils/errorMessage'
+import PendingOrdersTab from '../components/ops/PendingOrdersTab'
 import ProductEvents from './ProductEvents'
 
 
@@ -210,6 +211,7 @@ const DeadItemsTab: React.FC = () => {
             ),
           },
           { key: 'dead-items', label: '死信队列', children: <DeadItemsTab /> },
+          { key: 'orders', label: '待确认收款', children: <PendingOrdersTab /> },
           { key: 'product-events', label: '产品事实', children: <ProductEvents /> },
         ]}
       />

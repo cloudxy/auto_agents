@@ -6,6 +6,8 @@ import asyncio
 
 import pytest
 
+pytestmark = pytest.mark.mysql_fidelity
+
 
 @pytest.fixture(autouse=True)
 def _seed(db_session):
@@ -94,17 +96,24 @@ def test_permission_resource_crud_with_reference_guard(db_client, platform_admin
     assert db_client.delete(f"/api/v1/rbac/permissions/{pid}").status_code == 200
 
 
-def test_tenant_admin_cannot_update_platform_role(db_client, admin_client, _seed):
-    """GWT-06.3：租户公司管理员改平台角色权限 → 403；权限集合不变"""
-    before = db_client.get("/api/v1/rbac/roles").json()["data"]["roles"]
+def test_tenant_admin_cannot_update_platform_role(db_client, db_session, _seed):
+    """GWT-U15.3：租户公司管理员改平台角色权限 → 404 同形；权限集合不变"""
+    from conftest import make_platform_admin_headers, make_tenant_owner_headers
+
+    pa = make_platform_admin_headers(db_session)
+    tenant, _ = make_tenant_owner_headers(db_session, slug="rbac-u15")
+    before = db_client.get("/api/v1/rbac/roles", headers=pa).json()["data"]["roles"]
     admin = next(r for r in before if r["role_key"] == "admin")
     perms = list(admin["permissions"])
-    resp = admin_client.put(
+    resp = db_client.put(
         "/api/v1/rbac/roles/admin",
+        headers=tenant,
         json={"permissions": [*perms, "btn:tmp:denied"]},
     )
-    assert resp.status_code == 403
-    after = db_client.get("/api/v1/rbac/roles").json()["data"]["roles"]
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
+    assert "抱歉" not in resp.text
+    after = db_client.get("/api/v1/rbac/roles", headers=pa).json()["data"]["roles"]
     admin_after = next(r for r in after if r["role_key"] == "admin")
     assert admin_after["permissions"] == perms
 

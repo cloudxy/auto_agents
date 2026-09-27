@@ -1,6 +1,6 @@
 /** T-26 我的安装冻结句。空 ≠ 加载失败。两句只读不得混用。 */
 
-export const EMPTY_COPY = '还没有订阅的能力。去能力市场看看已上架的能力。'
+export const EMPTY_COPY = '还没有安装'
 export const EMPTY_CTA = '去能力市场'
 export const LOAD_FAIL = '安装列表加载失败。检查网络后重试。'
 export const OFFLINE_UNINSTALL = '网络不可用，安装行没有删除。'

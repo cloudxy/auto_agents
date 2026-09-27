@@ -80,6 +80,10 @@ def _service() -> AiPlannerService:
                     "list_plans", "create", "claim_status"):
         setattr(svc.repo, _method, AsyncMock())
     svc.repo.claim_status.return_value = True  # 默认抢断成功
+    # FR-U02：launch_plan 规划前 token 闸走真 QuotaService；本模块 session 是 MagicMock。
+    svc._reject_if_token_quota_full = AsyncMock()
+    # FR-M01：未开放闸走真 settings；本模块只测抢断/spawn。
+    svc._reject_if_planning_disabled = AsyncMock()
     return svc
 
 
@@ -174,7 +178,7 @@ class TestLlmChat:
         with patch("backend.services.ai_planner_service.settings", cfg):
             with pytest.raises(BusinessException) as ei:
                 await svc._llm_chat([{"role": "user", "content": "hi"}])
-        assert "未启用" in str(ei.value)
+        assert "智能规划未开放" in str(ei.value)
         assert "平台 LLM 网关不可达" not in str(ei.value)
         assert "还没有平台模型" not in str(ei.value)
 
@@ -810,6 +814,12 @@ def ai_client(admin_client, app):
     session.commit = AsyncMock()
     session.flush = AsyncMock()
     session.refresh = AsyncMock()
+    # T-38：task_actor_tenant_id 会查平台租户。admin_client 是租户 admin 且
+    # tenant_id=1；若这里返回 1 会被当成「冒名平台租户」拒绝。mock 会话无
+    # 平台租户行 → None，走普通用户 user.tenant_id。
+    session.execute = AsyncMock(return_value=MagicMock(
+        scalar_one_or_none=MagicMock(return_value=None),
+    ))
     app.dependency_overrides[get_async_db] = lambda: session
     yield admin_client
     app.dependency_overrides.pop(get_async_db, None)

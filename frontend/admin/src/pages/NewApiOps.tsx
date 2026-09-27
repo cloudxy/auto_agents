@@ -1,70 +1,52 @@
 /**
- * 值班页 /newapi（T-18）：网关模型/部署；空态 71.2 / 降级 71.3；URL 保留
+ * 值班页 /newapi：T-18 数据面 + T-31 页头结构 + T-32/33 总览三问驾驶舱。
+ * T-31（GWT-98.1 = FR-99 §0.10）：总览/探针/事件三 tab 上提顶栏行（PageHeaderTabs
+ * 槽位），页内无标题卡；内容区直接以当前 tab 内容开始（pane 常挂载保住筛选分页态）。
+ * T-32/33：总览 tab = 三问驾驶舱（Overview3q：三区独立失败/置顶排序/立即探测/事件跳转），
+ * 数据面 react-query 化；探针/事件 pane 与窗口配置 Modal 保持不动（GWT-99.3 动作不回退）。
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import ProbeResults from '../components/newapi/ProbeResults'
 import EventsList from '../components/newapi/EventsList'
-import {
-  DUTY_DEGRADE_71_3,
-  DUTY_DEGRADE_71_3_HINT,
-  DUTY_EMPTY_71_2,
-  DUTY_EMPTY_71_2_HINT,
-  DUTY_LOAD_FAILED,
-  DUTY_TABLE_UNAVAILABLE,
-  VERDICT_TAG,
-  fmtQuota,
-} from '../components/newapi/newapiShared'
-import {
-  Alert, Button, Card, Empty, Form, InputNumber, Modal, Popconfirm, Space, Statistic,
-  Table, Tabs, Tag, Tooltip, Typography, message,
-} from 'antd'
-import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
-import type { ColumnsType } from 'antd/es/table'
-import {
-  clearModelConfig, fetchChannelsWithConfig, fetchNewapiOverview, setModelConfig,
-} from '../services/newapi'
-import type {
-  GatewayModelWithConfig, NewapiOverview, ProbeVerdict,
-} from '../services/newapi'
+import Overview3q from '../components/newapi/Overview3q'
+import PageHeaderTabs, { pageTabPaneStyle } from '../components/layout/PageHeaderTabs'
+import DutyKeysTab from '../components/newapi/DutyKeysTab'
+import { Button, Form, InputNumber, Modal, Popconfirm, message } from 'antd'
+import { ReloadOutlined } from '@ant-design/icons'
+import { clearModelConfig, setModelConfig } from '../services/newapi'
+import type { GatewayModelWithConfig } from '../services/newapi'
 
-const { Text } = Typography
+/** 页级 tab（§0.10：顶栏行 = 页名「中转站管控」+ 本三 tab，与欢迎语同一行） */
+const PAGE_TAB_ITEMS = [
+  { key: 'overview', label: '总览' },
+  { key: 'probes', label: '探针' },
+  { key: 'events', label: '事件' },
+  { key: 'keys', label: '钥匙' },
+]
 
 const NewApiOps: React.FC = () => {
-  const [overview, setOverview] = useState<NewapiOverview | null>(null)
-  const [overviewLoading, setOverviewLoading] = useState(false)
-  const [loadFailed, setLoadFailed] = useState(false)
-
-  const loadOverview = useCallback(async (showSpin = true) => {
-    if (showSpin) setOverviewLoading(true)
-    try {
-      setOverview(await fetchNewapiOverview())
-      setLoadFailed(false)
-    } catch (error) {
-      setLoadFailed(true)
-      message.error(DUTY_LOAD_FAILED)
-    } finally {
-      if (showSpin) setOverviewLoading(false)
-    }
+  const queryClient = useQueryClient()
+  const [activeTab, setActiveTab] = useState('overview')
+  // pane 与原 Tabs 同语义：首次激活才挂载（数据装配时机不变），此后保持挂载（筛选/分页态不丢）
+  const [visitedTabs, setVisitedTabs] = useState<Record<string, boolean>>({ overview: true })
+  // GWT-98.5：总览 Top N 跳入事件 tab 的目标行（高亮）
+  const [highlightEventId, setHighlightEventId] = useState<number | undefined>(undefined)
+  const onTabChange = useCallback((key: string) => {
+    setActiveTab(key)
+    setVisitedTabs((visited) => (visited[key] ? visited : { ...visited, [key]: true }))
   }, [])
 
-  const [channelsCfg, setChannelsCfg] = useState<GatewayModelWithConfig[]>([])
-  const [channelsCfgLoading, setChannelsCfgLoading] = useState(false)
+  const onJumpToEvent = useCallback((eventId: number) => {
+    setHighlightEventId(eventId)
+    onTabChange('events')
+  }, [onTabChange])
+
   const [cfgTarget, setCfgTarget] = useState<GatewayModelWithConfig | null>(null)
   const [cfgSaving, setCfgSaving] = useState(false)
   const [cfgForm] = Form.useForm()
   const [refreshSignal, setRefreshSignal] = useState(0)
   const [configSaved, setConfigSaved] = useState(0)
-
-  const loadChannelsCfg = useCallback(async (showSpin = true) => {
-    if (showSpin) setChannelsCfgLoading(true)
-    try {
-      setChannelsCfg(await fetchChannelsWithConfig())
-    } catch (error) {
-      setChannelsCfg([])
-    } finally {
-      if (showSpin) setChannelsCfgLoading(false)
-    }
-  }, [])
 
   const openCfg = (record: GatewayModelWithConfig) => {
     setCfgTarget(record)
@@ -83,7 +65,7 @@ const NewApiOps: React.FC = () => {
       await setModelConfig(cfgTarget.gateway_ref, values)
       message.success(`模型 ${cfgTarget.model_name} 窗口配置已保存`)
       setCfgTarget(null)
-      loadChannelsCfg(false)
+      queryClient.invalidateQueries({ queryKey: ['newapi'] })
       setConfigSaved((s) => s + 1)
     } catch (error) {
       if ((error as { errorFields?: unknown })?.errorFields) return
@@ -100,7 +82,7 @@ const NewApiOps: React.FC = () => {
       await clearModelConfig(cfgTarget.gateway_ref)
       message.success(`模型 ${cfgTarget.model_name} 已清除窗口配置`)
       setCfgTarget(null)
-      loadChannelsCfg(false)
+      queryClient.invalidateQueries({ queryKey: ['newapi'] })
       setConfigSaved((s) => s + 1)
     } catch (error) {
       message.error('清除窗口配置失败')
@@ -109,139 +91,49 @@ const NewApiOps: React.FC = () => {
     }
   }
 
-  useEffect(() => {
-    loadOverview()
-    loadChannelsCfg()
-  }, [loadOverview, loadChannelsCfg])
-
+  // 顶栏「刷新」动作等价保持（GWT-99.3）：驾驶舱走 react-query 失效，探针/事件 pane 走信号
   const refreshAll = () => {
-    loadOverview(false)
-    loadChannelsCfg(false)
+    queryClient.invalidateQueries({ queryKey: ['newapi'] })
     setRefreshSignal((s) => s + 1)
   }
 
-  const channelColumns: ColumnsType<GatewayModelWithConfig> = [
-    {
-      title: '模型/部署', dataIndex: 'model_name', key: 'model_name', width: 200,
-      render: (v: string) => <Text strong>{v || '-'}</Text>,
-    },
-    {
-      title: '引用', dataIndex: 'gateway_ref', key: 'gateway_ref', width: 180, ellipsis: true,
-      render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text>,
-    },
-    {
-      title: '上游地址', dataIndex: 'api_base', key: 'api_base', ellipsis: true,
-      render: (v: string | null | undefined) => v || '-',
-    },
-    {
-      title: '密钥', dataIndex: 'api_key_masked', key: 'api_key_masked', width: 120,
-      render: (v: string | null | undefined) => (v ? <Text code>{v}</Text> : '—'),
-    },
-    {
-      title: '额度调度', key: 'quota_cfg', width: 190,
-      render: (_: unknown, record: GatewayModelWithConfig) => {
-        const sourceMeta: Record<string, { color: string; text: string }> = {
-          channel: { color: 'blue', text: '模型级' },
-          global: { color: 'cyan', text: '全局默认' },
-          none: { color: 'default', text: '未纳管' },
-        }
-        const meta = sourceMeta[record.effective_source] || sourceMeta.none
-        return (
-          <Space size={4}>
-            <Tooltip title={`窗口 ${record.effective.window_hours}h / 冷却 ${record.effective.cooldown_seconds}s`}>
-              <Tag color={meta.color}>
-                {record.effective_source === 'none' ? '未纳管' : fmtQuota(record.effective.limit_quota)}
-              </Tag>
-            </Tooltip>
-            <Button type="link" size="small" icon={<SettingOutlined />} onClick={() => openCfg(record)}>
-              配置
-            </Button>
-          </Space>
-        )
-      },
-    },
-  ]
-
-  const verdicts = overview?.latest_batch_verdicts || {}
-  const reachableEmpty = Boolean(overview?.available && (overview?.total ?? 0) === 0)
-  const tableEmpty = overview && !overview.available
-    ? DUTY_TABLE_UNAVAILABLE
-    : reachableEmpty
-      ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={
-            <span>
-              <div>{overview?.empty_state || DUTY_EMPTY_71_2}</div>
-              <Text type="secondary">{DUTY_EMPTY_71_2_HINT}</Text>
-            </span>
-          }
-        >
-          <Button type="primary" onClick={refreshAll}>刷新</Button>
-        </Empty>
-      )
-      : DUTY_EMPTY_71_2
-
-  const renderOverviewTab = () => (
-    <>
-      {loadFailed && (
-        <Alert
-          type="error" showIcon style={{ marginBottom: 16 }}
-          title={DUTY_LOAD_FAILED}
-        />
-      )}
-      {overview && !overview.available && (
-        <Alert
-          type="warning" showIcon style={{ marginBottom: 16 }}
-          title={overview.degrade_state || DUTY_DEGRADE_71_3}
-          description={DUTY_DEGRADE_71_3_HINT}
-        />
-      )}
-      <Space size={40} wrap style={{ marginBottom: 16 }}>
-        <Statistic title="模型/部署" value={overview?.available ? overview.total : '-'} />
-        <Statistic title="近 24h 事件数" value={overview?.events_24h ?? '-'} />
-        <div>
-          <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 14, marginBottom: 4 }}>
-            最近探针批次{overview?.latest_batch_id ? `（${overview.latest_batch_id.slice(0, 8)}…）` : ''}
-          </div>
-          <Space size={8} wrap>
-            {(['original', 'spoofed', 'offline'] as ProbeVerdict[]).map((v) => (
-              <Tag key={v} color={VERDICT_TAG[v].color}>
-                {VERDICT_TAG[v].text}: {verdicts[v] ?? 0}
-              </Tag>
-            ))}
-          </Space>
-        </div>
-      </Space>
-      <Table
-        columns={channelColumns}
-        dataSource={overview?.available ? channelsCfg : []}
-        rowKey="gateway_ref"
-        loading={overviewLoading || channelsCfgLoading}
-        pagination={false}
-        scroll={{ x: 900 }}
-        locale={{ emptyText: tableEmpty }}
-      />
-    </>
-  )
-
   return (
-    <Card
-      title="LLM 网关值班"
-      extra={
-        <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={overviewLoading}>
+    <>
+      {/* 页级 tab 上提顶栏（GWT-98.1）；无槽位（单测直渲染）时本组件原位回退 */}
+      <PageHeaderTabs items={PAGE_TAB_ITEMS} activeKey={activeTab} onChange={onTabChange} />
+
+      {/* 动作行（原 Card extra 的「刷新」保持，GWT-99.3 动作等价；作用于全部 tab） */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <Button icon={<ReloadOutlined />} onClick={refreshAll}>
           刷新
         </Button>
-      }
-    >
-      <Tabs
-        defaultActiveKey="overview"
-        items={[
-          { key: 'overview', label: '总览', children: renderOverviewTab() },
-          { key: 'probes', label: '探针', children: <ProbeResults refreshSignal={refreshSignal} /> },
-          { key: 'events', label: '事件', children: <EventsList refreshSignal={refreshSignal} configSaved={configSaved} /> },
-        ]}
-      />
+      </div>
+
+      {/* 内容区直接开始；pane 首次激活挂载后保持（与原 Tabs 同语义），display 切换 + ≤150ms 透明度过渡 */}
+      {visitedTabs.overview && (
+        <div style={pageTabPaneStyle(activeTab === 'overview')}>
+          <Overview3q onOpenConfig={openCfg} onJumpToEvent={onJumpToEvent} />
+        </div>
+      )}
+      {visitedTabs.probes && (
+        <div style={pageTabPaneStyle(activeTab === 'probes')}>
+          <ProbeResults refreshSignal={refreshSignal} />
+        </div>
+      )}
+      {visitedTabs.events && (
+        <div style={pageTabPaneStyle(activeTab === 'events')}>
+          <EventsList
+            refreshSignal={refreshSignal}
+            configSaved={configSaved}
+            highlightId={highlightEventId}
+          />
+        </div>
+      )}
+      {visitedTabs.keys && (
+        <div style={pageTabPaneStyle(activeTab === 'keys')}>
+          <DutyKeysTab />
+        </div>
+      )}
 
       <Modal
         title={`窗口配置 ${cfgTarget?.model_name ?? ''}`}
@@ -275,7 +167,7 @@ const NewApiOps: React.FC = () => {
           </Popconfirm>
         )}
       </Modal>
-    </Card>
+    </>
   )
 }
 

@@ -26,6 +26,7 @@ if str(SCRAPY_DIR) not in sys.path:
 from backend.services.spider_common import FLOW_SPIDER_NAME, extract_flow  # noqa: E402
 from backend.services.spider_task_service import SpiderTaskService  # noqa: E402
 from backend.tasks.consumer import SpiderTaskConsumer  # noqa: E402
+from platform_core.queues import tenant_active_key  # noqa: E402
 
 _LIST_HTML = """
 <html><head><title>列表页</title></head><body>
@@ -148,8 +149,8 @@ class TestEnqueueFlowNormalization:
             await svc.enqueue("generic", params=params, tenant_id=1)
 
         assert svc.repo.create.call_args.kwargs["spider_name"] == FLOW_SPIDER_NAME
-        # 并发槽位检查也走 flow_generic 的活跃键
-        fake_redis.scard.assert_called_once_with(f"spider:active_tasks:{FLOW_SPIDER_NAME}")
+        # 并发槽位检查走租户×爬虫键（C1 / T-07），归一化后的 spider 仍是 flow_generic
+        fake_redis.scard.assert_called_once_with(tenant_active_key(1, FLOW_SPIDER_NAME))
 
     @pytest.mark.asyncio
     async def test_plain_task_keeps_original_spider(self):

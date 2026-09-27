@@ -5,6 +5,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, ConfigProvider, Empty, Modal, Switch, Table, Tag, Typography } from 'antd'
 
 import SubscribeModal from '../components/SubscribeModal'
+import TenantSpaceOnly from '../components/TenantSpaceOnly'
+import { useAuthStore } from '../store/useAuthStore'
+import { isNotFoundError } from '../utils/httpError'
+import NotFound from './NotFound'
 import {
   listInstalls, patchInstall, uninstallInstall, type InstallRow,
 } from '../services/capabilities'
@@ -30,6 +34,9 @@ const groupRows = (items: InstallRow[]) => {
 }
 
 const MyInstalls: React.FC = () => {
+  const user = useAuthStore((s) => s.user)
+  // GWT-82.4：平台超管无企业空间 → 「属于企业空间」说明态，不发空表请求
+  const noTenantSpace = Boolean(user?.is_platform_admin) && user?.tenant_id == null
   const [items, setItems] = useState<InstallRow[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [pending, setPending] = useState<InstallRow | null>(null)
@@ -37,16 +44,24 @@ const MyInstalls: React.FC = () => {
   const [busy, setBusy] = useState(false)
   const [trustRow, setTrustRow] = useState<InstallRow | null>(null)
   const [subscribe, setSubscribe] = useState<InstallRow | null>(null)
+  const [notFound, setNotFound] = useState(false)
 
   const load = useCallback(async () => {
+    if (noTenantSpace) return
     setLoadError(null)
     try {
       setItems((await listInstalls()).items)
+      setNotFound(false)
     } catch (e) {
+      if (isNotFoundError(e)) {
+        setNotFound(true)
+        setItems(null)
+        return
+      }
       setItems(null)
       setLoadError(loadErrorCopy(e))
     }
-  }, [])
+  }, [noTenantSpace])
 
   useEffect(() => { load() }, [load])
 
@@ -88,6 +103,9 @@ const MyInstalls: React.FC = () => {
 
   const groups = useMemo(() => groupRows(items || []), [items])
   const empty = !loadError && items !== null && items.length === 0
+
+  if (noTenantSpace) return <TenantSpaceOnly what="安装" />
+  if (notFound) return <NotFound />
 
   return (
     <ConfigProvider button={{ autoInsertSpace: false }}>

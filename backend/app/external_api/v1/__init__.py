@@ -12,7 +12,7 @@
 - 稳定的接口契约
 """
 from fastapi import APIRouter
-from . import webhooks, public
+from . import payment_gateways, webhooks, public
 
 # 创建外部 API V1 路由器
 router = APIRouter()
@@ -20,5 +20,6 @@ router = APIRouter()
 # 注册 V1 版本的子路由
 router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 router.include_router(public.router, prefix="/public", tags=["public"])
+router.include_router(payment_gateways.router, prefix="/payments", tags=["payments"])
 
 __all__ = ["router"]

@@ -9,6 +9,6 @@ scripts/
   db/             建库、迁移、基线表（初始化会调用）
 ```
 
-仓库根：`init_project.sh`（第一次）· `run.py`（日常启停）。
+仓库根：`init_project.sh`（第一次）· `run.py`（日常启停）。`run.py start/restart` 会跑 `scripts/sync_agents_hub.py`，把 `.agents` 增量写入能力市场。
 
 质量门禁：`tools/check/`。OpenAPI：`tools/dump_openapi.py`。僵死看门狗：`deploy/watchdog.sh`。

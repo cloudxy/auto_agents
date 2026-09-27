@@ -56,8 +56,11 @@ const fromLocationState = (state: unknown): string | undefined => {
   const from = (state as { from?: unknown }).from
   if (typeof from === 'string') return from
   if (from && typeof from === 'object' && 'pathname' in from) {
-    const pathname = (from as { pathname?: unknown }).pathname
-    return typeof pathname === 'string' ? pathname : undefined
+    const loc = from as { pathname?: unknown; search?: unknown }
+    const pathname = typeof loc.pathname === 'string' ? loc.pathname : undefined
+    if (!pathname) return undefined
+    const search = typeof loc.search === 'string' ? loc.search : ''
+    return `${pathname}${search}`
   }
   return undefined
 }

@@ -7,7 +7,7 @@
   （T-05：非超管 404 同形；正面路径需平台超管 Bearer 真链路）
 - PATCH /api/v1/admin/tenants/{id}     匿名 401 / 非平台 admin 404 / 不存在 404
   （status 白名单 → test_r5_r7_fixes.py）
-- GET|POST|PATCH|DELETE /api/v1/admin/users   匿名 401 / viewer 403
+- GET|POST|PATCH|DELETE /api/v1/admin/users   匿名 401 / viewer 404
   （CRUD 正常路径 + 防自锁护栏 → test_admin_users_crud.py）
 
 权限断言口径：401 = 匿名无凭据；403 = 低权限角色直调（绕过前端隐藏入口）。
@@ -196,7 +196,7 @@ def test_patch_tenant_not_found_404(db_client, db_engine, db_session):
 
 
 # ---------------------------------------------------------------------------
-# /admin/users 四操作：匿名 401 / viewer 403（正常路径见 test_admin_users_crud.py）
+# /admin/users 四操作：匿名 401 / viewer 404 同形（正常路径见 test_admin_users_crud.py）
 # ---------------------------------------------------------------------------
 
 
@@ -208,12 +208,12 @@ def test_admin_users_anonymous_401(client):
     assert client.delete(f"{USERS_URL}/1").status_code == 401
 
 
-def test_admin_users_viewer_403(viewer_client, db_session):
-    """viewer 直调四操作 → 403，且零写入"""
-    assert viewer_client.get(USERS_URL).status_code == 403
-    assert viewer_client.post(USERS_URL, json=_VALID_USER_BODY).status_code == 403
-    assert viewer_client.patch(f"{USERS_URL}/1", json={"role": "viewer"}).status_code == 403
-    assert viewer_client.delete(f"{USERS_URL}/1").status_code == 403
+def test_admin_users_viewer_404(viewer_client, db_session):
+    """viewer 直调四操作 → 404 同形，且零写入"""
+    assert viewer_client.get(USERS_URL).status_code == 404
+    assert viewer_client.post(USERS_URL, json=_VALID_USER_BODY).status_code == 404
+    assert viewer_client.patch(f"{USERS_URL}/1", json={"role": "viewer"}).status_code == 404
+    assert viewer_client.delete(f"{USERS_URL}/1").status_code == 404
 
     async def _check():
         async with db_session() as s:

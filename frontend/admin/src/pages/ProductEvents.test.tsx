@@ -3,6 +3,7 @@
  */
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 jest.mock('../services/productEvents', () => ({
   listProductEvents: jest.fn(),
@@ -12,6 +13,15 @@ import { listProductEvents } from '../services/productEvents'
 import ProductEvents from './ProductEvents'
 
 const list = listProductEvents as jest.Mock
+
+const renderEvents = () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={client}>
+      <ProductEvents />
+    </QueryClientProvider>,
+  )
+}
 
 beforeEach(() => {
   list.mockReset()
@@ -33,7 +43,7 @@ beforeEach(() => {
 })
 
 test('superadmin events page lists facts by occurred time (GWT-15.1 shell)', async () => {
-  render(<ProductEvents />)
+  renderEvents()
   expect(screen.getByText(/仅平台超管/)).toBeInTheDocument()
   expect(screen.getByText(/Asia\/Shanghai/)).toBeInTheDocument()
   expect(await screen.findByText('task_completed', {}, { timeout: 15000 })).toBeInTheDocument()

@@ -6,7 +6,7 @@ import { Drawer, Input, Select, Space, Tag, Typography, Empty } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { fetchTaskLogs } from '../../services/spiders'
 import { STATUS_META } from './types'
-import type { Task, TaskLogResponse, SpiderMap } from './types'
+import type { Task, SpiderMap } from './types'
 
 const { Text } = Typography
 
