@@ -6,12 +6,12 @@
 
 - `.grok/plugins/<name>`、`.claude/plugins/<name>` → 这里的启用子集（`dev-team` / `sdlc-workflow` / `drama-skills` / `oh-story`）。`.claude/plugins` 只有 Grok 会扫，Claude Code 不读
 - Claude Code → `.claude/settings.json` 的 `extraKnownMarketplaces`（`./.agents/plugins/<name>`）+ `enabledPlugins`，同一份启用子集，原地加载。约束见 `../README.md`
-- Codex → 用户级目录链接 `~/.codex/skills/<name>` → 这里的 `<name>/skills`（同一启用子集）；sdlc-workflow 的角色子代理由 `link-codex.py` 链进仓库 `.codex/agents/`。约束见 `../README.md`
+- Codex → 项目级 `.codex/skills/<name>` → 这里的 `<name>/skills`（相对链接，同一启用子集，只在本项目生效）；sdlc-workflow 的角色子代理由 `link-codex.py --project` 链进 `.codex/agents/`。家目录 `~/.codex` 所有项目共用，不挂。约束见 `../README.md`
 - `capability-library/plugins` → 这里整目录（`POST /api/v1/capabilities/scan-plugins` 仍扫六个）
 
 **所有 AI 工具只能引用，禁止复制**：不复制进本目录或任何适配器目录，也不用会复制的安装命令（`claude plugin install`、`grok plugin install`、`codex plugin add`）。源头改了这里跟着变。检查：`bash tools/check/arch.sh`（PL 段）、`python3 tools/check/plugin_refs.py --local`。
 
-| 插件 | 唯一维护源 | Claude Code id（`enabledPlugins`） | Codex（`~/.codex/skills/<name>` 链接） |
+| 插件 | 唯一维护源 | Claude Code id（`enabledPlugins`） | Codex（`.codex/skills/<name>` 链接） |
 |------|------------|------------------------------------|------|
 | `sdlc-workflow` | `~/.zcode/local-plugins/sdlc-workflow` | `sdlc-workflow@sdlc-workflow` | 已链接；角色子代理见 `.codex/agents/` |
 | `superpowers` | `~/.zcode/local-plugins/superpowers` | 不启用 | 不启用 |
@@ -31,4 +31,4 @@ Grok / Claude 适配器只接启用子集；`superpowers` / `mattpocock-skills` 
 1. `ln -s ../../../.zcode/local-plugins/<name> <name>`，不要 `cp -R`。不要把插件内的 `skills/` 再摊到 `.agents/skills/`
 2. 要给 Claude Code 用：确认维护源根目录有 `.claude-plugin/marketplace.json`（`source: "./"`），没有就补；`claude plugin validate ~/.zcode/local-plugins/<name>` 通过
 3. `.claude/settings.json`：`extraKnownMarketplaces.<marketplace.json 的 name>` 指向 `./.agents/plugins/<name>`，再在 `enabledPlugins` 加 `<插件名>@<marketplace 名>: true`
-4. 要给 Codex 用：`ln -s <仓库>/.agents/plugins/<name>/skills ~/.codex/skills/<name>`；插件带角色子代理时用它自己的链接脚本（如 sdlc-workflow 的 `link-codex.py`）
+4. 要给 Codex 用：`ln -s ../../.agents/plugins/<name>/skills .codex/skills/<name>`（项目级，不挂 `~/.codex`）；插件带角色子代理时用它自己的链接脚本（如 sdlc-workflow 的 `link-codex.py --project <仓库根>`）

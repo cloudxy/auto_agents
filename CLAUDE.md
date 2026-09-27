@@ -30,6 +30,7 @@ auto_agents/
 ├── capability-library/   # 产品能力目录；plugins/ → .agents/plugins
 ├── .agents/              # 开发协作中枢（skills/ + plugins/ 指针农场）
 ├── .claude/              # 规则 / hooks / agents；skills、plugins 为适配器
+├── .codex/               # Codex 项目级（同 .claude/，只在本项目生效）：skills/、agents/ 为链到 .agents/plugins 的适配器
 └── .grok/                # Grok 项目配置；plugins/ 为启用子集
 ```
 

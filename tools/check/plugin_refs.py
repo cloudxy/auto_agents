@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""插件只能引用：所有 AI 工具经符号链接或原地加载使用 .agents/plugins，禁止复制。
+"""插件只能引用、只在项目内生效：所有 AI 工具经符号链接或原地加载使用 .agents/plugins，禁止复制；
+项目插件挂在项目级目录（.claude/、.codex/、.grok/），不挂到所有项目共用的用户级目录。
 
 用法：
   python3 tools/check/plugin_refs.py            # 仓库内适配器（CI 可跑）
@@ -57,12 +58,13 @@ def repo_checks(names: list[str]) -> list[str]:
             path = str(src.get("path", ""))
             if src.get("source") != "directory" or not path.startswith("./.agents/plugins/"):
                 bad.append(f"PL-3 .claude/settings.json 插件源 {key} 必须是 directory + ./.agents/plugins/<name>（原地加载）")
-    agents = ROOT / ".codex" / "agents"
-    for entry in sorted(agents.iterdir()) if agents.is_dir() else []:
-        if not entry.is_symlink():
-            bad.append(f"PL-4 .codex/agents/{entry.name} 是复制品，应由 link-codex.py 建链接")
-        elif not lexical_target(entry).startswith(str(HUB) + os.sep):
-            bad.append(f"PL-4 .codex/agents/{entry.name} 没有经 .agents/plugins 引用")
+    for sub in ("skills", "agents"):
+        d = ROOT / ".codex" / sub
+        for entry in sorted(d.iterdir()) if d.is_dir() else []:
+            if not entry.is_symlink():
+                bad.append(f"PL-4 .codex/{sub}/{entry.name} 是复制品，应链到 .agents/plugins（sdlc-workflow 用 link-codex.py）")
+            elif not lexical_target(entry).startswith(str(HUB) + os.sep):
+                bad.append(f"PL-4 .codex/{sub}/{entry.name} 没有经 .agents/plugins 引用")
     cap = ROOT / "capability-library" / "plugins"
     if cap.exists() and not cap.is_symlink():
         bad.append("PL-5 capability-library/plugins 不是符号链接（应整目录链到 ../.agents/plugins）")
@@ -73,11 +75,8 @@ def local_checks(names: list[str]) -> list[str]:
     bad = []
     for name in names:
         link = HOME / ".codex" / "skills" / name
-        if link.is_symlink():
-            if not same(link, HUB / name / "skills"):
-                bad.append(f"PL-L1 ~/.codex/skills/{name} 没有指向 .agents/plugins/{name}/skills")
-        elif link.exists():
-            bad.append(f"PL-L1 ~/.codex/skills/{name} 是复制品")
+        if link.is_symlink() or link.exists():
+            bad.append(f"PL-L1 ~/.codex/skills/{name} 挂在用户级，会进入所有项目；改挂 .codex/skills/{name}")
         for cache in (HOME / ".codex/plugins/cache", HOME / ".claude/plugins/cache", HOME / ".zcode/cli/plugins/cache"):
             for copy in sorted(cache.glob(f"*/{name}")) if cache.is_dir() else []:
                 if copy.is_dir() and not copy.is_symlink():
@@ -92,9 +91,8 @@ def local_checks(names: list[str]) -> list[str]:
             if f'"{name}"' in text:
                 bad.append(f"PL-L3 grok plugin install 留下了 {name} 的副本（~/.grok/installed-plugins）")
     for toml in sorted((HOME / ".codex" / "agents").glob("sdlc-workflow-*.toml")):
-        if not toml.is_symlink():
-            bad.append(f"PL-L4 {toml} 是复制品")
-    for d in (ROOT / ".claude/plugins", ROOT / ".grok/plugins", ROOT / ".codex/agents"):
+        bad.append(f"PL-L4 {toml} 挂在用户级，会进入所有项目；改用 link-codex.py --project")
+    for d in (ROOT / ".claude/plugins", ROOT / ".grok/plugins", ROOT / ".codex/skills", ROOT / ".codex/agents"):
         for entry in sorted(d.iterdir()) if d.is_dir() else []:
             if entry.is_symlink() and not entry.exists():
                 bad.append(f"PL-L5 {entry.relative_to(ROOT)} 是悬空链接（源头 ~/.zcode/local-plugins 缺失？）")
@@ -103,7 +101,7 @@ def local_checks(names: list[str]) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--local", action="store_true", help="also check this machine's tool caches and user-level links")
+    ap.add_argument("--local", action="store_true", help="also check tool caches, user-level leaks and dangling links")
     args = ap.parse_args()
     names = hub_names()
     bad = repo_checks(names) + (local_checks(names) if args.local else [])

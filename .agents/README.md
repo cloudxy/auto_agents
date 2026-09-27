@@ -17,7 +17,7 @@
 - **Claude Code 插件**：`.claude/settings.json` 的 `extraKnownMarketplaces` 把每个 `./.agents/plugins/<name>` 注册成 directory marketplace，`enabledPlugins` 启用同一份四插件子集。插件从 `plugins/<name>` 原地加载，不进 `~/.claude/plugins/cache`，源头改了下次会话生效
 - `.claude/plugins/<name>` → 同一份四插件子集，只给 Grok 扫；**Claude Code 不读这个目录**
 - `capability-library/plugins` → `plugins/`（整农场；平台 `scan-plugins` 入口，不改 `LIBRARY_ROOT`）
-- **Codex**（CLI 0.156.1 实测）：插件机制只会复制，所以不用它。skills 走用户级目录链接 `~/.codex/skills/<name>` → `<仓库>/.agents/plugins/<name>/skills`（Codex 没有自己的项目级 skill 目录；`.agents/skills` 与 Grok、Claude 共用，放插件会重复加载），同一份四插件子集；列出时带插件名前缀（如 `sdlc-workflow:sdlc`），drama-skills 无 `plugin.json`，显示为 `short-drama-*`。sdlc-workflow 的角色子代理是 `.codex/agents/*.toml` 相对链接，由 `python3 .agents/plugins/sdlc-workflow/scripts/link-codex.py --project <仓库根>` 生成（经中枢路径调用，链接就经过中枢）；Codex 只对**受信任**项目读 `.codex/`，在本仓库首次用 Codex 时确认信任
+- **Codex**（CLI 0.156.1 实测）：`.codex/` 与 `.claude/` 对称，只在本项目生效（家目录 `~/.codex`、`~/.claude` 是所有项目共用的，项目插件一律不挂那里，以隔离不同项目的 skill）。`.codex/skills/<name>` → `../../.agents/plugins/<name>/skills`（相对链接，同一份四插件子集；Codex 从任一子目录都会读仓库根的 `.codex/skills/`，官方文档未写）；`.codex/agents/*.toml` 是 sdlc-workflow 角色子代理的相对链接。sdlc-workflow 两者都由 `python3 .agents/plugins/sdlc-workflow/scripts/link-codex.py --project <仓库根>` 生成（经中枢路径调用，链接就经过中枢）。列出时带插件名前缀（如 `sdlc-workflow:sdlc`），drama-skills 无 `plugin.json`，显示为 `short-drama-*`。本仓库 SOP skill 不进 `.codex/skills`：Codex 已原生读取 `.agents/skills`，再链会重复。Codex 的插件机制只会复制（装进 `~/.codex/plugins/cache`），不用它。`.codex/agents` 只对**受信任**项目生效，首次在本仓库用 Codex 时确认信任
 
 Claude Code 的硬约束（2.1.283 实测，改接入前先读）：
 
@@ -26,7 +26,7 @@ Claude Code 的硬约束（2.1.283 实测，改接入前先读）：
 - 组件路径写在插件的 `.claude-plugin/plugin.json`；原地加载时 marketplace 条目里的 `agents` 等字段不生效。Claude 递归扫 `agents/`，sdlc-workflow 靠 `plugin.json` 只列顶层 19 个角色，新增角色要同步
 - 相对路径按项目根解析；仓库需先通过工作区信任对话框才会注册。本机没有 `~/.zcode/local-plugins/<name>` 时只在 `/plugin` 报错，不影响会话。个人关掉某个插件：在 `.claude/settings.local.json` 写 `"<id>": false`
 
-第三方插件正文只在 `~/.zcode/local-plugins/` 维护。新增：`ln -s ../../../.zcode/local-plugins/<name> .agents/plugins/<name>`，不要 `cp -R`；要给 Codex 用就再加 `ln -s <仓库>/.agents/plugins/<name>/skills ~/.codex/skills/<name>`。Codex 也会读仓库根 `.agents/plugins/marketplace.json`，但那条路是复制安装，本仓库不写这个文件。Grok 启用名单在 `.grok/config.toml`，那是宿主私有配置。Kimi 等确认官方发现路径后再加适配器，同样只许引用。
+第三方插件正文只在 `~/.zcode/local-plugins/` 维护。新增：`ln -s ../../../.zcode/local-plugins/<name> .agents/plugins/<name>`，不要 `cp -R`；要给 Codex 用就再加 `ln -s ../../.agents/plugins/<name>/skills .codex/skills/<name>`（项目级，不挂 `~/.codex`）。Codex 也会读仓库根 `.agents/plugins/marketplace.json`，但那条路是复制安装，本仓库不写这个文件。Grok 启用名单在 `.grok/config.toml`，那是宿主私有配置。Kimi 等确认官方发现路径后再加适配器，同样只许引用。
 
 ## 项目 skill 写法（`.agents/skills/<name>/SKILL.md`）
 
