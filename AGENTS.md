@@ -25,7 +25,7 @@
 - `platform_core/` 是源码包，经 `sys.path` 引入，不打包、不进 workspace
 - 前端用仓库根 `package.json` workspaces + 根 `package-lock.json`；先 `npm ci`，再 `npm run build:shared`
 
-## 架构红线 + 核心边界（R1–R13 + B1–B3，机械可检查）
+## 架构红线 + 核心边界（R1–R13 + B1–B4，机械可检查）
 
 权威清单是 `tools/check/arch.sh`（以脚本输出为准，不要靠记忆数条数）。提交前 pre-commit + CI 会跑。核心约束：
 
@@ -35,7 +35,7 @@
 - API 层禁止直接 import ORM 模型；ORM 禁止 import Pydantic schema（模型即契约）
 - async 上下文禁止同步 `redis_client()` 链式直调，统一走 `get_async_redis()`（R11）
 - 租户过滤收口（R13）；`spider_service` 门面白名单（R12）
-- 核心边界：`platform_core/` 只依赖 `config/`（B1）；`backend/` 禁止 import `scrapy/`（B2）；`config/` 不依赖任何业务模块（B3）
+- 核心边界：`platform_core/` 只依赖 `config/`（B1）；`backend/` 禁止 import `scrapy/`（B2）；`config/` 不依赖任何业务模块（B3）；四柱域 import 边界（B4，ADR-0010：`power_market` 禁 spider_/newapi_/litellm_/relay_/channel_/ai_planner/llm_gateway 直连；`ai_planner` 只禁 llm_gateway.admin，chat 仅 llm_client.py 可用；backend 对网关只走 HTTP，禁 DSN/create_async_engine）
 
 规则正文：`.claude/rules/project_rule.md`。
 
@@ -65,22 +65,29 @@
 ## 快速开始
 
 ```bash
-bash init_project.sh                       # 新人一键初始化
+bash init_project.sh                       # 新人一键初始化（uv sync + npm ci + build:shared + 建库 + admin 账号）
 uv run python run.py                       # 默认启动全部（已运行则跳过）
+uv run python run.py status                # 查看运行状态
 uv run python run.py stop                  # 停止全部
 uv run python run.py restart               # 强制重启
 uv run pytest -x -q backend/tests          # 后端测试
-bash tools/check/arch.sh                 # 架构合规检查
+bash tools/check/arch.sh                   # 架构合规检查（退出码 = 违规数）
+npm run gen:api                            # 后端 OpenAPI 变更后：dump → shared 类型重生成 → shared 重建
 uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type post-checkout
 ```
+
+端口：backend `9111` / admin `9112` / official `9113`。
 
 环境切换：所有入口接受 `--env {local,dev,prod}`。本地联调全栈：`docker compose up --build`（backend + MySQL 8 + Redis 7；compose 已设 `AUTO_AGENTS_API__HOST=0.0.0.0`）。
 
 ## 验证与交付约定
 
 - 任何「已完成」陈述必须伴随可验证输出（测试输出 / curl 结果 / 构建日志）
-- 后端改动：`uv run pytest -x -q backend/tests` 必须退出码 0
+- 后端改动：`uv run pytest -x -q backend/tests` 必须退出码 0；lint：`uv run ruff check backend platform_core scripts`（只查 E9+F401）
 - 数据契约改动（models/schemas）：额外跑 `bash tools/check/arch.sh`
+- 迁移改动：`bash tools/check/db_ir.sh` + `bash tools/check/db_migrations.sh`（CI db-migration-gate 同款）
+- 前端改动：`npm run check-frontend`（F-5/F-6 门禁）；测试 `npm test -w admin` / `npm test -w official`
+- 真库保真测试默认跳过，需 `MYSQL_FIDELITY=1`（CI 用 MySQL service container 承载）
 - CI 五阶段：Python lint+test / 架构红线 / DB 迁移门禁 / 前端构建 / Docker 校验
 
 ## Skill 路由（`.agents/`）
