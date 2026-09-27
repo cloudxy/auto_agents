@@ -54,5 +54,6 @@ bash tools/check/arch.sh
 | R12 | 直连子 Service；白名单只在脚本里 |
 | R13 | `backend/app/tenant_isolation.py` |
 | B1–B3 | `platform_core` → `config`；backend 不 import scrapy；config 无上层依赖 |
+| PL-1–PL-5 | 插件只能引用：把副本换成符号链接（`.agents/plugins/<name>` → `~/.zcode/local-plugins/<name>`；`.claude/plugins`、`.grok/plugins` → `.agents/plugins/<name>`；`.codex/agents` 由 `link-codex.py` 生成）；Claude 插件源只用 `directory` + `./.agents/plugins/<name>`。本机缓存副本另跑 `python3 tools/check/plugin_refs.py --local` |
 
 改完再跑 `bash tools/check/arch.sh`，以退出码为准。

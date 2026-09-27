@@ -280,10 +280,16 @@ else
     echo "✓ FR-14: 跟踪的 deploy/config 无上游 Key 样例模式"
 fi
 
+# --- 插件只能引用（PL；本机缓存另跑 plugin_refs.py --local）---
+echo ""
+echo "--- 插件引用（PL）---"
+python3 -B tools/check/plugin_refs.py
+VIOLATIONS=$((VIOLATIONS + $?))
+
 # --- 汇总 ---
 echo ""
 if [ "$VIOLATIONS" -eq 0 ]; then
-    echo "✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥，全部通过）"
+    echo "✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥 + PL 插件引用，全部通过）"
     exit 0
 else
     echo "共 $VIOLATIONS 处违规，请按 /check-arch Step 3 路由修复"
