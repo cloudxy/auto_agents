@@ -126,8 +126,8 @@ def test_gwt_42_3_tenant_cannot_override_public_unchanged(
     resp = admin_client.patch(
         _override_url("skill", "g423-nolic"), json={"public_license_override": 1},
     )
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404"
     assert _asset_override(db_session, "g423-nolic") == 0
     after_names, after_total = _public_names(db_client)
     assert after_names == before_names
@@ -214,8 +214,8 @@ def test_gwt_42_6_tenant_a_cannot_tear_down_b_install(
     gate = db_client.patch(
         _override_url("skill", "g426-row"), json={"public_license_override": 0},
     )
-    assert gate.status_code == 403
-    assert gate.json()["code"] == "FORBIDDEN"
+    assert gate.status_code == 404
+    assert gate.json()["code"] == "HTTP_404"
     stolen = db_client.delete(f"{_INSTALLS}/{b_id}")
     assert stolen.status_code == 404
     assert _asset_override(db_session, "g426-row") == 1

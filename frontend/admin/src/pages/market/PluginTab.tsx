@@ -5,7 +5,7 @@ import {
 import { ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 
 import {
-  getPlugin, listAssets, patchListing, scanPlugins, verifyPlugin,
+  getPlugin, listAssets, patchListing, syncAgentsHub, verifyPlugin,
   type AssetRow, type PluginDetail,
 } from '../../services/capabilities'
 import { usePermission } from '../../hooks/usePermission'
@@ -13,8 +13,9 @@ import { apiErrorMessage } from '../../utils/errorMessage'
 import HostRuntimeNote from './HostRuntimeNote'
 import ListingControls from './ListingControls'
 import {
-  DETAIL, HEALTH_UNKNOWN, LIST_CHILD, LISTED_NE_VERIFY,
-  NEED_PLATFORM_ADMIN, OPEN_IN_CATALOG, VERIFY, healthLabel, loadFail,
+  DETAIL, GOVERNANCE_PAGINATION, HEALTH_UNKNOWN, LIST_CHILD, LISTED_NE_VERIFY,
+  NEED_PLATFORM_ADMIN, OPEN_IN_CATALOG, SYNCING, SYNC_AGENTS, VERIFY,
+  healthLabel, loadFail, syncDoneCopy, syncFailCopy,
 } from './marketCopy'
 
 const { Text } = Typography
@@ -29,6 +30,7 @@ const PluginTab: React.FC<Props> = ({ onSubscribe, onOpenCatalog }) => {
   const [notice, setNotice] = useState<string | null>(null)
   const [verifying, setVerifying] = useState<string | null>(null)
   const [detail, setDetail] = useState<PluginDetail | null>(null)
+  const [syncing, setSyncing] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -40,12 +42,19 @@ const PluginTab: React.FC<Props> = ({ onSubscribe, onOpenCatalog }) => {
   }, [])
   useEffect(() => { load() }, [load])
 
-  const scan = async () => {
+  /** T-02（FR-01）：非破坏同步通道——任何失败都不动已有行（后端无软删路径）。 */
+  const sync = async () => {
+    if (syncing) return
+    setSyncing(true)
     try {
-      await scanPlugins()
-      message.success('插件扫描完成')
+      const result = await syncAgentsHub()
+      message.success(syncDoneCopy(result.inserted, result.updated, result.unchanged))
       load()
-    } catch (e) { message.error(apiErrorMessage(e, '扫描失败')) }
+    } catch (e) {
+      message.error(syncFailCopy(apiErrorMessage(e, '请稍后重试')))
+    } finally {
+      setSyncing(false)
+    }
   }
 
   const verify = async (name: string) => {
@@ -80,12 +89,17 @@ const PluginTab: React.FC<Props> = ({ onSubscribe, onOpenCatalog }) => {
         <Alert type="error" showIcon title={error} action={<Button onClick={load}>重试</Button>} />
       ) : null}
       <Space style={{ marginBottom: 12 }} wrap>
-        {isPlatformAdmin && <Button type="primary" onClick={scan}>扫描插件目录</Button>}
+        {isPlatformAdmin && (
+          <Button type="primary" loading={syncing} onClick={sync}>
+            {syncing ? SYNCING : SYNC_AGENTS}
+          </Button>
+        )}
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
         <Text type="secondary">{LISTED_NE_VERIFY}</Text>
       </Space>
       {empty ? <Empty description="还没有插件。扫描或同步源后会出现在这里。" /> : (
-        <Table rowKey="id" size="middle" loading={loading} dataSource={rows} pagination={false}
+        <Table rowKey="id" size="middle" loading={loading} dataSource={rows}
+               pagination={GOVERNANCE_PAGINATION}
                columns={[
                  { title: '名称', dataIndex: 'name', render: (v: string) => <Text code>{v}</Text> },
                  { title: '描述', dataIndex: 'title', ellipsis: true },

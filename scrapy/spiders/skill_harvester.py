@@ -6,7 +6,7 @@ spider_results.source，候选 Tab 以此过滤）：
   目录条目 = 候选（url=html_url，转正时正好是 import-url 的 GitHub 子目录形态）
 - raw README（awesome 清单）：markdown 行 `- [title](github-url) — 描述`
 转正走人工闸门（admin 候选 Tab → import_url 正式管线），采集不直接落
-skills-library。反爬（延迟/UA）沿 settings 与基类站点配置。
+capability-library。反爬（延迟/UA）沿 settings 与基类站点配置。
 """
 import re
 

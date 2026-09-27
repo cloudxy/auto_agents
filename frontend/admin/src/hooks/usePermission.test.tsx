@@ -18,7 +18,7 @@ import { useAuthStore } from '../store/useAuthStore'
 const ADMIN_PERMS = [
   'menu:dashboard', 'menu:spiders', 'menu:spiders.tasks', 'menu:spiders.logs',
   'menu:users', 'menu:data', 'menu:settings', 'menu:ai', 'menu:skills',
-  'menu:members', 'menu:usage', 'menu:platform-ops', 'menu:logs',
+  'menu:spiders.nodes', 'menu:members', 'menu:usage', 'menu:platform-ops', 'menu:logs',
   'menu:llm', 'menu:newapi',
 ]
 
@@ -94,6 +94,8 @@ test('空缓存/补拉失败：读叶保留，不得露出平台写叶（GWT-17.
   expect(text).not.toMatch(/中转站管控/)
   expect(text).not.toMatch(/平台运营台/)
   expect(text).not.toMatch(/用户管理/)
+  expect(text).not.toMatch(/角色权限/)
+  expect(text).not.toMatch(/上架治理/)
 })
 
 test('兜底分支同样过滤叶子层 tenantOnly（F-T10-1）', async () => {
@@ -129,6 +131,8 @@ test('租户公司管理员权限已加载：有仪表盘/数据工厂，无中�
   expect(text).not.toMatch(/中转站管控/)
   expect(text).not.toMatch(/平台运营台/)
   expect(text).not.toMatch(/用户管理/)
+  expect(text).not.toMatch(/角色权限/)
+  expect(text).not.toMatch(/上架治理/)
   expect(text).not.toMatch(/产品事实/)
   expect(text).not.toMatch(/分析入口/)
   expect(text).not.toMatch(/市场分析/)

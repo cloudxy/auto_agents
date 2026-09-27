@@ -53,11 +53,13 @@ def t17_plane(monkeypatch):
         "LITELLM.BASE_URL": settings.get("LITELLM.BASE_URL"),
         "LITELLM.MASTER_KEY": settings.get("LITELLM.MASTER_KEY"),
         "LLM.MAX_RETRIES": settings.get("LLM.MAX_RETRIES"),
+        "LLM.ENABLED": settings.get("LLM.ENABLED"),
     }
     settings.set("LLM.DATA_PLANE", "litellm")
     settings.set("LITELLM.BASE_URL", GATEWAY_URL)
     settings.set("LITELLM.MASTER_KEY", "sk-virt")
     settings.set("LLM.MAX_RETRIES", 1)
+    settings.set("LLM.ENABLED", True)
 
     async def _sleep(*_a, **_k):
         return None

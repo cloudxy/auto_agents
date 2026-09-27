@@ -43,12 +43,12 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'auth-storage',
       partialize: (state: AuthState) => {
-        if (!state.rememberMe && !state.token) return {} // If not remember me, we might want to clear on close, but zustand/persist is localStorage.
-        return { 
-          token: state.token, 
+        if (!state.rememberMe) return {}
+        return {
+          token: state.token,
           user: state.user,
           isAuthenticated: state.isAuthenticated,
-          rememberMe: state.rememberMe
+          rememberMe: state.rememberMe,
         }
       },
     }

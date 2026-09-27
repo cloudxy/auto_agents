@@ -1,5 +1,8 @@
 """用户模型"""
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, UniqueConstraint
+from sqlalchemy import (
+    Boolean, Column, Computed, DateTime, Integer, SmallInteger, String,
+    UniqueConstraint,
+)
 from sqlalchemy.sql import func
 from platform_core.models.base import Base
 from platform_core.models.mixins import SoftDeleteMixin, TenantMixin
@@ -16,15 +19,22 @@ class User(TenantMixin, SoftDeleteMixin, Base):
     语义消灭，(tenant_id, username) 唯一键真正生效）；Mixin 本身保持可空——
     llm_providers 平台公共行的 NULL 是读共享设计而非债务。平台超管挂 platform
     租户（slug='platform'），不再以 NULL 表达。
+
+    唯一键在册化（迁移 042 / T-24 FR-93）：两键均带尾列 alive_flag 生成列
+    （capability_assets L58 同款）——存活行 alive_flag=1 参与判重；已删行
+    NULL 脱离唯一（MySQL 唯一索引不对含 NULL 行判重）→ 软删行释放
+    username（同租户口径）/email（全局口径），恢复正确性由约束兜底。
     """
     __tablename__ = "users"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "username", name="uq_users_tenant_username"),
+        UniqueConstraint("tenant_id", "username", "alive_flag",
+                         name="uq_users_tenant_username_alive"),
+        UniqueConstraint("email", "alive_flag", name="uq_users_email_alive"),
     )
 
     id = Column(Integer, primary_key=True, comment="用户ID")
     username = Column(String(50), nullable=False, index=True, comment="用户名")
-    email = Column(String(100), unique=True, nullable=False, index=True, comment="邮箱")
+    email = Column(String(100), nullable=False, comment="邮箱")
     password_hash = Column(String(255), nullable=False, comment="密码哈希")
     is_active = Column(Boolean, default=True, comment="是否激活")
     is_admin = Column(Boolean, default=False, comment="是否管理员（存量标记，等价 admin 角色）")
@@ -37,8 +47,12 @@ class User(TenantMixin, SoftDeleteMixin, Base):
                                comment="平台超级管理员（跨租户，挂 platform 租户）")
     role = Column(String(20), nullable=False, default="operator", server_default="operator",
                   comment="角色：admin(全权)/operator(操作)/viewer(只读)")
+    last_login_at = Column(DateTime(timezone=True), nullable=True, comment="最近登录时间")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
+    alive_flag = Column(SmallInteger,
+                        Computed("CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END"),
+                        comment="存活标记（生成列，042）：唯一键组件，软删行 NULL 脱离唯一约束")
 
     def __repr__(self):
         return f"<User {self.username}>"

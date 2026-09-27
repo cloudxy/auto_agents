@@ -6,10 +6,12 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import (
-    CurrentUser, require_admin, require_login, require_platform_admin_or_404,
+    CurrentUser, require_admin, require_login,
+    require_platform_admin, require_platform_admin_or_404,
 )
 from platform_core.schemas.auth import AdminUserCreateRequest, AdminUserUpdateRequest
 from backend.app.responses import ok, created
@@ -19,12 +21,16 @@ from backend.services.config_service import ConfigService
 from backend.services.spider_service import SpiderService
 from backend.services.tenant_admin_service import TenantAdminService
 from backend.services.user_service import UserService
-from platform_core.db import get_async_db
+from platform_core.db import get_async_db, get_async_readonly_db
 
 router = APIRouter()
 
 
 def _service(session: AsyncSession = Depends(get_async_db)) -> SpiderService:
+    return SpiderService(session)
+
+
+def _stats_service(session: AsyncSession = Depends(get_async_readonly_db)) -> SpiderService:
     return SpiderService(session)
 
 
@@ -46,7 +52,7 @@ def _config_service(session: AsyncSession = Depends(get_async_db)) -> ConfigServ
 
 @router.get("/stats")
 async def get_stats(
-    service: SpiderService = Depends(_service),
+    service: SpiderService = Depends(_stats_service),
     _user: CurrentUser = Depends(require_login),
 ):
     """获取系统统计数据（含运行时长/成功率/近 7 日趋势/爬虫 Top5）"""
@@ -58,24 +64,27 @@ async def get_stats(
 async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    status: str = Query("active", pattern="^(active|deleted|disabled)$",
+                        description="active=默认（不含已删）；deleted=已删除；disabled=已停用"),
+    q: Optional[str] = Query(None, max_length=50, description="按登录名筛选"),
     service: UserService = Depends(_user_service),
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
 ):
-    """用户列表（用户管理页陈列，不含密码哈希）"""
-    data = await service.list_users(skip=skip, limit=limit)
+    """用户列表（用户管理页陈列，不含密码哈希；status=deleted 为已删筛选）"""
+    data = await service.list_users(skip=skip, limit=limit, status=status, q=q)
     return ok(data=data.model_dump())
 
 
 @router.post("/users", status_code=201)
 async def admin_create_user(
     payload: AdminUserCreateRequest,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: UserService = Depends(_user_service),
 ):
     """创建账户（平台超管；角色分配 role 单源，归属公司可选）"""
     created = await service.create_user(payload)
-    await record_audit(session, user, "user.create", f"user#{created.id}",
+    await record_audit(user, "user.create", f"user#{created.id}",
                        detail={"username": created.username, "role": created.role, "tenant_id": created.tenant_id})
     return ok(data=created.model_dump())
 
@@ -84,27 +93,44 @@ async def admin_create_user(
 async def admin_update_user(
     user_id: int,
     payload: AdminUserUpdateRequest,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: UserService = Depends(_user_service),
 ):
     """编辑账户：角色分配/启停/归属调整（防自锁：不可降级/停用/删除自己）"""
     updated = await service.update_user(user_id, payload, actor_id=int(user.id))
-    await record_audit(session, user, "user.update", f"user#{user_id}", detail=payload.model_dump(exclude_unset=True))
+    await record_audit(user, "user.update", f"user#{user_id}", detail=payload.model_dump(exclude_unset=True))
     return ok(data=updated.model_dump())
 
 
 @router.delete("/users/{user_id}")
 async def admin_delete_user(
     user_id: int,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: UserService = Depends(_user_service),
 ):
-    """软删除账户（防删自己；防删最后一个平台超管）"""
+    """软删除账户（防删自己；防删最后一个平台超管；种子 admin 不可删）"""
     await service.delete_user(user_id, actor_id=int(user.id))
-    await record_audit(session, user, "user.delete", f"user#{user_id}")
+    await record_audit(user, "user.delete", f"user#{user_id}")
     return ok(data={"id": user_id, "deleted": True})
+
+
+@router.post("/users/{user_id}/restore")
+async def admin_restore_user(
+    user_id: int,
+    user: CurrentUser = Depends(require_platform_admin_or_404),
+    session: AsyncSession = Depends(get_async_db),
+    service: UserService = Depends(_user_service),
+):
+    """恢复软删账户（T-24 / FR-93；仅平台超管，租户直打 404 同形 GWT-93.6）
+
+    占用冲突（username 同租户在册 / email 全局在册）→ 400 中文句；
+    重复恢复 no-op（GWT-93.9）；成功上报 user_restored（GWT-92.8）。
+    """
+    restored = await service.restore_user(user_id, actor_id=int(user.id))
+    await record_audit(user, "user.restore", f"user#{user_id}")
+    return ok(data=restored.model_dump())
 
 
 @router.get("/audit-logs")
@@ -152,7 +178,7 @@ async def create_tenant_minimal(
     """新建公司（最小语义：名称+可选 slug；配额/到期走平台运营台编辑；事务由 service 持有 ADR-0007）"""
     result = await service.create_tenant_minimal(
         str(body.get("name") or ""), slug=str(body.get("slug") or "") or None)
-    await record_audit(session, user, "tenant.create", f"tenant#{result['id']}",
+    await record_audit(user, "tenant.create", f"tenant#{result['id']}",
                        detail={"name": str(body.get("name") or "").strip(), "slug": result["slug"]})
     return created(data={"id": result["id"], "slug": result["slug"]})
 
@@ -165,10 +191,40 @@ async def patch_tenant(
     session: AsyncSession = Depends(get_async_db),
     service: TenantAdminService = Depends(_tenant_service),
 ):
-    """套餐/配额/到期编辑（平台超管；事务由 service 持有 ADR-0007）"""
+    """名称/套餐/配额/到期编辑（平台超管；改名冲突域与平台租户守卫在 service 单点 T-26/T-27）"""
     await service.patch_tenant(tenant_id, body)
-    await record_audit(session, user, "tenant.update", f"tenant#{tenant_id}", detail=body)
+    await record_audit(user, "tenant.update", f"tenant#{tenant_id}", detail=body)
     return ok(data={"id": tenant_id, "updated": True})
+
+
+class PowerMarketSwitchBody(BaseModel):
+    enabled: bool
+
+
+@router.get("/power-market")
+async def get_power_market_switch(
+    _user: CurrentUser = Depends(require_platform_admin),
+):
+    """市场总开关（超管可读；租户公司管理员拒绝且开关不变，GWT-U11.3）。"""
+    from backend.services.power_market.flag import is_power_market_enabled
+
+    return ok(data={"enabled": is_power_market_enabled()})
+
+
+@router.put("/power-market")
+async def put_power_market_switch(
+    body: PowerMarketSwitchBody,
+    user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """超管打开/关闭能力市场总开关。yaml 默认 false；本写覆盖运行时。"""
+    from backend.services.power_market.flag import set_power_market_enabled
+
+    enabled = set_power_market_enabled(body.enabled)
+    await record_audit(user, "power_market.switch", "POWER_MARKET.ENABLED",
+        detail={"enabled": enabled},
+    )
+    return ok(data={"enabled": enabled})
 
 
 # ---------------- 死信队列（B6 工单 91：排障刚需，admin 专属） ----------------
@@ -198,7 +254,7 @@ async def discard_dead_item(
         from platform_core.exceptions import NotFoundException
 
         raise NotFoundException(resource=f"死信 #{index}")
-    await record_audit(session, user, "dead_item.discard", f"dead_item#{index}")
+    await record_audit(user, "dead_item.discard", f"dead_item#{index}")
     return ok(data={"index": index, "removed": True})
 
 
@@ -211,7 +267,7 @@ async def clear_dead_items(
     from backend.services.dead_item_service import DeadItemService
 
     removed = await DeadItemService().clear()
-    await record_audit(session, user, "dead_item.clear", f"dead_items:{removed}")
+    await record_audit(user, "dead_item.clear", f"dead_items:{removed}")
     return ok(data={"removed": removed})
 
 
@@ -256,7 +312,7 @@ async def put_notify_config(
     if not updates:
         raise ValidationException(message="无可更新字段（webhook_url/dingtalk_url/wechat_work_url）")
     await service.upsert_configs(updates, description="通知渠道 URL（运营面配置）")
-    await record_audit(session, user, "notify_config.update", "notify_config",
+    await record_audit(user, "notify_config.update", "notify_config",
                        detail={k: (v[:40] + "…") if len(v) > 40 else v for k, v in updates.items()})
     return ok(data={"updated": sorted(updates.keys())})
 

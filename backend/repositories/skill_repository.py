@@ -1,5 +1,5 @@
 """技能域数据访问层 - Skill / SkillReview 查询封装"""
-from typing import Optional
+from typing import Optional, Sequence
 
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +32,7 @@ class SkillRepository(BaseRepository[Skill]):
         self,
         q: Optional[str] = None,
         category: Optional[str] = None,
-        status: Optional[str] = None,
+        status: Optional[str | Sequence[str]] = None,
         tier: Optional[str] = None,
         source_type: Optional[str] = None,
         industry: Optional[str] = None,
@@ -49,7 +49,10 @@ class SkillRepository(BaseRepository[Skill]):
         if category:
             stmt = stmt.where(Skill.category == category)
         if status:
-            stmt = stmt.where(Skill.status == status)
+            if isinstance(status, (list, tuple)):
+                stmt = stmt.where(Skill.status.in_(list(status)))
+            else:
+                stmt = stmt.where(Skill.status == status)
         if tier:
             stmt = stmt.where(Skill.tier == tier)
         if source_type:

@@ -18,8 +18,12 @@ export const fetchRecentCompletedTasks = (limit = 5): Promise<number[]> =>
 export const fetchQualityReport = <T,>(taskId: number): Promise<T> =>
   api.get(`/spiders/tasks/${taskId}/quality`).then((r) => unwrap<T>(r))
 
-/** GET /admin/users（平台超管用户分页） */
-export const fetchUsersPage = <T,>(params: { skip: number; limit: number }): Promise<{ items: T[]; total: number }> =>
+/** GET /admin/users（平台超管用户分页；status=deleted 为「已删除」筛选，T-24/FR-93） */
+export const fetchUsersPage = <T,>(params: {
+  skip: number
+  limit: number
+  status?: 'active' | 'deleted'
+}): Promise<{ items: T[]; total: number }> =>
   api.get('/admin/users', { params }).then((r) => unwrap<{ items: T[]; total: number }>(r))
 
 /** GET /admin/audit-logs（操作审计分页） */

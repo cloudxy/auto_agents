@@ -43,9 +43,43 @@ ITEM_QUEUE: Final[str] = "spider:item_queue"
 # 不再静默丢弃（P1-4）；人工排查后可重放或清理，无 TTL
 DEAD_ITEM_QUEUE: Final[str] = "spider:item_dead"
 
+# flush 失败整批回放（list）：消息已 lpop，失败后 LPUSH 于此，ingest 与主队列一并消费
+ITEM_REDO_QUEUE: Final[str] = "spider:item_queue:redo"
+
+# 租户配额超限旁路（list）：单租户超额不阻塞全平台回流
+ITEM_HOLD_PREFIX: Final[str] = "spider:item_hold:"
+
+
+def item_hold_queue(tenant_id: int) -> str:
+    return f"{ITEM_HOLD_PREFIX}{int(tenant_id)}"
+
 # 当前活跃任务关联键（SET，成员为 task_id），用于把结果关联回任务 + 并发槽位控制；
 # 阶段 4.1 由 string 升级为 SET：同爬虫可并发运行多个任务（上限见 SPIDER_MAX_CONCURRENT_PER_SPIDER）
 ACTIVE_TASK_KEY: Final[str] = "spider:active_tasks:{spider_name}"
+
+# 租户×爬虫并发槽（C1）：两租户互不挤占全局 2 槽
+TENANT_ACTIVE_KEY: Final[str] = "spider:active_tasks:{tenant_id}:{spider_name}"
+
+
+def tenant_active_key(tenant_id: int, spider_name: str) -> str:
+    return TENANT_ACTIVE_KEY.format(tenant_id=int(tenant_id), spider_name=spider_name)
+
+
+# B2：scrapy worker 维度活跃集，关闭回调只收本进程任务，避免多 worker 互杀
+WORKER_ACTIVE_KEY: Final[str] = "spider:active_tasks:{spider_name}:w:{worker_id}"
+
+
+def spider_worker_id() -> str:
+    import os
+
+    return (os.environ.get("SPIDER_WORKER_ID") or str(os.getpid())).strip() or "default"
+
+
+def worker_active_key(spider_name: str, worker_id: str | None = None) -> str:
+    return WORKER_ACTIVE_KEY.format(
+        spider_name=spider_name,
+        worker_id=worker_id or spider_worker_id(),
+    )
 
 # 阶段 4.1 之前的旧活跃键前缀（string 语义），消费者启动时一次性清理，防语义串扰
 LEGACY_ACTIVE_TASK_PREFIX: Final[str] = "spider:active_task:"
@@ -250,6 +284,15 @@ __all__ = [
     "task_queue",
     "ITEM_QUEUE",
     "ACTIVE_TASK_KEY",
+    "TENANT_ACTIVE_KEY",
+    "tenant_active_key",
+    "WORKER_ACTIVE_KEY",
+    "spider_worker_id",
+    "worker_active_key",
+    "ITEM_REDO_QUEUE",
+    "ITEM_HOLD_PREFIX",
+    "item_hold_queue",
+    "DEAD_ITEM_QUEUE",
     "ACTIVE_TASK_TTL",
     "TASK_LOG_OFFSET_KEY",
     "TASK_RESULTS_KEY",

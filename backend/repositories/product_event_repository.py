@@ -20,6 +20,7 @@ class ProductEventRepository(BaseRepository[ProductEvent]):
         tenant_id: Optional[int] = None,
         occurred_from: Optional[datetime] = None,
         occurred_to: Optional[datetime] = None,
+        is_internal_fixture: Optional[bool] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[int, list[ProductEvent]]:
@@ -37,6 +38,11 @@ class ProductEventRepository(BaseRepository[ProductEvent]):
         if occurred_to is not None:
             stmt = stmt.where(ProductEvent.occurred_at <= occurred_to)
             count_stmt = count_stmt.where(ProductEvent.occurred_at <= occurred_to)
+        if is_internal_fixture is not None:
+            stmt = stmt.where(ProductEvent.is_internal_fixture == is_internal_fixture)
+            count_stmt = count_stmt.where(
+                ProductEvent.is_internal_fixture == is_internal_fixture,
+            )
         total = int((await self.session.execute(count_stmt)).scalar_one() or 0)
         stmt = stmt.order_by(ProductEvent.occurred_at.desc()).offset(skip).limit(limit)
         rows = list((await self.session.execute(stmt)).scalars().all())

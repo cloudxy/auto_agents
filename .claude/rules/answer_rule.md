@@ -79,6 +79,10 @@ trigger: always_on
 | 架构合规检查 | `/check-arch` |
 | 编码规范 | `/coding-style` |
 | 日志规范 | `/logging` |
+| 配置规范 | `/config` |
 | 创建服务模块 | `/new-svc` |
 | 创建爬虫 | `/new-spider` |
 | 创建数据模型 | `/new-model` |
+| 数据库设计（S0→S5 / 迁移） | `/db-design` |
+| 部署 / CI | `/deploy` `/cicd` |
+| 穷尽式问题解决 | `/pua` |

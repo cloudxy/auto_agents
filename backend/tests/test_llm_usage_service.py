@@ -40,7 +40,7 @@ async def test_record_usage_increments_daily_and_monthly():
     assert fields["default|provider:9|gpt-4o-mini|requests"] == "2"
 
     monthly = redis.hashes[_monthly_key(today)]
-    assert monthly["provider:9|total"] == "22"                  # 预算读数口径
+    assert monthly["default|provider:9|total"] == "22"
 
 
 @pytest.mark.asyncio
@@ -114,6 +114,12 @@ def test_build_rows_groups_by_dim_and_model():
     assert rows[("provider:9", "gpt-b")]["total_tokens"] == 50
     assert rows[("provider:9", "gpt-d")]["total_tokens"] == 0  # 坏值容错
     assert len(rows) == 4  # bad-field / unknown 指标被跳过
+
+
+def test_cost_cents_rounds_up_per_1k():
+    assert LlmUsageFlushService._cost_cents(1, 10) == 1
+    assert LlmUsageFlushService._cost_cents(1000, 10) == 10
+    assert LlmUsageFlushService._cost_cents(100, None) == 0
 
 
 # ---------------- flush_once：认领-落库-删除链路 ----------------

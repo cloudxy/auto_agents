@@ -4,7 +4,8 @@
  * 自含列表状态：分页 / 状态筛选 / 加载 / 删除刷新；
  * 「继续」按钮经 props.onOpenPlan 上抛给页面（切回向导 tab）。
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Empty, Popconfirm, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { DeleteOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
@@ -22,34 +23,23 @@ interface PlanListProps {
 }
 
 export const PlanList: React.FC<PlanListProps> = ({ canDelete, onOpenPlan }) => {
-  const [plans, setPlans] = useState<AiPlan[]>([])
-  const [planTotal, setPlanTotal] = useState(0)
   const [planPage, setPlanPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
-  const [listLoading, setListLoading] = useState(false)
-
-  const loadPlans = useCallback(async (showSpin = true) => {
-    if (showSpin) setListLoading(true)
-    try {
-      const res = await fetchAiPlans({ skip: (planPage - 1) * 20, limit: 20, status: statusFilter })
-      setPlans(res.items || [])
-      setPlanTotal(res.total || 0)
-    } catch (error) {
-      message.error(apiErrorMessage(error, '获取 AI 方案列表失败'))
-    } finally {
-      if (showSpin) setListLoading(false)
-    }
-  }, [planPage, statusFilter])
-
-  useEffect(() => {
-    loadPlans()
-  }, [loadPlans])
+  const qc = useQueryClient()
+  const listQ = useQuery({
+    queryKey: ['ai-plans', planPage, statusFilter],
+    queryFn: () => fetchAiPlans({ skip: (planPage - 1) * 20, limit: 20, status: statusFilter }),
+  })
+  const plans = listQ.data?.items ?? []
+  const planTotal = listQ.data?.total ?? 0
+  const listLoading = listQ.isLoading
+  const loadPlans = () => { void qc.invalidateQueries({ queryKey: ['ai-plans'] }) }
 
   const onDeletePlan = async (p: AiPlan) => {
     try {
       await deleteAiPlan(p.id)
       message.success(`计划 #${p.id} 已删除`)
-      loadPlans(false)
+      loadPlans()
     } catch (error) {
       message.error(apiErrorMessage(error, '删除失败'))
     }

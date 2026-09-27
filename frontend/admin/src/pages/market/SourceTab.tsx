@@ -4,7 +4,7 @@ import { Alert, Button, Empty, Form, Input, Modal, Select, Space, Table, Typogra
 import { listSources, registerSource, syncSource, type SourceRow } from '../../services/capabilities'
 import { usePermission } from '../../hooks/usePermission'
 import { apiErrorMessage } from '../../utils/errorMessage'
-import { REGISTER_SOURCE, SOURCE_EMPTY, loadFail } from './marketCopy'
+import { GOVERNANCE_PAGINATION, REGISTER_SOURCE, SOURCE_EMPTY, loadFail } from './marketCopy'
 
 const { Text } = Typography
 
@@ -85,7 +85,8 @@ const SourceTab: React.FC = () => {
         <Button onClick={load}>刷新</Button>
       </Space>
       {empty ? <Empty description={SOURCE_EMPTY} /> : (
-        <Table rowKey="id" size="middle" loading={loading} dataSource={rows} pagination={false}
+        <Table rowKey="id" size="middle" loading={loading} dataSource={rows}
+               pagination={GOVERNANCE_PAGINATION}
                columns={[
                  { title: '名称', dataIndex: 'name', render: (v: string) => <Text code>{v}</Text> },
                  { title: '类型', dataIndex: 'source_kind' },

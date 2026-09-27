@@ -47,7 +47,7 @@ def test_import_url_admin_ok(db_client, admin_client, monkeypatch):
     assert call.args[0] == "https://github.com/o/r/tree/main/skills/imported-skill"
     assert call.kwargs.get("category") == "dev-tools"
     audit_mock.assert_awaited_once()
-    assert audit_mock.await_args.args[2] == "skill.import"
+    assert audit_mock.await_args.args[1] == "skill.import"  # K3：签名去掉 session
 
 
 @pytest.mark.parametrize("url", ["", "ftp://files.example.com/x", "not-a-url"])

@@ -33,6 +33,7 @@ class LlmTokenUsage(TenantMixin, Base):
     total_tokens = Column(BigInteger, nullable=False, default=0, server_default="0", comment="总 token 累计")
     request_count = Column(Integer, nullable=False, default=0, server_default="0", comment="成功请求数")
     failed_count = Column(Integer, nullable=False, default=0, server_default="0", comment="失败请求数")
+    cost_cents = Column(BigInteger, nullable=False, default=0, server_default="0", comment="本行金额（分）")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
 

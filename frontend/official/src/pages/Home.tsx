@@ -25,6 +25,8 @@ import { trackCta } from '../services/beacon'
 const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
 
 const SITE_NAME = 'AutoAgents'
+/** FR-U04 / GWT-U04.1：首屏第一句锁采集。支付/中转不得顶替。 */
+export const HERO_FIRST_SENTENCE = '粘贴链接即可出数。'
 const TOUCH_TARGET_STYLE: React.CSSProperties = {
   minHeight: 'var(--size-touch, 44px)',
   minWidth: 'var(--size-touch, 44px)',
@@ -39,19 +41,24 @@ const warnOfflineRegister = (event: React.MouseEvent) => {
 
 /** Hero：产品定位 + 双 CTA + 能力概览（深空指挥中心视觉） */
 const Hero: React.FC = () => (
-  <section className="hero-section" style={{ padding: '132px 24px 110px' }}>
+  <section
+    className="hero-section"
+    data-testid="hero-section"
+    aria-labelledby="hero-title"
+    style={{ padding: '132px 24px 110px' }}
+  >
     {/* 背景装饰：数据网格 + 浮动光晕 */}
     <div className="hero-grid" />
     <div className="hero-glow hero-glow--cyan" />
     <div className="hero-glow hero-glow--blue" />
 
     {/* 漂浮能力芯片（桌面端） */}
-    <div className="hero-chip hero-chip--left">
-      <ClusterOutlined style={{ color: '#13c2c2', fontSize: 18 }} />
+    <div className="hero-chip hero-chip--left" aria-hidden="true">
+      <ClusterOutlined style={{ color: 'var(--site-accent, #13c2c2)', fontSize: 18 }} />
       分布式 Worker 协同
     </div>
-    <div className="hero-chip hero-chip--right">
-      <DatabaseOutlined style={{ color: '#40a9ff', fontSize: 18 }} />
+    <div className="hero-chip hero-chip--right" aria-hidden="true">
+      <DatabaseOutlined style={{ color: 'var(--site-primary, #1677ff)', fontSize: 18 }} />
       结构化数据落库
     </div>
 
@@ -62,16 +69,17 @@ const Hero: React.FC = () => (
         transition={{ duration: 0.6, ease: EASE_OUT_EXPO }}
       >
         <span
+          aria-hidden="true"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: 8,
             fontSize: 13,
             letterSpacing: '0.2em',
-            color: '#7ee7e2',
+            color: 'var(--site-accent, #13c2c2)',
             background: 'rgba(19,194,194,0.1)',
             border: '1px solid rgba(19,194,194,0.3)',
-            borderRadius: 999,
+            borderRadius: 'var(--radius-pill, 999px)',
             padding: '7px 18px',
           }}
         >
@@ -80,6 +88,8 @@ const Hero: React.FC = () => (
       </motion.div>
 
       <motion.h1
+        id="hero-title"
+        data-testid="hero-first-sentence"
         initial={{ opacity: 0, y: 26 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.7, delay: 0.1, ease: EASE_OUT_EXPO }}
@@ -91,18 +101,9 @@ const Hero: React.FC = () => (
           margin: '28px 0 0',
         }}
       >
-        智能数据采集
+        {HERO_FIRST_SENTENCE}
         <br />
-        <span
-          style={{
-            background: 'linear-gradient(92deg, #69c0ff 0%, #7ee7e2 55%, #95de64 100%)',
-            WebkitBackgroundClip: 'text',
-            backgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-          }}
-        >
-          交给 AI 来完成
-        </span>
+        <span className="hero-title-accent">智能数据采集</span>
       </motion.h1>
 
       <motion.p
@@ -134,13 +135,13 @@ const Hero: React.FC = () => (
           icon={<RocketOutlined />}
           href="/register"
           onClick={warnOfflineRegister}
-          className="site-touch-target"
+          className="site-touch-target hero-cta-primary"
           style={{
             ...TOUCH_TARGET_STYLE,
             height: 54,
             padding: '0 40px',
             fontSize: 16,
-            background: 'linear-gradient(92deg, var(--site-primary, #1677ff), #13c2c2)',
+            background: 'linear-gradient(92deg, var(--site-primary, #1677ff), var(--site-accent, #13c2c2))',
             border: 'none',
             boxShadow: '0 8px 24px rgba(24, 144, 255, 0.4)',
           }}

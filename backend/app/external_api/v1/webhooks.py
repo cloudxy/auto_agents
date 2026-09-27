@@ -114,9 +114,10 @@ def validate_api_key(api_key: str) -> bool:
 
 
 def bound_tenant_id(api_key: str) -> int | None:
-    """出站拉数：钥匙绑到恰好一个 tenant_id 才放行。
+    """出站拉数查找链第二环（T-05）：钥匙绑到恰好一个 tenant_id 才放行。
 
-    只认 EXTERNAL_API.KEY_BINDINGS。旧字符串列表 / 旧单 key 无企业维，
+    只认 EXTERNAL_API.KEY_BINDINGS（第一环=出站钥匙表，由 public.py 编排，
+    Service.resolve_active_tenant 执法）。旧字符串列表 / 旧单 key 无企业维，
     视为未绑定（GWT-13.4）；同一钥匙映到两个租户亦未绑定。
     """
     if not api_key or not str(api_key).strip():

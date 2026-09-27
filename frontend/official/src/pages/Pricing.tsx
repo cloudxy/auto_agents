@@ -1,28 +1,29 @@
 /**
- * 定价页：闭集 A 免费档可买；闭集 B 与付费档标预告，主按钮不到 /register。
+ * 定价页（T-21）：免费档仍注册；专业/企业主按钮「去结账」。
+ * 无会话分支（GWT-01.3）：访客与登录态同一 CTA 字；角色闸在结账。禁 FR-U24 四字。
  */
-import React, { useState } from 'react'
-import { FREE_TIER_FEATURE_COPY } from '@auto-agents/frontend-shared'
-import { Button, Card, Col, Modal, Row, Tag, Typography, message } from 'antd'
+import React from 'react'
+import { FREE_TIER_FEATURE_COPY, PRO_TIER_FEATURE_COPY } from '@auto-agents/frontend-shared'
+import { Button, Card, Col, Row, Typography, message } from 'antd'
 import { trackCta } from '../services/beacon'
 
 const { Title, Text } = Typography
 
-const CONTACT_MAIL = process.env.REACT_APP_CONTACT_MAIL || 'contact@localhost'
+const ADMIN_URL = (process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112').replace(/\/$/, '')
 const TOUCH_TARGET_STYLE: React.CSSProperties = {
   minHeight: 'var(--size-touch, 44px)',
   minWidth: 'var(--size-touch, 44px)',
 }
 
-type FeatureItem = { text: string; preview?: boolean }
+const checkoutHref = (product: 'plan_pro' | 'plan_enterprise'): string =>
+  `${ADMIN_URL}/billing/checkout?product=${product}`
 
 type Plan = {
   name: string
   price: string
   highlight: boolean
-  comingSoon: boolean
-  features: FeatureItem[]
-  cta: { label: string; href?: string }
+  features: string[]
+  cta: { label: string; href: string; beacon: 'register_free' | 'pricing_pro' | 'pricing_enterprise' }
 }
 
 const PLANS: Plan[] = [
@@ -30,54 +31,52 @@ const PLANS: Plan[] = [
     name: '免费档',
     price: '¥0',
     highlight: false,
-    comingSoon: false,
     features: [
-      { text: FREE_TIER_FEATURE_COPY.task_concurrency },
-      { text: FREE_TIER_FEATURE_COPY.result_storage },
-      { text: FREE_TIER_FEATURE_COPY.llm_tokens_month },
-      { text: '成员管理' },
-      { text: '用量看板' },
+      FREE_TIER_FEATURE_COPY.task_concurrency,
+      FREE_TIER_FEATURE_COPY.result_storage,
+      FREE_TIER_FEATURE_COPY.llm_tokens_month,
+      '成员管理',
+      '用量看板',
     ],
-    cta: { label: '免费注册', href: '/register' },
+    cta: { label: '免费注册', href: '/register', beacon: 'register_free' },
   },
   {
     name: '专业档',
     price: '¥299/月',
     highlight: true,
-    comingSoon: true,
     features: [
-      { text: '50 个并发任务', preview: true },
-      { text: '200,000 条结果存储', preview: true },
-      { text: '500 万 LLM tokens/月', preview: true },
-      { text: '工单支持', preview: true },
+      PRO_TIER_FEATURE_COPY.task_concurrency,
+      PRO_TIER_FEATURE_COPY.result_storage,
+      PRO_TIER_FEATURE_COPY.llm_tokens_month,
+      '工单支持',
     ],
-    cta: { label: '预告不可购买' },
+    cta: { label: '去结账', href: checkoutHref('plan_pro'), beacon: 'pricing_pro' },
   },
   {
     name: '企业档',
     price: '定制',
     highlight: false,
-    comingSoon: true,
     features: [
-      { text: '不限并发（协商）', preview: true },
-      { text: '专属存储配额', preview: true },
-      { text: '专属 LLM 额度', preview: true },
-      { text: '私有技能库', preview: true },
-      { text: '中转站渠道组分配', preview: true },
-      { text: '专属客户成功', preview: true },
+      '不限并发（协商）',
+      '专属存储配额',
+      '专属 LLM 额度',
+      '私有技能库',
+      '中转站渠道组分配',
+      '专属客户成功',
     ],
-    cta: { label: '预告不可购买' },
+    cta: { label: '去结账', href: checkoutHref('plan_enterprise'), beacon: 'pricing_enterprise' },
   },
 ]
 
 const Pricing: React.FC = () => {
-  const [previewPlan, setPreviewPlan] = useState<string | null>(null)
-  const [mailHint, setMailHint] = useState(false)
-
-  const warnOfflineRegister = (event: React.MouseEvent) => {
+  const warnOffline = (event: React.MouseEvent, kind: 'register' | 'checkout') => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       event.preventDefault()
-      message.warning('网络不可用。连接恢复后再创建企业。')
+      message.warning(
+        kind === 'register'
+          ? '网络不可用。连接恢复后再创建企业。'
+          : '网络不可用。连接恢复后再去结账。',
+      )
     }
   }
 
@@ -86,94 +85,36 @@ const Pricing: React.FC = () => {
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '48px 24px 64px' }}>
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <Title level={2} style={{ marginBottom: 8 }}>选择适合你的套餐</Title>
-          <Text type="secondary">免费档现在可开通。专业档与企业档尚未开通购买。</Text>
+          <Text type="secondary">三档价格如下。</Text>
         </div>
         <Row gutter={24}>
           {PLANS.map((plan) => (
             <Col xs={24} md={8} key={plan.name}>
               <Card hoverable style={{ textAlign: 'center', height: '100%' }}>
-                {plan.comingSoon && <Tag style={{ marginBottom: 8 }}>预告</Tag>}
                 <Title level={4}>{plan.name}</Title>
-                <Title level={2} style={{ margin: '8px 0 20px' }}>
-                  {plan.price}
-                  {plan.comingSoon && (
-                    <span style={{ display: 'block', fontSize: 14, fontWeight: 400, marginTop: 8 }}>
-                      尚未开通购买
-                    </span>
-                  )}
-                </Title>
-                {plan.features.map((f) => (
-                  <p key={f.text} style={{ textAlign: 'left', padding: '4px 0' }}>
-                    ✓ {f.text}
-                    {f.preview && (
-                      <>
-                        {' '}
-                        <Tag>预告</Tag>
-                      </>
-                    )}
-                  </p>
+                <Title level={2} style={{ margin: '8px 0 20px' }}>{plan.price}</Title>
+                {plan.features.map((text) => (
+                  <p key={text} style={{ textAlign: 'left', padding: '4px 0' }}>✓ {text}</p>
                 ))}
-                {plan.cta.href ? (
-                  <Button
-                    type="primary"
-                    block
-                    href={plan.cta.href}
-                    data-cta="register_free"
-                    onClick={(event) => {
-                      trackCta('register_free')
-                      warnOfflineRegister(event)
-                    }}
-                    className="site-touch-target"
-                    style={{ marginTop: 16, ...TOUCH_TARGET_STYLE }}
-                  >
-                    {plan.cta.label}
-                  </Button>
-                ) : (
-                  <Button
-                    block
-                    className="site-touch-target"
-                    style={{ marginTop: 16, ...TOUCH_TARGET_STYLE }}
-                    data-cta={plan.name === '专业档' ? 'pricing_pro' : 'pricing_enterprise'}
-                    onClick={() => {
-                      trackCta(plan.name === '专业档' ? 'pricing_pro' : 'pricing_enterprise')
-                      setMailHint(false)
-                      setPreviewPlan(plan.name)
-                    }}
-                  >
-                    {plan.cta.label}
-                  </Button>
-                )}
+                <Button
+                  type="primary"
+                  block
+                  href={plan.cta.href}
+                  data-cta={plan.cta.beacon}
+                  onClick={(event) => {
+                    trackCta(plan.cta.beacon)
+                    warnOffline(event, plan.cta.beacon === 'register_free' ? 'register' : 'checkout')
+                  }}
+                  className="site-touch-target"
+                  style={{ marginTop: 16, ...TOUCH_TARGET_STYLE }}
+                >
+                  {plan.cta.label}
+                </Button>
               </Card>
             </Col>
           ))}
         </Row>
       </div>
-
-      <Modal
-        title="预告不可购买"
-        open={previewPlan != null}
-        onCancel={() => setPreviewPlan(null)}
-        destroyOnHidden
-        footer={[
-          <Button
-            key="mail"
-            href={`mailto:${CONTACT_MAIL}`}
-            onClick={() => setMailHint(true)}
-          >
-            联系平台
-          </Button>,
-          <Button key="ok" type="primary" onClick={() => setPreviewPlan(null)}>
-            知道了
-          </Button>,
-        ]}
-      >
-        <p>该档尚未开通购买。</p>
-        <p>
-          {mailHint
-            ? `邮件客户端没有打开。复制 ${CONTACT_MAIL} 联系平台。`
-            : `联系平台：${CONTACT_MAIL}`}
-        </p>
-      </Modal>
     </div>
   )
 }

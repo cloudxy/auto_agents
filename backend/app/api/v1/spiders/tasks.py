@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
 from backend.app.api.deps import CurrentUser, require_admin, require_login, require_operator, task_actor_tenant_id
-from backend.app.api.v1.spiders.deps import _query_service, _task_service
+from backend.app.api.v1.spiders.deps import _query_service, _task_service, require_enqueue_operator
 from backend.app.responses import (
     ApiResponse,
     PaginatedResponse,
@@ -20,6 +20,7 @@ from backend.app.responses import (
     paginated_from_offset,
     updated,
 )
+from backend.services.spider_common import ENQUEUE_ACCEPTED_COPY
 from backend.services.spider_query_service import SpiderQueryService
 from backend.services.spider_task_service import SpiderTaskService
 from platform_core.db import get_async_db
@@ -58,16 +59,19 @@ async def run_spider(
     payload: RunSpiderRequest,
     service: SpiderTaskService = Depends(_task_service),
     session: AsyncSession = Depends(get_async_db),
-    user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_enqueue_operator),
 ) -> ApiResponse[SpiderTaskResponse]:
-    """入队一次爬虫任务（params 为 JSON 字符串，如 '{"urls": ["https://..."]}'；可指定优先级）"""
+    """入队一次爬虫任务（params 为 JSON 字符串，如 '{"urls": ["https://..."]}'；可指定优先级）
+
+    守卫走 require_enqueue_operator（GWT-87.3）：只读直调拒绝句为同族中文。"""
     task = await service.enqueue(
         spider_name=payload.spider_name, params=payload.params,
-        priority=payload.priority, tenant_id=task_actor_tenant_id(user),
+        priority=payload.priority,
+        tenant_id=await task_actor_tenant_id(user, session),
     )
-    await record_audit(session, user, "task.run", f"task#{task.id}",
+    await record_audit(user, "task.run", f"task#{task.id}",
                  {"spider": payload.spider_name, "priority": payload.priority})
-    return created(task)
+    return created(task, message=ENQUEUE_ACCEPTED_COPY)
 
 
 @router.get("/tasks/{task_id}/store", response_model=ApiResponse[TaskStoreStatusResponse])
@@ -92,7 +96,7 @@ async def update_task(
     task = await service.update_task(
         task_id, params=payload.params, priority=payload.priority
     )
-    await record_audit(session, user, "task.update", f"task#{task_id}",
+    await record_audit(user, "task.update", f"task#{task_id}",
                  payload.model_dump(exclude_unset=True))
     return updated(task)
 
@@ -106,7 +110,7 @@ async def delete_task(
 ) -> ApiResponse[dict]:
     """删除任务及其采集结果（running 状态拒绝删除；仅管理员）"""
     result = await service.delete_task(task_id)
-    await record_audit(session, user, "task.delete", f"task#{task_id}")
+    await record_audit(user, "task.delete", f"task#{task_id}")
     return deleted(data=result)
 
 
@@ -120,7 +124,7 @@ async def control_task(
 ) -> ApiResponse[dict]:
     """控制运行中的任务：暂停/恢复/终止（A4；body 必填，缺失时 422）"""
     result = await service.control_task(task_id, payload.action)
-    await record_audit(session, user, "task.control", f"task#{task_id}", {"action": payload.action})
+    await record_audit(user, "task.control", f"task#{task_id}", {"action": payload.action})
     return ok(result)
 
 

@@ -6,8 +6,6 @@
   backend/services/audit_service.record_audit_standalone（Service 层），
   API 层不碰任何 session 生命周期
 """
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from backend.app.api.deps import CurrentUser
 from backend.services.audit_service import record_audit_standalone
 from platform_core.logger import get_logger
@@ -39,7 +37,6 @@ def omit_local_abs_paths_for_non_platform_admin(
 
 
 async def record_audit(
-    session: AsyncSession,
     user: CurrentUser,
     action: str,
     target: str,
@@ -48,8 +45,8 @@ async def record_audit(
     """写一条审计日志（独立短事务，P1-11 口径不变）
 
     审计与业务不同事务：审计失败只记日志，绝不影响业务事务与响应码；
-    业务回滚不连带丢审计。session 形参保留以兼容既有调用方签名与测试
-    patch 面，实际不使用（后续机械工单可移除）。
+    业务回滚不连带丢审计。K3：session 形参此前保留兼容旧签名但从未使用，
+    88 个调用点一次性机械改写去掉，不留"废弃但没有强制力"的技术债。
     """
     await record_audit_standalone(
         user.id, user.username, action, target, detail

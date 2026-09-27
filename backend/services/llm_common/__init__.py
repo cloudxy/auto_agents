@@ -20,6 +20,7 @@
 from backend.services.llm_common.seam import bind, seam
 from backend.services.llm_common.runtime import (
     LlmRuntimeConfig,
+    apply_proxy_route,
     resolve_config_from_settings,
     resolve_own_tenant_config,
     resolve_runtime_config,
@@ -27,6 +28,7 @@ from backend.services.llm_common.runtime import (
 
 __all__ = [
     "LlmRuntimeConfig",
+    "apply_proxy_route",
     "bind",
     "resolve_config_from_settings",
     "resolve_own_tenant_config",

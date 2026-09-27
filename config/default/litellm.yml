@@ -1,14 +1,24 @@
-# 平台 LLM 网关（LiteLLM Proxy）HTTP 连接。backend 只持虚拟 Key，禁止直连网关库。
+# 平台 LLM 网关（LiteLLM Proxy）HTTP 连接 + L1 影子开关。
+# backend 只持虚拟 Key，禁止直连网关库。根 compose 不焊 litellm 服务。
 #
-# 嵌套读取：
-#   settings.get("LITELLM.BASE_URL")
-# 环境变量覆盖（Dynaconf 双下划线嵌套，前缀 AUTO_AGENTS_）：
-#   AUTO_AGENTS_LITELLM__BASE_URL=http://127.0.0.1:4000
-#   AUTO_AGENTS_LITELLM__TIMEOUT=60
-#   AUTO_AGENTS_LITELLM__MASTER_KEY=   # 敏感，只走 config/<env>/.env
+# 嵌套读取：settings.get("LITELLM.BASE_URL") / LITELLM.ENABLED
+# 环境变量：AUTO_AGENTS_LITELLM__BASE_URL / AUTO_AGENTS_LITELLM__MASTER_KEY
 #
-# MASTER_KEY 为网关虚拟 Key（或操作者签发的等价 Key），不落本 yml。
-# 上游供应商 Key 只活在 LiteLLM 密钥面。compose 见 deploy/litellm/。
+# MASTER_KEY 不落本 yml。上游 Key 只活在 LiteLLM 密钥面。compose 见 deploy/litellm/。
 LITELLM:
+  ENABLED: false                      # 影子/网关总开关（默认关）
   BASE_URL: "http://127.0.0.1:4000"  # 同机 Proxy；容器加入 litellm-net 后用 http://litellm:4000
   TIMEOUT: 60                        # 单次 HTTP 超时（秒）
+  EXPORT:
+    DEFAULT_OUT: "deploy/litellm/config.gen.yaml"  # 生成路径（含明文 key，gitignore）
+  PROXY:
+    ROUTE_INTERNAL: false             # 内部 LLM 调用切到 sidecar（默认关）
+    PORT: 4000
+    HEALTH_PATH: "/health/liveliness"
+  SHADOW:
+    ENABLED: false                    # 只读对比器，不发起真实 LLM 调用
+  ADMIN:
+    ENABLED: false
+    BASE_URL: "http://127.0.0.1:4000"
+    MASTER_KEY: ""                    # AUTO_AGENTS_LITELLM__ADMIN__MASTER_KEY
+    TIMEOUT_SECONDS: 15

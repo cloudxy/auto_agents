@@ -5,7 +5,8 @@
  * + 详情 Drawer（SKILL.md 只读 + meta 原文 + 评分历史）
  * + 人工矫正 Modal（走 PUT /skills/{name}/meta，操作人=当前登录用户）。
  */
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { TIER_COLORS } from '@auto-agents/frontend-shared'
 import {
   Alert, Button, Drawer, Form, Input, InputNumber, message, Modal, Select,
@@ -39,30 +40,21 @@ const Skills: React.FC<{ onSubscribe?: (name: string) => void }> = ({ onSubscrib
   const { hasPermission, isPlatformAdmin } = usePermission()
   const canEdit = hasPermission('btn:skill:edit')
   const canMarketWrite = isPlatformAdmin
-  const [items, setItems] = useState<SkillItem[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(false)
   const [filters, setFilters] = useState<{ q?: string; category?: string; status?: string; tier?: string; sort: string }>({ sort: 'updated_at' })
   const [page, setPage] = useState(1)
   const [detail, setDetail] = useState<SkillDetail | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [correctTarget, setCorrectTarget] = useState<SkillItem | null>(null)
   const [form] = Form.useForm()
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await listSkills({ ...filters, page, page_size: 20 })
-      setItems(data.items)
-      setTotal(data.total)
-    } catch (e) {
-      message.error(apiErrorMessage(e, '技能列表加载失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [filters, page])
-
-  useEffect(() => { load() }, [load])
+  const qc = useQueryClient()
+  const listQ = useQuery({
+    queryKey: ['skills', filters, page],
+    queryFn: () => listSkills({ ...filters, page, page_size: 20 }),
+  })
+  const items = listQ.data?.items ?? []
+  const total = listQ.data?.total ?? 0
+  const loading = listQ.isLoading
+  const load = () => { qc.invalidateQueries({ queryKey: ['skills'] }) }
 
   const openDetail = async (name: string) => {
     try {
@@ -143,8 +135,12 @@ const Skills: React.FC<{ onSubscribe?: (name: string) => void }> = ({ onSubscrib
             children: (
               <>
       {!canEdit && (
-        <Alert type="info" showIcon style={{ marginBottom: 12 }} message="当前角色只读（矫正需 operator 及以上）" />
+        <Alert type="info" showIcon style={{ marginBottom: 12 }} title="当前角色只读（矫正需 operator 及以上）" />
       )}
+      {listQ.isError ? (
+        <Alert type="error" showIcon style={{ marginBottom: 12 }}
+               title={apiErrorMessage(listQ.error, '技能列表加载失败')} />
+      ) : null}
       <Space style={{ marginBottom: 12 }} wrap>
         <Input.Search
           placeholder="搜索 name/标题/描述"
@@ -181,7 +177,7 @@ const Skills: React.FC<{ onSubscribe?: (name: string) => void }> = ({ onSubscrib
       />
 
       <Drawer
-        title={detail ? `${detail.title || detail.name}` : ''} width={640} open={detailOpen}
+        title={detail ? `${detail.title || detail.name}` : ''} size={640} open={detailOpen}
         onClose={() => setDetailOpen(false)}
       >
         {detail && (
@@ -192,7 +188,7 @@ const Skills: React.FC<{ onSubscribe?: (name: string) => void }> = ({ onSubscrib
               {detail.source_url && <> · <a href={detail.source_url} target="_blank" rel="noreferrer">来源地址</a></>}
             </Paragraph>
             <Typography.Title level={5}>SKILL.md</Typography.Title>
-            <pre style={{ maxHeight: 260, overflow: 'auto', background: '#fafafa', padding: 12, fontSize: 12 }}>{detail.skill_md || '（无内容）'}</pre>
+            <pre data-testid="skill-md" style={{ maxHeight: 260, overflow: 'auto', background: '#fafafa', padding: 12, fontSize: 12 }}>{detail.skill_md || '（无内容）'}</pre>
             <Typography.Title level={5}>评分历史</Typography.Title>
             {detail.reviews.length === 0 && <Text type="secondary">暂无评审记录</Text>}
             {detail.reviews.map((rv) => (
@@ -210,7 +206,7 @@ const Skills: React.FC<{ onSubscribe?: (name: string) => void }> = ({ onSubscrib
 
       <Modal
         title={`人工矫正：${correctTarget?.name ?? ''}`} open={!!correctTarget}
-        onOk={submitCorrection} onCancel={() => setCorrectTarget(null)} destroyOnClose
+        onOk={submitCorrection} onCancel={() => setCorrectTarget(null)} destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item name="category" label="分类" initialValue={correctTarget?.category}>

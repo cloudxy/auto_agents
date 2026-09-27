@@ -26,6 +26,15 @@ export const HOST_OPTIONS = [
   { value: 'claude', label: 'Claude' },
 ] as const
 
+/** T-10 / 屏 3：关闭句 vs 空货架句。两句不得混用。禁定价可买四字。 */
+export const MARKET_CLOSED = '能力市场未开放'
+export const MARKET_CLOSED_HINT = '开放后，已上架的能力会出现在这里。'
+export const EMPTY_SHELF = '暂无已上架能力'
+export const EMPTY_SHELF_HINT = '已上架且过许可的能力会出现在这里。'
+export const FILTER_EMPTY = '没有符合条件的能力'
+export const LOAD_FAIL = '市场列表加载失败'
+export const LOAD_FAIL_HINT = '检查网络后重试'
+
 export type ResolvedType = { key: string; illegal: boolean }
 
 export const resolveType = (raw: string | null, pathIsSkills: boolean): ResolvedType => {
