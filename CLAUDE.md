@@ -99,7 +99,7 @@ uv run python run.py start frontend        # admin:9112 / official:9113
 | `/new-spider` | 创建 Scrapy 爬虫 |
 | `/new-model` | 创建 ORM + Pydantic 数据模型 |
 | `/db-design` | 数据库设计流水线（DBML → 迁移） |
-| `/check-arch` | 架构合规检查（R1–R13 + B1–B3） |
+| `/check-arch` | 架构合规检查（R1–R13 + B1–B4） |
 | `/verify` | 交付自检 |
 | `/deploy` `/cicd` | Docker / GitHub Actions |
 
