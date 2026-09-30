@@ -129,7 +129,7 @@ const ModelSetDrawer: React.FC<Props> = ({ provider, onClose, onSaved }) => {
 
   return (
     <Drawer
-      title={`管理模型：${provider?.name ?? ''}`} width={720} open={!!provider}
+      title={`管理模型：${provider?.name ?? ''}`} size={720} open={!!provider}
       onClose={onClose}
       extra={<Space>
         <Button icon={<CloudDownloadOutlined />} loading={diffLoading} onClick={onFetchDiff}>重新拉取 diff</Button>
@@ -138,7 +138,7 @@ const ModelSetDrawer: React.FC<Props> = ({ provider, onClose, onSaved }) => {
     >
       {diff && (
         <Alert type="info" showIcon style={{ marginBottom: 12 }}
-               message={
+               title={
                  <Space wrap>
                    <span>新增 {diff.new.length} / 已有 {diff.existing.length} / 远端已消失 {diff.vanished.length}</span>
                    {diff.new.length > 0 && <Button size="small" onClick={importNewModels}>导入新增（自动测试）</Button>}

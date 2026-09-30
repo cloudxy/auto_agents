@@ -1,0 +1,5 @@
+REPRO run 200
+REPRO flush#1 (1 item)            -> ok
+REPRO flush#2 (same item again)   -> IntegrityError: (raised as a result of Query-invoked autoflush; consider using a session.no_autoflush block if this flush is occurring p
+REPRO flush#3 (2 identical in batch, new task path) -> IntegrityError: (raised as a result of Query-invoked autoflush; consider using a session.no_autoflush block if this flush is occurring p
+1 passed in 4.53s

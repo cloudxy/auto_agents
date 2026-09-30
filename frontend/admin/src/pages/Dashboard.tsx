@@ -23,6 +23,7 @@ import { useAuthStore } from '../store/useAuthStore'
 import { fetchAdminStats, fetchQualityReport, fetchRecentCompletedTasks } from '../services/admin'
 import { LoadFailure } from '../components/LoadState'
 import { BRAND_TOKENS } from '@auto-agents/frontend-shared'
+import { buildTrendData } from './dashboardTrend'
 
 const { Title } = Typography
 
@@ -49,6 +50,9 @@ interface Stats {
   daily_tasks: DailyPoint[]
   daily_results: DailyPoint[]
   top_spiders: { spider_name: string; result_count: number }[]
+  /** 近 N 日窗口起点（UTC，带偏移）与天数；按北京时间切日 */
+  window_start?: string | null
+  window_days?: number
 }
 
 interface QualityReport {
@@ -85,18 +89,8 @@ const Dashboard: React.FC = () => {
   const qualityData = qualityQuery.data ?? null
   const loading = statsQuery.isPending
 
-  // 近 7 日趋势：把任务数/结果数按日期合并成一行（双折线共用 X 轴）
-  const trendData = (() => {
-    if (!stats) return []
-    const map: Record<string, { date: string; tasks: number; results: number }> = {}
-    for (const p of stats.daily_tasks || []) map[p.date] = { date: p.date.slice(5), tasks: p.count, results: 0 }
-    for (const p of stats.daily_results || []) {
-      const key = p.date.slice(5)
-      if (map[p.date]) map[p.date].results = p.count
-      else map[p.date] = { date: key, tasks: 0, results: p.count }
-    }
-    return Object.values(map).sort((a, b) => a.date.localeCompare(b.date))
-  })()
+  // 近 7 日趋势：任务数 / 结果数按日合并，窗口内缺的日子补 0（dashboardTrend.ts）
+  const trendData = stats ? buildTrendData(stats) : []
 
   const successRate = stats?.success_rate != null ? `${(stats.success_rate * 100).toFixed(1)}%` : '-'
   const avgDuration = stats?.avg_duration_seconds != null ? `${stats.avg_duration_seconds.toFixed(1)}s` : '-'
@@ -181,7 +175,7 @@ const Dashboard: React.FC = () => {
                   title="成功率"
                   value={successRate}
                   prefix={<CheckCircleOutlined />}
-                  valueStyle={{ color: '#3f8600' }}
+                  styles={{ content: { color: '#3f8600' } }}
                   suffix={
                     <span style={{ fontSize: 12, color: '#cf1322' }}>
                       失败 <CloseCircleOutlined /> {stats?.failed ?? 0}
@@ -219,11 +213,13 @@ const Dashboard: React.FC = () => {
                     <LineChart data={trendData} margin={{ top: 8, right: 16 }}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="date" />
-                      <YAxis allowDecimals={false} />
+                      {/* 任务数（几十）与结果数（几千）量级不同：双轴，否则任务线贴在 0 上 */}
+                      <YAxis yAxisId="tasks" allowDecimals={false} width={40} />
+                      <YAxis yAxisId="results" orientation="right" allowDecimals={false} width={56} />
                       <Tooltip />
                       <Legend />
-                      <Line type="monotone" dataKey="tasks" name="任务数" stroke={BRAND_TOKENS.primary} strokeWidth={2} />
-                      <Line type="monotone" dataKey="results" name="结果数" stroke="#52c41a" strokeWidth={2} />
+                      <Line yAxisId="tasks" type="monotone" dataKey="tasks" name="任务数（左轴）" stroke={BRAND_TOKENS.primary} strokeWidth={2} />
+                      <Line yAxisId="results" type="monotone" dataKey="results" name="结果数（右轴）" stroke="#52c41a" strokeWidth={2} />
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
@@ -266,7 +262,7 @@ const Dashboard: React.FC = () => {
                           title="平均评分"
                           value={qualityData?.avg_score ?? '-'}
                           suffix="/ 100"
-                          valueStyle={{ color: (qualityData?.avg_score ?? 0) >= 60 ? '#3f8600' : '#cf1322' }}
+                          styles={{ content: { color: (qualityData?.avg_score ?? 0) >= 60 ? '#3f8600' : '#cf1322' } }}
                         />
                       </Col>
                       <Col span={8}>
@@ -289,10 +285,10 @@ const Dashboard: React.FC = () => {
                   <ResponsiveContainer width="100%" height={200}>
                     <BarChart
                       data={[
-                        { name: '优秀(80-100)', count: qualityData?.score_distribution['excellent(80-100)'] || 0 },
-                        { name: '良好(60-80)', count: qualityData?.score_distribution['good(60-80)'] || 0 },
-                        { name: '一般(40-60)', count: qualityData?.score_distribution['fair(40-60)'] || 0 },
-                        { name: '较差(0-40)', count: qualityData?.score_distribution['poor(0-40)'] || 0 },
+                        { name: '优秀(80-100)', count: qualityData?.score_distribution?.['excellent(80-100)'] || 0 },
+                        { name: '良好(60-80)', count: qualityData?.score_distribution?.['good(60-80)'] || 0 },
+                        { name: '一般(40-60)', count: qualityData?.score_distribution?.['fair(40-60)'] || 0 },
+                        { name: '较差(0-40)', count: qualityData?.score_distribution?.['poor(0-40)'] || 0 },
                       ]}
                       margin={{ top: 8, right: 16, left: 8 }}
                     >

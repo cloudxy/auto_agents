@@ -1,0 +1,197 @@
+### R1 QA-1/2: require_admin 语义 + 租户 owner role
+        return None
+    return await get_current_user(request, credentials, session)
+
+
+def require_role(*roles: str) -> Callable:
+    """角色守卫依赖工厂：命中任一角色放行，否则 403"""
+    async def _guard(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if user.role not in roles:
+            logger.warning(f"权限不足被拒绝 | user={user.username} role={user.role} need={roles}")
+            raise AuthorizationException(message=f"需要角色 {('/'.join(roles))}，当前为 {user.role}")
+        return user
+
+    return _guard
+
+
+# 常用守卫快捷实例
+require_login = require_role(*ROLE_ALL)      # 任意已登录角色
+require_operator = require_role("admin", "operator")
+require_admin = require_role("admin")
+
+
+async def task_actor_tenant_id(user: CurrentUser, session: AsyncSession) -> int | None:
+    """租户任务路径的入队企业（FR-102 / T-38 改造；解析点单一——契约 §8）
+93:            role="admin", tenant_id=tenant.id, tenant_role="owner",
+135:            role="admin",
+        if email_taken is not None:
+            raise ValidationException(message=f"邮箱已注册: {email}", field="email")
+
+        hashed = await asyncio.to_thread(get_password_hash, password)
+        user = User(
+            username=username, email=email, password_hash=hashed,
+            role="viewer" if tenant_role in ("viewer", "operator") else "admin",
+            tenant_id=tenant_id, tenant_role=tenant_role,
+            is_active=True, is_platform_admin=False,
+        )
+        self.session.add(user)
+
+13:    CurrentUser, require_admin, require_login,
+14:    require_platform_admin, require_platform_admin_or_404,
+71:    _user: CurrentUser = Depends(require_platform_admin_or_404),
+81:    user: CurrentUser = Depends(require_platform_admin_or_404),
+96:    user: CurrentUser = Depends(require_platform_admin_or_404),
+109:    user: CurrentUser = Depends(require_platform_admin_or_404),
+122:    user: CurrentUser = Depends(require_platform_admin_or_404),
+145:    _user: CurrentUser = Depends(require_admin),
+164:    _user: CurrentUser = Depends(require_platform_admin_or_404),
+174:    user: CurrentUser = Depends(require_platform_admin_or_404),
+190:    user: CurrentUser = Depends(require_platform_admin_or_404),
+206:    _user: CurrentUser = Depends(require_platform_admin),
+217:    user: CurrentUser = Depends(require_platform_admin),
+235:    _user: CurrentUser = Depends(require_admin),
+246:    user: CurrentUser = Depends(require_admin),
+263:    user: CurrentUser = Depends(require_admin),
+285:    _user: CurrentUser = Depends(require_admin),
+298:    user: CurrentUser = Depends(require_admin),
+322:    _user: CurrentUser = Depends(require_admin),
+
+16:from backend.app.api.deps import CurrentUser, require_admin, require_platform_admin_or_404
+78:    tenant_id: int
+159:    tenant_id: int,
+160:    _user: CurrentUser = Depends(require_admin),
+164:    return ok(data=await service.list_departments(tenant_id))
+170:    user: CurrentUser = Depends(require_admin),
+177:                       detail={"tenant_id": result["tenant_id"], "name": result["name"]})
+185:    user: CurrentUser = Depends(require_admin),
+199:    user: CurrentUser = Depends(require_admin),
+
+### R2 QA-1: consumer 唯一键/回放
+                # B5：content_hash = md5(url + title + content)
+                url_val = str(item.get("url") or "")[:500]
+                title_val = item.get("title") or ""
+                content_val = item.get("content") or ""
+                content_hash = hashlib.md5(
+                    f"{url_val}{title_val}{content_val}".encode()
+                ).hexdigest()
+
+                # 增量去重（B5）：task params.incremental=true 时跳过重复
+                params = task_params_cache.get(task_id, {})
+                if params.get("incremental") and content_hash:
+                    existing = await result_repo.find_by_content_hash(
+                        content_hash, tenant_id=owner_id, spider_name=spider_name
+                    )
+                    if existing:
+                        logger.debug(
+                            f"增量去重：重复内容已跳过: hash={content_hash}, url={url_val}"
+                        )
+                        # 去重项不计入 result_count，修正 batch_counts
+                        counts[task_id] = max(0, counts[task_id] - 1)
+                        continue
+
+                # 未映射字段进 extra
+                        batch_counts.clear()
+                    except Exception as e:  # noqa: BLE001 flush 失败不阻断取消传播
+                        logger.error(f"关停 flush 残余批次失败: {e}")
+                raise
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"ingest 循环异常: {e}")
+                if batch:
+                    await self._park_messages(ITEM_REDO_QUEUE, batch)
+                    batch.clear()
+                    batch_counts.clear()
+                await asyncio.sleep(1)
+
+        # 退出前 flush 残余批次
+
+        while self._running:
+            try:
+                # 批量弹出（count=N）：一次往返取多条，显著减少逐条 blpop 的往返开销
+                raws = await self._redis.lpop(ITEM_QUEUE, count=self._POP_COUNT)
+                if not raws:
+                    raws = await self._redis.lpop(ITEM_REDO_QUEUE, count=self._POP_COUNT)
+                for raw in raws or []:
+                    try:
+backend/repositories/llm_token_usage_repository.py:39:        stmt = stmt.on_duplicate_key_update(**update_cols)
+
+### R2 QA-8: 网关路径预算
+        _seam().settings.get("LLM.MAX_TOKENS_BUDGET", 200000)
+    )
+    dim = usage_dim or "config"
+    last_error: Exception | None = None
+    from platform_core.tenant_context import current_tenant_id as _cur_tid
+
+    _tid = _cur_tid()
+    for attempt in range(cfg.max_retries):
+        month_used = await get_month_used(dim, tenant_id=_tid)
+        if month_used is None:
+            month_used = _seam()._TOKEN_USAGE.get(dim, 0)
+        if month_used >= budget:
+            raise BusinessException(
+                f"平台 LLM 成本熔断：token 预算已耗尽（{dim} 本月累计 {month_used} >= {budget}）",
+                code="LLM_COST_FUSE",
+
+### R3 QA-1: bootstrap
+    else:
+        print(e, file=sys.stderr); sys.exit(2)
+PY
+
+log "create_all 基线表"
+uv run python scripts/db/init_tables.py || die "基线表失败"
+
+log "迁移链收口"
+CURRENT="$(alembic current 2>/dev/null || true)"
+if echo "$CURRENT" | grep -qE '[0-9a-f]{12}'; then
+    alembic upgrade head || die "upgrade head 失败"
+else
+    alembic stamp head || die "stamp head 失败"
+fi
+log "完成。下一步：uv run python run.py"
+
+### R6 QA-8: health
+from platform_core.redis_async import get_async_redis
+
+router = APIRouter()
+
+@router.get("/")
+async def health():
+    """基础健康检查"""
+    logger = get_logger("api")
+    logger.debug("Health check accessed")
+    return {"status": "healthy"}
+
+@router.get("/db")
+async def health_db(session: AsyncSession = Depends(get_async_db)):
+#!/usr/bin/env bash
+# 发布冒烟：健康检查可判退出码（G3 / S5）
+set -euo pipefail
+BASE="${SMOKE_BASE_URL:-http://127.0.0.1:9111}"
+curl -fsS "${BASE}/api/v1/health/" | grep -q healthy
+echo "smoke ok: ${BASE}/api/v1/health/"
+
+### R4 QA-8 / R6 QA-12: litellm compose
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-litellm}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-CHANGE_ME_MASTER}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-sk-CHANGE_ME_SALT}
+      STORE_MODEL_IN_DB: "True"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+### R4 QA-6: dotenv_override
+    envvar_prefix="AUTO_AGENTS",
+    environments=False,
+    settings_files=settings_files,
+    dotenv_path=str(_config_dir / current_env / ".env"),
+    load_dotenv=True,
+    merge_enabled=True,
+    dotenv_override=True,
+)
+
+# 动态注入 Redis URL（供 scrapy-redis、aioredis 等直接用）
+# 密码取法与 platform_core.db.DBManager._get_password 对齐：
+
+### pip-audit head
+$ uv run pip-audit
+Found 45 known vulnerabilities in 10 packages
+Name              Version ID                  Fix Versions

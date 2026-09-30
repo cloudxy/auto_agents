@@ -4,9 +4,9 @@
  * 链接/二维码（channel 未选或未配置时仍走原有人工确认收款语义不变）。
  */
 import React, { useState } from 'react'
-import { Alert, Button, Radio, Skeleton, Typography, message } from 'antd'
+import { Alert, Button, Popconfirm, Radio, Skeleton, Space, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { LoadFailure } from '../components/LoadState'
 import {
@@ -32,6 +32,7 @@ import {
 } from '../constants/collectCopy'
 import {
   CHANNEL_LABEL,
+  cancelOrder,
   createCheckout,
   fetchPayIntent,
   listMyOrders,
@@ -107,6 +108,7 @@ const PayIntentPanel: React.FC<{
 
 const Checkout: React.FC = () => {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [params] = useSearchParams()
   const product = params.get('product') || DEFAULT_UPGRADE_PRODUCT
   const knownProduct = (CHECKOUT_PRODUCTS as readonly string[]).includes(product)
@@ -167,6 +169,20 @@ const Checkout: React.FC = () => {
     retry: false,
   })
 
+  // 审计 BUG-24：买方可取消自己的待支付单（已付款 / 已关闭由后端 409 拦下）
+  const cancelMutation = useMutation({
+    mutationFn: () => cancelOrder(orderId as number),
+    onSuccess: () => {
+      message.success('订单已取消')
+      setDupHint(false)
+      invalidate()
+    },
+    onError: (e) => {
+      message.error(apiErrorMessage(e, '取消失败，请刷新后重试'))
+      invalidate()
+    },
+  })
+
   const onSubmit = () => {
     if (isOffline()) {
       message.warning(CHECKOUT_OFFLINE_PAY)
@@ -207,9 +223,27 @@ const Checkout: React.FC = () => {
         />
       )
     }
-    if (code === CHECKOUT_SUPERADMIN_FORBIDDEN) {
+    if (code === 'PLAN_SALES_LED' || code === 'SUBSCRIPTION_DOWNGRADE_AT_PERIOD_END') {
+      // 决策 D17（企业档走联系我们）/ D22（高档期内不能自助买低档）：后端句子已带联系方式或到期日
       return (
-        <Alert type="info" showIcon title={apiErrorMessage(previewQuery.error, '超管不能代企业支付')} />
+        <Alert
+          type="info"
+          showIcon
+          title={apiErrorMessage(previewQuery.error, '该套餐暂不能自助结账')}
+          action={<Button size="small" onClick={() => navigate(PRICING_PATH)}>{CHECKOUT_RETURN_PRICING}</Button>}
+        />
+      )
+    }
+    if (code === CHECKOUT_SUPERADMIN_FORBIDDEN) {
+      // 审计 BUG-27：超管不是买方，给出去处而不是死胡同
+      return (
+        <Alert
+          type="info"
+          showIcon
+          title={apiErrorMessage(previewQuery.error, '超管不能代企业支付')}
+          description="企业的订单与收款在「平台运营台 · 待确认收款」里处理。"
+          action={<Button size="small" onClick={() => navigate('/platform-ops')}>去平台运营台</Button>}
+        />
       )
     }
     if (isOffline()) {
@@ -265,6 +299,20 @@ const Checkout: React.FC = () => {
           payUrl={payIntentQuery.data?.pay_url ?? null}
           qrCodeImage={payIntentQuery.data?.qr_code_image ?? null}
         />
+      )}
+
+      {!fulfilled && openStatus === 'checkout_pending' && orderId != null && (
+        <Space style={{ marginBottom: 16 }}>
+          <Popconfirm
+            title="取消这笔订单？"
+            description="如果已经完成付款，请不要取消，等待开通即可。"
+            okText="取消订单"
+            cancelText="再想想"
+            onConfirm={() => cancelMutation.mutate()}
+          >
+            <Button danger loading={cancelMutation.isPending}>取消订单</Button>
+          </Popconfirm>
+        </Space>
       )}
 
       {!fulfilled && !pending && (

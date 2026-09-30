@@ -1,6 +1,8 @@
 """T-08 FR-U10/U11/U14：POWER_MARKET.ENABLED 运行时闸订一行与关闭句。"""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from sqlalchemy import select
 
@@ -74,6 +76,14 @@ def _close_market():
     from config import settings
 
     settings.set("POWER_MARKET.ENABLED", False)
+
+
+def _market_on(db_session) -> bool:
+    """开关真相源在库（决策 D34）：与接口同一读法"""
+    async def _go():
+        async with db_session() as s:
+            return await is_power_market_enabled(s)
+    return asyncio.run(_go())
 
 
 def _items(resp, name=None):
@@ -172,7 +182,7 @@ def test_gwt_u11_3_tenant_admin_cannot_flip(
     resp = admin_client.put(SWITCH, json={"enabled": True})
     assert resp.status_code == 403
     assert resp.json()["code"] == "FORBIDDEN"
-    assert is_power_market_enabled() is False
+    assert _market_on(db_session) is False
     after = [r.listing_state for r in _assets(db_session)]
     assert after == before
     assert live_install_count(db_session) == 0
@@ -180,15 +190,16 @@ def test_gwt_u11_3_tenant_admin_cannot_flip(
     assert listed.json()["data"].get("market_closed") is True
 
 
-def test_platform_admin_can_flip_switch(platform_admin_client):
+def test_platform_admin_can_flip_switch(platform_admin_client, db_client, db_session, monkeypatch):
     _close_market()
-    got = platform_admin_client.get(SWITCH)
+    monkeypatch.setattr("backend.services.power_market.flag.public_duty_contact", lambda: "ops@example.invalid")
+    got = db_client.get(SWITCH)
     assert got.status_code == 200, got.text
     assert got.json()["data"]["enabled"] is False
-    opened = platform_admin_client.put(SWITCH, json={"enabled": True})
+    opened = db_client.put(SWITCH, json={"enabled": True})
     assert opened.status_code == 200, opened.text
     assert opened.json()["data"]["enabled"] is True
-    assert is_power_market_enabled() is True
+    assert _market_on(db_session) is True
 
 
 def test_gwt_u14_1_subscribe_event_queryable(op_client, db_session, tid):

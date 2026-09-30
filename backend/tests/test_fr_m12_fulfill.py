@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from sqlalchemy import select
+from sqlalchemy import func, insert, select
 
 from backend.services.quota_service import PLAN_FULL_USER, TASK_QUOTA_LIMIT_CODE
 from backend.tests.payment_notify_support import sku_status, tenant_quota
@@ -106,14 +106,16 @@ def _seed_owned_results(db_session, tid: int, n: int) -> None:
             s.add(task)
             await s.flush()
             tid_task = int(task.id)
-            s.add_all([
-                SpiderResult(
-                    task_id=tid_task, tenant_id=tid, spider_name="example",
-                    url=f"https://m12.example/{i}", title=str(i), source="web",
-                )
+            # ORM 批量插入（executemany）：逐个 add 1 万个对象的 unit-of-work 开销约 2s
+            await s.execute(insert(SpiderResult), [
+                {"task_id": tid_task, "tenant_id": tid, "spider_name": "example",
+                 "url": f"https://m12.example/{i}", "title": str(i), "source": "web"}
                 for i in range(n)
             ])
             await s.commit()
+            seeded = (await s.execute(select(func.count()).select_from(SpiderResult)
+                                      .where(SpiderResult.tenant_id == tid))).scalar_one()
+            assert seeded == n  # 断言「超过免费帽仍入队」的前提：结果数确实落到 n 条
 
     asyncio.run(_go())
 
@@ -180,7 +182,10 @@ def test_gwt_m12_4_pro_does_not_activate_relay(db_client, db_session):
     assert sku_status(db_session, tid) == "none"
 
 
-def test_gwt_m11_15_enterprise_writes_quota_and_sku(db_client, db_session):
+def test_gwt_m11_15_enterprise_writes_quota_and_sku(db_client, db_session, monkeypatch):
+    from backend.tests.payment_notify_support import allow_self_serve_enterprise
+
+    allow_self_serve_enterprise(monkeypatch)  # D17 默认销售主导；这里钉企业档履约写配额 + SKU
     tid, data, _before, _owner = _confirm(db_client, db_session, "m11-15", "plan_enterprise")
     assert data["status"] == "fulfilled"
     q = tenant_quota(db_session, tid)

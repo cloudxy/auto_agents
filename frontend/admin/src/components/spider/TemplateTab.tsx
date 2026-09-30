@@ -13,6 +13,7 @@ import {
 import { PRIORITY_META } from './types'
 import type { TaskTemplate, Task, SpiderMap } from './types'
 import { apiErrorMessage } from '../../utils/errorMessage'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 const { Text } = Typography
 
@@ -85,7 +86,7 @@ export const TemplateTab: React.FC<TemplateTabProps> = ({
         return <Tag color={meta.color}>{meta.label}</Tag>
       },
     },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180, render: (v: string | null) => formatDateTime(v) },
     {
       title: '操作',
       key: 'action',

@@ -15,6 +15,7 @@ from backend.services.member_service import MemberService
 from platform_core.db import get_async_db
 from platform_core.exceptions import AuthorizationException, BusinessException
 from platform_core.logger import get_logger
+from platform_core.schemas.auth import TransferOwnershipRequest
 
 logger = get_logger("api.members")
 
@@ -63,8 +64,8 @@ async def create_member(
     service: MemberService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """创建子账号（tenant_role: owner/admin/operator/viewer）"""
-    result = await service.create_member(user.tenant_id, body)
+    """创建子账号（tenant_role: admin/operator/viewer；owner 不可经此产生，admin 只能建 operator/viewer）"""
+    result = await service.create_member(user.tenant_id, body, actor_role=user.tenant_role)
     await record_audit(user, "member.create", f"user#{result['id']}")
     return created(data=result)
 
@@ -78,7 +79,9 @@ async def patch_member(
     session: AsyncSession = Depends(get_async_db),
 ):
     """角色分配 / 禁用（owner 不可变更/禁用）"""
-    result = await service.patch_member(user.tenant_id, member_id, body)
+    result = await service.patch_member(
+        user.tenant_id, member_id, body, actor_role=user.tenant_role, actor_id=user.id,
+    )
     await record_audit(user, "member.update", f"user#{member_id}", detail=body)
     return ok(data=result)
 
@@ -91,7 +94,8 @@ async def delete_member(
     session: AsyncSession = Depends(get_async_db),
 ):
     """删除成员（软删：owner 与当前登录账号不可删；收件箱随账号清理，审计保留）"""
-    result = await service.delete_member(user.tenant_id, member_id, actor_id=user.id)
+    result = await service.delete_member(user.tenant_id, member_id, actor_id=user.id,
+                                         actor_role=user.tenant_role)
     await record_audit(user, "member.delete", f"user#{member_id}")
     return ok(data=result)
 
@@ -105,8 +109,24 @@ async def reset_member_password(
     session: AsyncSession = Depends(get_async_db),
 ):
     """重置成员密码"""
-    result = await service.reset_password(user.tenant_id, member_id, str(body.get("new_password") or ""))
+    result = await service.reset_password(user.tenant_id, member_id, str(body.get("new_password") or ""),
+                                          actor_role=user.tenant_role)
     await record_audit(user, "member.reset_password", f"user#{member_id}")
+    return ok(data=result)
+
+
+@router.post("/{member_id}/transfer-ownership")
+async def transfer_ownership(
+    member_id: int,
+    body: TransferOwnershipRequest,
+    user: CurrentUser = Depends(require_member_writer),
+    service: MemberService = Depends(_service),
+):
+    """转让负责人（决策 D23）：仅负责人本人、须输入登录密码；本人降为管理员并需重新登录"""
+    result = await service.transfer_ownership(
+        user.tenant_id, member_id, actor_id=user.id, actor_role=user.tenant_role, password=body.password,
+    )
+    await record_audit(user, "member.transfer_ownership", f"user#{member_id}")
     return ok(data=result)
 
 

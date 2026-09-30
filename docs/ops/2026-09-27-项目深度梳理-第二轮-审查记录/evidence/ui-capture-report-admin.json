@@ -1,0 +1,266 @@
+[
+  {
+    "app": "admin",
+    "path": "/login",
+    "console": [
+      "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "Warning: [antd: message] Static function can not consume context like dynamic theme. Please use 'App' component instead.",
+      "Warning: [antd: Statistic] `valueStyle` is deprecated. Please use `styles.content` instead."
+    ],
+    "pageerrors": [],
+    "http": [
+      "401 GET /api/v1/auth/permissions"
+    ],
+    "finalUrl": "http://127.0.0.1:9112/dashboard"
+  },
+  {
+    "app": "admin",
+    "path": "/dashboard",
+    "console": [
+      "Warning: [antd: Statistic] `valueStyle` is deprecated. Please use `styles.content` instead."
+    ],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2395,
+    "finalUrl": "/dashboard"
+  },
+  {
+    "app": "admin",
+    "path": "/spiders/tasks",
+    "console": [
+      "Warning: [antd: Drawer] `width` is deprecated. Please use `size` instead."
+    ],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2515,
+    "finalUrl": "/spiders/tasks"
+  },
+  {
+    "app": "admin",
+    "path": "/spiders/logs",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2511,
+    "finalUrl": "/spiders/logs"
+  },
+  {
+    "app": "admin",
+    "path": "/spiders/nodes",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2368,
+    "finalUrl": "/spiders/nodes"
+  },
+  {
+    "app": "admin",
+    "path": "/ai",
+    "console": [
+      "Warning: [antd: Drawer] `width` is deprecated. Please use `size` instead."
+    ],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2427,
+    "finalUrl": "/ai"
+  },
+  {
+    "app": "admin",
+    "path": "/enterprise",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2441,
+    "finalUrl": "/enterprise"
+  },
+  {
+    "app": "admin",
+    "path": "/rbac",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2508,
+    "finalUrl": "/rbac"
+  },
+  {
+    "app": "admin",
+    "path": "/capabilities",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2633,
+    "finalUrl": "/capabilities"
+  },
+  {
+    "app": "admin",
+    "path": "/capabilities/installs",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2368,
+    "finalUrl": "/capabilities/installs"
+  },
+  {
+    "app": "admin",
+    "path": "/members",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2479,
+    "finalUrl": "/members"
+  },
+  {
+    "app": "admin",
+    "path": "/usage",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2504,
+    "finalUrl": "/usage"
+  },
+  {
+    "app": "admin",
+    "path": "/billing/checkout",
+    "console": [
+      "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    ],
+    "pageerrors": [],
+    "http": [
+      "400 GET /api/v1/billing/checkout?product=plan_pro"
+    ],
+    "title": "AutoAgents 管理后台",
+    "ms": 2336,
+    "finalUrl": "/billing/checkout"
+  },
+  {
+    "app": "admin",
+    "path": "/pricing",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2068,
+    "finalUrl": "/pricing"
+  },
+  {
+    "app": "admin",
+    "path": "/relay",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2386,
+    "finalUrl": "/relay"
+  },
+  {
+    "app": "admin",
+    "path": "/outbound-keys",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2384,
+    "finalUrl": "/outbound-keys"
+  },
+  {
+    "app": "admin",
+    "path": "/llm",
+    "console": [
+      "Warning: [antd: Drawer] `width` is deprecated. Please use `size` instead."
+    ],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2086,
+    "finalUrl": "/llm"
+  },
+  {
+    "app": "admin",
+    "path": "/payment-credentials",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2445,
+    "finalUrl": "/payment-credentials"
+  },
+  {
+    "app": "admin",
+    "path": "/logs",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2548,
+    "finalUrl": "/logs"
+  },
+  {
+    "app": "admin",
+    "path": "/data",
+    "console": [
+      "Warning: [antd: Drawer] `width` is deprecated. Please use `size` instead.",
+      "Warning: [antd: Statistic] `valueStyle` is deprecated. Please use `styles.content` instead."
+    ],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2473,
+    "finalUrl": "/data"
+  },
+  {
+    "app": "admin",
+    "path": "/newapi",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2649,
+    "finalUrl": "/newapi"
+  },
+  {
+    "app": "admin",
+    "path": "/platform-ops",
+    "console": [
+      "Warning: [antd: Alert] `message` is deprecated. Please use `title` instead."
+    ],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2436,
+    "finalUrl": "/platform-ops"
+  },
+  {
+    "app": "admin",
+    "path": "/users",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2500,
+    "finalUrl": "/users"
+  },
+  {
+    "app": "admin",
+    "path": "/settings",
+    "console": [
+      "Warning: [antd: Spin] `tip` is deprecated. Please use `description` instead.",
+      "Warning: Instance created by `useForm` is not connected to any Form element. Forget to pass `form` prop?"
+    ],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2467,
+    "finalUrl": "/settings"
+  }
+]

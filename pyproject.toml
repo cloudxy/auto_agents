@@ -19,6 +19,7 @@ dev = [
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.1.0",
     "pytest-socket>=0.8.1",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.14.0",
 ]
 
@@ -34,6 +35,7 @@ auto-agents-spider = { workspace = true }
 
 [tool.pytest.ini_options]
 # /verify Skill 约定的验证入口：uv run pytest -x -q backend/tests
+# 全量并行（pytest-xdist，每个 worker 独立 SQLite 库与 Redis DB）：uv run pytest -n auto -q backend/tests
 testpaths = ["backend/tests"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"

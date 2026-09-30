@@ -10,6 +10,7 @@ import {
   UPGRADE_OFFLINE_COPY,
 } from '../../constants/collectCopy'
 import { fetchUpgradeIntent } from '../../services/usage'
+import { useAuthStore } from '../../store/useAuthStore'
 import { apiErrorMessage } from '../../utils/errorMessage'
 import { ContactAdminModal } from './ContactAdminModal'
 
@@ -28,6 +29,8 @@ export const UpgradeIntentButton: React.FC<UpgradeIntentButtonProps> = ({
   const navigate = useNavigate()
   const [contactOpen, setContactOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  // 审计 BUG-27：超管不是买方，不展示结账 / 申请提升入口（后端对超管结账 403）
+  const isPlatformAdmin = useAuthStore((s) => Boolean(s.user?.is_platform_admin))
 
   const onClick = async () => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -48,6 +51,8 @@ export const UpgradeIntentButton: React.FC<UpgradeIntentButtonProps> = ({
       setLoading(false)
     }
   }
+
+  if (isPlatformAdmin) return null
 
   return (
     <>

@@ -11,6 +11,19 @@ import { navigateToLogin } from './navigation'
 const api = createApiClient({
   baseURL: process.env.REACT_APP_API_BASE_URL || '/api/v1',
   getAuthToken: () => useAuthStore.getState().token,
+  // 决策 D10：访问令牌过期先静默续期，续不上才登出
+  refreshSession: async () => {
+    const refreshToken = useAuthStore.getState().refreshToken
+    if (!refreshToken) return false
+    try {
+      const { refreshSessionTokens } = await import('./auth')
+      const pair = await refreshSessionTokens(refreshToken)
+      useAuthStore.getState().setTokens(pair.access_token, pair.refresh_token)
+      return true
+    } catch {
+      return false
+    }
+  },
   onUnauthorized: () => {
     useAuthStore.getState().logout()
     const here = `${window.location.pathname}${window.location.search}`

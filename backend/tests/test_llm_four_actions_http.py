@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+from conftest import make_platform_admin_headers
 import asyncio
 import json
 from types import SimpleNamespace
@@ -448,7 +449,8 @@ def test_post_rescore_consume_once_outbound_gateway(
     outbound: list[str] = []
     _wire_plan(monkeypatch, db_engine, db_session, "ok", outbound, SCORE_JSON)
     _install_score_queue(monkeypatch)
-    headers, _tid = _operator_headers(db_session, "t16-70-6")
+    # 审计 B4-1：重评是平台技能库写操作 + 平台模型花费，仅平台超管
+    headers = make_platform_admin_headers(db_session)
     name = _seed_skill(db_session)
     resp = db_client.post(f"/api/v1/skills/{name}/rescore", headers=headers)
     result, _job = _consume_once(db_session)
@@ -464,7 +466,8 @@ def test_post_rescore_consume_once_no_model_only_70_9(
     outbound: list[str] = []
     _wire_plan(monkeypatch, db_engine, db_session, "no_model", outbound, SCORE_JSON)
     _install_score_queue(monkeypatch)
-    headers, _tid = _operator_headers(db_session, "t16-70-9")
+    # 审计 B4-1：重评是平台技能库写操作 + 平台模型花费，仅平台超管
+    headers = make_platform_admin_headers(db_session)
     name = _seed_skill(db_session, "rate-me-empty")
     db_client.post(f"/api/v1/skills/{name}/rescore", headers=headers)
     result, job = _consume_once(db_session)
@@ -486,7 +489,7 @@ def test_post_rescore_consume_once_unreachable_only_74_5(
     outbound: list[str] = []
     _wire_plan(monkeypatch, db_engine, db_session, "unreachable", outbound, SCORE_JSON)
     _install_score_queue(monkeypatch)
-    headers, _tid = _operator_headers(db_session, "t16-74-5")
+    headers = make_platform_admin_headers(db_session)
     name = _seed_skill(db_session, "rate-me-down")
     db_client.post(f"/api/v1/skills/{name}/rescore", headers=headers)
     result, job = _consume_once(db_session)

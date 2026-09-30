@@ -1,0 +1,96 @@
+$ git check-ignore -v .claude/memory/x.md .github/workflows/x.yml .agents/skills/x/SKILL.md .codex/skills/x
+.gitignore:65:.claude/*	.claude/memory/x.md
+.gitignore:72:.github/*	.github/workflows/x.yml
+.gitignore:71:.agents/*	.agents/skills/x/SKILL.md
+exit=0
+$ ls -la scripts/check-arch.sh scripts/check-frontend.sh setup.sh capability-library/plugins
+ls: capability-library/plugins: No such file or directory
+ls: scripts/check-arch.sh: No such file or directory
+ls: scripts/check-frontend.sh: No such file or directory
+ls: setup.sh: No such file or directory
+$ uv run python run.py --help
+usage: run.py [-h] [--env {local,dev,prod}] [--list] [words ...]
+
+Auto Agents 统一启停
+
+positional arguments:
+  words                 动作和/或服务名
+
+options:
+  -h, --help            show this help message and exit
+  --env {local,dev,prod}
+  --list                列出爬虫后退出
+
+默认 start 全部。setup 一键初始化。sync-agents 同步 .agents 到能力市场。已运行则跳过；restart/reload 强制重启。
+$ git ls-files | grep -n claims_anchors
+exit=1
+$ uv run ruff check --select F821,F811,ASYNC backend platform_core scrapy scripts run.py --output-format concise
+warning: Invalid `# noqa` directive on platform_core/models/llm_provider_model.py:48: expected code to consist of uppercase letters followed by digits only (e.g. `F401`)
+backend/scripts/export_litellm_config.py:48:14: ASYNC230 Async functions should not open files with blocking methods like `open`
+backend/services/ai_planner/llm_client.py:74:58: ASYNC109 Async function definition with a `timeout` parameter
+backend/services/ai_planner/llm_client.py:201:33: ASYNC109 Async function definition with a `timeout` parameter
+backend/services/asset_import_service.py:106:7: F811 Redefinition of unused `PendingAsset` from line 35: `PendingAsset` redefined here
+backend/services/asset_import_service.py:183:16: ASYNC240 Async functions should not use pathlib.Path methods, use trio.Path or anyio.path
+backend/services/llm_gateway/_settings.py:38:5: ASYNC109 Async function definition with a `timeout` parameter
+backend/services/llm_gateway/chat.py:22:5: ASYNC109 Async function definition with a `timeout` parameter
+backend/services/llm_gateway/chat.py:34:5: ASYNC109 Async function definition with a `timeout` parameter
+backend/services/mcp_bridge.py:80:44: F821 Undefined name `StdioServerParameters`
+backend/services/newapi_api.py:168:40: ASYNC109 Async function definition with a `timeout` parameter
+backend/services/power_market/sync.py:86:16: ASYNC240 Async functions should not use pathlib.Path methods, use trio.Path or anyio.path
+backend/services/spider_query_service.py:322:25: ASYNC240 Async functions should not use os.path methods, use trio.Path or anyio.path
+backend/services/spider_query_service.py:371:37: ASYNC240 Async functions should not use os.path methods, use trio.Path or anyio.path
+backend/services/spider_registry_service.py:141:12: ASYNC240 Async functions should not use os.path methods, use trio.Path or anyio.path
+backend/services/spider_registry_service.py:152:28: ASYNC240 Async functions should not use os.path methods, use trio.Path or anyio.path
+backend/tasks/consumer.py:324:22: ASYNC240 Async functions should not use os.path methods, use trio.Path or anyio.path
+backend/tasks/consumer.py:324:64: ASYNC240 Async functions should not use os.path methods, use trio.Path or anyio.path
+backend/tests/conftest.py:208:5: F811 Redefinition of unused `platform_admin_client` from line 184: `platform_admin_client` redefined here
+backend/tests/test_newapi_services.py:161:23: F821 Undefined name `_build_usage_window`
+backend/tests/test_newapi_services.py:172:23: F821 Undefined name `_build_usage_window`
+backend/tests/test_newapi_services.py:212:16: F821 Undefined name `_is_type_mismatch_error`
+backend/tests/test_newapi_services.py:213:16: F821 Undefined name `_is_type_mismatch_error`
+backend/tests/test_newapi_services.py:214:16: F821 Undefined name `_is_type_mismatch_error`
+backend/tests/test_newapi_services.py:215:16: F821 Undefined name `_is_type_mismatch_error`
+backend/tests/test_newapi_services.py:216:16: F821 Undefined name `_is_type_mismatch_error`
+backend/tests/test_newapi_services.py:217:16: F821 Undefined name `_is_type_mismatch_error`
+backend/tests/test_product_events.py:654:73: F811 Redefinition of unused `import_env` from line 20: `import_env` redefined here
+backend/tests/test_skill_import.py:32:26: F821 Undefined name `httpx`
+backend/tests/test_skill_import.py:91:16: ASYNC240 Async functions should not use pathlib.Path methods, use trio.Path or anyio.path
+backend/tests/test_spider_multi_storage.py:208:14: ASYNC230 Async functions should not open files with blocking methods like `open`
+backend/tests/test_spider_priority_concurrency.py:200:34: ASYNC109 Async function definition with a `timeout` parameter
+backend/tests/test_t41_plan_view_purity.py:175:20: ASYNC240 Async functions should not use os.path methods, use trio.Path or anyio.path
+platform_core/models/__init__.py:55:42: F811 [*] Redefinition of unused `Order` from line 45: `Order` redefined here
+platform_core/models/__init__.py:55:49: F811 [*] Redefinition of unused `Plan` from line 45: `Plan` redefined here
+platform_core/models/__init__.py:55:55: F811 [*] Redefinition of unused `TenantSubscription` from line 45: `TenantSubscription` redefined here
+Found 35 errors.
+[*] 3 fixable with the `--fix` option.
+$ grep -n agents|skills .claude/hooks/*
+guard_meta.sh
+inject_context.sh
+suggest_memory.sh
+.claude/hooks/guard_meta.sh:51:# 拦截 regex：rules / skills / IDENTITY / SOUL / settings.json
+.claude/hooks/guard_meta.sh:53:# .agents/skills/ 是 skills 物理位置（.claude/skills 是 symlink 过去），同等保护
+.claude/hooks/guard_meta.sh:54:GUARD_REGEX='(\.claude/(rules/|skills/|IDENTITY\.md|SOUL\.md|settings\.json$)|\.agents/skills/)'
+.claude/hooks/guard_meta.sh:63:    "permissionDecisionReason": "拦截：修改 \`${FILE_PATH_ESCAPED}\` 是项目契约级文件（rules / skills / IDENTITY / SOUL / settings.json），需要人类确认。如果确实要改，请明确告诉 Claude 'apply' 或直接编辑。"
+    2736 .claude/hooks/guard_meta.sh
+    2336 .claude/hooks/inject_context.sh
+    2470 .claude/hooks/suggest_memory.sh
+    7542 total
+
+# 追加（R0 复核要求补跑）
+$ git check-ignore -v .grok/x .codex/skills/x
+.gitignore:73:.grok/*	.grok/x
+(.codex/skills/x 未被忽略)
+
+$ pip-audit 按 (包, ID) 去重
+pyasn1 3
+pydantic-settings 1
+scrapy 2
+protego 1
+pyjwt 5
+twisted 1
+cryptography 4
+python-multipart 3
+starlette 5
+anyio 2
+TOTAL_UNIQUE 27
+原始记录行数: 45

@@ -1,0 +1,16 @@
+/* 官网头部窄屏（审计 B5-8）：第一行品牌 + 管理后台，第二行导航居中；行间留白 */
+@media (max-width: 575.98px) {
+  .site-header-inner {
+    row-gap: 4px;
+    padding-top: 10px !important;
+    padding-bottom: 6px !important;
+  }
+
+  .site-header-nav {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+    gap: 22px !important;
+    padding: 2px 0 4px;
+  }
+}

@@ -1,0 +1,10 @@
+# verify-r2-F7-B4（manager，2026-09-28）
+$ git tag -l | wc -l
+       0
+$ git log --oneline | wc -l
+     230
+$ collect -m mysql_fidelity | grep t42
+0
+$ B4 QA-4 twin-row detail (live, admin token, read-only GET)
+GET /api/v1/capabilities/plugins/dev-team -> 500  {"success":false,"code":"INTERNAL_SERVER_ERROR","message":"服务器内部错误，请联系管理员","data":{},"request_id":"eaa7d0df2aa64b8b"}
+GET /api/v1/capabilities/plugin/dev-team -> 500  {"success":false,"code":"INTERNAL_SERVER_ERROR","message":"服务器内部错误，请联系管理员","data":{},"request_id":"25affb0b40604daa"}

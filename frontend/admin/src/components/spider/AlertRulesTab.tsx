@@ -13,6 +13,7 @@ import {
 } from '../../services/spiders'
 import type { AlertRule, SpiderRegistry, SpiderMap } from './types'
 import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 const { Text } = Typography
 
@@ -150,7 +151,7 @@ export const AlertRulesTab: React.FC<AlertRulesTabProps> = ({
     { title: '窗口', dataIndex: 'window_minutes', key: 'window_minutes', width: 80,
       render: (v: number) => `${v}分钟` },
     { title: '上次触发', dataIndex: 'last_triggered_at', key: 'last_triggered_at', width: 170,
-      render: (v: string | null) => v || '-' },
+      render: (v: string | null) => formatDateTime(v) },
     {
       title: '启用', dataIndex: 'enabled', key: 'enabled', width: 80,
       render: (enabled: boolean, record: AlertRule) => (

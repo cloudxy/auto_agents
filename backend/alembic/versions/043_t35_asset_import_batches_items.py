@@ -89,6 +89,5 @@ def downgrade() -> None:
     # MySQL 1553：FK 在场时索引不可删——先撤约束再撤索引，最后按建表逆序 drop 两表
     op.drop_constraint("fk_import_items_batch", "asset_import_items", type_="foreignkey")
     op.drop_constraint("fk_import_items_asset", "asset_import_items", type_="foreignkey")
-    op.drop_index("idx_import_items_batch", table_name="asset_import_items")
     op.drop_table("asset_import_items")
     op.drop_table("asset_import_batches")

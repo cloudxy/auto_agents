@@ -118,13 +118,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column("skill_reviews", "asset_id")
-    op.drop_index(op.f("ix_capability_teams_asset_id"), table_name="capability_teams")
     op.drop_table("capability_teams")
-    op.drop_index(op.f("ix_capability_experts_asset_id"), table_name="capability_experts")
     op.drop_table("capability_experts")
-    op.drop_index(op.f("ix_capability_plugins_asset_id"), table_name="capability_plugins")
     op.drop_table("capability_plugins")
-    op.drop_index(op.f("ix_capability_assets_status"), table_name="capability_assets")
-    op.drop_index(op.f("ix_capability_assets_category"), table_name="capability_assets")
-    op.drop_index(op.f("ix_capability_assets_asset_type"), table_name="capability_assets")
     op.drop_table("capability_assets")

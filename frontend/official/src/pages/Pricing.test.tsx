@@ -19,7 +19,7 @@ const GWT_01_1 = {
 const FORBIDDEN_GATEWAY = '直连平台网关'
 const FORBIDDEN_RELAY_TOKEN = '我的中转令牌'
 const FORBIDDEN_CLAIMS = ['抽取准确率', '已校准', '官方认证', '正品保证'] as const
-const ENTERPRISE_ITEMS = ['工单支持', '中转站渠道组分配', '私有技能库', '专属客户成功'] as const
+const ENTERPRISE_ITEMS = ['工单支持', '中转站渠道组分配', '专属客户成功'] as const  // D32：私有技能库已撤下
 
 function featureRow(label: string): HTMLElement {
   return screen.getByText((_, node) =>
@@ -73,12 +73,13 @@ test('NFR-07 Pricing primary CTAs have 44px touch target', () => {
   screen.getAllByRole('link', { name: '去结账' }).forEach(assertTouchTarget)
 })
 
-test('GWT-U35.1/5 paid-tier 去结账 goes to checkout not register', () => {
+test('GWT-U35.1 专业档去结账进结账页；企业档（D17）走「联系我们」不自助结账', () => {
   renderPricing()
   const paid = screen.getAllByRole('link', { name: '去结账' })
-  expect(paid).toHaveLength(2)
+  expect(paid).toHaveLength(1)
   expect(paid[0]).toHaveAttribute('href', 'http://localhost:9112/billing/checkout?product=plan_pro')
-  expect(paid[1]).toHaveAttribute('href', 'http://localhost:9112/billing/checkout?product=plan_enterprise')
+  expect(screen.getByRole('button', { name: '联系我们' })).toBeInTheDocument()  // 联系方式未取到：禁用态
+  expect(screen.getByText('联系方式即将公布')).toBeInTheDocument()
   paid.forEach((link) => {
     const href = link.getAttribute('href') || ''
     expect(href).not.toContain('/register')
@@ -105,7 +106,7 @@ test('closed-set B items are listed without 预告 tag', () => {
   expect(copy).toContain(GWT_01_1.tokensPhrase)
   expect(copy).toContain('工单支持')
   expect(copy).toContain('中转站渠道组分配')
-  expect(copy).toContain('私有技能库')
+  expect(copy).not.toContain('私有技能库')  // 决策 D32：尚无对企业开放的实现，先撤下
   expect(copy).toContain('专属客户成功')
   expect(screen.queryAllByText('预告')).toHaveLength(0)
   ENTERPRISE_ITEMS.forEach((label) => {
@@ -146,5 +147,5 @@ test('pricing source has no session branch (GWT-01.3)', () => {
   expect(src).not.toMatch(/useAuthStore|isAuthenticated|sessionStorage/)
   renderPricing()
   expect(screen.getByRole('link', { name: /免费注册/ })).toBeInTheDocument()
-  expect(screen.getAllByRole('link', { name: '去结账' })).toHaveLength(2)
+  expect(screen.getAllByRole('link', { name: '去结账' })).toHaveLength(1)
 })

@@ -47,5 +47,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """回滚子表"""
-    op.drop_index(op.f("ix_llm_provider_models_provider_id"), table_name="llm_provider_models")
     op.drop_table("llm_provider_models")

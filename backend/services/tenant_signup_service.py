@@ -92,6 +92,8 @@ class TenantSignupService:
             password_hash=await asyncio.to_thread(get_password_hash, admin_password),
             role="admin", tenant_id=tenant.id, tenant_role="owner",
             is_active=True, is_platform_admin=False,
+            # 决策 D21：自助注册的负责人待验证邮箱，验证前企业不能用平台 LLM
+            email_verify_pending=True,
         )
         self.session.add(owner)
         await self.session.flush()
@@ -106,9 +108,8 @@ class TenantSignupService:
             "owner": {"id": owner.id, "username": owner.username, "email": owner.email},
         }  # 先固化再提交（ADR-0007 D2）
         logger.success(f"企业注册完成 | tenant={slug} owner={owner.username}")
-        from backend.services.billing_service import BillingService
-
-        await BillingService(self.session).attach_free_plan(tenant.id)
+        # 审计 B5-12：此处原有第二次、且没有异常保护的 attach_free_plan——第一次被吞掉的失败
+        # 会在这里原样抛出让注册失败，一切正常时又重复申请网关虚拟键。已删除（上面已挂接一次）。
         from platform_core.models.task_template import TaskTemplate
 
         self.session.add(TaskTemplate(
@@ -121,6 +122,9 @@ class TenantSignupService:
         ))
         await self.session.commit()
         await self._emit_signup(snapshot, anonymous_id)
+        from backend.services.email_verification_service import send_verification
+
+        await send_verification(int(snapshot["owner"]["id"]), str(snapshot["owner"]["email"]))
         return snapshot
 
     async def _emit_signup(self, snapshot: dict, anonymous_id: str | None) -> None:

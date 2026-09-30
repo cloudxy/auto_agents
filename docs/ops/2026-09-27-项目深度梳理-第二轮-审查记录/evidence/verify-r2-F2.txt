@@ -1,0 +1,59 @@
+# verify-r2-F2（manager，2026-09-28，只读）
+$ notify_service 渠道来源
+
+class NotifyService:
+    """任务终态通知分发"""
+
+    def __init__(self):
+        self._enabled: bool = bool(settings.get("NOTIFY.ENABLED", True))
+        channels = settings.get("NOTIFY.CHANNELS", ["log"])
+        self._channels = list(channels) if channels else ["log"]
+        self._webhook_url: str = str(settings.get("NOTIFY.WEBHOOK_URL", "") or "")
+        # 三渠道 URL 支持运行面覆盖（system_configs，配置页可写）；发送时惰性解析
+        self._timeout: float = float(settings.get("NOTIFY.TIMEOUT_SECONDS", 10))
+        # 阶段 4.3 新增渠道配置（缺失时对应渠道自动跳过）
+        self._email_host: str = str(settings.get("NOTIFY.EMAIL.SMTP_HOST", "") or "")
+            "retry_count": retry_count,
+            "error_message": error_message,
+        }
+        for channel in self._channels:
+            try:
+                if channel == "log":
+                    self._notify_log(payload)
+
+$ admin notify-config 保存的键
+
+
+# ---------------- 通知渠道配置（B6：webhook/钉钉/企微 URL 运营面可写） ----------------
+
+_NOTIFY_CFG_KEYS = {
+    "webhook_url": "notify.webhook_url",
+    "dingtalk_url": "notify.dingtalk_webhook_url",
+    "wechat_work_url": "notify.wechat_work_webhook_url",
+}
+
+
+
+$ product_events since 2026-09-27 18:00
+event_name	tenant_id	is_internal_fixture	t
+sync_completed	NULL	0	09-27 18:23:51
+sync_completed	NULL	0	09-27 18:23:52
+sync_completed	NULL	0	09-27 18:23:53
+official_page_viewed	NULL	0	09-27 22:55:23
+official_page_viewed	NULL	0	09-27 22:55:23
+official_page_viewed	NULL	0	09-27 22:55:27
+official_page_viewed	NULL	0	09-27 22:55:27
+official_page_viewed	NULL	0	09-27 22:55:30
+official_page_viewed	NULL	0	09-27 22:55:30
+official_page_viewed	NULL	0	09-27 22:55:33
+official_page_viewed	NULL	0	09-27 22:55:33
+official_page_viewed	NULL	0	09-27 22:55:36
+official_page_viewed	NULL	0	09-27 22:55:36
+login_succeeded	1	0	09-27 22:55:49
+login_succeeded	1	0	09-27 22:57:20
+duty_entry_opened	NULL	0	09-27 22:58:19
+id	event_name	occurred_at	created_at	diff_min
+292	duty_entry_opened	2026-09-27 14:58:20	2026-09-27 22:58:19	479
+291	login_succeeded	2026-09-27 14:57:21	2026-09-27 22:57:20	479
+290	login_succeeded	2026-09-27 14:55:49	2026-09-27 22:55:49	480
+289	official_page_viewed	2026-09-27 14:55:37	2026-09-27 22:55:36	479

@@ -99,3 +99,11 @@ SPIDERS:
     title: "流程化采集（分页/详情/过滤）"
     type: "custom"
     description: "按流程定义采集：列表字段 + 自动翻页 + 详情页二次采集 + 条件过滤"
+
+# 出站边界（决策 D7 = B / D8）：租户可填任意采集地址，平台统一约束
+# - 内网 / 回环 / 元数据地址一律拒绝（代码内置，不可配置关闭）
+# - BLOCKED_DOMAINS：平台禁采域名（精确或 *.后缀），所有出站路径统一拒绝
+# - ROBOTS_EXEMPT_DOMAINS：已获授权、可不遵守 robots.txt 的站点（精确或 *.后缀）
+OUTBOUND:
+  BLOCKED_DOMAINS: []
+  ROBOTS_EXEMPT_DOMAINS: []

@@ -144,11 +144,12 @@ def downgrade() -> None:
         existing_nullable=False,
         existing_server_default="self_built",
     )
-    op.drop_index("idx_skill_jobs_source", table_name="skill_jobs")
+    # 审计 BUG-42：MySQL 须先删外键再删其依赖的索引（原顺序报 1553，全链回滚卡死在 037）
     op.drop_constraint("fk_skill_jobs_source_id", "skill_jobs", type_="foreignkey")
+    op.drop_index("idx_skill_jobs_source", table_name="skill_jobs")
     op.drop_column("skill_jobs", "source_id")
-    op.drop_index("idx_assets_source_origin_alive", table_name="capability_assets")
     op.drop_constraint("fk_assets_source_id", "capability_assets", type_="foreignkey")
+    op.drop_index("idx_assets_source_origin_alive", table_name="capability_assets")
     op.drop_column("capability_assets", "writable")
     op.drop_column("capability_assets", "alias_origin_refs")
     op.drop_column("capability_assets", "origin_plugin_name")

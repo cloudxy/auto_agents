@@ -280,10 +280,27 @@ else
     echo "✓ FR-14: 跟踪的 deploy/config 无上游 Key 样例模式"
 fi
 
+# compose 密钥不得带默认值（审计 R4-8 / P0-9）：${VAR:-默认} 会让漏配的环境带着公开默认密钥启动；
+# 密钥类变量必须 ${VAR:?说明} fail-closed
+COMPOSE_DEFAULT_SECRETS="$(grep -nE '\$\{[A-Z_]*(PASSWORD|SECRET|MASTER_KEY|SALT_KEY|API_TOKEN)[A-Z_]*:-[^}]+\}' deploy/*/docker-compose*.yml docker-compose*.yml 2>/dev/null | grep -v '^deploy/newapi/' || true)"
+if [ -n "$COMPOSE_DEFAULT_SECRETS" ]; then
+    echo "❌ FR-14: compose 密钥变量带默认值（须改 \${VAR:?说明}）"
+    echo "$COMPOSE_DEFAULT_SECRETS"
+    VIOLATIONS=$((VIOLATIONS + $(echo "$COMPOSE_DEFAULT_SECRETS" | wc -l | tr -d ' ')))
+else
+    echo "✓ FR-14: compose 密钥变量无默认值"
+fi
+
+# --- 插件只能引用（PL；本机缓存另跑 plugin_refs.py --local）---
+echo ""
+echo "--- 插件引用（PL）---"
+python3 -B tools/check/plugin_refs.py
+VIOLATIONS=$((VIOLATIONS + $?))
+
 # --- 汇总 ---
 echo ""
 if [ "$VIOLATIONS" -eq 0 ]; then
-    echo "✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥，全部通过）"
+    echo "✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥 + PL 插件引用，全部通过）"
     exit 0
 else
     echo "共 $VIOLATIONS 处违规，请按 /check-arch Step 3 路由修复"

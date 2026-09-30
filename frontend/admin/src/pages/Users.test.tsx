@@ -55,16 +55,45 @@ beforeEach(() => {
     p?.status === 'deleted' ? page([DELETED_USER]) : page([ACTIVE_USER]));
 });
 
-test('GWT-M32 filter 已停用 shows inactive row only', async () => {
+test('GWT-M32 filter 已停用 shows inactive row only (server-side status=disabled, D11)', async () => {
   const DISABLED = { ...ACTIVE_USER, id: 3, username: 'op-off', is_active: false }
   ;(fetchUsersPage as jest.Mock).mockImplementation((p: { status?: string }) =>
-    p?.status === 'deleted' ? page([]) : page([ACTIVE_USER, DISABLED]))
+    p?.status === 'disabled' ? page([DISABLED]) : page([ACTIVE_USER, DISABLED]))
   render(<Users />)
   await waitFor(() => expect(screen.getByText('op-active')).toBeInTheDocument())
   fireEvent.mouseDown(within(screen.getByTestId('status-filter')).getByRole('combobox'))
   fireEvent.click(await screen.findByTitle('已停用'))
-  await waitFor(() => expect(screen.getByText('op-off')).toBeInTheDocument())
-  expect(screen.queryByText('op-active')).toBeNull()
+  await waitFor(() => expect(fetchUsersPage).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'disabled', skip: 0 })))
+  await waitFor(() => expect(screen.queryByText('op-active')).toBeNull())
+  expect(screen.getByText('op-off')).toBeInTheDocument()
+})
+
+/**
+ * 决策 D11（BUG-40）：搜索走服务端——原先只过滤当前页、总数却是全库，第 2 页的人搜不到。
+ * 回车搜索即带 q 请求、回到第 1 页；展示的就是服务端返回的行与总数（不再二次本地过滤）。
+ */
+test('D11 search is server-side: q sent, page reset, rows and total from server', async () => {
+  const LATE = { ...ACTIVE_USER, id: 42, username: 'late-comer', email: 'findme@x.com' }
+  ;(fetchUsersPage as jest.Mock).mockImplementation((p: { q?: string }) =>
+    p?.q === 'findme' ? page([LATE], 1) : page([ACTIVE_USER], 45))
+  render(<Users />)
+  await waitFor(() => expect(screen.getByText('op-active')).toBeInTheDocument())
+  expect(screen.getByText('共 45 位用户')).toBeInTheDocument()
+  const box = screen.getByPlaceholderText('搜索用户名/邮箱')
+  fireEvent.change(box, { target: { value: 'findme' } })
+  fireEvent.keyDown(box, { key: 'Enter', code: 'Enter', keyCode: 13 })
+  await waitFor(() => expect(fetchUsersPage).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'findme', skip: 0 })))
+  // 服务端按邮箱命中，本地不再按用户名二次过滤掉
+  expect(await screen.findByText('late-comer')).toBeInTheDocument()
+  expect(screen.getByText('共 1 位用户')).toBeInTheDocument()
+})
+
+test('D11 role filter is sent to the server', async () => {
+  render(<Users />)
+  await waitFor(() => expect(screen.getByText('op-active')).toBeInTheDocument())
+  fireEvent.mouseDown(screen.getAllByRole('combobox')[0])
+  fireEvent.click(await screen.findByTitle('只读'))
+  await waitFor(() => expect(fetchUsersPage).toHaveBeenLastCalledWith(expect.objectContaining({ role: 'viewer', skip: 0 })))
 })
 
 test('GWT-M32 seed admin cannot be deleted', async () => {

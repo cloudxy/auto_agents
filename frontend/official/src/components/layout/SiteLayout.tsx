@@ -12,6 +12,9 @@ import { Button } from 'antd'
 import { RocketOutlined, ArrowRightOutlined } from '@ant-design/icons'
 import { trackCta, trackPageView } from '../../services/beacon'
 import { DUTY_CONTACT, DUTY_CONTACT_LABEL } from '../../dutyContact'
+import { contactMailto } from '@auto-agents/frontend-shared'
+import { usePublicContact } from '../../hooks/usePublicContact'
+import './SiteLayout.css'
 
 const ADMIN_URL = process.env.REACT_APP_ADMIN_URL || 'http://localhost:9112'
 
@@ -51,6 +54,8 @@ const PAGE_BY_PATH: Record<string, string> = {
 }
 
 const SiteLayout: React.FC = () => {
+  const contact = usePublicContact()
+  const contactHref = contactMailto(contact) ?? (DUTY_CONTACT ? `mailto:${DUTY_CONTACT}` : null)
   const { pathname } = useLocation()
   useEffect(() => {
     document.title = TITLES[pathname] || SITE_NAME
@@ -68,6 +73,7 @@ const SiteLayout: React.FC = () => {
         }}
       >
         <div
+          className="site-header-inner"
           style={{
             maxWidth: 1200, margin: '0 auto', padding: '0 16px', minHeight: 60, flexWrap: 'wrap',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -89,7 +95,7 @@ const SiteLayout: React.FC = () => {
             </span>
           </Link>
 
-          <nav aria-label="站内导航" style={{ display: 'flex', gap: 26, flexWrap: 'wrap' }}>
+          <nav aria-label="站内导航" className="site-header-nav" style={{ display: 'flex', gap: 26, flexWrap: 'wrap' }}>
             {NAV_LINKS.map((l) => (
               <Link
                 key={l.to}
@@ -152,8 +158,9 @@ const SiteLayout: React.FC = () => {
             ))}
             <Link to="/terms" style={linkStyle}>服务条款</Link>
             <Link to="/privacy" style={linkStyle}>隐私政策</Link>
-            {DUTY_CONTACT ? (
-              <a href={`mailto:${DUTY_CONTACT}`} style={linkStyle}>{DUTY_CONTACT_LABEL}</a>
+            {/* 决策 D25：联系方式以后端 /public/ops-contact 为准（运营改配置即生效），构建期变量兜底 */}
+            {contactHref ? (
+              <a href={contactHref} style={linkStyle} title={contact?.contact_sla || undefined}>{DUTY_CONTACT_LABEL}</a>
             ) : null}
           </nav>
         </div>
@@ -164,6 +171,9 @@ const SiteLayout: React.FC = () => {
             textAlign: 'center', fontSize: 12.5, color: 'rgba(255,255,255,0.4)',
           }}
         >
+          {contact?.contact_email && contact.contact_sla ? (
+            <div style={{ marginBottom: 6 }}>联系邮箱 {contact.contact_email} · {contact.contact_sla}</div>
+          ) : null}
           {SITE_NAME} ©2026 Created by xuyun
         </div>
       </footer>

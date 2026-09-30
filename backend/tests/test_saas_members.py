@@ -309,7 +309,7 @@ def test_delete_member_concurrent_race_graceful(db_session):
             svc = MemberService(RaceSession(a))
             raised = None
             try:
-                await svc.delete_member(tid, uid, actor_id=-1)
+                await svc.delete_member(tid, uid, actor_id=-1, actor_role="owner")
             except (NotFoundException, BusinessException) as exc:
                 code = getattr(exc, "code", "")
                 assert code in ("NOT_FOUND", "HTTP_404")

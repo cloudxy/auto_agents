@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_core.models.spider_result import SpiderResult
 from platform_core.models.spider_task import SpiderTask
 from platform_core.repository import BaseRepository
+from platform_core.timeutil import business_date, utc_iso
 
 # FR-11 / ADR-0013：候选与成果同表；租户配额/数据中心/导出/出站排除 marketplace。
 CANDIDATE_SOURCE = "marketplace"
@@ -187,8 +188,11 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
         return int(result.rowcount or 0)
 
     async def daily_result_counts(self, since: datetime) -> List[Tuple[str, int]]:
-        """按日统计采集结果条数（created_at >= since），返回 [(yyyy-mm-dd, count)] 升序"""
-        day = func.date(SpiderResult.created_at)
+        """按日统计采集结果条数（created_at >= since），返回 [(yyyy-mm-dd, count)] 升序
+
+        按 Asia/Shanghai 业务日切（审计 BUG-43：原 DATE(created_at) 按 UTC 切，上海 0–8 点落到前一天）
+        """
+        day = business_date(SpiderResult.created_at)
         stmt = (
             select(day, func.count(SpiderResult.id))
             .where(SpiderResult.created_at >= since)
@@ -212,6 +216,19 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
             stmt = stmt.where(SpiderResult.spider_name == spider_name)
         result = await self.session.execute(stmt.limit(1))
         return result.scalar_one_or_none()
+
+    async def existing_hashes(
+        self, tenant_id: int, spider_name: str, hashes: list[str],
+    ) -> set[str]:
+        """批量查重：返回已存在的 content_hash（含软删行——唯一键不含存活标记，审计 R2-1）"""
+        if not hashes:
+            return set()
+        stmt = select(SpiderResult.content_hash).where(
+            SpiderResult.tenant_id == tenant_id,
+            SpiderResult.spider_name == spider_name,
+            SpiderResult.content_hash.in_(list(set(hashes))),
+        )
+        return {h for h in (await self.session.execute(stmt)).scalars().all() if h}
 
     async def query_by_spider(
         self,
@@ -293,7 +310,7 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
                 "item_type": r.item_type,
                 "quality_score": r.quality_score,
                 "content_hash": r.content_hash,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "created_at": utc_iso(r.created_at),
             }
             for r in rows
         ]

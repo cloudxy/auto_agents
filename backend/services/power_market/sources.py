@@ -16,6 +16,7 @@ from backend.services.power_market.types import (
 from platform_core.exceptions import BusinessException, NotFoundException, ValidationException
 from platform_core.logger import get_logger
 from platform_core.models.capability import CapabilityAsset, CapabilitySource
+from platform_core.timeutil import utc_iso
 
 logger = get_logger("service.power_market")
 
@@ -31,7 +32,7 @@ def _project_source(row: CapabilitySource) -> dict:
         "source_kind": row.source_kind,
         "uri": row.uri,
         "is_enabled": int(row.is_enabled or 0),
-        "last_sync_at": row.last_sync_at.isoformat() if row.last_sync_at else None,
+        "last_sync_at": utc_iso(row.last_sync_at),
         "last_succeeded": int(row.last_succeeded or 0),
         "last_failed": int(row.last_failed or 0),
         "last_error": row.last_error,

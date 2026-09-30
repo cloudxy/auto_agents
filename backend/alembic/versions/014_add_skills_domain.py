@@ -97,7 +97,4 @@ def downgrade() -> None:
     """回滚技能域三表"""
     op.drop_table("skill_jobs")
     op.drop_table("skill_reviews")
-    op.drop_index(op.f("ix_skills_status"), table_name="skills")
-    op.drop_index(op.f("ix_skills_category"), table_name="skills")
-    op.drop_index(op.f("ix_skills_name"), table_name="skills")
     op.drop_table("skills")

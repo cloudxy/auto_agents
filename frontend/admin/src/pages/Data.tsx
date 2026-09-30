@@ -40,6 +40,7 @@ import {
   GO_SUBMIT_COLLECT,
 } from '../constants/collectCopy'
 import { apiErrorCode } from '../utils/collectBlock'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 import {
   buildExportBlob,
   exportWindowOverLimit,
@@ -222,7 +223,7 @@ const Data: React.FC = () => {
       title: 'URL', dataIndex: 'url', key: 'url', width: 180, ellipsis: true,
       render: (v: string | null) => (v ? <a href={v} target="_blank" rel="noreferrer">{v}</a> : '-'),
     },
-    { title: '采集时间', dataIndex: 'created_at', key: 'created_at', width: 170 },
+    { title: '采集时间', dataIndex: 'created_at', key: 'created_at', width: 170, render: (v: string | null) => formatDateTime(v) },
     {
       title: '操作', key: 'action', width: 140,
       render: (_: unknown, record: SpiderResult) => (
@@ -257,24 +258,24 @@ const Data: React.FC = () => {
         <LoadFailure title={STATS_LOAD_FAILED} onRetry={() => statsQuery.refetch()} />
       ) : (
       <Row gutter={[16, 16]}>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card loading={statsQuery.isPending}>
             <Statistic title="任务总数" value={stats?.total_tasks ?? 0} />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card loading={statsQuery.isPending}>
             <Statistic title="待执行" value={stats?.pending ?? 0} />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card loading={statsQuery.isPending}>
-            <Statistic title="已完成" value={stats?.completed ?? 0} valueStyle={{ color: '#3f8600' }} />
+            <Statistic title="已完成" value={stats?.completed ?? 0} styles={{ content: { color: '#3f8600' } }} />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card loading={statsQuery.isPending}>
-            <Statistic title="失败" value={stats?.failed ?? 0} valueStyle={{ color: '#cf1322' }} />
+            <Statistic title="失败" value={stats?.failed ?? 0} styles={{ content: { color: '#cf1322' } }} />
           </Card>
         </Col>
       </Row>

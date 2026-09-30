@@ -47,8 +47,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """降级数据库结构"""
-    op.drop_index(op.f('ix_operation_logs_created_at'), table_name='operation_logs')
-    op.drop_index(op.f('ix_operation_logs_action'), table_name='operation_logs')
-    op.drop_index(op.f('ix_operation_logs_actor_id'), table_name='operation_logs')
     op.drop_table('operation_logs')
     op.drop_column('users', 'role')

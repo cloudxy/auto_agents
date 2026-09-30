@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_core.db import get_async_db
 from backend.services.auth_service import AuthService
 from backend.app.api.deps import CurrentUser, get_current_user
+from config import settings
 from platform_core.logger import get_logger
 from platform_core.redis_async import get_async_redis
 from backend.app.core.rate_limiter import (
@@ -18,6 +19,8 @@ from backend.app.core.rate_limiter import (
 )
 from platform_core.exceptions import AuthenticationException
 from platform_core.schemas import LoginRequest, RegisterRequest  # 统一参数接收器
+from platform_core.schemas.auth import LogoutRequest, RefreshRequest, VerifyEmailRequest
+from backend.services.email_verification_service import company_verify_pending
 from backend.app.responses import ApiResponse, ok
 
 logger = get_logger("api")
@@ -78,22 +81,70 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
     
     await auth_service.assert_tenant_login_allowed(user_data)
 
-    token_response = await auth_service.create_token(user_data)
+    # 决策 D10：访问 + 刷新令牌对（刷新令牌窗口随「记住我」）
+    from backend.services.session_service import issue_session
+
+    session_pair = issue_session(user_data, remember=request.remember_me)
     
     return ok(
         data={
-            "access_token": token_response.access_token,
-            "token_type": token_response.token_type,
-            "username": token_response.username,
-            "is_admin": token_response.is_admin,
+            "access_token": session_pair["access_token"],
+            "refresh_token": session_pair["refresh_token"],
+            "expires_in": session_pair["expires_in"],
+            "token_type": session_pair["token_type"],
+            "username": user_data["username"],
+            "is_admin": bool(user_data.get("is_admin", False)),
             "role": user_data.get("role", "operator"),
             "tenant_id": user_data.get("tenant_id"),
             "tenant_role": user_data.get("tenant_role"),
             "is_platform_admin": bool(user_data.get("is_platform_admin", False)),
+            # 决策 D21：企业负责人待验证邮箱时为 true（前端据此提示验证 / 重发）
+            "email_verify_pending": await company_verify_pending(db, user_data.get("tenant_id")),
         },
         message="登录成功"
     )
 
+
+
+@router.post("/refresh", response_model=ApiResponse)
+async def refresh_session(request: RefreshRequest, db: AsyncSession = Depends(get_async_db)):
+    """用刷新令牌换一对新令牌（决策 D10：轮换；重放吊销全部会话；按库重核停用 / 改密 / 企业状态）"""
+    from backend.services.session_service import rotate
+
+    logger.info("刷新会话请求")
+    return ok(data=await rotate(db, request.refresh_token), message="已续期")
+
+
+@router.post("/logout", response_model=ApiResponse)
+async def logout(request: LogoutRequest):
+    """登出：作废本会话的刷新令牌；访问令牌自然到期（≤30 分钟）"""
+    from backend.services.session_service import revoke
+
+    logger.info("登出请求")
+    await revoke(request.refresh_token)
+    return ok(data={"logged_out": True}, message="已退出登录")
+
+
+@router.post("/verify-email", response_model=ApiResponse)
+async def verify_email(request: VerifyEmailRequest, db: AsyncSession = Depends(get_async_db)):
+    """点邮件里的验证链接（决策 D21）：无需登录，令牌与账号邮箱绑定"""
+    from backend.services.email_verification_service import verify
+
+    logger.info("邮箱验证请求")
+    await verify(db, request.token)
+    return ok(data={"verified": True}, message="邮箱已验证")
+
+
+@router.post("/resend-verification", response_model=ApiResponse)
+async def resend_verification(
+    user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_async_db),
+):
+    """重新发送验证邮件（负责人本人；60 秒一次）"""
+    from backend.services.email_verification_service import resend
+
+    logger.info(f"重发邮箱验证 | user={user.username}")
+    await resend(db, int(user.id))
+    return ok(data={"sent": True}, message="验证邮件已发送")
 
 # 角色 → 权限映射（前端按此控制菜单/按钮可见性，后端守卫为最终防线）
 # 权限单真相源（R5）：前端登录后从 /permissions 读取，不再硬编码
@@ -215,6 +266,13 @@ async def register(
         ApiResponse: 包含 user_id 的响应
     """
     logger.info(f"注册请求 | username={request.username}")
+    # 决策 D1 = A：个人自助注册默认关闭，与不存在的路由同形（不暴露入口存在）
+    auth_cfg = settings.get("AUTH") or {}
+    if not bool(auth_cfg.get("PERSONAL_REGISTER_ENABLED", False) if hasattr(auth_cfg, "get") else False):
+        # Starlette 的 404 与「路由不存在」走同一个默认处理，响应逐字相同
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+
+        raise StarletteHTTPException(status_code=404, detail="Not Found")
     client_ip = (http_request.client.host if http_request and http_request.client else "unknown")
     # 检查注册频率限制（请求到达即计数，成功失败均计入防刷）
     await check_register_rate_limit(client_ip)

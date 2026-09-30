@@ -43,7 +43,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """降级数据库结构"""
-    op.drop_index(op.f('ix_spider_results_spider_name'), table_name='spider_results')
-    op.drop_index(op.f('ix_spider_results_task_id'), table_name='spider_results')
-    op.drop_index(op.f('ix_spider_results_id'), table_name='spider_results')
     op.drop_table('spider_results')

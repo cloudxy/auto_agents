@@ -12,6 +12,7 @@
   _SPIDERS_DIR（测试 patch 目标：backend.services.spider_registry_service.<name>）。
 """
 import os
+from typing import Optional
 from urllib.parse import urlparse
 
 from pydantic import ValidationError
@@ -182,9 +183,10 @@ class SpiderRegistryService:
     # 爬虫定义完整 CRUD（阶段 6）：登记/元信息编辑/删除（引用检查）
     # ------------------------------------------------------------------
     async def create_definition(
-        self, payload: DefinitionCreateRequest, source: str = "manual"
+        self, payload: DefinitionCreateRequest, source: str = "manual",
+        params: Optional[dict] = None,
     ) -> SpiderDefinitionResponse:
-        """新建爬虫定义（来源标记默认 manual；AI 注册传 ai_generated；名称唯一）"""
+        """新建爬虫定义（来源标记默认 manual；AI 注册传 ai_generated 与定义参数；名称唯一）"""
         logger.info(f"新建爬虫定义: name={payload.name}, type={payload.type}, source={source}")
         repo = SpiderDefinitionRepository(self.session)
         existing = await repo.get_by_name(payload.name)
@@ -197,6 +199,7 @@ class SpiderRegistryService:
             description=payload.description,
             enabled=True,
             source=source,
+            params=params,
         )
         await self.session.commit()
         await self.session.refresh(item)

@@ -14,6 +14,8 @@
   （alive_flag 生成列唯一键——SQLite 与 MySQL 方言均支持，行为需真库复验）
 - 边界：name 长度 1/64（界上）与 0/65（界外）；缺 tenant_id 查询参数
 - 权限矩阵：4 路由 × 匿名 401 / viewer 403（require_admin 守卫）
+- 租户隔离（审计 R1-2 / BUG-02）：租户负责人的租户取自身份；指定他租户或改删他租户部门
+  → 404 同形且零副作用；只有平台超管可以显式指定 tenant_id
 """
 from __future__ import annotations
 
@@ -64,9 +66,9 @@ async def _dept_rows(db_session) -> list[Department]:
 # ---------------------------------------------------------------------------
 
 
-def test_create_department_ok(db_client, admin_client, db_session, _tenants):
+def test_create_department_ok(db_client, platform_admin_client, db_session, _tenants):
     """创建：201 CREATED + data 含 id/name（路由契约仅回这两字段）；库内行持久化"""
-    resp = admin_client.post(DEPT_URL, json=_payload(_tenants, name="x" * 64))
+    resp = platform_admin_client.post(DEPT_URL, json=_payload(_tenants, name="x" * 64))
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["code"] == "CREATED"
@@ -81,16 +83,16 @@ def test_create_department_ok(db_client, admin_client, db_session, _tenants):
     assert rows[0].deleted_at is None
 
 
-def test_create_department_name_length_1_ok(db_client, admin_client, _tenants):
+def test_create_department_name_length_1_ok(db_client, platform_admin_client, _tenants):
     """name 长度界上另一端（min=1）：单字符合法"""
-    resp = admin_client.post(DEPT_URL, json=_payload(_tenants, name="组"))
+    resp = platform_admin_client.post(DEPT_URL, json=_payload(_tenants, name="组"))
     assert resp.status_code == 201
 
 
-def test_create_department_dup_in_tenant_400(db_client, admin_client, db_session, _tenants):
+def test_create_department_dup_in_tenant_400(db_client, platform_admin_client, db_session, _tenants):
     """同租户重名 → 400 BUSINESS_ERROR，且无第二条落库"""
-    assert admin_client.post(DEPT_URL, json=_payload(_tenants)).status_code == 201
-    dup = admin_client.post(DEPT_URL, json=_payload(_tenants, name="数据组"))
+    assert platform_admin_client.post(DEPT_URL, json=_payload(_tenants)).status_code == 201
+    dup = platform_admin_client.post(DEPT_URL, json=_payload(_tenants, name="数据组"))
     assert dup.status_code == 400
     assert dup.json()["code"] == "BUSINESS_ERROR"
     assert "部门已存在" in dup.json()["message"]
@@ -99,10 +101,10 @@ def test_create_department_dup_in_tenant_400(db_client, admin_client, db_session
     assert len(rows) == 1  # 拒绝路径零副作用
 
 
-def test_create_department_same_name_other_tenant_201(db_client, admin_client, db_session, _tenants):
+def test_create_department_same_name_other_tenant_201(db_client, platform_admin_client, db_session, _tenants):
     """跨租户同名合法（唯一名契约以租户为界）；归属经库内验证"""
-    assert admin_client.post(DEPT_URL, json=_payload(_tenants)).status_code == 201
-    cross = admin_client.post(
+    assert platform_admin_client.post(DEPT_URL, json=_payload(_tenants)).status_code == 201
+    cross = platform_admin_client.post(
         DEPT_URL, json={"tenant_id": _tenants["B"], "name": "数据组"})
     assert cross.status_code == 201, cross.text
 
@@ -116,9 +118,9 @@ def test_create_department_same_name_other_tenant_201(db_client, admin_client, d
     assert len(rows) == 1 and rows[0].name == "数据组"
 
 
-def test_create_department_unknown_tenant_422(db_client, admin_client, db_session):
+def test_create_department_unknown_tenant_422(db_client, platform_admin_client, db_session):
     """tenant 不存在 → 422 VALIDATION_ERROR（field=tenant_id），零落库"""
-    resp = admin_client.post(DEPT_URL, json={"tenant_id": 99999999, "name": "幽灵组"})
+    resp = platform_admin_client.post(DEPT_URL, json={"tenant_id": 99999999, "name": "幽灵组"})
     assert resp.status_code == 422
     body = resp.json()
     assert body["code"] == "VALIDATION_ERROR"
@@ -133,9 +135,9 @@ def test_create_department_unknown_tenant_422(db_client, admin_client, db_sessio
     ({"tenant_id": 1, "name": "x" * 65}, "name"),      # 超长（max=64 界外）
     ({"name": "无租户"}, "tenant_id"),                  # 缺 tenant_id
 ])
-def test_create_department_validation_422(db_client, admin_client, db_session, payload, field):
+def test_create_department_validation_422(db_client, platform_admin_client, db_session, payload, field):
     """请求体校验 422（FastAPI 层），零落库"""
-    resp = admin_client.post(DEPT_URL, json=payload)
+    resp = platform_admin_client.post(DEPT_URL, json=payload)
     assert resp.status_code == 422, resp.text
     assert field in resp.text
     assert asyncio.run(_dept_rows(db_session)) == []
@@ -146,7 +148,7 @@ def test_create_department_validation_422(db_client, admin_client, db_session, p
 # ---------------------------------------------------------------------------
 
 
-def test_list_departments_with_member_count(db_client, admin_client, db_session, _tenants):
+def test_list_departments_with_member_count(db_client, platform_admin_client, db_session, _tenants):
     """列表：含成员计数；软删行排除；空部门计数 0"""
     async def _seed():
         async with db_session() as s:
@@ -162,7 +164,7 @@ def test_list_departments_with_member_count(db_client, admin_client, db_session,
 
     asyncio.run(_seed())
 
-    resp = admin_client.get(DEPT_URL, params={"tenant_id": _tenants["A"]})
+    resp = platform_admin_client.get(DEPT_URL, params={"tenant_id": _tenants["A"]})
     assert resp.status_code == 200, resp.text
     rows = {r["name"]: r for r in resp.json()["data"]}
     assert set(rows) == {"数据组", "运营组"}  # 软删行排除
@@ -171,16 +173,16 @@ def test_list_departments_with_member_count(db_client, admin_client, db_session,
     assert rows["数据组"]["description"] is None  # 结构关键字段在位
 
 
-def test_list_departments_empty(db_client, admin_client, _tenants):
+def test_list_departments_empty(db_client, platform_admin_client, _tenants):
     """无部门租户 → 200 + 空列表（空输入边界）"""
-    resp = admin_client.get(DEPT_URL, params={"tenant_id": _tenants["B"]})
+    resp = platform_admin_client.get(DEPT_URL, params={"tenant_id": _tenants["B"]})
     assert resp.status_code == 200
     assert resp.json()["data"] == []
 
 
-def test_list_departments_missing_tenant_id_422(admin_client):
-    """缺必填查询参数 tenant_id → 422"""
-    resp = admin_client.get(DEPT_URL)
+def test_list_departments_missing_tenant_id_422(platform_admin_client):
+    """平台超管不指定 tenant_id → 422（超管无归属租户，必须显式选择）"""
+    resp = platform_admin_client.get(DEPT_URL)
     assert resp.status_code == 422
     assert "tenant_id" in resp.text
 
@@ -190,16 +192,16 @@ def test_list_departments_missing_tenant_id_422(admin_client):
 # ---------------------------------------------------------------------------
 
 
-def _create_dept(admin_client, tenants, name="数据组") -> int:
-    resp = admin_client.post(DEPT_URL, json=_payload(tenants, name=name))
+def _create_dept(platform_admin_client, tenants, name="数据组") -> int:
+    resp = platform_admin_client.post(DEPT_URL, json=_payload(tenants, name=name))
     assert resp.status_code == 201, resp.text
     return resp.json()["data"]["id"]
 
 
-def test_update_department_ok(db_client, admin_client, db_session, _tenants):
+def test_update_department_ok(db_client, platform_admin_client, db_session, _tenants):
     """编辑：200 UPDATED + 回显变更字段；库内已更新"""
-    did = _create_dept(admin_client, _tenants)
-    resp = admin_client.put(f"{DEPT_URL}/{did}",
+    did = _create_dept(platform_admin_client, _tenants)
+    resp = platform_admin_client.put(f"{DEPT_URL}/{did}",
                             json={"name": "数据二组", "description": "改"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -215,8 +217,8 @@ def test_update_department_ok(db_client, admin_client, db_session, _tenants):
     assert row.name == "数据二组" and row.description == "改"
 
 
-def test_update_department_not_found_404(admin_client):
-    resp = admin_client.put(f"{DEPT_URL}/99999999", json={"name": "无"})
+def test_update_department_not_found_404(platform_admin_client):
+    resp = platform_admin_client.put(f"{DEPT_URL}/99999999", json={"name": "无"})
     assert resp.status_code == 404
     assert resp.json()["code"] == "NOT_FOUND"
 
@@ -226,9 +228,9 @@ def test_update_department_not_found_404(admin_client):
 # ---------------------------------------------------------------------------
 
 
-def test_delete_department_soft_and_member_fallback(db_client, admin_client, db_session, _tenants):
+def test_delete_department_soft_and_member_fallback(db_client, platform_admin_client, db_session, _tenants):
     """软删三断言：deleted_at 置位（行仍在）；成员回退未分组；列表排除"""
-    did = _create_dept(admin_client, _tenants)
+    did = _create_dept(platform_admin_client, _tenants)
 
     async def _attach():
         async with db_session() as s:
@@ -238,7 +240,7 @@ def test_delete_department_soft_and_member_fallback(db_client, admin_client, db_
 
     asyncio.run(_attach())
 
-    resp = admin_client.delete(f"{DEPT_URL}/{did}")
+    resp = platform_admin_client.delete(f"{DEPT_URL}/{did}")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["data"] == {"id": did, "deleted": True}
@@ -255,21 +257,21 @@ def test_delete_department_soft_and_member_fallback(db_client, admin_client, db_
     assert row.deleted_at is not None  # 软删：行未物理删除
     assert member.department_id is None  # 成员回退未分组
 
-    listed = admin_client.get(DEPT_URL, params={"tenant_id": _tenants["A"]}).json()["data"]
+    listed = platform_admin_client.get(DEPT_URL, params={"tenant_id": _tenants["A"]}).json()["data"]
     assert listed == []  # 列表排除软删行
 
 
-def test_delete_then_recreate_same_name_201(db_client, admin_client, _tenants):
+def test_delete_then_recreate_same_name_201(db_client, platform_admin_client, _tenants):
     """软删后同名可重建（alive_flag 唯一键：软删行脱离约束；组织重组高频路径）
     注：alive_flag 为生成列，SQLite/MySQL 方言均支持，行为建议 MYSQL_FIDELITY=1 复验"""
-    did = _create_dept(admin_client, _tenants, name="重组组")
-    assert admin_client.delete(f"{DEPT_URL}/{did}").status_code == 200
-    again = admin_client.post(DEPT_URL, json=_payload(_tenants, name="重组组"))
+    did = _create_dept(platform_admin_client, _tenants, name="重组组")
+    assert platform_admin_client.delete(f"{DEPT_URL}/{did}").status_code == 200
+    again = platform_admin_client.post(DEPT_URL, json=_payload(_tenants, name="重组组"))
     assert again.status_code == 201, again.text  # 同名重建不被软删行挡
 
 
-def test_delete_department_not_found_404(admin_client):
-    resp = admin_client.delete(f"{DEPT_URL}/99999999")
+def test_delete_department_not_found_404(platform_admin_client):
+    resp = platform_admin_client.delete(f"{DEPT_URL}/99999999")
     assert resp.status_code == 404
     assert resp.json()["code"] == "NOT_FOUND"
 
@@ -296,3 +298,97 @@ def test_departments_viewer_403(viewer_client, db_session):
     assert viewer_client.put(f"{DEPT_URL}/1", json={"name": "probe"}).status_code == 403
     assert viewer_client.delete(f"{DEPT_URL}/1").status_code == 403
     assert asyncio.run(_dept_rows(db_session)) == []  # 越权路径零副作用
+
+
+# ---------------------------------------------------------------------------
+# 租户隔离（审计 R1-2 / BUG-02 回归）：租户负责人不得跨租户读写部门
+# ---------------------------------------------------------------------------
+
+
+def _owner(db_session, slug: str) -> tuple[dict, int]:
+    from conftest import make_tenant_owner_headers
+    return make_tenant_owner_headers(db_session, slug=slug)
+
+
+def test_owner_create_department_defaults_to_own_tenant(db_client, db_session):
+    """负责人不传 tenant_id → 201，落在本租户"""
+    headers, tid = _owner(db_session, "dept-own")
+    resp = db_client.post(DEPT_URL, json={"name": "本组"}, headers=headers)
+    assert resp.status_code == 201, resp.text
+    rows = asyncio.run(_dept_rows(db_session))
+    assert [(r.tenant_id, r.name) for r in rows] == [(tid, "本组")]
+
+
+def test_owner_create_department_in_other_tenant_404(db_client, db_session, _tenants):
+    """负责人指定他租户 tenant_id → 404 同形，零落库（原先 201 = 跨租户写入）"""
+    headers, _tid = _owner(db_session, "dept-x")
+    resp = db_client.post(DEPT_URL, json={"tenant_id": _tenants["B"], "name": "渗透组"},
+                          headers=headers)
+    assert resp.status_code == 404
+    assert asyncio.run(_dept_rows(db_session)) == []
+
+
+def test_owner_list_other_tenant_404_and_own_scope(db_client, db_session, _tenants):
+    """负责人列他租户 → 404；不传 tenant_id 只见本租户"""
+    async def _seed():
+        async with db_session() as s:
+            s.add(Department(tenant_id=_tenants["B"], name="乙方机密组"))
+            await s.commit()
+
+    asyncio.run(_seed())
+    headers, _tid = _owner(db_session, "dept-list")
+    assert db_client.get(DEPT_URL, params={"tenant_id": _tenants["B"]},
+                         headers=headers).status_code == 404
+    db_client.post(DEPT_URL, json={"name": "本组"}, headers=headers)
+    own = db_client.get(DEPT_URL, headers=headers)
+    assert own.status_code == 200
+    assert [r["name"] for r in own.json()["data"]] == ["本组"]
+
+
+def test_owner_update_delete_other_tenant_404_no_side_effect(db_client, db_session, _tenants):
+    """负责人改/删他租户部门 → 404 同形，行不变、成员不被解绑"""
+    state: dict = {}
+
+    async def _seed():
+        async with db_session() as s:
+            d = Department(tenant_id=_tenants["B"], name="乙方组")
+            s.add(d)
+            await s.flush()
+            state["id"] = int(d.id)
+            s.add(User(username="b1a-victim", email="v@b1a.co", password_hash="x",
+                       role="viewer", tenant_id=_tenants["B"], department_id=d.id))
+            await s.commit()
+
+    asyncio.run(_seed())
+    headers, _tid = _owner(db_session, "dept-w")
+    did = state["id"]
+    assert db_client.put(f"{DEPT_URL}/{did}", json={"name": "被改"},
+                         headers=headers).status_code == 404
+    assert db_client.delete(f"{DEPT_URL}/{did}", headers=headers).status_code == 404
+
+    async def _check():
+        async with db_session() as s:
+            row = (await s.execute(select(Department).where(Department.id == did))).scalar_one()
+            member = (await s.execute(
+                select(User).where(User.username == "b1a-victim"))).scalar_one()
+            return row, member
+
+    row, member = asyncio.run(_check())
+    assert row.name == "乙方组" and row.deleted_at is None
+    assert member.department_id == did
+
+
+def test_owner_update_delete_own_department_ok(db_client, db_session):
+    """负责人改/删本租户部门 → 200（隔离不误伤正常路径）"""
+    headers, _tid = _owner(db_session, "dept-ok")
+    did = db_client.post(DEPT_URL, json={"name": "本组"}, headers=headers).json()["data"]["id"]
+    assert db_client.put(f"{DEPT_URL}/{did}", json={"name": "本组二"},
+                         headers=headers).status_code == 200
+    assert db_client.delete(f"{DEPT_URL}/{did}", headers=headers).status_code == 200
+
+
+def test_delete_department_twice_404(db_client, platform_admin_client, _tenants):
+    """已软删部门再删 → 404（原先会再次置 deleted_at 并清空成员归属）"""
+    did = _create_dept(platform_admin_client, _tenants, name="二次删")
+    assert platform_admin_client.delete(f"{DEPT_URL}/{did}").status_code == 200
+    assert platform_admin_client.delete(f"{DEPT_URL}/{did}").status_code == 404

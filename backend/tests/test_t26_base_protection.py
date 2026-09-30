@@ -199,9 +199,13 @@ def test_no_tenant_delete_endpoint(app):
     """企业管理/运营台均无 DELETE /admin/tenants 端点（企业删除本波不开）"""
     from fastapi.routing import APIRoute
 
+    from conftest import iter_app_routes
+
+    routes = iter_app_routes(app)
+    assert any("/admin/tenants" in path for path, _ in routes)  # 展开有效，防空集合假通过
     deletes = [
-        r.path for r in app.routes
-        if isinstance(r, APIRoute) and "DELETE" in r.methods and "/admin/tenants" in r.path
+        path for path, r in routes
+        if isinstance(r, APIRoute) and "DELETE" in r.methods and "/admin/tenants" in path
     ]
     assert deletes == []
 
@@ -225,3 +229,34 @@ def test_tenant_direct_patch_platform_is_404_shape(db_client, db_session, seed):
             return await s.get(Tenant, seed["platform_id"])
 
     assert asyncio.run(_row()).status == "active"
+
+
+# ---------------- 审计 R1-3 / P0-11a：default 租户停用保护 ----------------
+
+
+def test_default_tenant_disable_rejected_but_quota_editable(db_client, db_session, seed):
+    """default 租户承载个人注册账号：停用 / 置过期被拒；配额编辑照常"""
+    from platform_core.models.tenant import Tenant
+
+    async def _mk():
+        async with db_session() as s:
+            row = Tenant(slug="default", name="默认租户", status="active")
+            s.add(row)
+            await s.commit()
+            return int(row.id)
+
+    did = asyncio.run(_mk())
+    for status in ("disabled", "expired"):
+        resp = db_client.patch(f"{TENANTS_URL}/{did}", headers=seed["headers"], json={"status": status})
+        assert resp.status_code == 400
+        assert resp.json()["message"] == "默认租户承载个人注册账号，不可停用。"
+    ok = db_client.patch(f"{TENANTS_URL}/{did}", headers=seed["headers"],
+                         json={"quota": {"task_concurrency": 3}})
+    assert ok.status_code == 200, ok.text
+
+    async def _row():
+        async with db_session() as s:
+            return await s.get(Tenant, did)
+
+    row = asyncio.run(_row())
+    assert row.status == "active" and (row.quota or {}).get("task_concurrency") == 3

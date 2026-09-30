@@ -323,9 +323,17 @@ def test_confirm_cannot_fulfill_online_checkout(db_client, db_session):
     assert sub_plan_slug(db_session, fx["tid"]) == "pro"
 
 
-def test_gwt_u35_enterprise_notify_opens_enterprise(db_client, db_session):
-    fx = checkout(db_client, db_session, slug="u33-ent", product="plan_enterprise")
-    post_notify(db_client, "alipay", _ok_notify(fx))
-    assert sub_plan_slug(db_session, fx["tid"]) == "enterprise"
-    assert tenant_quota(db_session, fx["tid"]) == ENT_QUOTA
-    assert sku_status(db_session, fx["tid"]) == "active"
+def test_gwt_u35_enterprise_grant_opens_enterprise(db_client, db_session):
+    """决策 D17：企业档不再自助在线支付；平台开通后订阅 / 配额 / 中转 SKU 与原在线开通同一结果"""
+    from backend.tests.payment_notify_support import seed_plans
+    from conftest import make_platform_admin_headers, make_tenant_owner_headers
+
+    seed_plans(db_session)
+    _owner, tid = make_tenant_owner_headers(db_session, slug="u33-ent")
+    resp = db_client.post(f"/api/v1/billing/admin/tenants/{tid}/grant",
+                          headers=make_platform_admin_headers(db_session),
+                          json={"product": "plan_enterprise", "amount_cents": 99900, "periods": 1})
+    assert resp.status_code == 200, resp.text
+    assert sub_plan_slug(db_session, tid) == "enterprise"
+    assert tenant_quota(db_session, tid) == ENT_QUOTA
+    assert sku_status(db_session, tid) == "active"

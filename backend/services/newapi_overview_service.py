@@ -4,7 +4,7 @@
 空态 / 降级 / 活 三句互斥；页上无完整上游 Key；禁止「暂无渠道」。
 """
 import asyncio
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import NamedTuple, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from backend.services.gateway_models import (
 from backend.services.llm_gateway import admin as gw_admin
 from backend.services.newapi_api import _channel_id_from_ref
 from platform_core.logger import get_logger
+from platform_core.timeutil import utcnow
 from platform_core.schemas.newapi import (
     ChannelEventListResponse,
     ChannelEventResponse,
@@ -92,7 +93,7 @@ class NewapiOverviewService:
             return models
         latest = await self.probe_repo.latest_result_per_channel(
             channel_ids=[_channel_id_from_ref(m.gateway_ref) for m in models],
-            since=datetime.now() - timedelta(hours=EVENTS_WINDOW_HOURS),
+            since=utcnow() - timedelta(hours=EVENTS_WINDOW_HOURS),
         )
         return _annotate_duty_models(models, latest)
 
@@ -100,7 +101,7 @@ class NewapiOverviewService:
         """本地事件/探针统计（降级时仍返回）。"""
         logger.debug("读取值班本地事件与探针统计")
         events_24h = await self.event_repo.count_events_since(
-            datetime.now() - timedelta(hours=EVENTS_WINDOW_HOURS)
+            utcnow() - timedelta(hours=EVENTS_WINDOW_HOURS)
         )
         batch_id = await self.probe_repo.latest_batch_id()
         verdicts = (

@@ -1,9 +1,9 @@
 """爬虫任务 Schema —— API 层与 Service 层之间的数据契约"""
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from platform_core.schemas.base import QueryParams, RequestBody
+from platform_core.schemas.time_types import UTCDateTime
 
 
 class SpiderTaskResponse(BaseModel):
@@ -18,10 +18,10 @@ class SpiderTaskResponse(BaseModel):
     retry_count: int = 0
     error_message: Optional[str] = None
     worker_offline: bool = False
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
+    updated_at: Optional[UTCDateTime] = None
+    started_at: Optional[UTCDateTime] = None
+    completed_at: Optional[UTCDateTime] = None
 
 
 class SpiderTaskListResponse(BaseModel):
@@ -106,7 +106,7 @@ class SpiderResultResponse(BaseModel):
     extra: Optional[str] = None
     quality_score: Optional[float] = None
     content_hash: Optional[str] = None
-    created_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
 
 
 class SpiderResultListResponse(BaseModel):
@@ -165,9 +165,10 @@ class SpiderStatsResponse(BaseModel):
     daily_tasks: List[DailyPoint] = []
     daily_results: List[DailyPoint] = []
     top_spiders: List[TopSpider] = []
+    # daily_* 的切日时区；window_start 是带 +00:00 的 UTC 时刻
     timezone: str = "Asia/Shanghai"
     window_days: int = 7
-    window_start: Optional[datetime] = None
+    window_start: Optional[UTCDateTime] = None
 
 
 # ----------------------------------------------------------------------
@@ -197,10 +198,10 @@ class SpiderScheduleResponse(BaseModel):
     cron_expr: str
     params: Optional[str] = None
     enabled: bool
-    last_run_at: Optional[datetime] = None
-    next_run_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    last_run_at: Optional[UTCDateTime] = None
+    next_run_at: Optional[UTCDateTime] = None
+    created_at: Optional[UTCDateTime] = None
+    updated_at: Optional[UTCDateTime] = None
 
 
 class SpiderScheduleListResponse(BaseModel):
@@ -274,8 +275,9 @@ class TaskUpdateRequest(RequestBody):
 
 
 class TaskControlRequest(RequestBody):
-    """任务控制请求（暂停/恢复/终止）"""
-    action: str = Field(..., pattern="^(pause|resume|stop)$", description="控制动作：pause/resume/stop")
+    """任务控制请求（终止；暂停先下线 D6 → 409，恢复只清旧暂停键）"""
+    action: str = Field(..., pattern="^(pause|resume|stop)$",
+                        description="控制动作：stop 终止；pause 暂未开放（409）；resume 清除旧版本留下的暂停")
 
 
 class SpiderDefinitionResponse(BaseModel):
@@ -348,8 +350,8 @@ class AlertRuleResponse(BaseModel):
     severity: str = "warning"
     channels: Optional[List] = None
     enabled: bool = True
-    last_triggered_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
+    last_triggered_at: Optional[UTCDateTime] = None
+    created_at: Optional[UTCDateTime] = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -380,5 +382,5 @@ class TaskTemplateResponse(BaseModel):
     params: Optional[str] = None
     priority: str = "normal"
     created_by: Optional[str] = None
-    created_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
     model_config = ConfigDict(from_attributes=True)

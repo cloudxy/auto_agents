@@ -177,7 +177,6 @@ def test_gwt_15_8_login_succeeded_carries_tenant(db_client, db_session):
 
 def test_gwt_15_4_login_failed_reasons_no_password(db_client, db_session):
     from backend.utils.auth import get_password_hash
-    from backend.services.tenant_expiry_service import expire_overdue_tenants
 
     async def _seed():
         async with db_session() as s:
@@ -204,7 +203,6 @@ def test_gwt_15_4_login_failed_reasons_no_password(db_client, db_session):
     async def _expire():
         async with db_session() as s:
             await s.execute(update(Tenant).where(Tenant.id == tid).values(status="expired"))
-            await expire_overdue_tenants(s)
             await s.commit()
 
     asyncio.run(_expire())

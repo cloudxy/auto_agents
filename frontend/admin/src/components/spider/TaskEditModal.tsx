@@ -87,7 +87,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({
     >
       <Alert
         type="info" showIcon style={{ marginBottom: 16 }}
-        message="仅待执行（pending）任务可编辑；运行中/已结束的任务后端将拒绝修改。"
+        title="仅待执行（pending）任务可编辑；运行中/已结束的任务后端将拒绝修改。"
       />
       <Form form={form} layout="vertical" preserve={false}>
         <Form.Item name="priority" label="优先级" tooltip="高优先级任务在同爬虫队列中优先被消费">

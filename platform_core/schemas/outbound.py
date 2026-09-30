@@ -3,10 +3,10 @@
 明文只在签发响应（plaintext_key）出现一次；列表/详情只回前缀与派生状态。
 产品名统一「出站拉数钥匙」；与渠道组令牌（sk-）互不相干。
 """
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+from platform_core.schemas.time_types import UTCDateTime
 
 
 class OutboundKeyCreate(BaseModel):
@@ -22,8 +22,8 @@ class OutboundKeyOut(BaseModel):
     name: Optional[str] = None
     key_prefix: str
     status: str = Field(description="active=已签发；revoked=已吊销（revoked_at 派生）")
-    revoked_at: Optional[datetime] = None
-    created_at: datetime
+    revoked_at: Optional[UTCDateTime] = None
+    created_at: UTCDateTime
 
 
 class OutboundKeyIssuedOut(OutboundKeyOut):

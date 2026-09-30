@@ -44,7 +44,7 @@ from platform_core.models.i18n import I18nLocale, I18nTranslation
 from platform_core.models.system_cache import SystemCache
 from platform_core.models.billing import Order, Plan, TenantSubscription
 from platform_core.models.payment_channel_credential import PaymentChannelCredential
-from platform_core.models.relay import RelayGroup, RelayToken
+from platform_core.models.relay import RelayGroup, RelayToken, RelayUsageDaily
 from platform_core.models.relay_sku_entitlement import RelaySkuEntitlement
 from platform_core.models.outbound_key import OutboundKey
 from platform_core.models.role import Role
@@ -63,7 +63,8 @@ __all__ = [
     "CapabilityExpert", "CapabilityTeam", "CapabilityCommand", "CapabilityComponent",
     "CapabilityInstall", "CapabilitySource", "CapabilityAlias",
     "Plan", "TenantSubscription", "Order", "PaymentChannelCredential",
-    "RelaySkuEntitlement", "RelayGroup", "RelayToken", "OutboundKey",
+    "RelaySkuEntitlement", "RelayGroup", "RelayToken",
+    "RelayUsageDaily", "OutboundKey",
     "SoftDeleteMixin", "AuditMixin",
     # DB 升级 2026-09 Phase B/C 横切功能表
     "Tag", "Tagging", "Attachment", "Notification", "ResourceVersion",

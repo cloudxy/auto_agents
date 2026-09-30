@@ -33,7 +33,6 @@ from backend.services.power_market.types import SubscribeRequest
 from platform_core.db import get_async_db
 from platform_core.exceptions import RateLimitException
 from platform_core.logger import get_logger
-from platform_core.queues import SKILL_PUBLIC_RATE_PREFIX
 from platform_core.redis_async import get_async_redis
 
 logger = get_logger("api.public_skills")
@@ -48,27 +47,20 @@ def _market(session: AsyncSession = Depends(get_async_db)) -> PowerMarketService
     return PowerMarketService(session)
 
 
-def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
 async def _enforce_rate_limit(request: Request) -> None:
+    """公开市场限流（审计 BUG-34）：走共享限流模块——XFF 只在可信反代后采信且取最右值
+    （原先取 XFF 首跳，伪造请求头即可换身份无限刷）；计数 INCR+EXPIRE 同一事务提交"""
+    import dataclasses
+
+    from backend.app.core.rate_limiter import SKILL_PUBLIC_RATE_POLICY, enforce_request_limit
     from config import settings
 
     limit = int(settings.get("SKILLS.PUBLIC_API.RATE_LIMIT_PER_MIN", 60) or 60)
     if limit <= 0:
         return
+    policy = dataclasses.replace(SKILL_PUBLIC_RATE_POLICY, max_requests=limit)
     try:
-        redis = await get_async_redis()
-        key = f"{SKILL_PUBLIC_RATE_PREFIX}{_client_ip(request)}"
-        count = await redis.incr(key)
-        if count == 1:
-            await redis.expire(key, 60)
-        if count > limit:
-            raise RateLimitException(message=f"请求过于频繁（限 {limit} 次/分钟），请稍后再试")
+        await enforce_request_limit(get_async_redis(), policy, request)
     except RateLimitException:
         raise
     except Exception as exc:  # noqa: BLE001 Redis 故障 fail-open（公开只读面保可用性）

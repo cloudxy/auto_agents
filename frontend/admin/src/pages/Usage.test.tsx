@@ -99,8 +99,6 @@ const overview = (
   quota,
   usage,
   llm_by_provider: { 'provider:1': usage.llm_tokens_month },
-  cost_by_provider: {},
-  cost_cents_total: 0,
   timezone: 'Asia/Shanghai',
   year_month: '2026-09',
   alerts: [],
@@ -158,7 +156,7 @@ test('renders usage quota cards with webhook and no BillingPanel', async () => {
   )
   renderUsage()
   expect(await screen.findByText('任务并发')).toBeInTheDocument()
-  expect(await screen.findByText('任务交付 Webhook')).toBeInTheDocument()
+  expect(await screen.findByText('任务结果推送（Webhook）')).toBeInTheDocument()
   expect(screen.queryByText('套餐与订购')).toBeNull()
   expect(screen.queryByRole('radio')).toBeNull()
   expect(screen.getByRole('button', { name: '去结账' })).toBeInTheDocument()
@@ -413,4 +411,19 @@ test('GWT-50.13 (QA-23) pro-tier fixture enforces the same three numbers as the 
   expect(copy).toContain(GWT_50_13.storage)
   expect(copy).toContain(GWT_50_13.tokensFull)
   expect(copy).not.toContain('预告')
+})
+
+
+test('D19 tenant usage shows relay tokens only, no cost column', async () => {
+  ;(usePermission as jest.Mock).mockReturnValue(adminPerm)
+  useAuthStore.setState({ user: userWith('owner') })
+  ;(fetchUsageOverview as jest.Mock).mockResolvedValueOnce({
+    ...overview({ task_concurrency: 1, result_storage: 2, llm_tokens_month: 3 }),
+    relay: { sku_status: 'active', used_tokens: 1200, limit_tokens: 10000 },
+  })
+  renderUsage()
+  expect(await screen.findByText('中转用量（本月）')).toBeInTheDocument()
+  expect(screen.getByText('1,200')).toBeInTheDocument()
+  expect(pageCopy()).not.toContain('金额（元）')
+  expect(pageCopy()).not.toContain('LLM 成本')
 })

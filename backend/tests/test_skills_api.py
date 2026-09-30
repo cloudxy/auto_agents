@@ -100,7 +100,7 @@ def test_get_skill_detail_404(db_client, admin_client, db_engine, db_session, sk
     assert resp.status_code == 404
 
 
-def test_static_jobs_route_not_shadowed_by_name(db_client, admin_client, db_engine, db_session, skill_library):
+def test_static_jobs_route_not_shadowed_by_name(db_client, platform_admin_client, db_engine, db_session, skill_library):
     """/skills/jobs 是静态段——若被 /{name} 吞掉会返回技能 404 而非任务列表信封"""
     resp = db_client.get("/api/v1/skills/jobs")
     assert resp.status_code == 200

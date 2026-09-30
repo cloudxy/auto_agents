@@ -35,6 +35,15 @@ if str(TESTS_DIR) not in sys.path:
 os.environ.setdefault("APP_ENV", "local")
 # T1：测试态 bcrypt 因子降到 4，避免登录链被 12 轮拖进分钟级
 os.environ.setdefault("BCRYPT_ROUNDS", "4")
+# 测试不写开发 Redis（开发库是 DB 0）：串行用 DB 15；pytest-xdist 并行时每个 worker 各占一个库
+# （gwN → 4 + N % 11），限流计数、防重放标记互不串扰。不清库：残留键按各自 TTL 过期
+_xdist_worker = os.environ.get("PYTEST_XDIST_WORKER", "")
+# worker 进程继承主进程环境：是本文件设的值就按 worker 重算；人为显式指定的保持不动
+if "AUTO_AGENTS_REDIS__DEFAULT__DB" not in os.environ or os.environ.get("_AA_TEST_REDIS_DB_AUTO") == "1":
+    os.environ["AUTO_AGENTS_REDIS__DEFAULT__DB"] = (
+        str(4 + int(_xdist_worker[2:]) % 11) if _xdist_worker.startswith("gw") else "15"
+    )
+    os.environ["_AA_TEST_REDIS_DB_AUTO"] = "1"
 
 
 # ── get_async_db 全局兜底 mock（CI 无 .env，防意外连真库）──
@@ -91,6 +100,10 @@ async def _current_user_override(request, credentials, session, default_role: st
                 identity = await load_auth_identity(session, payload["user_id"])
             if identity is None or not identity.is_active:
                 raise AuthenticationException(message="用户不存在或已停用")
+            from backend.services.user_service import token_version_matches
+
+            if not token_version_matches(payload, identity):  # 与 deps.get_current_user 同口径
+                raise AuthenticationException(message="登录已失效，请重新登录")
             from backend.services.tenant_expiry_service import assert_tenant_active
 
             await assert_tenant_active(
@@ -359,10 +372,38 @@ async def _run_schema_ddl(server_url: str, statement: str) -> None:
         await engine.dispose()
 
 
-@pytest.fixture
-def db_engine(tmp_path: Path) -> Iterator["AsyncEngine"]:
-    """每测试独立的异步引擎：默认 SQLite 文件库；MYSQL_FIDELITY=1 时真实 MySQL 独立 schema"""
+@pytest.fixture(scope="session")
+def _sqlite_schema_template(tmp_path_factory) -> Path:
+    """SQLite 全量表结构只建一次，各测试复制这份空库文件
+
+    原先 1150 个用 DB 的用例各自 create_all 59 张表（每次约 0.1–0.2s），占全量耗时大半；
+    复制空库文件约 0.6ms。每个测试仍拿到独立的全新库，隔离语义不变。
+    """
     import asyncio
+
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    import platform_core.models  # noqa: F401 触发全模型注册到 Base.metadata
+    from platform_core.models.base import Base
+
+    path = tmp_path_factory.mktemp("schema_template") / "template.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{path}", poolclass=NullPool)
+
+    async def _build() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await engine.dispose()
+
+    asyncio.run(_build())
+    return path
+
+
+@pytest.fixture
+def db_engine(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator["AsyncEngine"]:
+    """每测试独立的异步引擎：默认 SQLite 文件库（复制会话级空库模板）；MYSQL_FIDELITY=1 时真实 MySQL 独立 schema"""
+    import asyncio
+    import shutil
 
     from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.pool import NullPool
@@ -376,18 +417,26 @@ def db_engine(tmp_path: Path) -> Iterator["AsyncEngine"]:
         asyncio.run(_run_schema_ddl(server_url, f"CREATE DATABASE `{mysql_schema}` CHARACTER SET utf8mb4"))
         url: str = f"{server_url}{mysql_schema}"
     else:
-        url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+        db_file = tmp_path / "test.db"
+        shutil.copyfile(request.getfixturevalue("_sqlite_schema_template"), db_file)
+        url = f"sqlite+aiosqlite:///{db_file}"
 
     engine_kw: dict = {"poolclass": NullPool}
     if url.startswith("sqlite"):
         engine_kw["connect_args"] = {"timeout": 30}
+    else:
+        # 与 platform_core.db 同口径：会话固定 UTC（审计 BUG-43）
+        from platform_core.timeutil import MYSQL_UTC_CONNECT_ARGS
+
+        engine_kw["connect_args"] = dict(MYSQL_UTC_CONNECT_ARGS)
     engine = create_async_engine(url, **engine_kw)
 
     async def _create_all() -> None:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-    asyncio.run(_create_all())
+    if mysql_schema is not None:  # SQLite 已从模板复制出全量表结构
+        asyncio.run(_create_all())
     # ADR-0007 D4 / GWT-06.1：record_audit_standalone 读 DEFAULT。注入本测试引擎，
     # 禁止 init_all() 连真库，也禁止 API 钩子回写请求 session。_reset_db_manager
     # 在本 fixture 之前 purge，teardown 再 purge。
@@ -465,6 +514,23 @@ def _reset_db_manager():
 
 
 @pytest.fixture(autouse=True)
+def _no_real_mail(tmp_path_factory):
+    """测试进程一律不发真信（决策 D25）：本机 config/local/.env 可能启用了真实 SMTP，
+    注册 / 到期巡检等用例会走发信路径、收件人是假地址。发件箱改到 pytest 临时目录，
+    不写仓库 runtime/。需要测 SMTP 分支的用例自己打开并桩掉 smtplib（test_mail_service）。"""
+    from config import settings
+
+    originals = {k: settings.get(k) for k in ("MAIL.ENABLED", "MAIL.OUTBOX_DIR")}
+    settings.set("MAIL.ENABLED", False)
+    settings.set("MAIL.OUTBOX_DIR", str(tmp_path_factory.getbasetemp() / "mail_outbox"))
+    try:
+        yield
+    finally:
+        for k, v in originals.items():
+            settings.set(k, v)
+
+
+@pytest.fixture(autouse=True)
 def _power_market_enabled_for_tests():
     """公开/订阅测默认打开总开关；关闭路径在用例里 settings.set False（FR-U11）。"""
     from config import settings
@@ -515,6 +581,56 @@ def _purge_quota_count_keys() -> None:
                 client.delete(*keys)
     finally:
         client.close()
+
+
+def iter_app_routes(app):
+    """展开应用的全部叶子路由 → [(完整路径, 路由对象)]
+
+    FastAPI ≥0.14x 的 include_router 不再把子路由摊平到 app.routes，而是挂
+    _IncludedRouter（前缀在 include_context.prefix、子路由在 original_router.routes）。
+    直接遍历 app.routes 会漏掉全部业务路由，让「清单 golden」「不存在某端点」一类断言
+    静默失效——统一经本函数递归展开（旧版本无 _IncludedRouter 时行为不变）。
+    """
+    out: list = []
+
+    def _walk(routes, prefix: str) -> None:
+        for route in routes:
+            original = getattr(route, "original_router", None)
+            if original is not None:
+                ctx = getattr(route, "include_context", None)
+                _walk(original.routes, prefix + (getattr(ctx, "prefix", "") or ""))
+                continue
+            path = getattr(route, "path", None)
+            if path is not None:
+                out.append((prefix + path, route))
+
+    _walk(app.routes, "")
+    return out
+
+
+# 出站守卫 DNS 桩：测试不出网。域名默认解析到文档公网地址 93.184.216.34；
+# 主机名显式带内网语义（localhost / *.internal / 含 127-0-0-1、10-、169-254 的
+# nip.io 式名字）解析到对应内网地址，便于 SSRF 用例表达「域名解析到内网」。
+_STUB_INTERNAL = (
+    ("localhost", "127.0.0.1"), (".internal", "169.254.169.254"),
+    ("127.0.0.1.", "127.0.0.1"), ("127-0-0-1", "127.0.0.1"),
+    ("169.254.169.254.", "169.254.169.254"), ("10.0.0.1.", "10.0.0.1"),
+)
+
+
+def _stub_resolve_host_ips(host: str) -> list[str]:
+    h = host.lower()
+    for marker, ip in _STUB_INTERNAL:
+        if h == marker or marker in h:
+            return [ip]
+    return ["93.184.216.34"]
+
+
+@pytest.fixture(autouse=True)
+def _stub_outbound_dns(monkeypatch):
+    import platform_core.outbound_guard as og
+
+    monkeypatch.setattr(og, "resolve_host_ips", _stub_resolve_host_ips)
 
 
 @pytest.fixture(autouse=True)

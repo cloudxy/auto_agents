@@ -260,8 +260,8 @@ class TestLlmChat:
 class TestExecuteTest:
     @pytest.mark.asyncio
     @patch("backend.services.ai_planner_service.SpiderService")
-    async def test_test_success_keeps_testing(self, spider_cls):
-        """试采通过：flow_generic 低优先级入队，保持 testing（可注册），不触发修复"""
+    async def test_test_success_moves_to_tested(self, spider_cls):
+        """试采通过：flow_generic 低优先级入队，进入 tested（可注册 / 重试 / 删除，审计 BUG-18），不触发修复"""
         svc = _service()
         plan = _plan(status="draft", generated_params=dict(_GENERATED),
                      plan_json={"flow": _FLOW, "test_history": []})
@@ -280,6 +280,7 @@ class TestExecuteTest:
         assert enqueue_kwargs["tenant_id"] == 1
         assert json.loads(enqueue_kwargs["params"])["urls"] == ["https://example.com/list"]
         assert svc.repo.update_status.await_args_list[0].args[1] == "testing"
+        assert svc.repo.update_status.await_args_list[-1].args[1] == "tested"
         history_updates = [c for c in svc.repo.update.await_args_list if "plan_json" in c.kwargs]
         assert history_updates[-1].kwargs["plan_json"]["test_history"][0]["passed"] is True
         svc._llm_chat.assert_not_awaited()  # 一次通过无需修复
@@ -817,8 +818,10 @@ def ai_client(admin_client, app):
     # T-38：task_actor_tenant_id 会查平台租户。admin_client 是租户 admin 且
     # tenant_id=1；若这里返回 1 会被当成「冒名平台租户」拒绝。mock 会话无
     # 平台租户行 → None，走普通用户 user.tenant_id。
+    # 决策 D21：规划守卫查「企业负责人是否待验证邮箱」（exists().scalar()）→ None 视为已验证
     session.execute = AsyncMock(return_value=MagicMock(
         scalar_one_or_none=MagicMock(return_value=None),
+        scalar=MagicMock(return_value=None),
     ))
     app.dependency_overrides[get_async_db] = lambda: session
     yield admin_client
@@ -982,3 +985,43 @@ class TestReconcileInterruptedPlans:
         monkeypatch.setattr(
             "backend.services.ai_planner_service.AsyncSession", lambda engine: _FakeSession())
         assert await reconcile_interrupted_plans() == 0
+
+
+
+class TestTestedStateAndRegisterParams:
+    """审计 BUG-18 / BUG-19 回归"""
+
+    @pytest.mark.asyncio
+    async def test_tested_plan_can_be_deleted(self):
+        svc = _service()
+        svc.repo.get_by_id = AsyncMock(return_value=_plan(status="tested"))
+        svc.repo.delete = AsyncMock(return_value=True)
+        out = await svc.delete_plan(1)
+        assert out["deleted"] is True
+
+    @pytest.mark.asyncio
+    async def test_tested_plan_can_be_retested(self):
+        svc = _service()
+        svc.repo.get_by_id = AsyncMock(return_value=_plan(status="tested", generated_params=dict(_GENERATED)))
+        svc.repo.claim_status = AsyncMock(return_value=True)
+        with patch("backend.services.ai_planner_service._spawn", MagicMock()), \
+             patch.object(type(svc), "get_plan", AsyncMock(return_value=MagicMock(status="testing"))):
+            out = await svc.launch_test(1)
+        assert out.status == "testing"
+        assert svc.repo.claim_status.await_args.args[1] == "testing"
+
+    @pytest.mark.asyncio
+    @patch("backend.services.ai_planner_service.SpiderService")
+    async def test_register_writes_generated_params_into_definition(self, spider_cls):
+        svc = _service()
+        svc.repo.get_by_id = AsyncMock(return_value=_plan(
+            status="tested", generated_params=dict(_GENERATED),
+            plan_json={"flow": _FLOW, "test_history": _HISTORY_PASS}, test_task_id=9))
+        definition = MagicMock()
+        definition.name = "ai_example_com_1"
+        spider_cls.return_value.create_definition = AsyncMock(return_value=definition)
+        svc.get_plan = AsyncMock(return_value=MagicMock(status="registered"))
+        await svc.register(1)
+        kwargs = spider_cls.return_value.create_definition.await_args.kwargs
+        assert kwargs["source"] == "ai_generated"
+        assert kwargs["params"]["urls"] == ["https://example.com/list"]  # 原先不传 params

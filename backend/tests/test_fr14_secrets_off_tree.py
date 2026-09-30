@@ -39,9 +39,11 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
 def _seed_asset(db_session, name: str, file_path: str) -> None:
     async def _go():
         async with db_session() as s:
+            # 已上架 + 许可合规：租户详情走公开货架闸（审计 B4-4），未上架资产对租户 404
             s.add(CapabilityAsset(
                 asset_type="skill", name=name, status="stable",
                 category="test", file_path=file_path,
+                listing_state="listed", license="MIT", description="d",
             ))
             await s.commit()
 
@@ -134,10 +136,12 @@ def test_capability_detail_tenant_omits_local_absolute_path(
 def test_capability_detail_keeps_relative_path_for_tenant(
     db_client, viewer_client, db_engine, db_session,
 ):
+    """GWT-14.2「相对库路径可保留」为可选；审计 B4-4 后租户详情只给公开货架投影，
+    库路径（无论相对绝对）属治理字段不再下发——比原口径更严，仍满足 14.2"""
     _seed_asset(db_session, ASSET_REL, REL_PATH)
     resp = db_client.get(f"/api/v1/capabilities/skill/{ASSET_REL}")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["data"]["file_path"] == REL_PATH
+    assert "file_path" not in resp.json()["data"]
 
 
 def test_capability_detail_superadmin_abs_path_not_emitted_to_tenant(

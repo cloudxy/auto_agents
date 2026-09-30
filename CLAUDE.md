@@ -30,6 +30,7 @@ auto_agents/
 ├── capability-library/   # 产品能力目录；plugins/ → .agents/plugins
 ├── .agents/              # 开发协作中枢（skills/ + plugins/ 指针农场）
 ├── .claude/              # 规则 / hooks / agents；skills、plugins 为适配器
+├── .codex/               # Codex 项目级（同 .claude/，只在本项目生效）：skills/、agents/ 为链到 .agents/plugins 的适配器
 └── .grok/                # Grok 项目配置；plugins/ 为启用子集
 ```
 
@@ -99,7 +100,7 @@ uv run python run.py start frontend        # admin:9112 / official:9113
 | `/new-spider` | 创建 Scrapy 爬虫 |
 | `/new-model` | 创建 ORM + Pydantic 数据模型 |
 | `/db-design` | 数据库设计流水线（DBML → 迁移） |
-| `/check-arch` | 架构合规检查（R1–R13 + B1–B3） |
+| `/check-arch` | 架构合规检查（R1–R13 + B1–B4） |
 | `/verify` | 交付自检 |
 | `/deploy` `/cicd` | Docker / GitHub Actions |
 

@@ -3,6 +3,7 @@ import { Modal, Radio, Space, Typography, message } from 'antd'
 
 import { patchListing, type AssetRow } from '../../services/capabilities'
 import { apiErrorMessage } from '../../utils/errorMessage'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 import {
   LISTING_OPTIONS, NEED_PLATFORM_MARKET, thirdPartyConfirm,
 } from './marketCopy'
@@ -62,7 +63,7 @@ const ListingControls: React.FC<Props> = ({
       />
       </div>
       {!isPlatformAdmin ? <Text type="secondary">{NEED_PLATFORM_MARKET}</Text> : null}
-      {row.listed_at ? <Text type="secondary">最近上架 {row.listed_at}</Text> : null}
+      {row.listed_at ? <Text type="secondary">最近上架 {formatDateTime(row.listed_at)}</Text> : null}
       <Modal
         open={Boolean(pending)}
         title={thirdPartyConfirm(row.name)}

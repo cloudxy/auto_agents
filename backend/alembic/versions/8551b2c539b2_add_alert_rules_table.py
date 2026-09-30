@@ -40,5 +40,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_index(op.f('ix_alert_rules_id'), table_name='alert_rules')
     op.drop_table('alert_rules')

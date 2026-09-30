@@ -35,6 +35,12 @@ def _client(handler) -> "httpx.AsyncClient":
     return httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False)
 
 
+@pytest.fixture(autouse=True)
+def _allow_example_host(monkeypatch):
+    """用例以 example.com 模拟来源：在 GitHub 默认白名单上追加该主机（不放宽内网判定）"""
+    monkeypatch.setattr(svc, "_allowed_hosts", lambda: svc.DEFAULT_IMPORT_HOSTS + ("example.com",))
+
+
 @pytest.fixture
 def library_root(tmp_path):
     from config import settings
@@ -159,7 +165,7 @@ async def test_name_conflict_returns_422(db_session, library_root):
         await _run(db_session, "https://example.com/skill-2.zip", _client(handler))
 
 
-def test_check_update_uses_httpx_trust_env_false(db_client, admin_client, db_engine, db_session, library_root, monkeypatch):
+def test_check_update_uses_httpx_trust_env_false(db_client, platform_admin_client, db_engine, db_session, library_root, monkeypatch):
     """check-update 拉取必须走 httpx 且 trust_env=False（总方案 3.2-A-8）"""
     import asyncio
     import httpx
@@ -168,13 +174,15 @@ def test_check_update_uses_httpx_trust_env_false(db_client, admin_client, db_eng
 
     real_client = httpx.AsyncClient
 
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=SKILL_MD + "\nupdated", request=request)
+
     class _SpyClient(real_client):
         def __init__(self, *a, **kw):
             captured["trust_env"] = kw.get("trust_env", "MISSING")
+            # 原先 handler 定义了却没接上：check-update 真实出网，网络慢 / 断网时偶发失败
+            kw["transport"] = httpx.MockTransport(handler)
             super().__init__(*a, **kw)
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text=SKILL_MD + "\nupdated", request=request)
 
     monkeypatch.setattr(svc.httpx, "AsyncClient", _SpyClient)
 
@@ -200,3 +208,68 @@ def test_check_update_uses_httpx_trust_env_false(db_client, admin_client, db_eng
     data = resp.json()["data"]
     assert "has_update" in data
     assert captured["trust_env"] is False
+
+
+# ---------------------------------------------------------------------------
+# SSRF（审计 BUG-22 / P0-3）：主机白名单 + 逐跳复检，拒绝路径零请求
+# ---------------------------------------------------------------------------
+
+
+def _recording_client(routes: dict[str, "httpx.Response"], seen: list[str]):
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        builder = routes.get(str(request.url))
+        if builder is None:
+            return httpx.Response(404, request=request)
+        return builder(request)
+
+    return _client(handler)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", [
+    "https://evil.test/skill.zip",                 # 非白名单主机
+    "http://github.com/o/r/archive/main.zip",      # 非 https
+    "https://127.0.0.1/skill.zip",                 # 字面量内网
+    "https://169.254.169.254/latest/meta-data",    # 云元数据
+])
+async def test_import_rejects_disallowed_targets_without_request(db_session, library_root, url):
+    seen: list[str] = []
+    with pytest.raises(ValidationException):
+        await _run(db_session, url, _recording_client({}, seen))
+    assert seen == []  # 零请求
+
+
+@pytest.mark.asyncio
+async def test_import_redirect_to_internal_blocked(db_session, library_root):
+    """白名单主机 302 跳到内网：第二跳复检拒绝，内网地址零请求"""
+    import httpx
+
+    seen: list[str] = []
+    routes = {
+        "https://github.com/o/r/archive/main.zip":
+            lambda req: httpx.Response(302, headers={"location": "http://10.0.0.5/x.zip"}, request=req),
+    }
+    with pytest.raises(ValidationException):
+        await _run(db_session, "https://github.com/o/r/archive/main.zip", _recording_client(routes, seen))
+    assert seen == ["https://github.com/o/r/archive/main.zip"]
+
+
+@pytest.mark.asyncio
+async def test_import_follows_allowed_redirect(db_session, library_root):
+    """github.com → codeload.github.com 的正常跳转可跟随（白名单内逐跳放行）"""
+    import httpx
+
+    seen: list[str] = []
+    zip_body = _zip_bytes({"imported-skill/SKILL.md": SKILL_MD})
+    routes = {
+        "https://github.com/o/r/archive/main.zip": lambda req: httpx.Response(
+            302, headers={"location": "https://codeload.github.com/o/r/zip/main"}, request=req),
+        "https://codeload.github.com/o/r/zip/main": lambda req: httpx.Response(
+            200, content=zip_body, request=req),
+    }
+    result = await _run(db_session, "https://github.com/o/r/archive/main.zip", _recording_client(routes, seen))
+    assert result["imported"] is True
+    assert seen == ["https://github.com/o/r/archive/main.zip", "https://codeload.github.com/o/r/zip/main"]

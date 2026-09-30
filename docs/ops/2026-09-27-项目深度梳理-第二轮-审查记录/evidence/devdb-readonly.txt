@@ -1,0 +1,56 @@
+# dev DB = auto_agents (read-only SELECTs, manager 2026-09-27)
+$ alembic_version
+050
+$ table row counts (top 30, information_schema estimates)
+TABLE_NAME	TABLE_ROWS
+operation_logs	824
+product_events	292
+capability_assets	207
+skill_jobs	28
+permissions	23
+menus	22
+capability_commands	20
+capability_experts	19
+capability_plugins	18
+llm_provider_models	9
+users	7
+ai_plans	6
+spider_definitions	6
+departments	5
+tenants	5
+llm_providers	3
+capability_installs	2
+relay_tokens	2
+roles	2
+system_configs	2
+i18n_locales	2
+plans	2
+outbound_keys	2
+spider_tasks	1
+skills	1
+alembic_version	1
+orders	1
+workflow_transitions	0
+internal_fixture_tenants	0
+asset_import_batches	0
+$ product_events by name
+event_name	n	fixture	first	last
+market_list_viewed	87	0	2026-09-14 12:53:52	2026-09-16 23:27:32
+official_page_viewed	79	0	2026-09-14 10:45:41	2026-09-27 22:55:36
+sync_completed	51	0	2026-09-15 16:21:00	2026-09-27 18:23:53
+official_cta_clicked	22	0	2026-09-14 10:45:47	2026-09-16 23:25:15
+login_succeeded	13	0	2026-09-14 09:41:34	2026-09-27 22:57:20
+market_detail_viewed	13	0	2026-09-14 17:56:23	2026-09-16 23:27:44
+duty_entry_opened	10	0	2026-09-14 10:47:15	2026-09-27 22:58:19
+detail_opened	8	0	2026-09-16 15:28:53	2026-09-16 23:27:44
+market_list_paged	3	0	2026-09-14 17:58:22	2026-09-14 17:58:31
+market_subscribe_succeeded	2	0	2026-09-14 17:56:52	2026-09-16 23:27:53
+market_uninstalled	2	0	2026-09-16 15:28:43	2026-09-16 23:28:37
+outbound_key_issued	1	0	2026-09-14 09:41:34	2026-09-14 09:41:34
+relay_token_call_succeeded	1	0	2026-09-14 09:41:34	2026-09-14 09:41:34
+$ tenants / users / tasks
+tenants	users	tasks	results	assets	orders
+5	7	1	1	207	1
+$ spider_tasks by status
+status	count(*)
+completed	1

@@ -21,6 +21,17 @@ from platform_core.queues import LOGIN_FAIL_PREFIX, REGISTER_ATTEMPT_PREFIX
 from platform_core.redis_async import get_async_redis
 from backend.utils.auth import get_password_hash
 
+
+@pytest.fixture(autouse=True)
+def _personal_register_enabled():
+    """决策 D1：个人注册默认关闭；本文件验证开启时的行为，显式打开开关"""
+    from config import settings
+
+    original = settings.get("AUTH.PERSONAL_REGISTER_ENABLED")
+    settings.set("AUTH.PERSONAL_REGISTER_ENABLED", True)
+    yield
+    settings.set("AUTH.PERSONAL_REGISTER_ENABLED", original)
+
 STATE: dict = {}
 
 

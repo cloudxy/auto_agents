@@ -11,13 +11,15 @@ import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 
 import {
-  createMember, deleteMember, listMemberAudit, listMembers, patchMember, resetMemberPassword,
+  createMember, deleteMember, listMemberAudit, listMembers, patchMember, resetMemberPassword, transferOwnership,
   type MemberAuditRow, type MemberRow,
 } from '../services/members'
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
 import { isNotFoundError } from '../utils/httpError'
 import { useAuthStore } from '../store/useAuthStore'
 import NotFound from './NotFound'
+import { formatDateTime } from '@auto-agents/frontend-shared'
+import { tenantRoleLabel } from '../constants/roles'
 
 const { Text } = Typography
 
@@ -47,6 +49,8 @@ const MEMBER_WRITER_ROLES = ['owner', 'admin']
 
 const Members: React.FC = () => {
   const user = useAuthStore((s) => s.user)
+  const logout = useAuthStore((s) => s.logout)
+  const isOwner = user?.tenant_role === 'owner'
   const canManageMembers = MEMBER_WRITER_ROLES.includes(user?.tenant_role || '')
   const [rows, setRows] = useState<MemberRow[]>([])
   const [audit, setAudit] = useState<MemberAuditRow[]>([])
@@ -55,6 +59,9 @@ const Members: React.FC = () => {
   const [form] = Form.useForm()
   const [resetTarget, setResetTarget] = useState<MemberRow | null>(null)
   const [resetForm] = Form.useForm()
+  const [transferTarget, setTransferTarget] = useState<MemberRow | null>(null)
+  const [transferring, setTransferring] = useState(false)
+  const [transferForm] = Form.useForm()
   const [notFound, setNotFound] = useState(false)
 
   const load = useCallback(async () => {
@@ -126,6 +133,24 @@ const Members: React.FC = () => {
     }
   }
 
+  // 决策 D23：转让负责人——本人降为管理员、会话失效，成功后登出重新登录
+  const onTransfer = async () => {
+    if (!transferTarget) return
+    try {
+      const values = await transferForm.validateFields()
+      setTransferring(true)
+      await transferOwnership(transferTarget.id, values.password)
+      message.success(`负责人已转让给 ${transferTarget.username}，你已成为管理员，请重新登录`)
+      setTransferTarget(null)
+      logout()
+    } catch (e) {
+      if (isFormValidateError(e)) return
+      message.error(apiErrorMessage(e, '转让失败'))
+    } finally {
+      setTransferring(false)
+    }
+  }
+
   const onDelete = async (row: MemberRow) => {
     try {
       await deleteMember(row.id)
@@ -137,18 +162,19 @@ const Members: React.FC = () => {
   }
 
   const columns: ColumnsType<MemberRow> = [
-    { title: '用户名', dataIndex: 'username', render: (v: string) => <Text strong>{v}</Text> },
-    { title: '邮箱', dataIndex: 'email', ellipsis: true },
+    // 定宽：邮箱列 ellipsis 会让表格走固定布局，不定宽的列在窄屏被挤成 0 宽（批次 5）
+    { title: '用户名', dataIndex: 'username', width: 140, render: (v: string) => <Text strong>{v}</Text> },
+    { title: '邮箱', dataIndex: 'email', width: 220, ellipsis: true },
     {
       title: '租户角色', dataIndex: 'tenant_role', width: 140,
       render: (v: string, row: MemberRow) => (
         row.tenant_role === 'owner' || !canManageMembers
-          ? <Tag color={ROLE_COLORS[v]}>{v}</Tag>
+          ? <Tag color={ROLE_COLORS[v]}>{tenantRoleLabel(v)}</Tag>
           : (
             <Select
               size="small" value={v} style={{ width: 110 }}
               onChange={(role) => onRoleChange(row, role)}
-              options={['admin', 'operator', 'viewer'].map((r) => ({ value: r, label: r }))}
+              options={['admin', 'operator', 'viewer'].map((r) => ({ value: r, label: tenantRoleLabel(r) }))}
             />
           )
       ),
@@ -162,13 +188,18 @@ const Members: React.FC = () => {
       ),
     },
     {
-      title: '操作', width: 160,
+      title: '操作', width: 240,
       render: (_: unknown, row: MemberRow) => {
         if (row.tenant_role === 'owner') return <Text type="secondary">所有者</Text>
         if (!canManageMembers) return <Text type="secondary">—</Text>
         return (
           <Space size={0}>
             <Button size="small" type="link" onClick={() => { setResetTarget(row); resetForm.resetFields() }}>重置密码</Button>
+            {isOwner && row.is_active && (
+              <Button size="small" type="link" onClick={() => { setTransferTarget(row); transferForm.resetFields() }}>
+                转让负责人
+              </Button>
+            )}
             <Popconfirm
               title={`删除成员「${row.username}」`}
               description="账号将被移除且不可恢复（登录即时失效），收件箱随之清空；操作审计保留。"
@@ -188,7 +219,7 @@ const Members: React.FC = () => {
   return (
     <div>
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
-             title="成员管理是租户内部事务（owner/admin 可操作）；平台级用户管理请用「用户管理」页（平台超管）" />
+             title="成员管理是企业内部事务，由企业负责人和管理员操作；平台账号请到「用户管理」页（平台超管）" />
       <Space style={{ marginBottom: 12 }}>
         {canManageMembers && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>添加成员</Button>
@@ -217,9 +248,9 @@ const Members: React.FC = () => {
           </Form.Item>
           <Form.Item name="tenant_role" label="租户角色" initialValue="viewer">
             <Select options={[
-              { value: 'admin', label: 'admin（可管理成员）' },
-              { value: 'operator', label: 'operator（可操作任务）' },
-              { value: 'viewer', label: 'viewer（只读）' },
+              { value: 'admin', label: '管理员（可管理成员）' },
+              { value: 'operator', label: '操作员（可操作任务）' },
+              { value: 'viewer', label: '只读成员' },
             ]} />
           </Form.Item>
         </Form>
@@ -233,6 +264,17 @@ const Members: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+      <Modal title={`转让负责人给 ${transferTarget?.username ?? ''}`} open={!!transferTarget}
+             onOk={onTransfer} onCancel={() => setTransferTarget(null)}
+             okText="确认转让" okButtonProps={{ danger: true, loading: transferring }} cancelText="取消">
+        <Alert type="warning" showIcon style={{ marginBottom: 16 }}
+               title="转让后对方成为企业负责人（套餐、账单、成员管理都归对方），你将降为管理员并需要重新登录；只有新负责人能再转回来。" />
+        <Form form={transferForm} layout="vertical">
+          <Form.Item name="password" label="你的登录密码" rules={[{ required: true, message: '请输入登录密码确认' }]}>
+            <Input.Password autoComplete="current-password" />
+          </Form.Item>
+        </Form>
+      </Modal>
       <Card title="成员操作审计（本租户，近 50 条）" style={{ marginTop: 16 }}>
         <Table<MemberAuditRow>
           rowKey="id"
@@ -241,7 +283,7 @@ const Members: React.FC = () => {
           dataSource={audit}
           columns={[
             { title: '时间', dataIndex: 'created_at', width: 180,
-              render: (v: string | null) => (v ? new Date(v).toLocaleString('zh-CN') : '-') },
+              render: (v: string | null) => formatDateTime(v) },
             { title: '操作人', dataIndex: 'actor_name', width: 120 },
             { title: '动作', dataIndex: 'action', width: 150, render: (v: string) => <Tag>{v}</Tag> },
             { title: '对象', dataIndex: 'target', ellipsis: true },

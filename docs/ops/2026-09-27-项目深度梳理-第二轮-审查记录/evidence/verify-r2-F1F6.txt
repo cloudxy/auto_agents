@@ -1,0 +1,44 @@
+# verify-r2-F1F6（manager，2026-09-27，只读）
+$ SELECT slug,name,price_cents,is_public,quota_json FROM plans
+slug	name	price_cents	is_public	quota
+free	免费档	0	1	{"task_concurrency":5,"result_storage":10000,"llm_tokens_month":200000}
+pro	专业档	29900	1	{"task_concurrency":50,"result_storage":200000,"llm_tokens_month":5000000}
+enterprise	企业档	99900	1	{"task_concurrency":50,"result_storage":2000000,"llm_tokens_month":20000000}
+
+$ grep LITELLM.ENABLED / SHADOW readers (backend non-test)
+(eval):1: no matches found: --include=*.py
+(end)
+$ grep DATA_PLANE config/
+config/default/llm.yml:14:  DATA_PLANE: "litellm"
+$ grep APP_ROLE
+(eval):1: no matches found: --include=*.py
+
+$ llm_token_usage by provider since 2026-09-01
+ERROR 1054 (42S22) at line 1: Unknown column 'provider' in 'field list'
+
+$ skills vs capability_assets tier/status mismatch
+name	s_tier	a_tier	s_status	a_status
+example-pdf-extractor	NULL	NULL	experimental	experimental
+
+$ capability_assets listing by origin/license (listed only)
+asset_type	listing_state	n
+skill	listed	150
+agent	listed	19
+command	listed	20
+plugin	listed	15
+plugin	unlisted	3
+
+$ power_market flag impl
+def is_power_market_enabled() -> bool:
+    logger.info("power_market.flag.read")
+    return bool(settings.get("POWER_MARKET.ENABLED", POWER_MARKET_ENABLED))
+
+
+def set_power_market_enabled(enabled: bool) -> bool:
+    logger.info(f"power_market.flag.write | enabled={enabled}")
+    flag = bool(enabled)
+    settings.set("POWER_MARKET.ENABLED", flag)
+    return flag
+
+
+(eval):1: no matches found: --include=*.py

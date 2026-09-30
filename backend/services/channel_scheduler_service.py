@@ -30,6 +30,7 @@ from backend.services.newapi_api import (
 from backend.services.notify_service import NotifyService
 from config import settings
 from platform_core.logger import get_logger
+from platform_core.timeutil import utc_iso, utcnow
 from platform_core.queues import distributed_lock
 
 logger = get_logger("api")
@@ -290,7 +291,7 @@ class ChannelSchedulerService:
         await write_state_json(
             self._redis,
             {
-                "disabled_at": datetime.now().isoformat(timespec="seconds"),
+                "disabled_at": utc_iso(utcnow().replace(microsecond=0)),
                 "cooldown_until": now + int(cfg["cooldown_seconds"]),
                 "last_usage": spend,
             },

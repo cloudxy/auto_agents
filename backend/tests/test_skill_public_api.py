@@ -51,27 +51,17 @@ def library_root(tmp_path):
     settings.set("SKILLS.PUBLIC_API.RATE_LIMIT_PER_MIN", original_limit)
 
 
-class _RateLimitRedis:
-    """限流桩：incr+expire 原子计数"""
 
-    def __init__(self):
-        self.counts: dict[str, int] = {}
-        self.ttls: dict[str, int] = {}
-
-    async def incr(self, key):
-        self.counts[key] = self.counts.get(key, 0) + 1
-        return self.counts[key]
-
-    async def expire(self, key, ttl):
-        self.ttls[key] = ttl
-        return True
 
 
 @pytest.fixture
 def rate_redis(monkeypatch):
-    fake = _RateLimitRedis()
+    """限流桩（共享 stubs.RateLimitFakeRedis）"""
+    from stubs import RateLimitFakeRedis
 
-    async def _fake(key: str = "DEFAULT"):
+    fake = RateLimitFakeRedis()
+
+    def _fake(key: str = "DEFAULT"):
         return fake
 
     import backend.app.api.v1.public_skills as mod
@@ -135,6 +125,17 @@ def test_public_rate_limit_429(db_client, db_engine, db_session, library_root, r
     """超 SKILLS.PUBLIC_API.RATE_LIMIT_PER_MIN 返回 429（桩计满 3 次）"""
     _seed_library(db_session, library_root)
     codes = [db_client.get("/api/v1/public/skills").status_code for _ in range(5)]
+    assert codes[:3] == [200, 200, 200]
+    assert codes[3] == 429 and codes[4] == 429
+
+
+def test_forged_xff_does_not_bypass_rate_limit(db_client, db_engine, db_session, library_root, rate_redis):
+    """审计 BUG-34：每次换一个伪造的 X-Forwarded-For 仍按连接地址计数，第 4 次起 429"""
+    _seed_library(db_session, library_root)
+    codes = [
+        db_client.get("/api/v1/public/skills", headers={"X-Forwarded-For": f"198.51.100.{i}"}).status_code
+        for i in range(5)
+    ]
     assert codes[:3] == [200, 200, 200]
     assert codes[3] == 429 and codes[4] == 429
 

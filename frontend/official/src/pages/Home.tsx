@@ -205,7 +205,7 @@ const CtaBand: React.FC = () => (
       </FadeIn>
       <FadeIn delay={0.1}>
         <p style={{ margin: '16px auto 0', maxWidth: 560, fontSize: 16, lineHeight: 1.8, color: 'rgba(255,255,255,0.66)' }}>
-          免费注册后即可粘贴链接、提交任务并查看结果。专业档与企业档尚未开通购买。
+          免费注册后即可粘贴链接、提交任务并查看结果；需要更多并发和额度时，可在定价页直接购买专业档或企业档。
         </p>
       </FadeIn>
       <FadeIn delay={0.18}>

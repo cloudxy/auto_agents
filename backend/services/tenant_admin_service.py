@@ -18,11 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from platform_core.exceptions import BusinessException, NotFoundException, ValidationException
 from platform_core.logger import get_logger
 from platform_core.models.tenant import Tenant
+from platform_core.timeutil import to_utc_naive, utc_iso
 
 logger = get_logger("service.tenant_admin")
 
 # 平台租户 slug（024 种子；user_service 同口径）——三名保护（FR-94）的守卫键
 PLATFORM_TENANT_SLUG = "platform"
+# default 租户承接个人自助注册账号（审计 R1-3 / P0-11a）：停用会一次锁死所有个人账号，
+# 在 D1（个人注册去留）答复前加停用保护；改名 / 配额 / 到期编辑不受限
+DEFAULT_TENANT_SLUG = "default"
 
 # 企业改名冲突域保留名（GWT-95.1）：平台默认企业名 + 站点名（spec §0.4 命名收口）
 RESERVED_TENANT_NAMES = ("平台租户", "AutoAgents")
@@ -66,8 +70,8 @@ class TenantAdminService:
             {
                 "id": r.id, "slug": r.slug, "name": r.name, "status": r.status,
                 "quota": r.quota,
-                "expires_at": r.expires_at.isoformat() if r.expires_at else None,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "expires_at": utc_iso(r.expires_at),
+                "created_at": utc_iso(r.created_at),
                 "is_platform_default": r.slug == PLATFORM_TENANT_SLUG,
             }
             for r in rows
@@ -114,7 +118,11 @@ class TenantAdminService:
             if ("status" in body and str(body["status"]) != row.status
                     and str(body["status"]) in ("active", "expired", "disabled")):
                 raise BusinessException("平台租户不可停用。")
-        elif "name" in body:  # 常规企业改名（T-27 / GWT-95.1；同名提交=no-op 放行）
+        elif (row.slug == DEFAULT_TENANT_SLUG and "status" in body
+              and str(body["status"]) in ("expired", "disabled") and str(body["status"]) != row.status):
+            logger.warning(f"拒绝停用 default 租户 | tenant={tenant_id}")
+            raise BusinessException("默认租户承载个人注册账号，不可停用。")
+        if row.slug != PLATFORM_TENANT_SLUG and "name" in body:  # 常规企业改名（T-27 / GWT-95.1；同名提交=no-op 放行）
             new_name = str(body.get("name") or "").strip()
             if new_name != row.name:
                 await _assert_name_available(self.session, row, new_name)
@@ -126,7 +134,8 @@ class TenantAdminService:
         if "expires_at" in body:
             raw = body.get("expires_at")
             if raw:
-                row.expires_at = datetime.fromisoformat(str(raw).replace("Z", ""))
+                # 带偏移的换算成 UTC naive（审计 BUG-43：原先只剥 Z，+08:00 会按墙钟落库）
+                row.expires_at = to_utc_naive(datetime.fromisoformat(str(raw).replace("Z", "+00:00")))
             else:
                 row.expires_at = None
                 row.status = "active"  # 清除到期时间 = 续期恢复

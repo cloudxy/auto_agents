@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import quote_plus
 
@@ -21,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from backend.services.payment_gateways.secrets_schema import AlipaySecrets
 from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
+from platform_core.timeutil import business_now
 
 logger = get_logger("service.payment.alipay")
 
@@ -117,7 +117,8 @@ class AlipayGateway:
             "method": _METHOD,
             "charset": "utf-8",
             "sign_type": "RSA2",
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            # 支付宝网关要求 GMT+8 的请求时刻，显式按北京时间，不依赖宿主时区
+            "timestamp": business_now().strftime("%Y-%m-%d %H:%M:%S"),
             "version": "1.0",
             "notify_url": notify_url,
             "biz_content": json.dumps(biz_content, ensure_ascii=False, separators=(",", ":")),

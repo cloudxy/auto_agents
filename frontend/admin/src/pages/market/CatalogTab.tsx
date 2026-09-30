@@ -4,7 +4,7 @@
  * 工具栏「清理失源资产」（仅超管）→ PruneConfirmModal 二段式确认。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Empty, Input, Select, Space, Table, Tag, Typography, message } from 'antd'
 import { DeleteOutlined, ReloadOutlined, StarFilled, StarOutlined } from '@ant-design/icons'
 
 import {
@@ -17,7 +17,7 @@ import ExamplesModal from './ExamplesModal'
 import ListingControls from './ListingControls'
 import PruneConfirmModal from './PruneConfirmModal'
 import {
-  CATALOG_EMPTY, GOVERNANCE_PAGINATION, LISTING_OPTIONS, catalogFocusCopy, loadFail,
+  CATALOG_EMPTY, GOVERNANCE_PAGE_SIZE, GOVERNANCE_PAGINATION, LISTING_OPTIONS, catalogFocusCopy, loadFail,
 } from './marketCopy'
 
 const { Text } = Typography
@@ -57,20 +57,26 @@ const CatalogTab: React.FC<Props> = ({
   const [examplesRow, setExamplesRow] = useState<AssetRow | null>(null)
   const [pruneOpen, setPruneOpen] = useState(false)
   const [detailRow, setDetailRow] = useState<AssetRow | null>(null)
+  // 服务端分页（审计 BUG-31）
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [keyword, setKeyword] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const data = await listAssets(type, listing)
+      const data = await listAssets(type, listing, { page, pageSize: GOVERNANCE_PAGE_SIZE, q: keyword || undefined })
       setRows(data.items)
+      setTotal(typeof data.total === 'number' ? data.total : data.items.length)
     } catch (e) {
       setRows([])
+      setTotal(0)
       setError(apiErrorMessage(e, loadFail('目录')))
     } finally {
       setLoading(false)
     }
-  }, [type, listing])
+  }, [type, listing, page, keyword])
 
   // refreshKey（T-36 导入完成计数）为显式重载触发器，不参与 load 逻辑
   useEffect(() => { load() }, [load, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -99,7 +105,7 @@ const CatalogTab: React.FC<Props> = ({
     }
   }
 
-  const filtered = Boolean(type || listing)
+  const filtered = Boolean(type || listing || keyword)
   const empty = !loading && !error && rows.length === 0
   const focus = (focusName || '').trim()
 
@@ -111,10 +117,12 @@ const CatalogTab: React.FC<Props> = ({
         <Alert type="error" showIcon title={error} action={<Button onClick={load}>重试</Button>} />
       ) : null}
       <Space style={{ marginBottom: 12 }} wrap>
+        <Input.Search allowClear placeholder="按名称 / 标题搜索" style={{ width: 220 }}
+                      aria-label="搜索目录" onSearch={(v) => { setPage(1); setKeyword(v.trim()) }} />
         <Select allowClear placeholder="类型" style={{ width: 120 }} value={type}
-                options={TYPE_OPTIONS} onChange={(v) => setType(v)} />
+                options={TYPE_OPTIONS} onChange={(v) => { setPage(1); setType(v) }} />
         <Select allowClear placeholder="上架态" style={{ width: 120 }} value={listing}
-                options={[...LISTING_OPTIONS]} onChange={(v) => setListing(v)} />
+                options={[...LISTING_OPTIONS]} onChange={(v) => { setPage(1); setListing(v) }} />
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
         {isPlatformAdmin ? (
           <Button danger icon={<DeleteOutlined />} aria-label="清理失源资产"
@@ -127,7 +135,8 @@ const CatalogTab: React.FC<Props> = ({
         <Empty description={filtered ? '没有符合条件的目录项' : CATALOG_EMPTY} />
       ) : (
         <Table rowKey="id" size="middle" loading={loading} dataSource={rows}
-               pagination={GOVERNANCE_PAGINATION}
+               scroll={{ x: 760 }}
+               pagination={{ ...GOVERNANCE_PAGINATION, current: page, total, onChange: (p) => setPage(p) }}
                rowClassName={(r) => (focus && matchesFocus(r, focus) ? 'market-catalog-focus' : '')}
                columns={[
                  {

@@ -5,10 +5,11 @@ GOLDEN = Path(__file__).with_name("openapi_routes_golden.txt")
 
 
 def _collect(app) -> list[str]:
+    from conftest import iter_app_routes
+
     rows: list[str] = []
-    for route in app.routes:
+    for path, route in iter_app_routes(app):
         methods = getattr(route, "methods", None)
-        path = getattr(route, "path", None)
         if not methods or not path:
             continue
         for method in sorted(methods):

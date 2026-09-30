@@ -1,0 +1,366 @@
+$ uv run pytest -q --tb=short -p no:cacheprovider --durations=20 --cov=backend --cov=platform_core --cov-report=term backend/tests
+2026年 9月27日 星期日 18时21分20秒 CST
+........................................................................ [  3%]
+.............sss........................................................ [  7%]
+........................................................................ [ 10%]
+........................................................................ [ 14%]
+........................................................................ [ 18%]
+........................................................................ [ 21%]
+................................................................ssss.... [ 25%]
+..................................s..................................... [ 28%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 39%]
+........................................................................ [ 43%]
+........................................................................ [ 46%]
+........................................................................ [ 50%]
+..................sss..............sssssssssssssssssssssss.............. [ 54%]
+.........................s.............................................. [ 57%]
+........................................................................ [ 61%]
+.....................................s.................................. [ 64%]
+........................................................................ [ 68%]
+........................................................................ [ 72%]
+........................................................................ [ 75%]
+........................................................................ [ 79%]
+........................................................................ [ 83%]
+.....................................s.........s........................ [ 86%]
+....................s................................................... [ 90%]
+........................................................................ [ 93%]
+........................s........................................s...... [ 97%]
+...................................................                      [100%]
+=============================== warnings summary ===============================
+backend/tests/test_e5_socket_guard.py::test_pytest_socket_plugin_available
+  /Users/xuyun/auto_agents/.venv/lib/python3.13/site-packages/pytest_socket/__init__.py:138: UserWarning: A test tried to use socket.socket.
+    raise SocketBlockedError()
+
+backend/tests/test_llm_provider.py::TestActivateExclusive::test_single_statement_case_update
+  /Users/xuyun/auto_agents/backend/tests/test_llm_provider.py:285: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    await repo.activate_exclusive(5)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+backend/tests/test_llm_provider.py::TestConnectivity::test_ok
+  /Users/xuyun/auto_agents/backend/tests/test_llm_provider.py:502: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    result = await svc.test_connectivity(1)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+backend/tests/test_llm_provider.py::TestConnectivity::test_http_error_reported
+  /Users/xuyun/auto_agents/backend/tests/test_llm_provider.py:526: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    result = await svc.test_connectivity(1)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+backend/tests/test_llm_provider.py::TestPrivateUrlSwitch::test_switch_on_rejects_private_update
+  /Users/xuyun/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/unittest/mock.py:2193: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    setattr(_type, entry, MagicProxy(entry, self))
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+backend/tests/test_scrapy_site_config.py::test_site_download_delay_applied_via_from_crawler
+backend/tests/test_scrapy_site_config.py::test_site_without_config_keeps_global_delay
+backend/tests/test_scrapy_site_config.py::test_login_required_site_logs_warning_but_starts
+  /Users/xuyun/auto_agents/.venv/lib/python3.13/site-packages/scrapy_redis/connection.py:67: DeprecationWarning: Call to '__init__' function with deprecated usage of input argument/s 'retry_on_timeout'. (TimeoutError is included by default.) -- Deprecated since version 6.0.0.
+    return get_redis(**params)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+_______________ coverage: platform darwin, python 3.13.3-final-0 _______________
+
+Name                                                             Stmts   Miss  Cover
+------------------------------------------------------------------------------------
+backend/alembic/versions/043_t35_asset_import_batches_items.py      17      8    53%
+backend/app/__init__.py                                            178    129    28%
+backend/app/api/__init__.py                                          7      0   100%
+backend/app/api/_helpers.py                                         21      0   100%
+backend/app/api/deps.py                                             82      4    95%
+backend/app/api/v1/__init__.py                                      32      0   100%
+backend/app/api/v1/admin.py                                        130     12    91%
+backend/app/api/v1/ai.py                                            53      1    98%
+backend/app/api/v1/api_keys.py                                      31     10    68%
+backend/app/api/v1/auth.py                                         102     32    69%
+backend/app/api/v1/billing.py                                       72      8    89%
+backend/app/api/v1/capabilities.py                                 134     12    91%
+backend/app/api/v1/capabilities_gov.py                              74      9    88%
+backend/app/api/v1/configs.py                                       22      1    95%
+backend/app/api/v1/health.py                                        68      0   100%
+backend/app/api/v1/internal_fixture_tenants.py                      27      3    89%
+backend/app/api/v1/litellm_admin.py                                 22      6    73%
+backend/app/api/v1/llm_providers.py                                 78      8    90%
+backend/app/api/v1/members.py                                       51      6    88%
+backend/app/api/v1/newapi.py                                        73     11    85%
+backend/app/api/v1/ops_contact.py                                    7      0   100%
+backend/app/api/v1/outbound_keys.py                                 30      2    93%
+backend/app/api/v1/payment_credentials.py                           35      6    83%
+backend/app/api/v1/product_events.py                                35      5    86%
+backend/app/api/v1/public_skills.py                                129     24    81%
+backend/app/api/v1/rbac.py                                         155     36    77%
+backend/app/api/v1/relay.py                                         82     22    73%
+backend/app/api/v1/root.py                                           8      0   100%
+backend/app/api/v1/skills.py                                       128     22    83%
+backend/app/api/v1/spiders/__init__.py                              25      0   100%
+backend/app/api/v1/spiders/definitions.py                           44      4    91%
+backend/app/api/v1/spiders/deps.py                                  25      0   100%
+backend/app/api/v1/spiders/results.py                               31      3    90%
+backend/app/api/v1/spiders/schedules.py                             51      3    94%
+backend/app/api/v1/spiders/tasks.py                                 46     11    76%
+backend/app/api/v1/spiders/templates.py                             33      3    91%
+backend/app/api/v1/tenant_signup.py                                 46      5    89%
+backend/app/api/v1/tenant_usage.py                                  54     11    80%
+backend/app/api/v2/__init__.py                                       6      0   100%
+backend/app/api/v2/health.py                                        39      0   100%
+backend/app/api/v2/root.py                                           8      3    62%
+backend/app/core/rate_limiter.py                                    75      2    97%
+backend/app/external_api/__init__.py                                 5      0   100%
+backend/app/external_api/v1/__init__.py                              7      0   100%
+backend/app/external_api/v1/payment_gateways.py                     94     66    30%
+backend/app/external_api/v1/public.py                               68     14    79%
+backend/app/external_api/v1/webhooks.py                            130     17    87%
+backend/app/middleware/__init__.py                                   4      0   100%
+backend/app/middleware/process_time.py                              14      7    50%
+backend/app/middleware/request_id.py                                14      0   100%
+backend/app/middleware/tenant_context.py                            90     22    76%
+backend/app/responses/__init__.py                                    3      0   100%
+backend/app/responses/api.py                                        19      1    95%
+backend/app/responses/paginated.py                                  21      0   100%
+backend/app/tenant_isolation.py                                      9      0   100%
+backend/config_consts.py                                            38      0   100%
+backend/repositories/__init__.py                                     4      0   100%
+backend/repositories/ai_plan_repository.py                          30      5    83%
+backend/repositories/alert_rule_repository.py                       23      3    87%
+backend/repositories/internal_fixture_tenant_repository.py          18      1    94%
+backend/repositories/llm_provider_repository.py                     29      1    97%
+backend/repositories/llm_token_usage_repository.py                  19      9    53%
+backend/repositories/newapi_repository.py                           85     26    69%
+backend/repositories/operation_log_repository.py                    34     10    71%
+backend/repositories/order_repository.py                            54      2    96%
+backend/repositories/outbound_key_repository.py                     20      2    90%
+backend/repositories/payment_channel_credential_repository.py       22      2    91%
+backend/repositories/product_event_repository.py                    31      7    77%
+backend/repositories/relay_sku_entitlement_repository.py            21      7    67%
+backend/repositories/skill_repository.py                            41      9    78%
+backend/repositories/spider_definition_repository.py                21      1    95%
+backend/repositories/spider_result_repository.py                   134     27    80%
+backend/repositories/spider_schedule_repository.py                  25      6    76%
+backend/repositories/spider_task_repository.py                     102     47    54%
+backend/repositories/task_template_repository.py                    16      2    88%
+backend/repositories/user_repository.py                             38     15    61%
+backend/services/__init__.py                                         5      0   100%
+backend/services/ai_planner/__init__.py                             33      0   100%
+backend/services/ai_planner/_cooldown.py                            60      5    92%
+backend/services/ai_planner/llm_client.py                          334     41    88%
+backend/services/ai_planner/orchestrator.py                        248     25    90%
+backend/services/ai_planner/prompting.py                            55     13    76%
+backend/services/ai_planner/state.py                                67     10    85%
+backend/services/ai_planner/url_guard.py                            84      9    89%
+backend/services/ai_planner_service.py                               6      0   100%
+backend/services/alert_service.py                                  147     10    93%
+backend/services/api_key_service.py                                 56     22    61%
+backend/services/asset_import_sandbox.py                           188     24    87%
+backend/services/asset_import_service.py                           254     58    77%
+backend/services/audit_service.py                                   43      2    95%
+backend/services/auth_service.py                                   102      5    95%
+backend/services/background_session.py                              49      4    92%
+backend/services/billing_fulfill.py                                 90     15    83%
+backend/services/billing_service.py                                277     87    69%
+backend/services/capability_service.py                              76     17    78%
+backend/services/channel_config_service.py                         113     18    84%
+backend/services/channel_notify_auth.py                             14      1    93%
+backend/services/channel_probe_score.py                            130      5    96%
+backend/services/channel_probe_service.py                          223     41    82%
+backend/services/channel_scheduler_service.py                      236     67    72%
+backend/services/config_service.py                                  41      2    95%
+backend/services/dead_item_service.py                               38      0   100%
+backend/services/delivery_webhook_service.py                        35      6    83%
+backend/services/expert_service.py                                 174     17    90%
+backend/services/gateway_models.py                                  67      9    87%
+backend/services/internal_fixture_tenant_service.py                 32     12    62%
+backend/services/litellm/__init__.py                                 4      0   100%
+backend/services/litellm/admin_client.py                            50     14    72%
+backend/services/litellm/admin_service.py                           44     13    70%
+backend/services/litellm/exporter.py                                99      2    98%
+backend/services/litellm/guard.py                                   53      2    96%
+backend/services/litellm/shadow.py                                 111      2    98%
+backend/services/llm_common/__init__.py                              3      0   100%
+backend/services/llm_common/runtime.py                              78      6    92%
+backend/services/llm_common/seam.py                                 13      1    92%
+backend/services/llm_gateway/__init__.py                             1      0   100%
+backend/services/llm_gateway/_settings.py                           26      1    96%
+backend/services/llm_gateway/admin.py                               53      5    91%
+backend/services/llm_gateway/chat.py                                28      5    82%
+backend/services/llm_health_patrol.py                               89     41    54%
+backend/services/llm_probe_engine.py                                62      2    97%
+backend/services/llm_protocol/__init__.py                            3      0   100%
+backend/services/llm_protocol/adapters.py                           76      4    95%
+backend/services/llm_protocol/base.py                               58      7    88%
+backend/services/llm_provider_service.py                           233     83    64%
+backend/services/llm_secret_vault.py                                55      0   100%
+backend/services/llm_usage_service.py                              243     69    72%
+backend/services/market_events.py                                   84      2    98%
+backend/services/mcp_bridge.py                                      60     22    63%
+backend/services/member_service.py                                 115     36    69%
+backend/services/newapi_api.py                                     198     14    93%
+backend/services/newapi_overview_service.py                        120     26    78%
+backend/services/notify_service.py                                 187     49    74%
+backend/services/ops_contact_service.py                              6      0   100%
+backend/services/outbound_key_service.py                            70     14    80%
+backend/services/outbound_pull_auth.py                              29      3    90%
+backend/services/payment_credential_service.py                      86     35    59%
+backend/services/payment_gateways/alipay_gateway.py                 74      6    92%
+backend/services/payment_gateways/qr.py                             14      0   100%
+backend/services/payment_gateways/secrets_schema.py                 48      1    98%
+backend/services/payment_gateways/wechat_gateway.py                 36     18    50%
+backend/services/payment_notify_service.py                         145     61    58%
+backend/services/payment_provider.py                                67      1    99%
+backend/services/plugin_service.py                                  62     34    45%
+backend/services/power_market/__init__.py                            5      0   100%
+backend/services/power_market/agents_hub.py                        170     27    84%
+backend/services/power_market/agents_hub_scan.py                   184     12    93%
+backend/services/power_market/aliases.py                            54     24    56%
+backend/services/power_market/correct.py                            21      7    67%
+backend/services/power_market/curation.py                           40      8    80%
+backend/services/power_market/flag.py                               26      0   100%
+backend/services/power_market/hub_import.py                        183     29    84%
+backend/services/power_market/identity.py                           30      7    77%
+backend/services/power_market/installs.py                          129     35    73%
+backend/services/power_market/license.py                            23      5    78%
+backend/services/power_market/listing.py                            63     17    73%
+backend/services/power_market/projection.py                         40      6    85%
+backend/services/power_market/references.py                         62     10    84%
+backend/services/power_market/service.py                           230     49    79%
+backend/services/power_market/sorting.py                            34      2    94%
+backend/services/power_market/sources.py                            69     32    54%
+backend/services/power_market/store_page.py                          2      0   100%
+backend/services/power_market/sync.py                              240    114    52%
+backend/services/power_market/types.py                             102      4    96%
+backend/services/power_market/walk.py                              167     24    86%
+backend/services/product_event_service.py                           63      4    94%
+backend/services/proxy_health_service.py                           120     36    70%
+backend/services/quota_service.py                                  176     11    94%
+backend/services/rbac_service.py                                   192    102    47%
+backend/services/relay_service.py                                  241     81    66%
+backend/services/relay_sku_gate.py                                  57      6    89%
+backend/services/relay_usage.py                                     50      4    92%
+backend/services/retention_service.py                               69     27    61%
+backend/services/schedule_service.py                               228     79    65%
+backend/services/skill_import_service.py                           222     47    79%
+backend/services/skill_scoring_service.py                          162     54    67%
+backend/services/skill_service.py                                  446     59    87%
+backend/services/spider_common.py                                  105     19    82%
+backend/services/spider_query_service.py                           196     26    87%
+backend/services/spider_registry_service.py                        274     34    88%
+backend/services/spider_service.py                                  25      5    80%
+backend/services/spider_task_service.py                            430     54    87%
+backend/services/spider_worker_gate.py                              69      9    87%
+backend/services/tenant_admin_service.py                            73     36    51%
+backend/services/tenant_expiry_service.py                           61     25    59%
+backend/services/tenant_settings_service.py                         31     15    52%
+backend/services/tenant_signup_service.py                           74     26    65%
+backend/services/user_service.py                                   207     91    56%
+backend/services/workflow_service.py                                98      3    97%
+backend/tasks/__init__.py                                            2      0   100%
+backend/tasks/consumer.py                                          556    144    74%
+backend/utils/auth.py                                               46      3    93%
+platform_core/__init__.py                                            5      0   100%
+platform_core/db.py                                                195     59    70%
+platform_core/exceptions/__init__.py                                 4      0   100%
+platform_core/exceptions/base.py                                     8      0   100%
+platform_core/exceptions/business.py                                25      0   100%
+platform_core/exceptions/handlers.py                                34      0   100%
+platform_core/fs_guard.py                                           18      3    83%
+platform_core/logger.py                                             52     43    17%
+platform_core/models/__init__.py                                    43      0   100%
+platform_core/models/ai_plan.py                                     18      1    94%
+platform_core/models/alert_rule.py                                  17      0   100%
+platform_core/models/api_key.py                                     16      0   100%
+platform_core/models/archive.py                                     14      0   100%
+platform_core/models/asset_import.py                                27      0   100%
+platform_core/models/attachment.py                                  16      0   100%
+platform_core/models/base.py                                         3      0   100%
+platform_core/models/billing.py                                     47      0   100%
+platform_core/models/capability.py                                 146      0   100%
+platform_core/models/channel_event.py                               17      1    94%
+platform_core/models/channel_probe_result.py                        16      1    94%
+platform_core/models/department.py                                  14      0   100%
+platform_core/models/i18n.py                                        22      0   100%
+platform_core/models/internal_fixture_tenant.py                     13      1    92%
+platform_core/models/llm_provider.py                                25      1    96%
+platform_core/models/llm_provider_model.py                          24      1    96%
+platform_core/models/llm_token_usage.py                             22      1    95%
+platform_core/models/menu.py                                        15      0   100%
+platform_core/models/mixins.py                                      11      0   100%
+platform_core/models/notification.py                                17      0   100%
+platform_core/models/operation_log.py                               14      1    93%
+platform_core/models/outbound_key.py                                15      0   100%
+platform_core/models/payment_channel_credential.py                  16      0   100%
+platform_core/models/permission.py                                  12      0   100%
+platform_core/models/product_event.py                               19      1    95%
+platform_core/models/relay.py                                       31      0   100%
+platform_core/models/relay_sku_entitlement.py                       14      0   100%
+platform_core/models/resource_version.py                            15      0   100%
+platform_core/models/role.py                                        14      0   100%
+platform_core/models/skill.py                                       60      0   100%
+platform_core/models/spider_definition.py                           20      1    95%
+platform_core/models/spider_result.py                               20      0   100%
+platform_core/models/spider_schedule.py                             15      0   100%
+platform_core/models/spider_task.py                                 19      0   100%
+platform_core/models/system_cache.py                                11      0   100%
+platform_core/models/system_config.py                               10      0   100%
+platform_core/models/tag.py                                         20      0   100%
+platform_core/models/task_template.py                               14      0   100%
+platform_core/models/tenant.py                                      16      1    94%
+platform_core/models/user.py                                        24      1    96%
+platform_core/models/workflow.py                                    50      0   100%
+platform_core/queues.py                                            119      0   100%
+platform_core/redis_async.py                                        37     18    51%
+platform_core/repository.py                                         61      0   100%
+platform_core/schemas/__init__.py                                   13      0   100%
+platform_core/schemas/ai_plan.py                                   128      4    97%
+platform_core/schemas/api_key.py                                    21      0   100%
+platform_core/schemas/audit.py                                      15      0   100%
+platform_core/schemas/auth.py                                       61      0   100%
+platform_core/schemas/base.py                                       23      0   100%
+platform_core/schemas/billing.py                                    78      0   100%
+platform_core/schemas/internal_fixture_tenant.py                    14      0   100%
+platform_core/schemas/litellm.py                                    12      0   100%
+platform_core/schemas/llm_provider.py                              129     12    91%
+platform_core/schemas/newapi.py                                    116      0   100%
+platform_core/schemas/outbound.py                                   15      0   100%
+platform_core/schemas/payment_channel_credential.py                 41      0   100%
+platform_core/schemas/product_event.py                              40      0   100%
+platform_core/schemas/relay.py                                      53      0   100%
+platform_core/schemas/relay_sku_entitlement.py                      22      0   100%
+platform_core/schemas/skill.py                                      82      0   100%
+platform_core/schemas/spider.py                                    231      0   100%
+platform_core/schemas/validators.py                                 25     12    52%
+platform_core/storage.py                                            82     48    41%
+platform_core/tenant_context.py                                     86      2    98%
+------------------------------------------------------------------------------------
+TOTAL                                                            18673   3460    81%
+
+1 empty file skipped.
+Required test coverage of 70.0% reached. Total coverage: 81.47%
+============================= slowest 20 durations =============================
+7.30s call     backend/tests/test_spider_task_flow.py::TestNotifyService::test_webhook_skipped_without_url
+3.01s call     backend/tests/test_llm_failover.py::test_all_candidates_exhausted_raises_summary
+2.59s call     backend/tests/test_fr_m12_fulfill.py::test_gwt_m12_7_storage_10001_still_enqueues
+2.01s call     backend/tests/test_llm_failover.py::test_tier_degrade_alert_fires_only_on_downgrade
+1.82s call     backend/tests/test_spider_min_loop.py::test_example_httpbin_get_completes_with_items_within_120s
+1.67s call     backend/tests/test_run_orchestrator.py::test_start_skips_when_running
+1.10s call     backend/tests/test_run_orchestrator.py::test_start_spawns_when_stopped
+1.01s call     backend/tests/test_llm_failover.py::test_primary_failure_falls_over_to_backup
+0.99s call     backend/tests/test_run_orchestrator.py::test_restart_stops_then_starts
+0.97s call     backend/tests/test_skill_import.py::test_check_update_uses_httpx_trust_env_false
+0.76s call     backend/tests/test_t29_sources.py::test_gwt_38_5_d16_empty_sources_still_local
+0.73s call     backend/tests/test_relay_token_usage.py::test_gwt_60_3_chat_authed_usage_moves_and_event
+0.72s call     backend/tests/test_relay_token_usage.py::test_gwt_60_10_tenant_a_call_does_not_move_tenant_b
+0.66s setup    backend/tests/test_t24_user_restore.py::test_create_reuses_released_username_in_same_tenant
+0.64s setup    backend/tests/test_admin_users_crud.py::test_list_users_includes_tenant_name
+0.62s call     backend/tests/test_relay_token_usage.py::test_qa_20_revoked_token_rejected_on_chat
+0.62s call     backend/tests/test_relay_token_usage.py::test_gwt_60_2_viewer_sees_usage_list_reads_local_column_only
+0.62s call     backend/tests/test_relay_token_usage.py::test_gwt_60_5_gateway_unreachable_same_then_not_quota
+0.62s call     backend/tests/test_agents_hub_sync.py::test_hub_updates_when_skill_md_changes
+0.58s call     backend/tests/test_relay_token_usage.py::test_outbound_style_key_rejected_on_chat
+1954 passed, 41 skipped, 8 warnings in 236.28s (0:03:56)
+exit=0
+2026年 9月27日 星期日 18时25分22秒 CST

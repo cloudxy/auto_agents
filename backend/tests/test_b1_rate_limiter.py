@@ -66,6 +66,12 @@ def test_xff_takes_rightmost_trusted_value():
     assert resolve_client_ip(_req(None), "last") == "10.0.0.1"
 
 
+def test_xff_ignored_when_peer_is_not_trusted_proxy():
+    """审计 BUG-34：公网直连时 XFF 整条可伪造——按连接地址限流，换请求头不换身份"""
+    assert resolve_client_ip(_req("9.9.9.9", host="203.0.113.7"), "last") == "203.0.113.7"
+    assert resolve_client_ip(_req("1.1.1.1, 2.2.2.2", host="203.0.113.7"), "last") == "203.0.113.7"
+
+
 # ---------------- fail-closed：Redis 故障拒绝 ----------------
 
 @pytest.mark.asyncio

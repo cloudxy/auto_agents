@@ -1,10 +1,10 @@
 """认证相关 Schema - 登录、注册等请求参数"""
-from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from platform_core.schemas.base import RequestBody
 from platform_core.schemas.validators import validate_email
+from platform_core.schemas.time_types import UTCDateTime
 
 
 class LoginRequest(RequestBody):
@@ -20,6 +20,25 @@ class LoginRequest(RequestBody):
     password: str = Field(..., min_length=6, max_length=128, description="密码")
     tenant_slug: Optional[str] = Field(
         None, max_length=64, description="租户标识（预留字段，暂不消费）")
+    remember_me: bool = Field(False, description="记住我：刷新令牌 7 天；否则按会话（决策 D10）")
+
+
+class RefreshRequest(RequestBody):
+    """用刷新令牌换一对新令牌（决策 D10）"""
+
+    refresh_token: str = Field(..., min_length=20, max_length=4096)
+
+
+class VerifyEmailRequest(RequestBody):
+    """邮箱验证令牌（决策 D21）"""
+
+    token: str = Field(..., min_length=10, max_length=4096)
+
+
+class LogoutRequest(RequestBody):
+    """登出：作废本会话的刷新令牌（可空：只有访问令牌的旧客户端）"""
+
+    refresh_token: Optional[str] = Field(None, max_length=4096)
 
 
 class RegisterRequest(RequestBody):
@@ -58,10 +77,10 @@ class UserResponse(BaseModel):
     department_id: Optional[int] = None
     department_name: Optional[str] = None  # 所属部门（JOIN departments）
     is_platform_admin: bool = False
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
+    updated_at: Optional[UTCDateTime] = None
     # 已删除标记（T-24 / GWT-93.1）：非空=软删行（仅「已删除」筛选会出现）
-    deleted_at: Optional[datetime] = None
+    deleted_at: Optional[UTCDateTime] = None
 
 
 class AdminUserCreateRequest(RequestBody):
@@ -101,5 +120,9 @@ class OperationLogResponse(BaseModel):
     action: str
     target: str
     detail: Optional[str] = None
-    created_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
 
+
+class TransferOwnershipRequest(RequestBody):
+    """转让负责人：再次输入本人登录密码确认（决策 D23）"""
+    password: str = Field(..., min_length=1, max_length=128, description="负责人本人的登录密码")

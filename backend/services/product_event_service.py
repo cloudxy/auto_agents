@@ -24,6 +24,27 @@ def utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+_CLIENT_CLOCK_SKEW_SECONDS = 300
+
+
+def normalize_occurred_at(value: datetime | None, now: datetime | None = None) -> datetime:
+    """事件时刻统一为 UTC naive（审计 BUG-43 / F3 QA-6 第 4 点）
+
+    - 带时区的值先换算到 UTC（原先 pymysql 丢掉 tzinfo，+08:00 按墙钟存，偏 8 小时）；
+    - 与服务端时间相差超过 ±5 分钟的值视为不可信（客户端时钟漂移或伪造历史 / 未来时间），
+      改用服务端时刻。
+    """
+    logger.debug("归一事件时刻")
+    current = now or utc_now_naive()
+    if value is None:
+        return current
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    if abs((value - current).total_seconds()) > _CLIENT_CLOCK_SKEW_SECONDS:
+        return current
+    return value
+
+
 def _row_kwargs(
     event_name: str,
     *,
@@ -36,7 +57,7 @@ def _row_kwargs(
 ) -> dict[str, Any]:
     logger.debug(f"组装产品事件行 | name={event_name}")
     return {
-        "occurred_at": occurred_at or utc_now_naive(),
+        "occurred_at": normalize_occurred_at(occurred_at),
         "event_name": event_name,
         "tenant_id": tenant_id,
         "actor_user_id": actor_user_id,

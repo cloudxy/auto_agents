@@ -95,7 +95,7 @@ export const useAiPlanFlow = (): AiPlanFlow => {
   useEffect(() => {
     if (!freshPlan) return
     setPlan(freshPlan)
-    if (freshPlan.status === 'testing' || freshPlan.status === 'registered') {
+    if (freshPlan.status === 'testing' || freshPlan.status === 'tested' || freshPlan.status === 'registered') {
       setStep((s) => (s < 2 ? 2 : s))
     }
   }, [freshPlan])
@@ -322,7 +322,7 @@ export const useAiPlanFlow = (): AiPlanFlow => {
     setCustomTask(null)
     setCollectBlock(null)
     const hist = p.plan_json?.test_history || []
-    if (p.status === 'testing' || p.status === 'registered' || (p.status === 'failed' && hist.length > 0)) {
+    if (p.status === 'testing' || p.status === 'tested' || p.status === 'registered' || (p.status === 'failed' && hist.length > 0)) {
       setStep(2)
     } else {
       setStep(1)
@@ -332,7 +332,7 @@ export const useAiPlanFlow = (): AiPlanFlow => {
   // 带最近试采结果条数构造结果抽屉载荷
   const resultsTaskOf = useCallback((p: AiPlan): Task => {
     const last = (p.plan_json?.test_history || []).slice(-1)[0]
-    const status = p.status === 'registered' ? 'completed' : 'running'
+    const status = p.status === 'registered' || p.status === 'tested' ? 'completed' : 'running'
     return { id: p.test_task_id!, spider_name: 'flow_generic', status, priority: 'low', result_count: last?.result_count || 0 }
   }, [])
 

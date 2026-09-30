@@ -19,6 +19,7 @@ export const STATUS_META: Record<string, { label: string; color: string }> = {
   running: { label: '运行中', color: 'processing' },
   completed: { label: '已完成', color: 'green' },
   failed: { label: '失败', color: 'red' },
+  cancelled: { label: '已终止', color: 'default' },
 }
 
 export const PRIORITY_META: Record<string, { label: string; color: string }> = {
