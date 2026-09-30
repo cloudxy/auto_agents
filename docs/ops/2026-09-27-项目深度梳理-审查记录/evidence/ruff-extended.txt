@@ -1,0 +1,42 @@
+$ uv run ruff check --select E,F,B,UP,SIM,ASYNC --statistics backend platform_core scrapy scripts run.py
+warning: Invalid `# noqa` directive on platform_core/models/llm_provider_model.py:48: expected code to consist of uppercase letters followed by digits only (e.g. `F401`)
+2827	E501    	[ ] line-too-long
+ 745	UP045   	[*] non-pep604-annotation-optional
+ 564	B008    	[ ] function-call-in-default-argument
+ 159	UP007   	[*] non-pep604-annotation-union
+  92	UP035   	[-] deprecated-import
+  90	UP006   	[*] non-pep585-annotation
+  54	UP017   	[*] datetime-timezone-utc
+  50	E402    	[ ] module-import-not-at-top-of-file
+  42	SIM117  	[-] multiple-with-statements
+  20	B904    	[ ] raise-without-from-inside-except
+  18	SIM105  	[ ] suppressible-exception
+  10	ASYNC240	[ ] blocking-path-method-in-async-function
+  10	F821    	[ ] undefined-name
+  10	SIM300  	[*] yoda-conditions
+  10	UP037   	[*] quoted-annotation
+   7	ASYNC109	[ ] async-function-with-timeout
+   6	F811    	[-] redefined-while-unused
+   4	UP046   	[ ] non-pep695-generic-class
+   3	B905    	[ ] zip-without-explicit-strict
+   3	SIM118  	[ ] in-dict-keys
+   3	UP015   	[*] redundant-open-modes
+   3	UP034   	[*] extraneous-parentheses
+   3	UP042   	[ ] replace-str-enum
+   3	UP047   	[ ] non-pep695-generic-function
+   2	ASYNC230	[ ] blocking-open-call-in-async-function
+   2	F841    	[ ] unused-variable
+   2	SIM201  	[ ] negate-equal-op
+   2	UP012   	[*] unnecessary-encode-utf8
+   1	B009    	[*] get-attr-with-constant
+   1	E701    	[ ] multiple-statements-on-one-line-colon
+   1	E712    	[ ] true-false-comparison
+   1	E731    	[ ] lambda-assignment
+   1	SIM101  	[ ] duplicate-isinstance-call
+   1	SIM102  	[ ] collapsible-if
+   1	SIM110  	[ ] reimplemented-builtin
+   1	SIM910  	[*] dict-get-with-none-default
+   1	UP031   	[ ] printf-string-formatting
+Found 4753 errors.
+[*] 1151 fixable with the `--fix` option (35 hidden fixes can be enabled with the `--unsafe-fixes` option).
+exit=1

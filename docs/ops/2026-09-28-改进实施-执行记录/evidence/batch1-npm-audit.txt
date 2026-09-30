@@ -1,0 +1,4 @@
+$ npm audit --omit=dev
+found 0 vulnerabilities
+$ npm audit（含构建链，残余全部在 react-scripts/jest）
+25 vulnerabilities (9 low, 5 moderate, 11 high)

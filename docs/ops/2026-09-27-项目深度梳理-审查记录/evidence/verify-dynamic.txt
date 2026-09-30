@@ -1,0 +1,58 @@
+### R5 QA-1: axios FormData + instance JSON Content-Type
+$ node -e (axios.create with JSON header, post FormData via stub adapter)
+axios 1.20.0
+typeof data= string isFormData= false body= {"file":{}} ct= application/json
+[control: no instance CT] isFormData= true
+exit=0
+
+### R4 QA-6: Dynaconf dotenv_override probe
+dotenv_override=True  -> PROBE = file
+dotenv_override=False -> PROBE = file
+exit=0
+
+### R6 QA-7: lsof without LISTEN filter
+
+def pids_on_port(port: int) -> list[int]:
+    try:
+        out = subprocess.check_output(
+            ["lsof", "-ti", f"tcp:{port}"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    pids: list[int] = []
+
+### R3 QA-3: mysql_fidelity files vs CI list
+NOT-CI  conftest.py
+in-CI   test_alembic_baseline.py
+in-CI   test_auth_login_tenant.py
+in-CI   test_admin_users_crud.py
+in-CI   test_db_fixtures.py
+NOT-CI  test_db_behavior_loop.py
+NOT-CI  test_explain_indexes.py
+in-CI   test_mysql_fidelity.py
+NOT-CI  test_outbound_migration_041.py
+NOT-CI  test_saas_ddl_drill.py
+in-CI   test_saas_rbac_deep.py
+in-CI   test_saas_members.py
+NOT-CI  test_t14_migration_046.py
+in-CI   test_t10_fix_regressions.py
+NOT-CI  test_t35_migration_043.py
+NOT-CI  test_t24_migration_042.py
+
+### R1 conftest fixtures
+159:def client(app):
+176:def admin_client(app, client, _reset_auth_override):
+184:def platform_admin_client(app, client, _reset_auth_override):
+192:def operator_client(app, client, _reset_auth_override):
+200:def viewer_client(app, client, _reset_auth_override):
+208:def platform_admin_client(app, client, _reset_auth_override):
+280:def make_tenant_owner_headers(db_session, *, slug: str = "co-a") -> tuple[dict, int]:
+531:def db_client(
+
+### R4 QA-6 更正：上面同一进程内两次构造 Dynaconf 的探针被污染（第一次 load_dotenv 已把 PROBE=file 写进 os.environ），结论无效。
+### 以下为隔离进程重跑（manager，2026-09-27）：
+$ AUTO_AGENTS_PROBE=env uv run python -c "Dynaconf(..., dotenv_override=True).PROBE"   -> file   （.env 覆盖真实环境变量）
+$ AUTO_AGENTS_PROBE=env uv run python -c "Dynaconf(..., dotenv_override=False).PROBE"  -> env    （环境变量优先）
+结论：R4 QA-6 成立（config/__init__.py:51 dotenv_override=True 与 docstring「环境变量最高优先级」相反）。

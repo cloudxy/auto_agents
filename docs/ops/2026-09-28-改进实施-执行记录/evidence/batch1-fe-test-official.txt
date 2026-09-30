@@ -1,0 +1,40 @@
+      at success (src/pages/Register.tsx:110:15)
+
+    console.error
+      Warning: [antd: message] Static function can not consume context like dynamic theme. Please use 'App' component instead.
+
+      108 |         owner: { username: ownerLabel },
+      109 |       })
+    > 110 |       message.success(COPY_CREATED_TOAST)
+          |               ^
+      111 |     } catch (e) {
+      112 |       if (isFormValidateError(e)) return
+      113 |       if (isNetworkError(e)) {
+
+      at error (../../node_modules/@rc-component/util/lib/warning.js:42:15)
+      at method (../../node_modules/@rc-component/util/lib/warning.js:61:5)
+      at call (../../node_modules/@rc-component/util/lib/warning.js:68:3)
+      at _warning (node_modules/antd/lib/_util/warning.js:24:22)
+      at Object.<anonymous>.exports.warnContext (node_modules/antd/lib/config-provider/index.js:79:63)
+      at typeOpen (node_modules/antd/lib/message/index.js:208:36)
+      at Object.typeOpen [as success] (node_modules/antd/lib/message/index.js:251:38)
+      at success (src/pages/Register.tsx:110:15)
+
+PASS src/App.test.tsx
+PASS src/pages/Pricing.beacon.test.tsx
+PASS src/pages/CommandCards.test.tsx
+PASS src/pages/CapabilityDetail.test.tsx
+PASS src/pages/Home.beacon.test.tsx
+PASS src/components/layout/SiteLayout.beacon.test.tsx
+PASS src/frU24CopyScan.test.tsx
+PASS src/components/home/FeaturesSection.test.tsx
+PASS src/pages/SkillsSquare.test.tsx
+PASS src/services/capabilities.test.ts
+PASS src/components/layout/SiteLayout.test.tsx
+
+Test Suites: 15 passed, 15 total
+Tests:       90 passed, 90 total
+Snapshots:   0 total
+Time:        15.659 s, estimated 17 s
+Ran all test suites.
+exit=0

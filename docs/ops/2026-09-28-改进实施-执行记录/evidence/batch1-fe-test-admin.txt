@@ -1,0 +1,40 @@
+
+    console.error
+      Warning: [antd: message] Static function can not consume context like dynamic theme. Please use 'App' component instead.
+
+      37 |       form.resetFields()
+      38 |       void queryClient.invalidateQueries({ queryKey: ['litellm-keys'] })
+    > 39 |       message.success('已签发')
+         |               ^
+      40 |     },
+      41 |     onError: (e) => {
+      42 |       if (isFormValidateError(e)) return
+
+      at error (../../node_modules/@rc-component/util/lib/warning.js:42:15)
+      at method (../../node_modules/@rc-component/util/lib/warning.js:61:5)
+      at call (../../node_modules/@rc-component/util/lib/warning.js:68:3)
+      at _warning (node_modules/antd/lib/_util/warning.js:24:22)
+      at Object.<anonymous>.exports.warnContext (node_modules/antd/lib/config-provider/index.js:79:63)
+      at typeOpen (node_modules/antd/lib/message/index.js:208:36)
+      at Object.typeOpen [as success] (node_modules/antd/lib/message/index.js:251:38)
+      at Object.success [as onSuccess] (src/components/newapi/DutyKeysTab.tsx:39:15)
+      at Mutation.execute (../../node_modules/@tanstack/query-core/src/mutation.ts:249:26)
+
+PASS src/frU24CopyScan.test.tsx
+PASS src/pages/MyOrders.test.tsx
+PASS src/pages/ProductEvents.test.tsx
+PASS src/hooks/usePermission.test.tsx
+PASS src/components/quota/QuotaBlockAlert.test.tsx
+PASS src/pages/market/MarkdownBody.test.tsx
+PASS src/pages/market/AssetVisual.test.tsx
+PASS src/components/QueryStateView.test.tsx
+PASS src/components/ProtectedRoute.test.tsx
+PASS src/components/llm/wizardPayload.test.ts
+PASS src/utils/collectBlock.test.ts
+
+Test Suites: 55 passed, 55 total
+Tests:       393 passed, 393 total
+Snapshots:   0 total
+Time:        60.519 s, estimated 63 s
+Ran all test suites.
+exit=0

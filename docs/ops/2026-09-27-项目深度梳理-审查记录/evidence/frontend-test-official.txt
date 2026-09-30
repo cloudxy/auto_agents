@@ -1,0 +1,84 @@
+$ CI=true npm test -w official
+2026年 9月27日 星期日 18时22分44秒 CST
+      at Object.<anonymous>.exports.warnContext (node_modules/antd/lib/config-provider/index.js:79:63)
+      at typeOpen (node_modules/antd/lib/message/index.js:208:36)
+      at Object.typeOpen [as success] (node_modules/antd/lib/message/index.js:251:38)
+      at success (src/pages/Register.tsx:110:15)
+
+    console.error
+      Warning: [antd: message] Static function can not consume context like dynamic theme. Please use 'App' component instead.
+
+    [0m [90m 108 |[39m         owner[33m:[39m { username[33m:[39m ownerLabel }[33m,[39m
+     [90m 109 |[39m       })
+    [31m[1m>[22m[39m[90m 110 |[39m       message[33m.[39msuccess([33mCOPY_CREATED_TOAST[39m)
+     [90m     |[39m               [31m[1m^[22m[39m
+     [90m 111 |[39m     } [36mcatch[39m (e) {
+     [90m 112 |[39m       [36mif[39m (isFormValidateError(e)) [36mreturn[39m
+     [90m 113 |[39m       [36mif[39m (isNetworkError(e)) {[0m
+
+      at error (../../node_modules/@rc-component/util/lib/warning.js:42:15)
+      at method (../../node_modules/@rc-component/util/lib/warning.js:61:5)
+      at call (../../node_modules/@rc-component/util/lib/warning.js:68:3)
+      at _warning (node_modules/antd/lib/_util/warning.js:24:22)
+      at Object.<anonymous>.exports.warnContext (node_modules/antd/lib/config-provider/index.js:79:63)
+      at typeOpen (node_modules/antd/lib/message/index.js:208:36)
+      at Object.typeOpen [as success] (node_modules/antd/lib/message/index.js:251:38)
+      at success (src/pages/Register.tsx:110:15)
+
+    console.error
+      Warning: [antd: message] Static function can not consume context like dynamic theme. Please use 'App' component instead.
+
+    [0m [90m 108 |[39m         owner[33m:[39m { username[33m:[39m ownerLabel }[33m,[39m
+     [90m 109 |[39m       })
+    [31m[1m>[22m[39m[90m 110 |[39m       message[33m.[39msuccess([33mCOPY_CREATED_TOAST[39m)
+     [90m     |[39m               [31m[1m^[22m[39m
+     [90m 111 |[39m     } [36mcatch[39m (e) {
+     [90m 112 |[39m       [36mif[39m (isFormValidateError(e)) [36mreturn[39m
+     [90m 113 |[39m       [36mif[39m (isNetworkError(e)) {[0m
+
+      at error (../../node_modules/@rc-component/util/lib/warning.js:42:15)
+      at method (../../node_modules/@rc-component/util/lib/warning.js:61:5)
+      at call (../../node_modules/@rc-component/util/lib/warning.js:68:3)
+      at _warning (node_modules/antd/lib/_util/warning.js:24:22)
+      at Object.<anonymous>.exports.warnContext (node_modules/antd/lib/config-provider/index.js:79:63)
+      at typeOpen (node_modules/antd/lib/message/index.js:208:36)
+      at Object.typeOpen [as success] (node_modules/antd/lib/message/index.js:251:38)
+      at success (src/pages/Register.tsx:110:15)
+
+    console.error
+      Warning: [antd: message] Static function can not consume context like dynamic theme. Please use 'App' component instead.
+
+    [0m [90m 108 |[39m         owner[33m:[39m { username[33m:[39m ownerLabel }[33m,[39m
+     [90m 109 |[39m       })
+    [31m[1m>[22m[39m[90m 110 |[39m       message[33m.[39msuccess([33mCOPY_CREATED_TOAST[39m)
+     [90m     |[39m               [31m[1m^[22m[39m
+     [90m 111 |[39m     } [36mcatch[39m (e) {
+     [90m 112 |[39m       [36mif[39m (isFormValidateError(e)) [36mreturn[39m
+     [90m 113 |[39m       [36mif[39m (isNetworkError(e)) {[0m
+
+      at error (../../node_modules/@rc-component/util/lib/warning.js:42:15)
+      at method (../../node_modules/@rc-component/util/lib/warning.js:61:5)
+      at call (../../node_modules/@rc-component/util/lib/warning.js:68:3)
+      at _warning (node_modules/antd/lib/_util/warning.js:24:22)
+      at Object.<anonymous>.exports.warnContext (node_modules/antd/lib/config-provider/index.js:79:63)
+      at typeOpen (node_modules/antd/lib/message/index.js:208:36)
+      at Object.typeOpen [as success] (node_modules/antd/lib/message/index.js:251:38)
+      at success (src/pages/Register.tsx:110:15)
+
+PASS src/pages/SkillsSquare.test.tsx
+PASS src/pages/CommandCards.test.tsx
+PASS src/pages/Home.beacon.test.tsx
+PASS src/pages/Pricing.beacon.test.tsx
+PASS src/App.test.tsx
+PASS src/components/layout/SiteLayout.beacon.test.tsx
+PASS src/services/capabilities.test.ts
+PASS src/components/home/FeaturesSection.test.tsx
+PASS src/components/layout/SiteLayout.test.tsx
+
+Test Suites: 15 passed, 15 total
+Tests:       90 passed, 90 total
+Snapshots:   0 total
+Time:        16.973 s
+Ran all test suites.
+exit=0
+2026年 9月27日 星期日 18时23分02秒 CST

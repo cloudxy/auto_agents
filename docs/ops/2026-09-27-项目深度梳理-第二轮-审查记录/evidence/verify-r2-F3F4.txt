@@ -1,0 +1,50 @@
+# verify-r2-F3F4（manager，2026-09-28，本地/只读）
+$ F4 QA-1: AiPlanCreate 接受解析到回环的域名 + html_snippet（静态校验拦不住）
+target_url='http://127.0.0.1.nip.io/' html_snippet='<title>x</title>'
+
+$ F4 QA-4: FlowConfig 是否接受灾难性正则 + 回溯耗时
+FlowConfig accepts (a|aa)+$ : True
+n=24 0.04s
+n=28 0.25s
+n=32 1.74s
+
+$ F4 QA-2: 质量分只由 schema 决定（只命中 1 个字段的 item）
+2026-09-28 00:40:06.019 | DEBUG    | pipelines.quality:process_item:62 - 重复数据（质量评分降低）: url=https://example.com/l
+quality_score = 75.0
+quality_score = 55.0
+
+$ ai_plans / quality distribution (dev, read-only)
+status	iteration_count	err
+failed	0	试采异常: (pymysql.err.OperationalError) (1792, 'Cannot execute statement in a READ 
+failed	0	平台 LLM 网关不可达
+failed	0	平台 LLM 网关不可达
+failed	0	平台 LLM 网关不可达
+failed	0	平台 LLM 网关不可达
+failed	0	平台 LLM 网关不可达
+quality_score	COUNT(*)
+75	1
+
+$ F3 V2 event subject nulls
+event_name	n	no_anon	no_actor	no_tenant
+market_list_viewed	87	87	87	87
+official_page_viewed	79	0	79	79
+sync_completed	51	51	51	51
+official_cta_clicked	22	0	22	22
+login_succeeded	13	13	0	0
+market_detail_viewed	13	13	13	13
+duty_entry_opened	10	10	0	10
+detail_opened	8	8	7	8
+market_list_paged	3	0	3	3
+market_subscribe_succeeded	2	2	0	0
+market_uninstalled	2	2	0	0
+outbound_key_issued	1	1	0	0
+relay_token_call_succeeded	1	1	1	0
+
+$ F3 V4 Redis month key vs DB
+default|config|total
+786
+tenant_id	tokens	cost
+1	786	0
+
+$ F3 V7 retention covers product_events?
+exit=1

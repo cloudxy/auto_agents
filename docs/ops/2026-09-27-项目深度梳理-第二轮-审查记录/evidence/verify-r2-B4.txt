@@ -1,0 +1,23 @@
+# verify-r2-B4（manager，2026-09-28）
+$ QA-2 存活资产数
+alive
+195
+$ QA-4 孪生行
+asset_type	name	c
+plugin	dev-team	3
+plugin	drama-skills	3
+plugin	mattpocock-skills	3
+plugin	oh-story	3
+plugin	sdlc-workflow	3
+plugin	superpowers	3
+$ QA-7 agent/expert 同名
+$ QA-6 _client_ip
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
