@@ -1,0 +1,24 @@
+== 租户 ==
+  #1    default                  active     默认租户
+  #2    co-24634                 active     演示公司
+  #3    co-25727                 active     上海云海科技
+  #5    platform                 active     平台租户
+  #10   c4-1789347758            active     C4闸门企业1789347758
+
+== default 租户 #1 业务数据 ==
+  users                  2
+  spider_tasks           0
+  spider_results         0
+  spider_schedules       0
+  spider_definitions     6
+  ai_plans               0
+  llm_providers          0
+  api_keys               0
+  capability_installs    2
+
+== default 租户账号（2）==
+  #1    admin                role=admin     tenant_role=admin [平台超管]
+  #9    xuyus                role=admin     tenant_role=admin [已删]
+
+== 不在 platform 租户的平台超管（1）==
+  #1 admin 当前 tenant_id=1

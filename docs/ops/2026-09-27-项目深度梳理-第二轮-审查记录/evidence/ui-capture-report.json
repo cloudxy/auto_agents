@@ -1,0 +1,326 @@
+[
+  {
+    "app": "official",
+    "path": "/",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents · 智能数据采集",
+    "ms": 2599,
+    "finalUrl": "/"
+  },
+  {
+    "app": "official",
+    "path": "/pricing",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "定价 · AutoAgents",
+    "ms": 2281,
+    "finalUrl": "/pricing"
+  },
+  {
+    "app": "official",
+    "path": "/register",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "注册 · AutoAgents",
+    "ms": 2293,
+    "finalUrl": "/register"
+  },
+  {
+    "app": "official",
+    "path": "/skills",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "能力市场 · AutoAgents",
+    "ms": 2309,
+    "finalUrl": "/skills"
+  },
+  {
+    "app": "official",
+    "path": "/capabilities",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "能力市场 · AutoAgents",
+    "ms": 2310,
+    "finalUrl": "/capabilities"
+  },
+  {
+    "app": "official",
+    "path": "/terms",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "服务条款 · AutoAgents",
+    "ms": 1950,
+    "finalUrl": "/terms"
+  },
+  {
+    "app": "official",
+    "path": "/privacy",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "隐私政策 · AutoAgents",
+    "ms": 1949,
+    "finalUrl": "/privacy"
+  },
+  {
+    "app": "official",
+    "path": "/no-such-page",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents",
+    "ms": 1946,
+    "finalUrl": "/no-such-page"
+  },
+  {
+    "app": "admin",
+    "path": "/login",
+    "console": [
+      "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "Warning: [antd: message] Static function can not consume context like dynamic theme. Please use 'App' component instead.",
+      "Warning: [antd: Statistic] `valueStyle` is deprecated. Please use `styles.content` instead."
+    ],
+    "pageerrors": [],
+    "http": [
+      "401 GET /api/v1/auth/permissions"
+    ],
+    "finalUrl": "http://127.0.0.1:9112/dashboard"
+  },
+  {
+    "app": "admin",
+    "path": "/dashboard",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2010,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/spiders/tasks",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2001,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/spiders/logs",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2002,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/spiders/nodes",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1974,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/ai",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2097,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/enterprise",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1761,
+    "finalUrl": "/enterprise"
+  },
+  {
+    "app": "admin",
+    "path": "/rbac",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1759,
+    "finalUrl": "/rbac"
+  },
+  {
+    "app": "admin",
+    "path": "/capabilities",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1981,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/capabilities/installs",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1978,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/members",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1984,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/usage",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1978,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/billing/checkout",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1981,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/pricing",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1994,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/relay",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1978,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/outbound-keys",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1996,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/llm",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1979,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/payment-credentials",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1756,
+    "finalUrl": "/payment-credentials"
+  },
+  {
+    "app": "admin",
+    "path": "/logs",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 2002,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/data",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1993,
+    "finalUrl": "/login"
+  },
+  {
+    "app": "admin",
+    "path": "/newapi",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1757,
+    "finalUrl": "/newapi"
+  },
+  {
+    "app": "admin",
+    "path": "/platform-ops",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1756,
+    "finalUrl": "/platform-ops"
+  },
+  {
+    "app": "admin",
+    "path": "/users",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1755,
+    "finalUrl": "/users"
+  },
+  {
+    "app": "admin",
+    "path": "/settings",
+    "console": [],
+    "pageerrors": [],
+    "http": [],
+    "title": "AutoAgents 管理后台",
+    "ms": 1756,
+    "finalUrl": "/settings"
+  }
+]

@@ -1,0 +1,44 @@
+$ MYSQL_FIDELITY=1 uv run pytest -q <7 files not in CI + test_alembic_baseline>
+2026年 9月27日 星期日 22时59分18秒 CST
+INFO  [alembic.runtime.migration] Running upgrade 018 -> 019, DB 升级 2026-09 Phase A：软删除 + 审计 Mixin 存量改造 + 关键 FK 补全
+INFO  [alembic.runtime.migration] Running upgrade 019 -> 020, DB 升级 2026-09 Phase B：横切功能表（标签/附件/通知/版本/工作流引擎 4 表）
+INFO  [alembic.runtime.migration] Running upgrade 020 -> 021, DB 升级 2026-09 Phase C：运维扩展（归档 / i18n + 种子 / 系统缓存）
+INFO  [alembic.runtime.migration] Running upgrade 021 -> 022, SaaS 化拓展：角色权限 DB 化 + 部门组织树（roles / departments + users.department_id）
+INFO  [alembic.runtime.migration] Running upgrade 022 -> 023, SaaS 化深化：菜单树 DB 化 + 权限资源注册表（menus / permissions + 种子）
+INFO  [alembic.runtime.migration] Running upgrade 023 -> 024, T5 用户层租户隔离：users.tenant_id 收紧 NOT NULL + platform 租户兜底
+INFO  [alembic.runtime.migration] Running upgrade 024 -> 025, T9 迁移健康：软删表唯一键补删除标记（5 表）——删后可重建同名
+INFO  [alembic.runtime.migration] Running upgrade 025 -> 026, B3 索引治理：删除冗余/无访问模式索引（27 个）+ spider_tasks 复合索引升级
+INFO  [alembic.runtime.migration] Running upgrade 026 -> 027, B3：spider_tasks.status 由 MySQL ENUM 改 VARCHAR(20) + 应用层枚举校验
+INFO  [alembic.runtime.migration] Running upgrade 027 -> 031, add product_events table
+INFO  [alembic.runtime.migration] Running upgrade 031 -> 032, operator 加 menu:llm（T-17 SH-11 数据回填）
+INFO  [alembic.runtime.migration] Running upgrade 032 -> 033, t21 capability commands components
+INFO  [alembic.runtime.migration] Running upgrade 033 -> 034, t23 capability_assets listing_state + license gate columns
+INFO  [alembic.runtime.migration] Running upgrade 034 -> 035, t25 capability_installs + assets.host_compat
+INFO  [alembic.runtime.migration] Running upgrade 035 -> 036, t28 capability_assets.listed_at；治理台叶名能力市场
+INFO  [alembic.runtime.migration] Running upgrade 036 -> 037, t29 capability_sources + assets origin columns + skill_jobs.source_id
+INFO  [alembic.runtime.migration] Running upgrade 037 -> 038, t33 capability_aliases vanity slugs
+INFO  [alembic.runtime.migration] Running upgrade 038 -> 039, t28 listed_at DATETIME(6)；GWT-37.6 MySQL isoformat 往返
+INFO  [alembic.runtime.migration] Running upgrade 039 -> 040, plans/orders/subscriptions + tenant relay groups/tokens
+INFO  [alembic.runtime.migration] Running upgrade 040 -> 041, outbound_keys + relay_tokens gateway ref (expand-only)
+INFO  [alembic.runtime.migration] Running upgrade 041 -> 042, users 唯一键在册化（alive_flag 生成列）——软删行释放 username/email
+INFO  [alembic.runtime.migration] Running upgrade 042 -> 043, 能力资产导入两表（asset_import_batches / asset_import_items）——FR-100 / ADR-0023
+INFO  [alembic.runtime.migration] Running upgrade 043 -> 044, spider_definitions 加定义参数列（params JSON，expand-only）——FR-103 / T-39
+INFO  [alembic.runtime.migration] Running upgrade 044 -> 045, N1 夹具名单表 + product_events.is_internal_fixture 快照列（T-01 / FR-U03）
+INFO  [alembic.runtime.migration] Running upgrade 045 -> 046, N3 结账单据 expand + 商户凭据 + 中转 SKU 权益（T-14 / FR-U30 U31 U33 U38 U20）
+INFO  [alembic.runtime.migration] Running upgrade 046 -> 047, W2：orders.channel 可空去 default；专业档配额对齐定价页；补企业档价目。
+INFO  [alembic.runtime.migration] Running upgrade 039 -> 028, api_keys 租户密钥表 + spider_results.fetched_at
+INFO  [alembic.runtime.migration] Running upgrade 028 -> 029, plans/subscriptions/orders + llm cost columns
+INFO  [alembic.runtime.migration] Running upgrade 029 -> 030, last_login / skill downloads / result hash unique / builtin role perms
+INFO  [alembic.runtime.migration] Running upgrade 030, 047 -> 048, merge Alembic heads 030 + 047（039 后分叉收口）
+INFO  [alembic.runtime.migration] Running upgrade 048 -> 049, capability_assets 加 logo / background（.agents 同步 icon/background）
+INFO  [alembic.runtime.migration] Running upgrade 049 -> 050, capability_assets 加 featured / examples（feat-agents-market FR-04/FR-05）
+INFO  [alembic.runtime.migration] Context impl MySQLImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade 050 -> 049, capability_assets 加 featured / examples（feat-agents-market FR-04/FR-05）
+INFO  [alembic.runtime.migration] Running downgrade 049 -> 048, capability_assets 加 logo / background（.agents 同步 icon/background）
+INFO  [alembic.runtime.migration] Running downgrade 048 -> 030, 047, merge Alembic heads 030 + 047（039 后分叉收口）
+=========================== short test summary info ============================
+SKIPPED [1] backend/tests/test_alembic_baseline.py:136: MySQL errno 1553: DROP INDEX idx_skill_jobs_source 仍被 FK 占用；生产禁止 downgrade past 037（qc / deliver 已记）
+5 failed, 6 passed, 1 skipped, 1 error in 28.83s
+exit=
+2026年 9月27日 星期日 22时59分49秒 CST

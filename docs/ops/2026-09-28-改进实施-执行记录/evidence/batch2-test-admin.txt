@@ -1,0 +1,30 @@
+      at processRootScheduleInMicrotask (../../node_modules/react-dom/cjs/react-dom-client.development.js:18853:9)
+      at ../../node_modules/react-dom/cjs/react-dom-client.development.js:18991:13
+      at invokeTheCallbackFunction (node_modules/jsdom/lib/jsdom/living/generated/Function.js:19:26)
+      at node_modules/jsdom/lib/jsdom/browser/Window.js:554:9
+
+PASS src/pages/Pricing.test.tsx
+PASS src/components/QueryStateView.test.tsx
+PASS src/components/ProtectedRoute.test.tsx
+PASS src/pages/market/AssetDetailDrawer.test.tsx
+PASS src/services/apiClientContract.test.ts
+PASS src/pages/Capabilities.subscribe.test.tsx
+PASS src/pages/Nodes.test.tsx
+PASS src/pages/AiPlans.test.tsx
+PASS src/pages/Skills.test.tsx
+PASS src/frU24CopyScan.test.tsx
+PASS src/pages/market/PowerMarketSwitch.test.tsx
+PASS src/pages/ProductEvents.test.tsx
+PASS src/hooks/usePermission.test.tsx
+PASS src/pages/MyOrders.test.tsx
+PASS src/pages/market/AssetVisual.test.tsx
+PASS src/pages/market/MarkdownBody.test.tsx
+PASS src/components/llm/wizardPayload.test.ts
+PASS src/utils/collectBlock.test.ts
+
+Test Suites: 55 passed, 55 total
+Tests:       396 passed, 396 total
+Snapshots:   0 total
+Time:        140.499 s
+Ran all test suites.
+exit=0

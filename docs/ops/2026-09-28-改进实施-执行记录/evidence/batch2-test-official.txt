@@ -1,0 +1,30 @@
+      113 |       if (isNetworkError(e)) {
+
+      at error (../../node_modules/@rc-component/util/lib/warning.js:42:15)
+      at method (../../node_modules/@rc-component/util/lib/warning.js:61:5)
+      at call (../../node_modules/@rc-component/util/lib/warning.js:68:3)
+      at _warning (node_modules/antd/lib/_util/warning.js:24:22)
+      at Object.<anonymous>.exports.warnContext (node_modules/antd/lib/config-provider/index.js:79:63)
+      at typeOpen (node_modules/antd/lib/message/index.js:208:36)
+      at Object.typeOpen [as success] (node_modules/antd/lib/message/index.js:251:38)
+      at success (src/pages/Register.tsx:110:15)
+
+PASS src/pages/Pricing.test.tsx
+PASS src/pages/Pricing.beacon.test.tsx
+PASS src/pages/Pricing.price.test.tsx
+PASS src/App.test.tsx
+PASS src/pages/Capabilities.test.tsx
+PASS src/pages/CommandCards.test.tsx
+PASS src/pages/CapabilityDetail.test.tsx
+PASS src/components/layout/SiteLayout.beacon.test.tsx
+PASS src/pages/SkillsSquare.test.tsx
+PASS src/components/layout/SiteLayout.test.tsx
+PASS src/services/capabilities.test.ts
+PASS src/components/home/FeaturesSection.test.tsx
+
+Test Suites: 16 passed, 16 total
+Tests:       93 passed, 93 total
+Snapshots:   0 total
+Time:        24.908 s, estimated 36 s
+Ran all test suites.
+exit=0

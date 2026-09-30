@@ -1,0 +1,7 @@
+REPRO 200  GET /admin/audit-logs
+REPRO 200  GET /admin/webhook-status
+REPRO 200  GET /admin/notify-config
+REPRO 200  GET /rbac/departments?tenant_id=B(2) as owner A(1)
+REPRO 201  POST /rbac/departments tenant_id=B as owner A
+REPRO 404  GET /admin/users (control: platform-only)
+1 passed in 4.50s

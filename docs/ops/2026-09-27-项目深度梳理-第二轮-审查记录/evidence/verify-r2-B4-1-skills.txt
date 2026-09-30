@@ -1,0 +1,6 @@
+REPRO tenant-owner PUT /api/v1/skills/__nonexistent__/meta -> 404 code=NOT_FOUND msg=技能 __nonexistent__不存在
+REPRO tenant-owner POST /api/v1/skills/import-url -> 422 code=VALIDATION_ERROR msg=url 必须是 http(s) 地址
+REPRO tenant-owner GET /api/v1/skills/manifests -> 200 code=SUCCESS msg=操作成功
+REPRO tenant-owner POST /api/v1/skills/__nonexistent__/rescore -> 404 code=NOT_FOUND msg=技能 __nonexistent__不存在
+REPRO tenant-owner GET /api/v1/capabilities-gov/assets -> 404 code=None msg=None
+1 passed in 3.02s

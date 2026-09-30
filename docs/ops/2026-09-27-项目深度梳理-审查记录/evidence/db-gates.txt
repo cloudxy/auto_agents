@@ -1,0 +1,8 @@
+$ bash tools/check/db_ir.sh
+check-db-ir: 无 DBML 文件，跳过 IR lint（迁移 lint 由 check-db-migrations 覆盖）
+exit=0
+$ bash tools/check/db_migrations.sh
+迁移破坏性变更检测（strong_migrations 语义）
+==============================================
+[0;32m✓ 迁移破坏性变更检测通过[0m
+exit=0

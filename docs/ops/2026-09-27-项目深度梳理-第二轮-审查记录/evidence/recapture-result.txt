@@ -1,0 +1,1 @@
+dashboard recharts-bar-rectangle=2 scrollWidth@1440=1440 scrollWidth@375=513

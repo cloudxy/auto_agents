@@ -1,0 +1,55 @@
+# alembic check 摘要（manager，2026-09-27）
+# 方法：本机 MySQL 8.0.42 新建临时 schema → ALEMBIC_URL 指向它 → alembic upgrade head（到 050）→ alembic check → DROP schema
+# 结果：ERROR New upgrade operations detected（即 ORM 模型 ≠ 迁移链产物）。原始输出 152KB 见 alembic-check.txt
+op 计数: {'modify_comment': 656, 'modify_nullable': 24, 'remove_index': 14, 'add_index': 26, 'remove_fk': 8, 'add_fk': 6}
+
+## modify_nullable（表, 列, 库里可空, 模型可空）
+- ('ai_plans', 'tenant_id', 'False', 'True')
+- ('alert_rules', 'tenant_id', 'False', 'True')
+- ('llm_token_usage', 'tenant_id', 'False', 'True')
+- ('notifications', 'tenant_id', 'False', 'True')
+- ('outbound_keys', 'tenant_id', 'False', 'True')
+- ('spider_definitions', 'tenant_id', 'False', 'True')
+- ('spider_results', 'tenant_id', 'False', 'True')
+- ('spider_schedules', 'tenant_id', 'False', 'True')
+- ('spider_task_templates', 'tenant_id', 'False', 'True')
+- ('spider_tasks', 'priority', 'False', 'True')
+- ('spider_tasks', 'retry_count', 'False', 'True')
+- ('spider_tasks', 'tenant_id', 'False', 'True')
+
+## add_index（模型有、库里没有）
+- ix_archive_records_tenant_id
+- ix_llm_providers_tenant_id
+- ix_llm_token_usage_tenant_id
+- ix_notifications_tenant_id
+- ix_outbound_keys_tenant_id
+- ix_skill_jobs_source_id
+- ix_skills_name
+- ix_spider_definitions_tenant_id
+- ix_spider_task_templates_tenant_id
+- ix_spider_tasks_tenant_id
+- ix_tags_tenant_id
+- ix_workflow_definitions_tenant_id
+- ix_workflow_instances_tenant_id
+
+## remove_index（库里有、模型没有）
+- idx_skill_jobs_source
+- ix_skills_name
+- ix_spider_results_created_at
+- ix_spider_results_spider_created
+- ix_system_configs_config_key
+- key_hash
+- uq_skills_name
+
+## remove_fk: 8
+- ForeignKeyConstraint(<sqlalchemy.sql.base.ReadOnlyColumnCollection object at 0x10c5b04a0>, None, name='notifications_ibfk_1', ondelete='CASCADE', table=Table('n
+- ForeignKeyConstraint(<sqlalchemy.sql.base.ReadOnlyColumnCollection object at 0x10d4576f0>, None, name='workflow_steps_ibfk_1', ondelete='CASCADE', table=Table('
+- ForeignKeyConstraint(<sqlalchemy.sql.base.ReadOnlyColumnCollection object at 0x10d457880>, None, name='taggings_ibfk_1', ondelete='CASCADE', table=Table('taggin
+- ForeignKeyConstraint(<sqlalchemy.sql.base.ReadOnlyColumnCollection object at 0x10d4578d0>, None, name='workflow_transitions_ibfk_1', ondelete='CASCADE', table=T
+
+## add_fk: 6
+- ForeignKeyConstraint(<sqlalchemy.sql.base.ReadOnlyColumnCollection object at 0x10d457830>, None, table=Table('notifications', MetaData(), Column('user_id', Null
+- ForeignKeyConstraint(<sqlalchemy.sql.base.ReadOnlyColumnCollection object at 0x10d457920>, None, table=Table('workflow_steps', MetaData(), Column('instance_id',
+- ForeignKeyConstraint(<sqlalchemy.sql.base.ReadOnlyColumnCollection object at 0x10d457a10>, None, table=Table('workflow_transitions', MetaData(), Column('step_id
+
+## modify_comment：656 处（仅注释差异，噪声，不计入缺陷）

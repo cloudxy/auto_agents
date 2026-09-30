@@ -1,0 +1,37 @@
+# verify-manager-2 命令原文（R0 QA-10 要求补记）：
+#   grep -rniE "is_private|ipaddress|169\.254|url_guard|ssrf" scrapy backend/services/spider_task_service.py backend/services/spider_registry_service.py backend/app/api/v1/spiders
+#   → 无任何命中（输出仅 "(end grep)"）；「租户可否提交 generic/flow」一节 grep 无结果，保持未验证。
+### R4 QA-3: 出站校验是否存在于 scrapy / 任务创建
+(end grep)
+
+### generic/flow_generic 可否由租户提交（spider 定义 visibility / 角色）
+
+### R2 QA-7: 租户 webhook URL 校验
+    async def set_delivery_webhook(self, tenant_id: int, url: str | None) -> dict:
+        logger.info(f"设置交付 webhook | tenant={tenant_id}")
+        tenant = await self.session.get(Tenant, tenant_id)
+        if tenant is None:
+            raise NotFoundException("租户")
+        cleaned = (url or "").strip()
+        if cleaned and not (cleaned.startswith("https://") or cleaned.startswith("http://")):
+            raise ValidationException(message="webhook 须为 http(s) URL", field="url")
+        quota = dict(tenant.quota or {})
+        if cleaned:
+            quota["delivery_webhook_url"] = cleaned
+        else:
+
+### R1 QA-3: /auth/register 归入 default
+212:        """注册用户（T5 决策 B：挂 default 租户，不再产生 NULL 租户行）
+215:        default 租户（tenant_role=viewer），NULL 租户账号的历史放大器
+223:        # default 租户兜底归属（017 种子保证存在；缺失即环境未初始化）
+229:            select(Tenant).where(Tenant.slug == "default")
+232:            logger.error("default 租户缺失，公开注册不可用（迁移 017 未执行？）")
+239:        # 1. 唯一性检查：username 按 (default 租户, username) 在册口径、email 全局
+271:        logger.info(f"用户注册成功: {username} tenant=default({tenant.id})")
+
+### R6 QA-6: Node 版本
+v25.9.0
+7:FROM node:20 AS frontend-builder
+
+### R6 QA-4: Dockerfile USER
+0

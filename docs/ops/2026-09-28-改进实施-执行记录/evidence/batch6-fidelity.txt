@@ -1,0 +1,8 @@
+# 批次 6（D 决策落地）MySQL 保真通道 · 2026-09-30 本机 MySQL 8（root，test_ 临时库，跑完自动删除）
+# 1) CI 同一份清单（.github/workflows/ci.yml mysql-fidelity，16 个文件，含迁移往返到 056）
+88 passed, 1 skipped in 101.45s (0:01:41)
+# 2) 本批新增 / 改动的库相关用例（D10/D11/D17/D21/D22/D23/D34、D1）
+#    test_admin_users_search.py test_member_transfer_owner.py test_market_switch_persisted.py
+#    test_email_verification.py test_session_refresh.py test_subscription_lifecycle.py
+#    test_sales_led_grant.py test_personal_register_closed.py
+40 passed in 39.81s

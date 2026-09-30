@@ -1,0 +1,10 @@
+$ grep LITELLM.ENABLED / SHADOW readers (backend non-test)
+(end)
+$ grep APP_ROLE
+backend/app/__init__.py:101:        _run_bg = (_os.environ.get("APP_ROLE") or "all").strip().lower() in ("all", "worker")
+(end)
+$ settings.set( callers (backend non-test)
+backend/services/power_market/flag.py:23:    settings.set("POWER_MARKET.ENABLED", flag)
+(end)
+$ llm_token_usage columns + aggregate
+id,provider_id,provider_name,model,stat_date,prompt_tokens,completion_tokens,total_tokens,request_count,failed_count,created_at,updated_at,tenant_id,cost_cents

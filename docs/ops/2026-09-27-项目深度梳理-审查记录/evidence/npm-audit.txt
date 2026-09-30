@@ -1,0 +1,62 @@
+$ npm audit --omit=dev
+      Depends on vulnerable versions of workbox-build
+      frontend/admin/node_modules/workbox-webpack-plugin
+      frontend/official/node_modules/workbox-webpack-plugin
+
+shell-quote  <=1.8.4
+Severity: critical
+shell-quote quote() does not escape newlines in object .op values - https://github.com/advisories/GHSA-w7jw-789q-3m8p
+shell-quote: Quadratic-complexity Denial of Service in `parse()` (CWE-407) - https://github.com/advisories/GHSA-395f-4hp3-45gv
+fix available via `npm audit fix`
+frontend/admin/node_modules/shell-quote
+frontend/official/node_modules/shell-quote
+
+
+underscore  <=1.13.7
+Severity: high
+Underscore has unlimited recursion in _.flatten and _.isEqual, potential for DoS attack - https://github.com/advisories/GHSA-qpx9-hpmf-5gmw
+fix available via `npm audit fix`
+frontend/admin/node_modules/underscore
+frontend/official/node_modules/underscore
+  jsonpath  *
+  Depends on vulnerable versions of underscore
+  frontend/admin/node_modules/jsonpath
+  frontend/official/node_modules/jsonpath
+    bfj  7.1.0 - 9.1.2
+    Depends on vulnerable versions of jsonpath
+    frontend/admin/node_modules/bfj
+    frontend/official/node_modules/bfj
+
+uuid  <11.1.1
+Severity: moderate
+uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided - https://github.com/advisories/GHSA-w5hq-g745-h8pq
+fix available via `npm audit fix --force`
+Will install react-scripts@0.0.0, which is a breaking change
+frontend/admin/node_modules/uuid
+frontend/official/node_modules/uuid
+  sockjs  >=0.3.17
+  Depends on vulnerable versions of uuid
+  frontend/admin/node_modules/sockjs
+  frontend/official/node_modules/sockjs
+    webpack-dev-server  <=5.2.6
+    Depends on vulnerable versions of sockjs
+    frontend/admin/node_modules/webpack-dev-server
+    frontend/official/node_modules/webpack-dev-server
+
+
+websocket-driver  <=0.7.4
+Severity: critical
+websocket-driver: Resource limit bypass via message compression - https://github.com/advisories/GHSA-mp7j-qc5w-4988
+websocket-driver: Message corruption via abuse of protocol length headers - https://github.com/advisories/GHSA-xv26-6w52-cph6
+fix available via `npm audit fix`
+frontend/admin/node_modules/websocket-driver
+frontend/official/node_modules/websocket-driver
+
+44 vulnerabilities (12 low, 10 moderate, 20 high, 2 critical)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+exit=1
