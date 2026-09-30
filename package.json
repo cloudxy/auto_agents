@@ -13,5 +13,9 @@
     "start:official": "npm run start -w official",
     "check-frontend": "bash tools/check/frontend.sh",
     "gen:api": "uv run python tools/dump_openapi.py && npm run codegen:api -w @auto-agents/frontend-shared && npm run build -w @auto-agents/frontend-shared"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3"
   }
 }
