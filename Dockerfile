@@ -4,7 +4,7 @@
 # 运行：见 docker-compose.yml（本地联调含 MySQL 8 + Redis 7）
 
 # ===== Stage 1: 前端构建（shared dist → admin + official）=====
-FROM node:20 AS frontend-builder
+FROM node:26 AS frontend-builder
 
 WORKDIR /build
 COPY package.json package-lock.json .npmrc ./
