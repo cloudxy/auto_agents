@@ -119,6 +119,10 @@ class FakeRedis:
     async def hget(self, key, field):
         return self.hashes.get(key, {}).get(field)
 
+    async def exists(self, *keys):
+        """与 redis-py 同义：返回存在的键个数"""
+        return sum(1 for k in keys if k in self.strings or k in self.hashes or k in self.sets)
+
     async def hset(self, key, field=None, value=None, mapping=None):
         bucket = self.hashes.setdefault(key, {})
         if mapping:
@@ -146,6 +150,14 @@ class FakeRedis:
 
     async def sismember(self, key, member):
         return member in self.sets.get(key, set())
+
+    async def srem(self, key, *members):
+        """与 Redis 同义：成员按字符串比较（int / str 都能移除）"""
+        bucket = self.sets.get(key, set())
+        targets = {str(m) for m in members}
+        hit = {m for m in bucket if str(m) in targets}
+        bucket.difference_update(hit)
+        return len(hit)
 
     async def rpush(self, key, *values):
         bucket = self.lists.setdefault(key, [])
@@ -177,3 +189,46 @@ def fake_async_session() -> MagicMock:
     s.rollback = AsyncMock()
     s.execute = AsyncMock()
     return s
+
+
+class RateLimitFakeRedis:
+    """限流桩（与真实 redis.asyncio 客户端同形：get_async_redis 同步返回客户端，计数走 pipeline）"""
+
+    def __init__(self):
+        self.counts: dict[str, int] = {}
+        self.ttls: dict[str, int] = {}
+
+    async def incr(self, key):
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return self.counts[key]
+
+    async def expire(self, key, ttl):
+        self.ttls[key] = ttl
+        return True
+
+    async def get(self, key):
+        return self.counts.get(key)
+
+    async def ttl(self, key):
+        return self.ttls.get(key, -1)
+
+    def pipeline(self, transaction=True):
+        outer = self
+
+        class _Pipe:
+            def __init__(self):
+                self.ops: list = []
+
+            def incr(self, key):
+                self.ops.append(("incr", key))
+
+            def expire(self, key, ttl):
+                self.ops.append(("expire", key, ttl))
+
+            async def execute(self):
+                out = []
+                for op in self.ops:
+                    out.append(await (outer.incr(op[1]) if op[0] == "incr" else outer.expire(op[1], op[2])))
+                return out
+
+        return _Pipe()

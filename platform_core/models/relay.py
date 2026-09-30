@@ -3,7 +3,9 @@
 租户可管自己的组/令牌/限额；不能改平台渠道或全局熔断（仍走 /newapi 超管页）。
 明文 Key 只在签发响应里出现一次，库内只存 hash。
 """
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON, BigInteger, Column, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
+)
 from sqlalchemy.sql import func
 
 from platform_core.models.base import Base
@@ -55,3 +57,25 @@ class RelayToken(TenantMixin, Base):
         DateTime(), nullable=True,
         comment="最近一次网关 spend 回写 used_tokens 的时刻；NULL=从未同步",
     )
+    blocked_reason = Column(
+        String(32), nullable=True,
+        comment="网关侧已 block 的原因 quota_exhausted/group_disabled/sku_expired/tenant_quota；NULL=未封（迁移 053）",
+    )
+
+
+class RelayUsageDaily(TenantMixin, Base):
+    """中转令牌日粒度用量事实（审计 F3-9，迁移 053）
+
+    由网关 spend 日志按日聚合写入；同一 (令牌, 日) 只增不减（取观察值与既有值的较大者），
+    网关分页截断或日志清理不会让已记账的用量倒退。企业月度中转用量 = 本表按月求和。
+    """
+
+    __tablename__ = "relay_usage_daily"
+    __table_args__ = (UniqueConstraint("token_id", "stat_date", name="uq_relay_usage_daily_token_date"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="主键")
+    token_id = Column(Integer, ForeignKey("relay_tokens.id", ondelete="CASCADE"), nullable=False,
+                      index=True, comment="令牌")
+    stat_date = Column(Date, nullable=False, comment="统计日（网关日志 startTime 所属的 Asia/Shanghai 业务日）")
+    total_tokens = Column(BigInteger, nullable=False, default=0, server_default="0", comment="当日 token 合计")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")

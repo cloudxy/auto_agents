@@ -1,7 +1,8 @@
 """计费 API：公开价目 + 租户订购 + 结账占坑 + 通道通知 + 平台确认收款。"""
+import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
@@ -20,7 +21,7 @@ from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
 from platform_core.schemas.billing import (
     ChannelNotifyIn, CheckoutCreate, OnlinePayChannel, OrderConfirmIn, OrderCreate,
-    OrderOut, PlanOut, SubscriptionOut,
+    OrderOut, PlanGrantIn, PlanOut, SubscriptionOut,
 )
 
 logger = get_logger("api.billing")
@@ -34,6 +35,16 @@ def _svc(session: AsyncSession = Depends(get_async_db)) -> BillingService:
 
 def _notify_svc(session: AsyncSession = Depends(get_async_db)) -> PaymentNotifyService:
     return PaymentNotifyService(session)
+
+
+def _fixture_notify_enabled() -> bool:
+    from config import settings
+
+    if os.getenv("APP_ENV", "local") == "prod":
+        return False
+    section = settings.get("BILLING") or {}  # 先取段再取键（点路径会在 Dynaconf 内部带 parent 递归）
+    value = section.get("FIXTURE_NOTIFY_ENABLED") if hasattr(section, "get") else None
+    return True if value is None else bool(value)
 
 
 @router.get("/plans", response_model=ApiResponse[list[PlanOut]])
@@ -90,7 +101,13 @@ async def channel_notify(
     payload: ChannelNotifyIn,
     service: PaymentNotifyService = Depends(_notify_svc),
 ):
-    """通道通知入口：无 JWT。验真失败也 200，不开通、无 payment_succeeded。"""
+    """HMAC 夹具通知入口（沙箱 / CI）：无 JWT。验真失败也 200，不开通、无 payment_succeeded。
+
+    审计 R1-11：夹具通路与真实网关共用同一份商户密钥，prod 恒关闭（404 同形），
+    其它环境可用 BILLING.FIXTURE_NOTIFY_ENABLED=false 关闭；真实回调走 /external/v1/payments/*。
+    """
+    if not _fixture_notify_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
     logger.info(f"通道通知 | channel={channel} order_no={payload.order_no}")
     await service.handle(channel, payload)
     return ok(data={"accepted": True})
@@ -142,6 +159,20 @@ async def regenerate_pay_intent(
     return ok(data=order)
 
 
+@router.post("/orders/{order_id}/cancel", response_model=ApiResponse[OrderOut])
+async def cancel_order(
+    order_id: int,
+    user: CurrentUser = Depends(get_current_user),
+    service: BillingService = Depends(_svc),
+) -> ApiResponse[OrderOut]:
+    """买方取消本企业待支付单（审计 BUG-24）；已付款 / 已关闭 409，跨企业 404"""
+    out = await service.cancel_checkout(
+        order_id, user.tenant_id, user.tenant_role, actor_user_id=user.id,
+    )
+    await record_audit(user, "order.cancel", f"order#{order_id}")
+    return ok(out, message="订单已取消")
+
+
 @router.get("/orders", response_model=ApiResponse[list[OrderOut]])
 async def list_orders(
     user: CurrentUser = Depends(get_current_user),
@@ -158,6 +189,36 @@ async def list_pending_orders(
     service: BillingService = Depends(_svc),
 ) -> ApiResponse[list[OrderOut]]:
     return ok(await service.list_pending_orders())
+
+
+@router.post("/admin/tenants/{tenant_id}/grant", response_model=ApiResponse[OrderOut])
+async def grant_plan(
+    tenant_id: int,
+    payload: PlanGrantIn,
+    user: CurrentUser = Depends(require_platform_admin_or_404),
+    service: BillingService = Depends(_svc),
+) -> ApiResponse[OrderOut]:
+    """平台为定制客户开通套餐（决策 D17）：记一笔线下已收款订单并按同一履约路径开通"""
+    out = await service.grant_plan(
+        tenant_id, payload.product, payload.amount_cents, payload.periods,
+        note=payload.note, actor_user_id=user.id,
+    )
+    await record_audit(user, "plan.grant", f"tenant#{tenant_id}",
+                       detail={"product": payload.product, "periods": payload.periods,
+                               "amount_cents": payload.amount_cents, "note": payload.note})
+    return ok(out, message="已开通")
+
+
+@router.post("/orders/{order_id}/retry-fulfillment", response_model=ApiResponse[OrderOut])
+async def retry_order_fulfillment(
+    order_id: int,
+    user: CurrentUser = Depends(require_platform_admin_or_404),
+    service: BillingService = Depends(_svc),
+) -> ApiResponse[OrderOut]:
+    """超管补偿：已付款待开通的单重新履约（审计 BUG-25）"""
+    out = await service.retry_fulfillment(order_id)
+    await record_audit(user, "order.retry_fulfillment", f"order#{order_id}")
+    return ok(out, message="已重新开通")
 
 
 @router.post("/orders/{order_id}/confirm", response_model=ApiResponse[OrderOut])

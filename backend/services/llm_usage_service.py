@@ -55,6 +55,9 @@ def _today() -> date:
     return shanghai_today()
 
 
+_PLATFORM_DAY_FIELD = "__platform__|total"
+
+
 def _daily_key(day: date) -> str:
     return f"{_DAILY_KEY_PREFIX}{day.strftime('%Y%m%d')}"
 
@@ -98,6 +101,8 @@ async def record_usage(dim: str, model: str, prompt_tokens: int = 0, completion_
         if total:
             await redis.hincrby(daily, f"{tkey}|{dim}|{model}|total", total)
             await redis.hincrby(daily, f"{tkey}|{dim}|{model}|requests", 1)
+            # 平台全局当日合计（决策 D21：全局日预算上限的读数口径）
+            await redis.hincrby(daily, _PLATFORM_DAY_FIELD, total)
             # 月度汇总（预算读数口径）
             monthly = _monthly_key(today)
             await redis.hincrby(monthly, f"{tkey}|{dim}|total", total)
@@ -118,12 +123,30 @@ async def get_month_used(dim: str, tenant_id: Optional[int] = None) -> Optional[
     try:
         redis = get_async_redis()
         tkey = str(tenant_id) if tenant_id is not None else "default"
+        if not await redis.exists(_monthly_key(_today())):
+            # 审计 BUG-29：月度键不存在（过期 / 清库 / 故障恢复）≠ 本月用量为 0；返回 None 让调用方
+            # 按 fail-closed 或回源数据库处理（原先读成 0 直接放行）
+            logger.warning(f"LLM 月度用量键缺失，按不可知处理: dim={dim} tenant={tenant_id}")
+            return None
         raw = await redis.hget(_monthly_key(_today()), f"{tkey}|{dim}|total")
         if not raw and tkey != "default":
             raw = await redis.hget(_monthly_key(_today()), f"{dim}|total")  # 旧三段兜底
         return int(raw) if raw else 0
     except Exception as e:  # noqa: BLE001
         logger.debug(f"LLM 月度用量读取失败（回退内存读数）: dim={dim}, error={e}")
+        return None
+
+
+async def get_platform_day_used() -> Optional[int]:
+    """平台今日全部 LLM token 合计（上海业务日）；None = 读数不可用（Redis 故障 / 测试态）"""
+    logger.debug("读取平台当日 LLM 用量")
+    if _IN_PYTEST:
+        return None
+    try:
+        raw = await get_async_redis().hget(_daily_key(_today()), _PLATFORM_DAY_FIELD)
+        return int(raw) if raw else 0
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"平台当日 LLM 用量读取失败: error={e}")
         return None
 
 
@@ -135,6 +158,10 @@ async def get_tenant_month_used(tenant_id: int) -> Optional[int]:
         redis = get_async_redis()
         tkey = str(tenant_id)
         data = await redis.hgetall(_monthly_key(_today()))
+        if not data:
+            # 审计 BUG-29：键缺失 → None，QuotaService 回源 llm_token_usage 表
+            logger.warning(f"租户月度用量键缺失，回源数据库: tenant={tenant_id}")
+            return None
         total = 0
         prefix = f"{tkey}|"
         for field, val in (data or {}).items():

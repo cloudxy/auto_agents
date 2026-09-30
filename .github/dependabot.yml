@@ -1,6 +1,7 @@
 version: 2
 updates:
-  - package-ecosystem: pip
+  # uv workspace：pip 生态读不到 uv.lock，升级 PR 形同虚设（审计 R6-1）
+  - package-ecosystem: uv
     directory: "/"
     schedule:
       interval: weekly
@@ -9,6 +10,10 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+  - package-ecosystem: docker
     directory: "/"
     schedule:
       interval: monthly

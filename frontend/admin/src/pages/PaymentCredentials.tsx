@@ -14,6 +14,7 @@ import {
 import { CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 import {
   buildAlipaySecretsPayload, buildWechatSecretsPayload, deletePaymentCredential,
   fetchPaymentCredentials, putPaymentCredential, validatePaymentCredential,
@@ -30,8 +31,7 @@ const SAVE_OK = '已保存商户凭据；密钥已加密落库，页面不会再
 const DELETE_TITLE = '停用该支付通道？'
 const DELETE_NOTE = '停用后租户结账选该通道会回退成人工确认收款，不影响已产生的订单。'
 
-const formatTime = (v?: string | null) =>
-  (v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '—')
+const formatTime = (v?: string | null) => formatDateTime(v, '—')
 
 type FormValues = {
   merchant_no: string

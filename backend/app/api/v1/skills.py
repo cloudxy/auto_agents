@@ -3,6 +3,10 @@
 路由注册顺序约束（总方案 3.2-A-5）：静态段（scan/jobs/similar-suggest/similar-confirm/candidates/manifests/
 sync-adapters/import-url）必须先于 /{name} 注册，否则被动态段吞掉。
 本文件落地：列表 / 详情 / 扫描 / 任务记录；其余静态段随对应工单补充（同样置于 {name} 之前）。
+
+权限（审计 B4-1 / BUG-04，D32-A 临时最严口径）：技能库是全平台共享的仓库文件，
+所有写操作（导入、启用矩阵、分发、同类确认、重评、矫正、导出、查更新）以及
+启用矩阵 / 任务记录读取一律仅平台超管，非超管 404 同形；列表与详情对登录用户只读。
 """
 from pathlib import Path
 from backend.config_consts import (SKILLS_LIBRARY_ROOT)
@@ -13,9 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.api._helpers import omit_local_abs_paths_for_non_platform_admin, record_audit
 from backend.app.api.deps import (
     CurrentUser,
-    require_admin,
     require_login,
-    require_operator,
     require_platform_admin_or_404,
 )
 from backend.app.responses import ok
@@ -59,10 +61,10 @@ async def scan_skills(
 @router.post("/import-url")
 async def import_skill_from_url(
     body: dict,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """URL 导入（admin）：GitHub 子目录 / raw 文件 / zip（安全边界见 skill_import_service）"""
+    """URL 导入（仅平台超管）：GitHub 子目录 / raw 文件 / zip（安全边界见 skill_import_service）"""
     from backend.services.skill_import_service import SkillImportService
 
     url = str(body.get("url") or "").strip()
@@ -79,7 +81,7 @@ async def import_skill_from_url(
 
 @router.get("/manifests")
 async def get_manifests(
-    user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
 ):
     """启用矩阵读取（tool → 已启用技能名列表）"""
@@ -89,7 +91,7 @@ async def get_manifests(
 @router.put("/manifests")
 async def put_manifest(
     body: dict,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -101,7 +103,7 @@ async def put_manifest(
 
 @router.post("/sync-adapters")
 async def sync_adapters(
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -113,7 +115,7 @@ async def sync_adapters(
 
 @router.post("/similar-suggest")
 async def similar_suggest(
-    user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -126,7 +128,7 @@ async def similar_suggest(
 @router.put("/similar-confirm")
 async def similar_confirm(
     body: dict,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -185,7 +187,7 @@ async def reject_skill_candidate(
 async def list_skill_jobs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
 ):
     """任务运行记录（scan/score_batch/import/export_meta）"""
@@ -232,7 +234,7 @@ async def get_skill_detail(
 @router.post("/{name}/rescore")
 async def rescore_skill(
     name: str,
-    user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -250,11 +252,11 @@ async def rescore_skill(
 async def correct_skill_meta(
     name: str,
     body: dict,
-    user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """人工矫正（operator）：落 DB + 写回 meta.yaml + CHANGELOG + skill_reviews(human)"""
+    """人工矫正（仅平台超管）：落 DB + 写回 meta.yaml + CHANGELOG + skill_reviews(human)"""
     allowed = {
         "category", "industries", "status", "similar_to",
         "score", "rubric_human", "review_notes",
@@ -270,7 +272,7 @@ async def correct_skill_meta(
 @router.post("/{name}/export-meta")
 async def export_skill_meta(
     name: str,
-    user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     service: SkillService = Depends(_service),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -283,7 +285,7 @@ async def export_skill_meta(
 @router.get("/{name}/check-update")
 async def check_skill_update(
     name: str,
-    user: CurrentUser = Depends(require_operator),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
 ):
     """只读检查来源更新（哈希比对，不自动覆盖——手动更新走 git）"""

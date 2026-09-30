@@ -3,7 +3,7 @@
  *
  * 响应为后端统一信封（ADR-001）：plans 列表为 PaginatedResponse（data.items/total），
  * 其余为 ApiResponse；service 层统一解包 data，页面组件拿到的仍是裸结构。
- * 状态机：draft → planning →（draft，含 flow 产物）→ testing →（试采通过保持 testing，可注册）→ registered；任意阶段可 failed。
+ * 状态机：draft → planning →（draft，含 flow 产物）→ testing →（试采通过 → tested，可注册 / 重试 / 删除）→ registered；任意阶段可 failed。
  */
 import api, { unwrap } from './api'
 
@@ -60,7 +60,7 @@ export interface AiPlanTestHistory {
 export interface AiPlan {
   id: number
   target_url: string
-  status: 'draft' | 'planning' | 'testing' | 'registered' | 'failed' | string
+  status: 'draft' | 'planning' | 'testing' | 'tested' | 'registered' | 'failed' | string
   plan_json?: {
     flow?: FlowConfig | null
     test_history?: AiPlanTestHistory[]
@@ -82,6 +82,7 @@ export const AI_PLAN_STATUS_META: Record<string, { label: string; color: string 
   draft: { label: '草稿', color: 'default' },
   planning: { label: '规划中', color: 'processing' },
   testing: { label: '试采中', color: 'orange' },
+  tested: { label: '试采通过', color: 'cyan' },
   registered: { label: '已上线', color: 'success' },
   failed: { label: '失败', color: 'error' },
 }
@@ -91,6 +92,7 @@ export const AI_PLAN_STATUS_OPTIONS = [
   { value: 'draft', label: '草稿' },
   { value: 'planning', label: '规划中' },
   { value: 'testing', label: '试采中' },
+  { value: 'tested', label: '试采通过' },
   { value: 'registered', label: '已上线' },
   { value: 'failed', label: '失败' },
 ]

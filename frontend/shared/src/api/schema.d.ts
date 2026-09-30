@@ -31,6 +31,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Session
+         * @description 用刷新令牌换一对新令牌（决策 D10：轮换；重放吊销全部会话；按库重核停用 / 改密 / 企业状态）
+         */
+        post: operations["refresh_session_api_v1_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Logout
+         * @description 登出：作废本会话的刷新令牌；访问令牌自然到期（≤30 分钟）
+         */
+        post: operations["logout_api_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verify-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Email
+         * @description 点邮件里的验证链接（决策 D21）：无需登录，令牌与账号邮箱绑定
+         */
+        post: operations["verify_email_api_v1_auth_verify_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/resend-verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend Verification
+         * @description 重新发送验证邮件（负责人本人；60 秒一次）
+         */
+        post: operations["resend_verification_api_v1_auth_resend_verification_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/permissions": {
         parameters: {
             query?: never;
@@ -324,7 +404,7 @@ export interface paths {
         put?: never;
         /**
          * Control Task
-         * @description 控制运行中的任务：暂停/恢复/终止（A4；body 必填，缺失时 422）
+         * @description 控制任务：终止；暂停先下线（D6，409 TASK_PAUSE_UNAVAILABLE）；恢复只清旧暂停键（body 必填，缺失时 422）
          */
         post: operations["control_task_api_v1_spiders_tasks__task_id__control_post"];
         delete?: never;
@@ -343,6 +423,8 @@ export interface paths {
         /**
          * Get Task Logs
          * @description 任务运行日志（尾部 N 行，支持关键词搜索和级别过滤）
+         *
+         *     共享爬虫进程的日志混有并发任务：非平台超管只看带本任务标记的行（审计 BUG-16）。
          */
         get: operations["get_task_logs_api_v1_spiders_tasks__task_id__logs_get"];
         put?: never;
@@ -794,7 +876,7 @@ export interface paths {
         };
         /**
          * List Users
-         * @description 用户列表（用户管理页陈列，不含密码哈希；status=deleted 为已删筛选）
+         * @description 用户列表（不含密码哈希；筛选全部在服务端、total 与筛选一致——决策 D11）
          */
         get: operations["list_users_api_v1_admin_users_get"];
         put?: never;
@@ -934,7 +1016,7 @@ export interface paths {
         get: operations["get_power_market_switch_api_v1_admin_power_market_get"];
         /**
          * Put Power Market Switch
-         * @description 超管打开/关闭能力市场总开关。yaml 默认 false；本写覆盖运行时。
+         * @description 超管打开/关闭能力市场总开关（决策 D34：写库，重启不丢；打开须已配值班联系人）
          */
         put: operations["put_power_market_switch_api_v1_admin_power_market_put"];
         post?: never;
@@ -1006,6 +1088,26 @@ export interface paths {
          */
         put: operations["put_notify_config_api_v1_admin_notify_config_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/notify-config/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Notify Channel
+         * @description 配置页「发送测试」（审计 BUG-36）：对指定渠道发一条测试消息，结果如实返回
+         */
+        post: operations["test_notify_channel_api_v1_admin_notify_config_test_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1093,12 +1195,14 @@ export interface paths {
         /**
          * List Departments
          * @description 部门列表（按租户；软删行排除；含成员计数）
+         *
+         *     非平台超管只能看本租户：tenant_id 省略即本租户，指定他租户 → 404 同形。
          */
         get: operations["list_departments_api_v1_rbac_departments_get"];
         put?: never;
         /**
          * Create Department
-         * @description 创建部门（租户内名唯一）
+         * @description 创建部门（租户内名唯一；租户取自身份，仅平台超管可指定）
          */
         post: operations["create_department_api_v1_rbac_departments_post"];
         delete?: never;
@@ -1237,7 +1341,11 @@ export interface paths {
         };
         /**
          * Get Configs
-         * @description 获取所有系统配置（信封 data 为 {key: value} 字典）
+         * @description 获取所有系统配置（信封 data 为 {key: value} 字典）。
+         *
+         *     仅平台超管（租户 404 同形）：全量里有通知机器人地址（钉钉 / 企微 URL 自带
+         *     access_token），原先 require_login，任何企业的任何成员都能读到。唯一消费方是
+         *     平台设置页。
          */
         get: operations["get_configs_api_v1_configs__get"];
         put?: never;
@@ -1847,7 +1955,7 @@ export interface paths {
         put?: never;
         /**
          * Import Skill From Url
-         * @description URL 导入（admin）：GitHub 子目录 / raw 文件 / zip（安全边界见 skill_import_service）
+         * @description URL 导入（仅平台超管）：GitHub 子目录 / raw 文件 / zip（安全边界见 skill_import_service）
          */
         post: operations["import_skill_from_url_api_v1_skills_import_url_post"];
         delete?: never;
@@ -2094,7 +2202,7 @@ export interface paths {
         get?: never;
         /**
          * Correct Skill Meta
-         * @description 人工矫正（operator）：落 DB + 写回 meta.yaml + CHANGELOG + skill_reviews(human)
+         * @description 人工矫正（仅平台超管）：落 DB + 写回 meta.yaml + CHANGELOG + skill_reviews(human)
          */
         put: operations["correct_skill_meta_api_v1_skills__name__meta_put"];
         post?: never;
@@ -2321,7 +2429,7 @@ export interface paths {
         put?: never;
         /**
          * Create Member
-         * @description 创建子账号（tenant_role: owner/admin/operator/viewer）
+         * @description 创建子账号（tenant_role: admin/operator/viewer；owner 不可经此产生，admin 只能建 operator/viewer）
          */
         post: operations["create_member_api_v1_members_post"];
         delete?: never;
@@ -2368,6 +2476,26 @@ export interface paths {
          * @description 重置成员密码
          */
         post: operations["reset_member_password_api_v1_members__member_id__reset_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/members/{member_id}/transfer-ownership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfer Ownership
+         * @description 转让负责人（决策 D23）：仅负责人本人、须输入登录密码；本人降为管理员并需重新登录
+         */
+        post: operations["transfer_ownership_api_v1_members__member_id__transfer_ownership_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2769,7 +2897,7 @@ export interface paths {
         };
         /**
          * Get Plugin
-         * @description 插件详情（manifest/mcp_servers/健康态）
+         * @description 插件详情（manifest/mcp_servers/健康态）；非超管仅限已上架，且不含验证明细
          */
         get: operations["get_plugin_api_v1_capabilities_plugins__name__get"];
         put?: never;
@@ -2809,7 +2937,7 @@ export interface paths {
         };
         /**
          * Get Expert
-         * @description 专家详情（persona/tools/skills/mcp）
+         * @description 专家详情（persona/tools/skills/mcp）；非超管仅限已上架
          */
         get: operations["get_expert_api_v1_capabilities_experts__name__get"];
         put?: never;
@@ -2852,7 +2980,7 @@ export interface paths {
         };
         /**
          * Get Team
-         * @description 专家团详情
+         * @description 专家团详情；非超管仅限已上架
          */
         get: operations["get_team_api_v1_capabilities_teams__name__get"];
         put?: never;
@@ -2872,7 +3000,7 @@ export interface paths {
         };
         /**
          * Export Team
-         * @description 专家团导出（TEAM.md 文档形态）
+         * @description 专家团导出（TEAM.md 文档形态）；非超管仅限已上架
          */
         get: operations["export_team_api_v1_capabilities_teams__name__export_get"];
         put?: never;
@@ -3085,6 +3213,8 @@ export interface paths {
          * Get Capability Detail
          * @description 统一详情（治理字段 + 类型化细节由各域端点补充）
          *
+         *     非超管：只返回已上架资产的公开投影（未上架 / 黑名单 / 市场关闭 → 404 同形，审计 B4-4）。
+         *
          *     注意：本路由为二段式动态段，必须保持在文件末尾注册，否则遮蔽
          *     /plugins/{name} /experts/{name} /teams/{name} 三条静态详情路由（恒 404）。
          *     非超管不发出本机绝对路径（GWT-14.1/14.2）；相对库路径可保留。
@@ -3185,7 +3315,10 @@ export interface paths {
         put?: never;
         /**
          * Channel Notify
-         * @description 通道通知入口：无 JWT。验真失败也 200，不开通、无 payment_succeeded。
+         * @description HMAC 夹具通知入口（沙箱 / CI）：无 JWT。验真失败也 200，不开通、无 payment_succeeded。
+         *
+         *     审计 R1-11：夹具通路与真实网关共用同一份商户密钥，prod 恒关闭（404 同形），
+         *     其它环境可用 BILLING.FIXTURE_NOTIFY_ENABLED=false 关闭；真实回调走 /external/v1/payments/*。
          */
         post: operations["channel_notify_api_v1_billing_notify__channel__post"];
         delete?: never;
@@ -3256,6 +3389,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/billing/orders/{order_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Order
+         * @description 买方取消本企业待支付单（审计 BUG-24）；已付款 / 已关闭 409，跨企业 404
+         */
+        post: operations["cancel_order_api_v1_billing_orders__order_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/billing/admin/orders": {
         parameters: {
             query?: never;
@@ -3267,6 +3420,46 @@ export interface paths {
         get: operations["list_pending_orders_api_v1_billing_admin_orders_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/admin/tenants/{tenant_id}/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant Plan
+         * @description 平台为定制客户开通套餐（决策 D17）：记一笔线下已收款订单并按同一履约路径开通
+         */
+        post: operations["grant_plan_api_v1_billing_admin_tenants__tenant_id__grant_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/orders/{order_id}/retry-fulfillment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Order Fulfillment
+         * @description 超管补偿：已付款待开通的单重新履约（审计 BUG-25）
+         */
+        post: operations["retry_order_fulfillment_api_v1_billing_orders__order_id__retry_fulfillment_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5510,11 +5703,16 @@ export interface components {
         DeliveryWebhookIn: {
             /** Url */
             url?: string | null;
+            /**
+             * Rotate Secret
+             * @default false
+             */
+            rotate_secret: boolean;
         };
         /** DepartmentCreateRequest */
         DepartmentCreateRequest: {
             /** Tenant Id */
-            tenant_id: number;
+            tenant_id?: number | null;
             /** Name */
             name: string;
             /** Description */
@@ -5942,6 +6140,20 @@ export interface components {
              * @description 租户标识（预留字段，暂不消费）
              */
             tenant_slug?: string | null;
+            /**
+             * Remember Me
+             * @description 记住我：刷新令牌 7 天；否则按会话（决策 D10）
+             * @default false
+             */
+            remember_me: boolean;
+        };
+        /**
+         * LogoutRequest
+         * @description 登出：作废本会话的刷新令牌（可空：只有访问令牌的旧客户端）
+         */
+        LogoutRequest: {
+            /** Refresh Token */
+            refresh_token?: string | null;
         };
         /** MenuCreateRequest */
         MenuCreateRequest: {
@@ -6622,6 +6834,35 @@ export interface components {
             /** Description */
             description?: string;
         };
+        /**
+         * PlanGrantIn
+         * @description 平台为定制客户开通套餐（决策 D17）：合同金额（分，整个合同期合计）+ 期数
+         */
+        PlanGrantIn: {
+            /**
+             * Product
+             * @default plan_enterprise
+             * @enum {string}
+             */
+            product: "plan_enterprise" | "plan_pro";
+            /**
+             * Amount Cents
+             * @description 合同金额（分），记入订单
+             */
+            amount_cents: number;
+            /**
+             * Periods
+             * @description 开通几个账期（月付套餐 = 月数）
+             * @default 1
+             */
+            periods: number;
+            /**
+             * Note
+             * @description 合同号等备注（记入产品事件与审计）
+             * @default
+             */
+            note: string;
+        };
         /** PlanOut */
         PlanOut: {
             /** Id */
@@ -6638,6 +6879,11 @@ export interface components {
             quota_json?: string | null;
             /** Is Public */
             is_public: number;
+            /**
+             * Sales Led
+             * @default false
+             */
+            sales_led: boolean;
         };
         /** PowerMarketSwitchBody */
         PowerMarketSwitchBody: {
@@ -6749,6 +6995,14 @@ export interface components {
         PutAliasRequest: {
             /** Slug */
             slug: string;
+        };
+        /**
+         * RefreshRequest
+         * @description 用刷新令牌换一对新令牌（决策 D10）
+         */
+        RefreshRequest: {
+            /** Refresh Token */
+            refresh_token: string;
         };
         /**
          * RegisterRequest
@@ -7252,15 +7506,26 @@ export interface components {
             current_period_end?: string | null;
             /** Tenant Id */
             tenant_id?: number | null;
+            /** Plan Slug */
+            plan_slug?: string | null;
+            /** Plan Name */
+            plan_name?: string | null;
+            /** Grace Until */
+            grace_until?: string | null;
+            /**
+             * In Grace
+             * @default false
+             */
+            in_grace: boolean;
         };
         /**
          * TaskControlRequest
-         * @description 任务控制请求（暂停/恢复/终止）
+         * @description 任务控制请求（终止；暂停先下线 D6 → 409，恢复只清旧暂停键）
          */
         TaskControlRequest: {
             /**
              * Action
-             * @description 控制动作：pause/resume/stop
+             * @description 控制动作：stop 终止；pause 暂未开放（409）；resume 清除旧版本留下的暂停
              */
             action: string;
         };
@@ -7422,6 +7687,17 @@ export interface components {
              */
             anonymous_id?: string | null;
         };
+        /**
+         * TransferOwnershipRequest
+         * @description 转让负责人：再次输入本人登录密码确认（决策 D23）
+         */
+        TransferOwnershipRequest: {
+            /**
+             * Password
+             * @description 负责人本人的登录密码
+             */
+            password: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -7434,6 +7710,14 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * VerifyEmailRequest
+         * @description 邮箱验证令牌（决策 D21）
+         */
+        VerifyEmailRequest: {
+            /** Token */
+            token: string;
         };
         /**
          * WorkerActiveTask
@@ -7512,6 +7796,140 @@ export interface operations {
                 "application/json": components["schemas"]["LoginRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_session_api_v1_auth_refresh_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_api_v1_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogoutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_email_api_v1_auth_verify_email_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resend_verification_api_v1_auth_resend_verification_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -8944,10 +9362,16 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
-                /** @description active=默认（不含已删）；deleted=已删除；disabled=已停用 */
+                /** @description active=在职（含停用，默认）；enabled=在职·激活；disabled=已停用；deleted=已删除 */
                 status?: string;
-                /** @description 按登录名筛选 */
+                /** @description 登录名或邮箱包含 */
                 q?: string | null;
+                /** @description 角色 */
+                role?: string | null;
+                /** @description 归属公司 */
+                tenant_id?: number | null;
+                /** @description 所属部门 */
+                department_id?: number | null;
                 key?: string;
             };
             header?: never;
@@ -9492,6 +9916,43 @@ export interface operations {
             };
         };
     };
+    test_notify_channel_api_v1_admin_notify_config_test_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     webhook_status_api_v1_admin_webhook_status_get: {
         parameters: {
             query?: {
@@ -9661,8 +10122,8 @@ export interface operations {
     };
     list_departments_api_v1_rbac_departments_get: {
         parameters: {
-            query: {
-                tenant_id: number;
+            query?: {
+                tenant_id?: number | null;
                 key?: string;
             };
             header?: never;
@@ -12278,6 +12739,43 @@ export interface operations {
             };
         };
     };
+    transfer_ownership_api_v1_members__member_id__transfer_ownership_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                member_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferOwnershipRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     member_audit_logs_api_v1_members_audit_get: {
         parameters: {
             query?: {
@@ -13898,6 +14396,39 @@ export interface operations {
             };
         };
     };
+    cancel_order_api_v1_billing_orders__order_id__cancel_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_OrderOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_pending_orders_api_v1_billing_admin_orders_get: {
         parameters: {
             query?: {
@@ -13916,6 +14447,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiResponse_list_OrderOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grant_plan_api_v1_billing_admin_tenants__tenant_id__grant_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanGrantIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_OrderOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_order_fulfillment_api_v1_billing_orders__order_id__retry_fulfillment_post: {
+        parameters: {
+            query?: {
+                key?: string;
+            };
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponse_OrderOut_"];
                 };
             };
             /** @description Validation Error */

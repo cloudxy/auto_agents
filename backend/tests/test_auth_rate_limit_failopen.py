@@ -15,6 +15,17 @@ import pytest
 import redis.exceptions
 from loguru import logger as _loguru
 
+
+@pytest.fixture(autouse=True)
+def _personal_register_enabled():
+    """决策 D1：个人注册默认关闭；本文件验证开启时的行为，显式打开开关"""
+    from config import settings
+
+    original = settings.get("AUTH.PERSONAL_REGISTER_ENABLED")
+    settings.set("AUTH.PERSONAL_REGISTER_ENABLED", True)
+    yield
+    settings.set("AUTH.PERSONAL_REGISTER_ENABLED", original)
+
 from backend.app.api.v1.auth import (
     check_login_rate_limit,
     record_login_failure,
@@ -224,7 +235,8 @@ class TestFailOpenEndToEnd:
             _FakeAuthService.authenticate_result = None
 
         assert resp.status_code == 200
-        assert resp.json()["data"]["access_token"] == "fake-token"
+        # 决策 D10 起登录签发访问 + 刷新令牌对（session_service），不再经 create_token 桩
+        assert resp.json()["data"]["access_token"] and resp.json()["data"]["refresh_token"]
 
     def test_login_failure_still_401_when_record_redis_down(self, client, monkeypatch):
         """认证失败路径：计数写入故障被吞后仍返回 401（而非 500）"""

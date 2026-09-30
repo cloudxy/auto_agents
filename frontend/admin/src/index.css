@@ -1,23 +1,217 @@
 :root {
   /* semantic tokens ← design-tokens.json；Login 等消费，禁止业务页硬编码紫渐变 */
   --color-surface: #ffffff;
-  --color-surface-sunken: #fafafa;
+  --color-surface-sunken: #f5f7fa;
   --color-text-primary: #141414;
   --color-text-secondary: #595959;
   --color-primary: #1677ff;
+  --color-accent: #13c2c2;
+  --color-deep-space: #001529;
   --shadow-card: 0 1px 2px rgba(0, 21, 41, 0.06);
+  --radius-card: 8px;
 }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Helvetica Neue', 'Roboto', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: var(--color-surface-sunken);
 }
 
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
+}
+
+/* ---------- 后台外壳（批次 5 / BUG-39：窄屏可用） ---------- */
+
+/* 品牌标：与官网同一渐变方块 + 火箭 */
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 18px;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+  flex: none;
+}
+
+.admin-brand {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+/* flex 子项默认 min-width:auto，宽表格会把整页撑宽；放开后表格在自己的容器里横向滚动 */
+.admin-main {
+  min-width: 0;
+}
+
+.admin-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  gap: 12px;
+}
+
+.admin-header-title {
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-content {
+  margin: 16px;
+  padding: 20px 24px 24px;
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  min-height: 280px;
+  min-width: 0;
+}
+
+.ant-table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 991.98px) {
+  .admin-header {
+    padding: 0 12px !important;
+  }
+
+  .admin-header-welcome {
+    display: none !important;
+  }
+
+  .admin-content {
+    margin: 8px;
+    padding: 12px;
+  }
+}
+
+/* ---------- 登录页 ---------- */
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  background: var(--color-surface);
+}
+
+.login-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 48px 56px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 15% 85%, rgba(22, 119, 255, 0.45), transparent 45%),
+    radial-gradient(circle at 90% 10%, rgba(19, 194, 194, 0.35), transparent 40%),
+    var(--color-deep-space);
+}
+
+.login-hero h1 {
+  margin: 0 0 16px;
+  font-size: 36px;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #fff;
+}
+
+.login-hero-accent {
+  background: linear-gradient(90deg, #69b1ff, #5cdbd3);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.login-hero ul {
+  list-style: none;
+  padding: 0;
+  margin: 24px 0 0;
+  display: grid;
+  gap: 14px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 15px;
+}
+
+.login-hero li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.login-hero-foot {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+}
+
+.login-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+}
+
+.login-form {
+  width: 100%;
+  max-width: 380px;
+}
+
+.login-mobile-brand {
+  display: none;
+}
+
+@media (max-width: 767.98px) {
+  .login-page {
+    grid-template-columns: 1fr;
+    background: var(--color-surface-sunken);
+  }
+
+  .login-hero {
+    display: none;
+  }
+
+  .login-panel {
+    align-items: flex-start;
+    padding: 40px 16px;
+  }
+
+  .login-mobile-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 24px;
+  }
+}
+
+/* 定价页推荐档：Ribbon 外层撑满列高，三张卡等高 */
+.pricing-ribbon {
+  height: 100%;
+}
+
+/* 窄屏表格：单元格不折行，表格在自己的容器里横向滚动（原先逐字竖排） */
+@media (max-width: 767.98px) {
+  .ant-table-cell {
+    white-space: nowrap;
+  }
 }

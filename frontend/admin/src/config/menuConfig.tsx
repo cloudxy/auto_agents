@@ -101,13 +101,21 @@ export const menuConfig: MenuItem[] = [
  * 路由 → 页面标题（menuConfig 唯一派生，消双源）。
  * 叶子命中返回叶子 label；组路由返回组 label；兜底"后台管理"。
  */
+/** 不在侧栏里的路由（从页面内按钮进入）的页头标题（审计 B5-7：原先一律回落「后台管理」） */
+const EXTRA_PAGE_TITLES: Record<string, string> = {
+  '/pricing': '套餐与定价',
+  '/billing/checkout': '结账',
+  '/enterprise': '企业管理',
+  '/rbac': '组织与角色',
+}
+
 export const pageTitleFor = (pathname: string): string => {
   for (const group of menuConfig) {
     if (group.key === pathname) return group.label
     const leaf = group.children?.find((c) => c.key === pathname)
     if (leaf) return leaf.label
   }
-  return '后台管理'
+  return EXTRA_PAGE_TITLES[pathname] || '后台管理'
 }
 
 /** DB 动态菜单 icon 标识 → 组件映射（/auth/menus 下发 icon 字符串经此渲染） */

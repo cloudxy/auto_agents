@@ -12,6 +12,7 @@ from platform_core.models.capability import CapabilityAsset, CapabilityCommand
 
 from backend.services.power_market.installs import hosts_for_asset
 from backend.services.power_market.types import _to_public_asset_type
+from platform_core.timeutil import utc_iso
 
 _PUBLIC_FIELDS = (
     "name", "title", "description", "category", "tier", "score",
@@ -28,7 +29,7 @@ def _project(
 ) -> dict:
     item = {f: getattr(row, f) for f in _PUBLIC_FIELDS if hasattr(row, f)}
     item["asset_type"] = _to_public_asset_type(row.asset_type)
-    item["updated_at"] = row.updated_at.isoformat() if row.updated_at else None
+    item["updated_at"] = utc_iso(row.updated_at)
     item["score"] = float(row.score) if row.score is not None else None
     # QA-13：featured 列随 050 迁移落地，`select(CapabilityAsset)` 在迁移前的
     # 库上本就会因未知列直接炸 SQL 错误——getattr 防御不到它声称保护的场景

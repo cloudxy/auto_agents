@@ -31,7 +31,7 @@ from backend.services.llm_common import (
 )
 from backend.services.llm_gateway.chat import chat_completions, list_v1_models
 from backend.services.llm_common.seam import seam as _seam
-from backend.services.llm_usage_service import get_month_used, record_usage
+from backend.services.llm_usage_service import get_month_used, get_platform_day_used, record_usage
 from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
 
@@ -209,6 +209,49 @@ async def _probe_gateway_models(timeout: float) -> list[str]:
     return models
 
 
+async def _budget_guard(usage_dim: str, budget: int, tenant_id) -> int:
+    """平台 token 预算闸（审计 R2-8 / R2-10 / P0-10：网关路径与供应商路径共用）
+
+    读数优先月度 Redis 聚合（跨重启/多副本有效）；读数不可用时：
+    - LLM.BUDGET_FAIL_CLOSED=true（prod）：拒绝调用——预算失去数据支撑宁可拒绝不可放行；
+    - false（默认，测试/CI 无 Redis）：回退进程内存计数。
+    累计 >= budget 抛 LLM_COST_FUSE。返回当前累计值（日志用）。
+    """
+    month_used = await get_month_used(usage_dim, tenant_id=tenant_id)
+    if month_used is None:
+        if bool(_seam().settings.get("LLM.BUDGET_FAIL_CLOSED", False)):
+            logger.error(f"LLM 预算读数不可用，fail-closed 拒绝 | dim={usage_dim} tenant={tenant_id}")
+            raise BusinessException(
+                f"LLM token 预算读数不可用（Redis），fail-closed 拒绝调用: {usage_dim}",
+                code="LLM_BUDGET_UNAVAILABLE",
+                status_code=503,
+            )
+        month_used = _seam()._TOKEN_USAGE.get(usage_dim, 0)
+    if month_used >= budget:
+        raise BusinessException(
+            f"平台 LLM 成本熔断：token 预算已耗尽（{usage_dim} 本月累计 {month_used} >= {budget}）",
+            code="LLM_COST_FUSE",
+        )
+    # 决策 D21：免费档也能用平台 LLM → 平台全局日预算上限（0 = 不设上限）
+    day_cap = int(_seam().settings.get("LLM.PLATFORM_DAILY_TOKEN_CAP", 0) or 0)
+    if day_cap > 0:
+        day_used = await get_platform_day_used()
+        if day_used is None:
+            if bool(_seam().settings.get("LLM.BUDGET_FAIL_CLOSED", False)):
+                logger.error("平台当日 LLM 用量读数不可用，fail-closed 拒绝")
+                raise BusinessException(
+                    "LLM token 预算读数不可用（Redis），fail-closed 拒绝调用: platform-day",
+                    code="LLM_BUDGET_UNAVAILABLE", status_code=503,
+                )
+        elif day_used >= day_cap:
+            logger.warning(f"平台今日 LLM 额度已用完 | used={day_used} cap={day_cap}")
+            raise BusinessException(
+                "平台今日 AI 额度已用完，请明天再试（或在「模型配置」接入自有模型）。",
+                code="LLM_PLATFORM_DAILY_CAP", status_code=429,
+            )
+    return int(month_used)
+
+
 async def _llm_chat_gateway(
     messages: list[dict],
     cfg: LlmRuntimeConfig,
@@ -233,14 +276,7 @@ async def _llm_chat_gateway(
 
     _tid = _cur_tid()
     for attempt in range(cfg.max_retries):
-        month_used = await get_month_used(dim, tenant_id=_tid)
-        if month_used is None:
-            month_used = _seam()._TOKEN_USAGE.get(dim, 0)
-        if month_used >= budget:
-            raise BusinessException(
-                f"平台 LLM 成本熔断：token 预算已耗尽（{dim} 本月累计 {month_used} >= {budget}）",
-                code="LLM_COST_FUSE",
-            )
+        await _budget_guard(dim, budget, _tid)
         try:
             data = await chat_completions(payload, timeout=cfg.timeout)
             content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
@@ -502,50 +538,14 @@ async def llm_chat(
     usage_dim = usage_dim or dim
     last_error: Exception | None = None
 
+    from platform_core.tenant_context import current_tenant_id as _cur_tid
+
+    _tid = _cur_tid()
     for attempt in range(cfg.max_retries):
-        # 预算读数优先月度 Redis 聚合（P0-3：跨重启/多副本有效）；
-        # None（测试态/Redis 故障）回退进程内存计数（原语义，存量测试零变化）
-        # 预算熔断降级方向（审计 10.2-D，与登录限流 fail-open 方向相反，二者刻意不对称）：
-        # - fail-open（默认，LLM.BUDGET_FAIL_CLOSED=false）：Redis 读数不可用回退进程内存
-        #   计数（保可用，测试/CI 无 Redis 可跑）；
-        # - fail-closed（LLM.BUDGET_FAIL_CLOSED=true，prod 建议）：读数不可用即拒绝调用
-        #   （保成本——预算检查失去数据支撑时宁可拒绝不可放行）。
-        from platform_core.tenant_context import current_tenant_id as _cur_tid
-
-        _tid = _cur_tid()
-        month_used = await get_month_used(usage_dim, tenant_id=_tid)
-        if month_used is None:
-            if bool(_seam().settings.get("LLM.BUDGET_FAIL_CLOSED", False)):
-                raise BusinessException(
-                    f"LLM token 预算读数不可用（Redis），fail-closed 拒绝调用: {usage_dim}"
-                )
-            month_used = _seam()._TOKEN_USAGE.get(usage_dim, 0)
-        used_total = month_used
-        if used_total >= budget:
-            raise BusinessException(
-                f"平台 LLM 成本熔断：token 预算已耗尽（{usage_dim} 本月累计 {used_total} >= {budget}）",
-                code="LLM_COST_FUSE",
-            )
-        if isinstance(_tid, int):
-            try:
-                from datetime import date as _date
-
-                from sqlalchemy.ext.asyncio import AsyncSession as _AS
-
-                from backend.services.quota_service import QuotaExceededException, QuotaService
-                from platform_core.db import get_manager as _gm
-
-                _engines = getattr(_gm(), "async_engines", {}) or {}
-                _engine = next(iter(_engines.values()), None)
-                if _engine is not None:
-                    async with _AS(_engine) as _qs:
-                        await QuotaService(_qs).check_llm_tokens_month(
-                            _tid, _date.today().strftime("%Y-%m")
-                        )
-            except QuotaExceededException:
-                raise
-            except Exception as _qe:  # noqa: BLE001 配额检查基础设施失败不阻断（测试/无引擎）
-                logger.debug(f"租户 LLM 配额检查跳过: {_qe}")
+        # 平台预算闸（与网关路径同一实现）；企业月度 token 套餐闸已在出站前由
+        # _enforce_tenant_token_quota 按上海自然月执行一次（原此处重复的本地日期月度闸
+        # 口径不一致且吞掉基础设施异常，已删除——审计 R2-10）
+        await _budget_guard(usage_dim, budget, _tid)
         try:
             if cfg.provider_id is not None:
                 # provider 路径：模块级共享 client（连接池复用，变更时 invalidate 失效）

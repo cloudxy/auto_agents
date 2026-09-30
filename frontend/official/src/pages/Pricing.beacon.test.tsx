@@ -5,6 +5,7 @@ import React from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
+jest.mock('../services/contact', () => ({ fetchPublicContact: jest.fn().mockRejectedValue(new Error('offline')) }))
 jest.mock('../services/beacon', () => ({
   trackCta: jest.fn(),
   trackPageView: jest.fn(),
@@ -40,10 +41,13 @@ test('pricing pro CTA is pricing_pro (GWT-15.6)', () => {
   expect(trackCta).not.toHaveBeenCalledWith('register_free')
 })
 
-test('pricing enterprise CTA is pricing_enterprise (GWT-15.16)', () => {
+test('pricing enterprise CTA is pricing_enterprise (GWT-15.16；D17 起为「联系我们」)', async () => {
+  const { fetchPublicContact } = jest.requireMock('../services/contact')
+  ;(fetchPublicContact as jest.Mock).mockResolvedValue({
+    duty_contact: '', contact_email: 'sales@example.com', contact_sla: '工作日 24 小时内回复',
+  })
   renderPricing()
-  const paid = screen.getAllByRole('link', { name: '去结账' })
-  fireEvent.click(paid[1])
+  fireEvent.click(await screen.findByRole('link', { name: '联系我们' }))
   expect(trackCta).toHaveBeenCalledWith('pricing_enterprise')
   expect(trackCta).not.toHaveBeenCalledWith('pricing_pro')
 })

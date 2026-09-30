@@ -60,5 +60,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """回滚数据库结构"""
-    op.drop_index(op.f('ix_llm_providers_name'), table_name='llm_providers')
     op.drop_table('llm_providers')

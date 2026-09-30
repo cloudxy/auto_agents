@@ -31,6 +31,7 @@ class LlmProbeEngine:
         """拉取平台模型列表（归一化 + 对话模型计数）"""
         logger.info(f"模型列表探测 | type={provider_type} host={LlmSecretVault.host_of(base_url)}")
         validated = LlmSecretVault.validated_probe_base_url(base_url)
+        await LlmSecretVault.assert_outbound_base_url(validated)
         adapter = get_adapter(provider_type)
         models = await adapter.list_models(validated, api_key)
         chat_only = models.chat_only()
@@ -44,6 +45,7 @@ class LlmProbeEngine:
         """1-token 连通测试（保存前）——用表单当前 平台/地址/Key/模型 真发一次"""
         logger.info(f"连通探测 | type={provider_type} host={LlmSecretVault.host_of(base_url)} model={model}")
         validated = LlmSecretVault.validated_probe_base_url(base_url)
+        await LlmSecretVault.assert_outbound_base_url(validated)
         adapter = get_adapter(provider_type)
         request = adapter.build_chat(
             validated, api_key, model, [{"role": "user", "content": "ping"}], max_tokens=_PROBE_MAX_TOKENS
@@ -86,6 +88,7 @@ class LlmProbeEngine:
 
         start = time.perf_counter()
         try:
+            await LlmSecretVault.assert_outbound_base_url(base_url)
             # trust_env=False：供应商 base_url 可能指向本机 mock/内网端点，
             # 不读环境变量与 macOS 系统代理（与 notify/newapi 服务的 client 约定一致）
             async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_SECONDS, trust_env=False) as client:

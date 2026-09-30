@@ -24,6 +24,7 @@ from backend.services.power_market.types import (
 from platform_core.exceptions import BusinessException, NotFoundException, ValidationException
 from platform_core.logger import get_logger
 from platform_core.models.capability import CapabilityAsset
+from platform_core.timeutil import utc_iso
 
 logger = get_logger("service.power_market")
 
@@ -97,7 +98,7 @@ def _project(row: CapabilityAsset) -> dict:
         "name": row.name,
         "asset_type": _to_public_asset_type(row.asset_type),
         "listing_state": row.listing_state,
-        "listed_at": row.listed_at.isoformat() if row.listed_at else None,
+        "listed_at": utc_iso(row.listed_at),
         "status": row.status,
         "source_type": row.source_type,
     }

@@ -43,6 +43,7 @@ from platform_core.logger import get_logger
 from platform_core.tenant_context import tenant_scope
 from platform_core.queues import TASK_LOG_OFFSET_KEY, TASK_RESULTS_KEY
 from platform_core.redis_async import get_async_redis
+from platform_core.timeutil import business_iso
 from platform_core.schemas.spider import (
     DailyPoint,
     SpiderResultListResponse,
@@ -154,7 +155,8 @@ class SpiderQueryService:
             "source": r.source,
             "item_type": r.item_type,
             "extra": r.extra,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
+            # 导出文件给人读：北京时间 + 偏移（审计 BUG-43）
+            "created_at": business_iso(r.created_at),
         }
 
     async def export_results(
@@ -220,8 +222,10 @@ class SpiderQueryService:
             yield buf.getvalue().encode("utf-8")
             buf.seek(0)
             buf.truncate(0)
+            from backend.utils.csv_safe import safe_csv_row
+
             for r in rows:
-                writer.writerow(self._export_row(r))
+                writer.writerow(safe_csv_row(self._export_row(r)))  # 审计 BUG-20：公式注入
                 yield buf.getvalue().encode("utf-8")
                 buf.seek(0)
                 buf.truncate(0)
@@ -310,8 +314,12 @@ class SpiderQueryService:
         lines: int = 200,
         keyword: str | None = None,
         level: str | None = None,
+        only_task_lines: bool = False,
     ) -> TaskLogResponse:
-        """读取任务运行日志（按任务隔离，从分发偏移量到文件尾，取尾部 N 行）"""
+        """读取任务运行日志（按任务隔离：[分发偏移, 终态偏移) 窗口，取尾部 N 行）
+
+        only_task_lines=True（租户视角）：只返回带本任务标记的行（审计 BUG-16）。
+        """
         task = await self.repo.get_by_id(task_id)
         if task is None:
             raise NotFoundException("爬虫任务")
@@ -321,9 +329,11 @@ class SpiderQueryService:
         content_lines: list[str] = []
         if log_path and os.path.isfile(log_path):
             offset = await self._task_log_offset(task_id)
+            end = await self._task_log_end(task_id)
             tail = max(1, min(lines, 500))
             content_lines = await asyncio.to_thread(
-                _read_task_log_sync, log_path, offset, tail, keyword, level
+                _read_task_log_sync, log_path, offset, tail, keyword, level,
+                end, task_id if only_task_lines else None,
             )
         return TaskLogResponse(
             task_id=task_id,
@@ -348,6 +358,20 @@ class SpiderQueryService:
             return None
         try:
             return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    async def _task_log_end(self, task_id: int) -> Optional[int]:
+        """任务日志窗口终点（终态时记录；运行中为 None = 读到文件尾）"""
+        from platform_core.queues import TASK_LOG_END_KEY
+
+        try:
+            raw = await get_async_redis().get(TASK_LOG_END_KEY.format(task_id=task_id))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"读取任务日志终点失败: task_id={task_id}, error={e}")
+            return None
+        try:
+            return int(raw) if raw is not None else None
         except (TypeError, ValueError):
             return None
 

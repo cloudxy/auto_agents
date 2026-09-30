@@ -12,6 +12,7 @@ import { DeleteOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import { AI_PLAN_STATUS_META, AI_PLAN_STATUS_OPTIONS, deleteAiPlan, fetchAiPlans } from '../../services/ai'
 import type { AiPlan } from '../../services/ai'
 import { apiErrorMessage } from '../../utils/errorMessage'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 const { Text } = Typography
 
@@ -73,7 +74,7 @@ export const PlanList: React.FC<PlanListProps> = ({ canDelete, onOpenPlan }) => 
       ),
     },
     { title: '创建人', dataIndex: 'created_by', key: 'created_by', width: 100, render: (v: string | null) => v || '-' },
-    { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 170, render: (v: string | null) => v || '-' },
+    { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 170, render: (v: string | null) => formatDateTime(v) },
     {
       title: '操作', key: 'action', width: 150,
       render: (_: unknown, record: AiPlan) => (

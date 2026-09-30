@@ -67,12 +67,12 @@ def relay_upgrade(tenant_role: Optional[str]) -> RelayUpgradeOut:
 
 
 async def load_sku_status(session: AsyncSession, tenant_id: int) -> str:
-    """点查权益。缺行 ≡ none。不读组行、不 COUNT。"""
+    """点查权益。缺行 ≡ none。不读组行、不 COUNT。账期已过的 active 读时即判 expired（审计 B2-1）"""
     logger.info(f"读中转 SKU 权益 | tenant={tenant_id}")
+    from backend.services.relay_enforcement import sku_effective_status
+
     row = await RelaySkuEntitlementRepository(session).get_by_tenant_id(tenant_id)
-    if row is None:
-        return "none"
-    status = str(row.status or "none")
+    status = sku_effective_status(row)
     return status if status in _VALID else "none"
 
 

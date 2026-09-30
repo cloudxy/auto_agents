@@ -522,25 +522,17 @@ _PUBLIC_WHITELIST = {
 }
 
 
-class _RateLimitRedis:
-    """限流桩：incr+expire 计数（与 test_skill_public_api 同口径，域内局部桩）"""
 
-    def __init__(self):
-        self.counts: dict[str, int] = {}
-
-    async def incr(self, key):
-        self.counts[key] = self.counts.get(key, 0) + 1
-        return self.counts[key]
-
-    async def expire(self, key, ttl):
-        return True
 
 
 @pytest.fixture
 def rate_redis(monkeypatch):
-    fake = _RateLimitRedis()
+    """限流桩（共享 stubs.RateLimitFakeRedis）"""
+    from stubs import RateLimitFakeRedis
 
-    async def _fake(key: str = "DEFAULT"):
+    fake = RateLimitFakeRedis()
+
+    def _fake(key: str = "DEFAULT"):
         return fake
 
     import backend.app.api.v1.public_skills as mod

@@ -213,7 +213,8 @@ class PowerMarketService:
         )
         page_size = self._page_size(page_size)
         page = max(int(page or 1), 1)
-        if not preview and not is_power_market_enabled():
+        gate_open = await is_power_market_enabled(self.session)
+        if not preview and not gate_open:
             return closed_list_payload(page=page, page_size=page_size)
         public = self.parse_asset_type(asset_type, default=default)
         stored = None if public is None else _stored_types_for(public)
@@ -235,7 +236,7 @@ class PowerMarketService:
         }
         if preview:  # AD-5c：管理员预览态跳闸，payload 带实际闸值
             payload["preview"] = True
-            payload["gate_open"] = is_power_market_enabled()
+            payload["gate_open"] = gate_open
         if total == 0:
             payload["empty"] = True
             payload["message"] = MSG_EMPTY_SHELF
@@ -248,7 +249,8 @@ class PowerMarketService:
         logger.info(
             f"power_market.get_public | type={asset_type} name={name} preview={preview}"
         )
-        if not preview and not is_power_market_enabled():
+        gate_open = await is_power_market_enabled(self.session)
+        if not preview and not gate_open:
             return {**closed_detail_payload(), "gate_open": False}
         public = self.parse_asset_type(asset_type, default=default)
         row = await self._load_named(public, name)
@@ -267,7 +269,7 @@ class PowerMarketService:
         # 同 QA-13 模式（examples 列随 050 迁移落地，getattr 防御不到 SQL 层
         # 未知列错误）：只留 ORM 侧真实存在时的默认值归一化。
         item["examples"] = row.examples or []
-        item["gate_open"] = is_power_market_enabled()
+        item["gate_open"] = gate_open
         if preview:
             item["preview"] = True
             item["market_closed"] = False
@@ -288,7 +290,7 @@ class PowerMarketService:
         )
         if kind not in ("logo", "background"):
             return None
-        if not preview and not is_power_market_enabled():
+        if not preview and not await is_power_market_enabled(self.session):
             return None
         public = self.parse_asset_type(asset_type)
         row = await self._load_named(public, name)
@@ -307,7 +309,7 @@ class PowerMarketService:
         default: Optional[str] = None,
     ) -> dict:
         logger.info(f"power_market.subscribe_public | type={asset_type} name={name}")
-        require_power_market_open()
+        await require_power_market_open(self.session)
         public = self.parse_asset_type(asset_type, default=default)
         row = await self._load_named(public, name)
         if row is None or not _row_is_fr33(row):

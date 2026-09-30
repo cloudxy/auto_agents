@@ -25,6 +25,8 @@ npm run e2e -w admin
 - 接口全部 `page.route('**/api/v1/**')` 拦截，不启 MySQL/Redis。
 - 登录勾「记住我」，否则 `page.goto('/usage')` 整页刷新后 zustand 不持久化，会掉回登录页。
 - 侧栏 antd Menu 的 `menuitem` 不稳定；登录后用 `page.goto('/usage')` / `/members`。
+- 窄屏用例（375）：断言 `document.documentElement.scrollWidth <= 375`；抽屉用 `getByRole('dialog')`，antd 6 的 drawer 内部类名变了。
+- 全页截图前先逐屏滚动到底：官网区块是 `whileInView` 动画，不滚动截出来是空白。
 
 ## 相关
 

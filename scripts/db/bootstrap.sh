@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 空库引导：建库 → create_all 基线 → stamp/upgrade head。幂等。
+# 空库引导：建库 → alembic upgrade head（种子随迁移写入）。幂等。
 # 新环境也可直接 `bash scripts/db/migrate.sh`（002a 已补基线表）。
 set -euo pipefail
 # shellcheck source=../lib/common.sh
@@ -31,14 +31,9 @@ except pymysql.err.OperationalError as e:
         print(e, file=sys.stderr); sys.exit(2)
 PY
 
-log "create_all 基线表"
-uv run python scripts/db/init_tables.py || die "基线表失败"
-
-log "迁移链收口"
-CURRENT="$(alembic current 2>/dev/null || true)"
-if echo "$CURRENT" | grep -qE '[0-9a-f]{12}'; then
-    alembic upgrade head || die "upgrade head 失败"
-else
-    alembic stamp head || die "stamp head 失败"
-fi
+# 审计 BUG-41：只走迁移链。原先 create_all 建表后 stamp head，迁移里的种子数据
+# （platform 租户、价目、角色 / 菜单等）一条都不会写入，新库缺种子、功能大面积空白。
+# 空库 upgrade head 全链可用（test_alembic_baseline 覆盖）；已有库则只补未执行的迁移。
+log "迁移链 upgrade head"
+alembic upgrade head || die "upgrade head 失败"
 log "完成。下一步：uv run python run.py"

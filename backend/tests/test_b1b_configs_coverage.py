@@ -1,7 +1,7 @@
 """B1b 零覆盖路由清剿：系统配置读写（配置面）
 
 覆盖路由（backend/app/api/v1/configs.py，此前零 HTTP 覆盖）：
-- GET /api/v1/configs/          全量配置（require_login；data 为 {key: value} 字典）
+- GET /api/v1/configs/          全量配置（require_platform_admin_or_404；data 为 {key: value} 字典）
 - PUT /api/v1/configs/{key}     单项更新（require_platform_admin_or_404；存在则改、缺省则建）
 
 既有覆盖对照：test_config_service.py 仅 Service 单元（session 直查），HTTP 层零覆盖；
@@ -29,15 +29,31 @@ BASE = "/api/v1/configs"
 
 
 # ---------------------------------------------------------------------------
-# GET /configs/（require_login）
+# GET /configs/（require_platform_admin_or_404）
 # ---------------------------------------------------------------------------
 
-def test_get_configs_empty_ok(db_client, viewer_client):
-    """viewer（最低特权）读：200 + data 为 {key: value} 字典（空库为 {}）"""
-    resp = viewer_client.get(f"{BASE}/")
+def test_get_configs_empty_ok(db_client, platform_admin_client):
+    """平台超管读：200 + data 为 {key: value} 字典（空库为 {}）"""
+    resp = platform_admin_client.get(f"{BASE}/")
     assert resp.status_code == 200, resp.text
     assert resp.json()["code"] == "SUCCESS"
     assert resp.json()["data"] == {}
+
+
+@pytest.mark.parametrize("who", ["viewer_client", "admin_client"])
+def test_get_configs_hidden_from_tenant_users(db_client, db_session, request, who):
+    """全量配置含通知机器人地址（钉钉 / 企微 URL 自带 access_token）：租户成员与租户管理员
+    读 404 同形，响应里不得出现地址。原先 require_login，任何登录用户都能读到。"""
+    async def _seed():
+        async with db_session() as s:
+            s.add(SystemConfig(config_key="notify.dingtalk_webhook_url",
+                               config_value="https://oapi.dingtalk.com/robot/send?access_token=SECRET"))
+            await s.commit()
+
+    asyncio.run(_seed())
+    resp = request.getfixturevalue(who).get(f"{BASE}/")
+    assert resp.status_code == 404
+    assert "SECRET" not in resp.text
 
 
 def test_get_configs_anonymous_401(client):

@@ -49,17 +49,12 @@ NEW_PARAMS = '{"urls": ["https://c.d"]}'
 
 
 def _msg(task_id: int, spider_name: str, params: str, tenant_id=None, priority="normal") -> str:
-    """构造与 enqueue/_relocate_queue_message 完全一致的任务消息"""
-    return json.dumps(
-        {
-            "task_id": task_id,
-            "spider_name": spider_name,
-            "params": params,
-            "tenant_id": tenant_id,
-            "priority": priority,
-        },
-        ensure_ascii=False,
-    )
+    """构造与 enqueue 投递完全一致的任务消息（审计 BUG-13：唯一构造点 queue_message；
+    原夹具多带 tenant_id / priority，与生产投递字节不一致，测试替缺陷背书）。
+    tenant_id / priority 形参保留兼容旧调用点，不进入消息体。"""
+    from backend.services.spider_task_service import queue_message
+
+    return queue_message(task_id, spider_name, params)
 
 
 class _FakeQueueRedis:

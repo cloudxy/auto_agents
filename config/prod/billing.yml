@@ -1,0 +1,4 @@
+# 生产环境计费覆盖（叠加 default/billing.yml）
+BILLING:
+  # 审计 R1-11：prod 关闭 HMAC 夹具通知（代码侧 APP_ENV=prod 同样恒关，此处显式声明便于审阅）
+  FIXTURE_NOTIFY_ENABLED: false

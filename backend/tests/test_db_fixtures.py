@@ -78,6 +78,7 @@ ALL_ORM_TABLES = {
     "orders",
     "relay_groups",
     "relay_tokens",
+    "relay_usage_daily",
     # T-14 N3 结账 widen + 凭据 + 中转 SKU 权益（迁移 046）
     "payment_channel_credentials",
     "relay_sku_entitlements",

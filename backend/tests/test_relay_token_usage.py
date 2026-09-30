@@ -177,7 +177,9 @@ class _FixtureGateway:
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         self.base_url = f"http://127.0.0.1:{self._server.server_address[1]}"
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        # serve_forever 默认每 0.5s 才检查一次停机标志：shutdown() 每个用例白等最多 0.5s
+        self._thread = threading.Thread(target=self._server.serve_forever,
+                                        kwargs={"poll_interval": 0.02}, daemon=True)
         self._thread.start()
         return self
 

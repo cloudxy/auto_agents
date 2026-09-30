@@ -9,6 +9,7 @@ tenants.quota JSON 契约：{task_concurrency, result_storage, llm_tokens_month}
 内部码可保留；用户可见句不得渲染 QUOTA_EXCEEDED / 裸 429。
 """
 from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import String, func, select
@@ -21,6 +22,7 @@ from platform_core.models.llm_token_usage import LlmTokenUsage
 from platform_core.models.spider_task import SpiderTask
 from platform_core.models.tenant import Tenant
 from platform_core.redis_async import get_async_redis
+from platform_core.timeutil import utc_iso
 
 logger = get_logger("service.quota")
 
@@ -303,10 +305,24 @@ class QuotaService:
             {
                 "member": r.member or "（系统/调度）",
                 "tasks": int(r.tasks),
-                "last_active_at": r.last_active_at.isoformat() if r.last_active_at else None,
+                "last_active_at": utc_iso(r.last_active_at),
             }
             for r in rows
         ]
+
+    async def _relay_month_usage(self, tenant: Tenant, year_month: str) -> Optional[dict]:
+        """中转月度用量（D19：与 LLM token 分开计）；未开通中转返回 None"""
+        from backend.services.relay_enforcement import tenant_month_relay_used, tenant_relay_limit
+        from backend.services.relay_sku_gate import load_sku_status
+
+        status = await load_sku_status(self.session, int(tenant.id))
+        if status == "none":
+            return None
+        return {
+            "sku_status": status,
+            "used_tokens": await tenant_month_relay_used(self.session, int(tenant.id), year_month),
+            "limit_tokens": tenant_relay_limit(tenant),
+        }
 
     async def usage_overview(self, tenant_id: int, year_month: str) -> dict:
         """用量看板数据（S3-2 消费）：三指标当前值 vs 配额 + 成员分摊"""
@@ -341,10 +357,12 @@ class QuotaService:
             "result_storage": int(stored_results),
             "llm_tokens_month": tokens_total,
         }
+        relay = await self._relay_month_usage(tenant, year_month)
         return {
             "tenant_id": tenant_id,
             "quota": quota,
             "usage": usage,
+            "relay": relay,
             "llm_by_provider": {r.provider_name: int(r.tokens or 0) for r in tokens_row},
             "cost_by_provider": cost_by_provider,
             "cost_cents_total": sum(cost_by_provider.values()),

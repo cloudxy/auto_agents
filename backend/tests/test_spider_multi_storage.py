@@ -121,6 +121,7 @@ class TestIngestMirror:
 
         result_repo = MagicMock()
         result_repo.create_for_task = AsyncMock()
+        result_repo.find_by_content_hash = AsyncMock(return_value=None)
         task_repo = MagicMock()
         task_repo.get_by_id = AsyncMock(
             return_value=_task(id=3, params=json.dumps({"urls": [], "store_to": "csv"}))
@@ -159,6 +160,7 @@ class TestIngestMirror:
 
         result_repo = MagicMock()
         result_repo.create_for_task = AsyncMock()
+        result_repo.find_by_content_hash = AsyncMock(return_value=None)
         task_repo = MagicMock()
         task_repo.get_by_id = AsyncMock(return_value=_task(id=4, params=None))
 

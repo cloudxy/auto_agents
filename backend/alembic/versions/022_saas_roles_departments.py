@@ -84,8 +84,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column("users", "department_id")
-    op.drop_index(op.f("ix_departments_deleted_at"), table_name="departments")
-    op.drop_index(op.f("ix_departments_tenant_id"), table_name="departments")
     op.drop_table("departments")
     op.execute(sa.text("DELETE FROM roles WHERE is_builtin = 1"))
     op.drop_table("roles")

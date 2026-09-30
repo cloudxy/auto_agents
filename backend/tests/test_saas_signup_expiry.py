@@ -1,6 +1,9 @@
 """S5-1/5-2 企业注册 + 到期降级验证（工单 42/43 后端）
 
-Seam（工单预确认）：/public/tenant/signup 端点 + expire_overdue_tenants + 登录拒绝。
+Seam（工单预确认）：/public/tenant/signup 端点 + 登录拒绝。
+
+决策 D22（2026-09-29）：账期到期不再自动把企业置 expired（改为提醒 → 宽限 → 降免费档，
+见 test_subscription_lifecycle.py）；运营台手动置为到期 / 停用的企业仍拒绝登录（本文件）。
 """
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -13,7 +16,6 @@ from backend.services.auth_service import AuthService
 from backend.services.tenant_expiry_service import (
     AUTH_TENANT_EXPIRED,
     TENANT_EXPIRED_MESSAGE,
-    expire_overdue_tenants,
 )
 from backend.services.tenant_signup_service import SIGNUP_INCOMPLETE_CODE, SIGNUP_INCOMPLETE_MESSAGE
 from backend.utils.auth import get_password_hash
@@ -232,23 +234,19 @@ async def _seed_member(
 
 @pytest.mark.asyncio
 async def test_expired_tenant_login_rejected(db_client, db_engine, db_session):
-    """GWT-08.1 / 08.3：到期成员登录失败且文案 ≠ 密码错误；另一有效企业不受影响。"""
+    """GWT-08.1 / 08.3：运营台置为到期的企业成员登录失败且文案 ≠ 密码错误；另一有效企业不受影响。
+
+    决策 D22：到期状态只由运营台手动设置（账期到期改为降免费档，不再自动置 expired）。
+    """
     await _seed_member(
         db_session, slug="expired-co", username="exowner",
         expires_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1),
+        status="expired",
     )
     await _seed_member(
         db_session, slug="alive-co", username="aliveowner",
         email="alive@x.com",
     )
-
-    async def _expire():
-        async with db_session() as s:
-            count = await expire_overdue_tenants(s)
-            await s.commit()
-            return count
-
-    assert await _expire() == 1
 
     async def _status():
         async with db_session() as s:

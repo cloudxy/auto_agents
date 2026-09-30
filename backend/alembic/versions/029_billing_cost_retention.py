@@ -105,8 +105,15 @@ def _seed_plans() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("llm_token_usage", "cost_cents")
-    op.drop_column("llm_providers", "unit_price_per_1k_cents")
-    op.drop_table("orders")
-    op.drop_table("tenant_subscriptions")
-    op.drop_table("plans")
+    # 审计 BUG-42：plans / tenant_subscriptions / orders 与 040 分支共用（两边 upgrade 都是
+    # 「不存在才建」）。穿过 048 merge 降级时本分支先跑，原先无条件删表，040→047 分支随后
+    # 找不到 orders 而失败。040 分支在（relay_groups 存在）时由 040 负责删表，这里只撤本迁移独有的列。
+    if _has_column("llm_token_usage", "cost_cents"):
+        op.drop_column("llm_token_usage", "cost_cents")
+    if _has_column("llm_providers", "unit_price_per_1k_cents"):
+        op.drop_column("llm_providers", "unit_price_per_1k_cents")
+    if _has_table("relay_groups"):
+        return
+    for table in ("orders", "tenant_subscriptions", "plans"):
+        if _has_table(table):
+            op.drop_table(table)

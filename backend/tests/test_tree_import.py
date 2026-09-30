@@ -417,3 +417,75 @@ def test_gwt_07_10_normal_user_404_zero_write(
         assert got.status_code == 404, got.text
     assert _live(db_session) == before
     assert not list(agents_root.rglob("SKILL.md"))
+
+
+# ---------- 审计 BUG-33 / B4 QA-5：逐项 savepoint，先写库后原子落盘，提交失败撤回文件 ----------
+
+def test_bug33_flush_failure_isolated_and_leaves_no_file(
+    db_client, platform_admin_client, db_session, agents_root, monkeypatch,
+):
+    """beta 的入库 flush 撞唯一键（真实 IntegrityError，会把会话打成待回滚）：
+    只有 beta 失败；其后的项照常成功（原先全部 PendingRollbackError）；
+    beta 不留库行、不留磁盘文件（原先先落盘后入库，文件已写进 .agents）。"""
+    import backend.services.power_market.hub_import as mod
+
+    real = mod._upsert_item_listing
+
+    async def _dup_on_beta(session, item, *, listing):
+        action = await real(session, item, listing=listing)
+        if item.name == "beta":
+            row = (await session.execute(
+                select(CapabilityAsset).where(CapabilityAsset.name == "beta"))).scalar_one()
+            skip = {"id", "alive_flag"}
+            session.add(CapabilityAsset(**{
+                c.name: getattr(row, c.name) for c in CapabilityAsset.__table__.columns
+                if c.name not in skip}))
+            await session.flush()  # 唯一键冲突
+        return action
+
+    monkeypatch.setattr(mod, "_upsert_item_listing", _dup_on_beta)
+    got = platform_admin_client.post(CONFIRM, files=_parts(_tree()))
+    assert got.status_code == 200, got.text
+    out = got.json()["data"]
+    assert [f["name"] for f in out["failed"]] == ["beta"]
+    assert out["created"] == 5
+    live = _live(db_session)
+    assert ("skill", "beta") not in live and ("skill", "alpha") in live
+    assert ("plugin", "myplug") in live
+    assert not (agents_root / "skills" / "beta").exists()
+    assert (agents_root / "skills" / "alpha" / "SKILL.md").is_file()
+
+
+def test_bug33_commit_failure_restores_files(
+    db_client, platform_admin_client, db_session, agents_root, monkeypatch,
+):
+    """整批提交失败：本次覆盖的文件恢复原内容、新建的文件撤掉——磁盘与库一致"""
+    files = _tree()
+    assert platform_admin_client.post(CONFIRM, files=_parts(files)).status_code == 200
+    alpha = agents_root / "skills" / "alpha" / "SKILL.md"
+    original = alpha.read_text(encoding="utf-8")
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    real_commit = AsyncSession.commit
+    state = {"armed": True}
+
+    async def _fail_once(self):
+        if state["armed"]:
+            state["armed"] = False
+            raise RuntimeError("commit 故障注入")
+        return await real_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", _fail_once)
+    files["up/alpha/SKILL.md"] = SKILL_MD.format(name="alpha") + "\n新正文\n"
+    files["up/gamma/SKILL.md"] = SKILL_MD.format(name="gamma")
+    with pytest.raises(RuntimeError, match="commit 故障注入"):  # TestClient 透传服务端异常（线上为 500）
+        platform_admin_client.post(CONFIRM, files=_parts(files))
+    assert alpha.read_text(encoding="utf-8") == original
+    assert not (agents_root / "skills" / "gamma").exists()
+    # 库侧：savepoint 随外层回滚一并撤销。pysqlite 旧式事务模式下 SAVEPOINT 自开事务、
+    # RELEASE 即提交，库侧断言只在真实 MySQL 上成立（CI 保真通道跑本文件）
+    from conftest import mysql_fidelity_enabled
+
+    if mysql_fidelity_enabled():
+        assert ("skill", "gamma") not in _live(db_session)

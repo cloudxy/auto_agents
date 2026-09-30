@@ -15,13 +15,13 @@ target_url 静态 SSRF 校验（M6）：仅 80/443、拒绝 localhost/字面量�
 """
 import ipaddress
 import re
-from datetime import datetime
 from typing import List, Optional
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from platform_core.schemas.base import RequestBody
+from platform_core.schemas.time_types import UTCDateTime
 
 # 与 scrapy/utils/selector_engine.py 的 _SELECTOR_TYPES 一致
 SELECTOR_EXPR_TYPES = ("xpath", "css", "regex")
@@ -191,8 +191,8 @@ class AiPlanResponse(BaseModel):
     iteration_count: int = 0
     error_message: Optional[str] = None
     created_by: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
+    updated_at: Optional[UTCDateTime] = None
 
 
 class AiPlanListResponse(BaseModel):

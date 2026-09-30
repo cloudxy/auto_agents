@@ -34,7 +34,7 @@ def seeded(monkeypatch):
     return m, items
 
 
-def test_list_returns_newest_first_with_total(db_client, admin_client, seeded):
+def test_list_returns_newest_first_with_total(db_client, platform_admin_client, seeded):
     resp = db_client.get("/api/v1/admin/dead-items?limit=10")
     body = resp.json()["data"]
     assert body["total"] == 3
@@ -46,21 +46,28 @@ def test_list_returns_newest_first_with_total(db_client, admin_client, seeded):
     assert "not-json" in body["items"][1]["raw"]
 
 
-def test_discard_removes_single_item(db_client, admin_client, seeded):
+def test_discard_removes_single_item(db_client, platform_admin_client, seeded):
     m, items = seeded
     resp = db_client.delete("/api/v1/admin/dead-items/0")
     assert resp.json()["data"] == {"index": 0, "removed": True}
     m.lrem.assert_awaited_once_with(DEAD_ITEM_QUEUE, 1, items[0])
 
 
-def test_discard_missing_index_404(db_client, admin_client, seeded):
+def test_discard_missing_index_404(db_client, platform_admin_client, seeded):
     m, _ = seeded
     m.lindex = AsyncMock(return_value=None)
     resp = db_client.delete("/api/v1/admin/dead-items/99")
     assert resp.status_code == 404
 
 
-def test_clear_empties_queue(db_client, admin_client, seeded):
+def test_clear_empties_queue(db_client, platform_admin_client, seeded):
     resp = db_client.delete("/api/v1/admin/dead-items")
     assert resp.json()["data"]["removed"] == 3
     seeded[0].delete.assert_awaited_once_with(DEAD_ITEM_QUEUE)
+
+
+def test_dead_items_tenant_admin_404(db_client, admin_client, seeded):
+    """租户公司管理员不得读取/清空全局死信队列（审计 R1-1 回归）"""
+    assert db_client.get("/api/v1/admin/dead-items").status_code == 404
+    assert db_client.delete("/api/v1/admin/dead-items").status_code == 404
+    assert db_client.delete("/api/v1/admin/dead-items/0").status_code == 404

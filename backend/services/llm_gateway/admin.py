@@ -129,6 +129,29 @@ async def delete_key(
     return await _http_json("POST", "/key/delete", json_body=body, transport=transport)
 
 
+async def block_key(
+    key_hash: str,
+    *,
+    transport: Optional[httpx.AsyncBaseTransport] = None,
+) -> Any:
+    """POST /key/block：网关侧封禁虚拟 Key（审计 BUG-28：额度 / 停用 / 到期在网关执行）。
+
+    LiteLLM 的 token 列即 sha256(明文)，与本地 key_hash 同值；以 hash 引用，明文不出库。
+    """
+    logger.info("LiteLLM POST /key/block")
+    return await _http_json("POST", "/key/block", json_body={"key": key_hash}, transport=transport)
+
+
+async def unblock_key(
+    key_hash: str,
+    *,
+    transport: Optional[httpx.AsyncBaseTransport] = None,
+) -> Any:
+    """POST /key/unblock：解除封禁（渠道组重新启用、SKU 续费、额度调整后）。"""
+    logger.info("LiteLLM POST /key/unblock")
+    return await _http_json("POST", "/key/unblock", json_body={"key": key_hash}, transport=transport)
+
+
 def _normalize_spend_logs(raw: Any, *, page: int, page_size: int) -> dict:
     """把 /spend/logs 的 list 收成观察面用的 {data, total_pages}。"""
     if isinstance(raw, dict) and isinstance(raw.get("data"), list):

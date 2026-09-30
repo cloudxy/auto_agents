@@ -1,7 +1,7 @@
 """夹具企业名单契约（Router/Service 边界；禁止 import ORM）"""
-from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
+from platform_core.schemas.time_types import UTCDateTime
 
 
 class InternalFixtureTenantCreate(BaseModel):
@@ -14,8 +14,8 @@ class InternalFixtureTenantOut(BaseModel):
     id: int
     tenant_id: int
     created_by: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDateTime
+    updated_at: UTCDateTime
 
 
 class InternalFixtureTenantListOut(BaseModel):

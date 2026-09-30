@@ -15,6 +15,7 @@ import { renderParamFields, collectParams } from './formUtils'
 import type { SpiderRegistry, SpiderMap } from './types'
 import type { SpiderSchedule as SpiderScheduleType } from '../../services/spiders'
 import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 const { Text } = Typography
 
@@ -133,8 +134,8 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
       width: 160,
       render: (expr: string) => <Text code>{expr}</Text>,
     },
-    { title: '上次触发', dataIndex: 'last_run_at', key: 'last_run_at', width: 180, render: (v: string | null) => v || '-' },
-    { title: '下次触发', dataIndex: 'next_run_at', key: 'next_run_at', width: 180, render: (v: string | null) => v || '-' },
+    { title: '上次触发', dataIndex: 'last_run_at', key: 'last_run_at', width: 180, render: (v: string | null) => formatDateTime(v) },
+    { title: '下次触发', dataIndex: 'next_run_at', key: 'next_run_at', width: 180, render: (v: string | null) => formatDateTime(v) },
     {
       title: '启用',
       dataIndex: 'enabled',

@@ -54,6 +54,12 @@ def _confirm(db_client, db_session, slug: str, product: str, monkeypatch=None):
     _seed_plans(db_session)
     owner, tid = make_tenant_owner_headers(db_session, slug=slug)
     pa = make_platform_admin_headers(db_session)
+    if product == "plan_enterprise":
+        # 决策 D17：企业档走销售，成交后由平台开通（不再自助结账）
+        granted = db_client.post(f"/api/v1/billing/admin/tenants/{tid}/grant", headers=pa,
+                                 json={"product": "plan_enterprise", "amount_cents": 99900, "periods": 1})
+        assert granted.status_code == 200, granted.text
+        return owner, tid
     created = db_client.post(CHECKOUT, headers=owner, json={"product": product})
     assert created.status_code == 201, created.text
     oid = created.json()["data"]["id"]

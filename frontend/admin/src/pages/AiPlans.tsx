@@ -20,6 +20,7 @@ import { useAiPlanFlow } from '../hooks/useAiPlanFlow'
 import { PlanDetail } from '../components/ai/PlanDetail'
 import { PlanList } from '../components/ai/PlanList'
 import PageHeaderTabs, { pageTabPaneStyle } from '../components/layout/PageHeaderTabs'
+import EmailVerifyBanner from '../components/EmailVerifyBanner'
 
 /** 试采/日志抽屉用的爬虫映射（flow_generic 为流程化引擎） */
 const PSEUDO_SPIDER_MAP: SpiderMap = { flow_generic: { title: '流程化采集', type: 'flow' } }
@@ -74,6 +75,8 @@ const AiPlans: React.FC = () => {
       {/* 页级 tab 上提顶栏（T-34 / GWT-99.1）；无槽位（单测直渲染）时原位回退 */}
       <PageHeaderTabs items={PAGE_TAB_ITEMS} activeKey={activeTab} onChange={onTabChange} />
 
+      {/* 决策 D21：企业负责人验证邮箱前不能用 AI 规划 */}
+      <EmailVerifyBanner />
       {/* 原 Card extra 的「新建采集计划」保留为内容区动作行（GWT-99.3 动作等价） */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
         <Button icon={<PlusOutlined />} onClick={() => { wizard.resetWizard(); onTabChange('wizard') }}>

@@ -99,5 +99,5 @@ class SpiderService:
         return await self._query_svc.stats()
 
     # 注册表 → SpiderRegistryService
-    async def create_definition(self, payload, source: str = "manual"):
-        return await self._registry_svc.create_definition(payload, source=source)
+    async def create_definition(self, payload, source: str = "manual", params=None):
+        return await self._registry_svc.create_definition(payload, source=source, params=params)

@@ -11,7 +11,7 @@
 - 静默窗口内不重复触发
 """
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List
 
 from sqlalchemy import select
@@ -23,6 +23,7 @@ from backend.repositories.user_repository import UserRepository
 from backend.services.notify_service import NotifyService
 from platform_core.exceptions import NotFoundException
 from platform_core.logger import get_logger
+from platform_core.timeutil import utc_iso, utcnow
 from platform_core.models.alert_rule import AlertRule
 from platform_core.models.notification import Notification
 from platform_core.models.spider_task import SpiderTask
@@ -117,7 +118,7 @@ class AlertService:
                 if triggered:
                     await self._send_alert(rule, task_info, message)
                     # 更新 last_triggered_at
-                    rule.last_triggered_at = datetime.now()
+                    rule.last_triggered_at = utcnow()
                     await self.session.commit()
         except Exception as e:  # noqa: BLE001 告警评估失败不影响主流程
             logger.warning(f"告警评估失败（不影响主流程）: {e}")
@@ -182,7 +183,7 @@ class AlertService:
             resource_type="alert_rule",
             resource_id=rule.id,
         ))
-        rule.last_triggered_at = datetime.now()
+        rule.last_triggered_at = utcnow()
         await self.session.commit()
         logger.info(
             f"queue_depth 告警已触发: rule_id={rule.id}, "
@@ -237,7 +238,7 @@ class AlertService:
         """检查静默窗口（last_triggered_at + window_minutes > now → 跳过）"""
         if not rule.last_triggered_at:
             return False
-        return datetime.now() < rule.last_triggered_at + timedelta(minutes=rule.window_minutes)
+        return utcnow() < rule.last_triggered_at + timedelta(minutes=rule.window_minutes)
 
     async def _send_alert(self, rule: AlertRule, task_info: dict, message: str) -> None:
         """通过 NotifyService 发送告警"""
@@ -271,6 +272,6 @@ class AlertService:
             "severity": rule.severity or "warning",
             "channels": channels,
             "enabled": rule.enabled,
-            "last_triggered_at": rule.last_triggered_at.isoformat() if rule.last_triggered_at else None,
-            "created_at": rule.created_at.isoformat() if rule.created_at else None,
+            "last_triggered_at": utc_iso(rule.last_triggered_at),
+            "created_at": utc_iso(rule.created_at),
         }

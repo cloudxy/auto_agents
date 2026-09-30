@@ -64,7 +64,7 @@ const Spiders: React.FC = () => {
   const canCreate = hasPermission('btn:create')
   const canDelete = hasPermission('btn:delete')
   const canSchedule = hasPermission('btn:schedule')
-  const canOperate = hasPermission('btn:create') // 暂停/终止与创建共享 operator 权限
+  const canOperate = hasPermission('btn:create') // 终止与创建共享 operator 权限
 
   const [page, setPage] = useState(1)
   const [priorityFilter, setPriorityFilter] = useState<string | undefined>(undefined)
@@ -179,15 +179,14 @@ const Spiders: React.FC = () => {
     }
   }
 
-  // ---------------- 任务控制（A4）：暂停/恢复/终止 ----------------
-  const onControlTask = async (task: Task, action: 'pause' | 'resume' | 'stop') => {
-    const actionLabels: Record<string, string> = { pause: '暂停', resume: '恢复', stop: '终止' }
+  // ---------------- 任务控制：终止（暂停先下线，决策 D6） ----------------
+  const onStopTask = async (task: Task) => {
     try {
-      const res = await controlTask(task.id, action)
-      message.success(res.message || `任务 #${task.id} 已${actionLabels[action]}`)
+      const res = await controlTask(task.id, 'stop')
+      message.success(res.message || `任务 #${task.id} 已终止`)
       await loadTasks(false)
     } catch (error) {
-      message.error(apiErrorMessage(error, `${actionLabels[action]}失败`))
+      message.error(apiErrorMessage(error, '终止失败'))
     }
   }
 
@@ -253,9 +252,7 @@ const Spiders: React.FC = () => {
             onPaginationChange={changePagination}
             onRun={(task: Task) => openModal({ spiderName: task.spider_name, params: task.params, priority: task.priority })}
             onCreateNew={() => openModal()}
-            onPause={(task: Task) => onControlTask(task, 'pause')}
-            onResume={(task: Task) => onControlTask(task, 'resume')}
-            onStop={(task: Task) => onControlTask(task, 'stop')}
+            onStop={onStopTask}
             onDelete={onDelete}
             onSaveTemplate={openTemplateModal}
             onViewLog={(task: Task) => setLogTask(task)}

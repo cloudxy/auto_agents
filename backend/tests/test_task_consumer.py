@@ -155,6 +155,7 @@ async def test_flush_result_tenant_is_task_owner_not_message():
     repo.get_by_id = AsyncMock(return_value=task)
     repo.batch_increment_result_counts = AsyncMock()
     repo.find_by_content_hash = AsyncMock(return_value=None)
+    repo.existing_hashes = AsyncMock(return_value=set())
     session, ctx = _flush_session()
     qs = MagicMock()
     qs.check_result_storage = AsyncMock()

@@ -1,8 +1,8 @@
 """租户渠道组 / 令牌契约。"""
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+from platform_core.schemas.time_types import UTCDateTime
 
 
 class RelayGroupCreate(BaseModel):
@@ -30,7 +30,7 @@ class RelayGroupOut(BaseModel):
     models: list[str] = Field(default_factory=list)
     status: str
     tenant_id: Optional[int] = None
-    created_at: datetime
+    created_at: UTCDateTime
 
 
 class RelayTokenCreate(BaseModel):
@@ -49,9 +49,9 @@ class RelayTokenOut(BaseModel):
     quota_tokens: int
     used_tokens: int
     status: str
-    expires_at: Optional[datetime] = None
-    revoked_at: Optional[datetime] = None
-    created_at: datetime
+    expires_at: Optional[UTCDateTime] = None
+    revoked_at: Optional[UTCDateTime] = None
+    created_at: UTCDateTime
     plaintext_key: Optional[str] = None
 
 
@@ -66,7 +66,7 @@ class RelaySkuPageOut(BaseModel):
     """「我的渠道组」SKU 闸读模型。status 来自权益表，不是组行 COUNT。"""
 
     status: str
-    period_end: Optional[datetime] = None
+    period_end: Optional[UTCDateTime] = None
     can_issue: bool
     empty_title: str = ""
     empty_hint: str = ""

@@ -2,8 +2,8 @@
  * 登录页：成功后来源回跳；页脚回官网企业注册（GWT-04.3）。
  */
 import React, { useEffect, useState } from 'react'
-import { Form, Input, Button, Card, message, Typography, Checkbox, Alert } from 'antd'
-import { UserOutlined, LockOutlined } from '@ant-design/icons'
+import { Form, Input, Button, message, Typography, Checkbox, Alert } from 'antd'
+import { UserOutlined, LockOutlined, RocketOutlined, CheckCircleFilled } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
@@ -132,101 +132,117 @@ const Login: React.FC = () => {
   }
 
   return (
-    <div
-      style={{
-        height: '100vh',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        background: 'var(--color-surface-sunken, #fafafa)',
-      }}
-    >
-      <Card
-        style={{
-          width: 400,
-          background: 'var(--color-surface, #ffffff)',
-          boxShadow: 'var(--shadow-card, 0 1px 2px rgba(0,21,41,0.06))',
-        }}
-      >
-        <div style={{ textAlign: 'center', marginBottom: 30 }}>
-          <Title level={2} style={{ margin: 0, color: 'var(--color-text-primary, #141414)' }}>
-            AutoAgents
-          </Title>
-          <Text type="secondary">管理后台登录</Text>
+    <div className="login-page">
+      {/* 批次 5：左侧品牌区（与官网同一深空底与渐变）；窄屏隐藏，只留表单 */}
+      <aside className="login-hero" aria-hidden>
+        <div className="admin-brand" style={{ padding: 0, height: 'auto' }}>
+          <span className="brand-mark"><RocketOutlined /></span>
+          AutoAgents
         </div>
+        <div>
+          <h1>
+            粘贴链接即可出数
+            <br />
+            <span className="login-hero-accent">智能数据采集</span>
+          </h1>
+          <ul>
+            <li><CheckCircleFilled style={{ color: '#5cdbd3' }} />粘贴链接、提交任务、查看结果</li>
+            <li><CheckCircleFilled style={{ color: '#5cdbd3' }} />AI 规划与试采，从链接走到入库</li>
+            <li><CheckCircleFilled style={{ color: '#5cdbd3' }} />分布式 Worker 协同，结构化结果可导出</li>
+          </ul>
+        </div>
+        <div className="login-hero-foot">AutoAgents 管理后台</div>
+      </aside>
 
-        {formError ? (
-          <Alert type="error" showIcon title={formError} style={{ marginBottom: 16 }} role="alert" />
-        ) : sessionExpired ? (
-          <Alert type="warning" showIcon title={COPY_SESSION_EXPIRED} style={{ marginBottom: 16 }} role="status" />
-        ) : null}
+      <main className="login-panel">
+        <div className="login-form">
+          <div className="login-mobile-brand">
+            <span className="brand-mark" aria-hidden><RocketOutlined /></span>
+            AutoAgents
+          </div>
+          <div style={{ marginBottom: 28 }}>
+            <Title level={3} style={{ margin: 0, color: 'var(--color-text-primary, #141414)' }}>
+              登录管理后台
+            </Title>
+            <Text type="secondary">使用企业账号登录</Text>
+          </div>
 
-        <Form
-          form={form}
-          name="login"
-          onFinish={onFinish}
-          size="large"
-        >
-          <Form.Item
-            name="username"
-            label="用户名"
-            rules={[{ required: true, message: '请输入用户名' }]}
+          {formError ? (
+            <Alert type="error" showIcon title={formError} style={{ marginBottom: 16 }} role="alert" />
+          ) : sessionExpired ? (
+            <Alert type="warning" showIcon title={COPY_SESSION_EXPIRED} style={{ marginBottom: 16 }} role="status" />
+          ) : null}
+
+          <Form
+            form={form}
+            name="login"
+            onFinish={onFinish}
+            size="large"
+            layout="vertical"
+            requiredMark={false}
           >
-            <Input
-              prefix={<UserOutlined />}
-              placeholder="用户名"
-              autoComplete="username"
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="password"
-            label="密码"
-            rules={[{ required: true, message: '请输入密码' }]}
-          >
-            <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="密码"
-              autoComplete="current-password"
-            />
-          </Form.Item>
-
-          <Form.Item name="remember_me" valuePropName="checked">
-            <Checkbox>记住我（7天）</Checkbox>
-          </Form.Item>
-
-          <Form.Item>
-            <Button
-              type="primary"
-              htmlType="submit"
-              loading={loading}
-              block
-              autoInsertSpace={false}
+            <Form.Item
+              name="username"
+              label="用户名"
+              rules={[{ required: true, message: '请输入用户名' }]}
             >
-              {loading ? '登录中…' : '登录'}
+              <Input
+                prefix={<UserOutlined />}
+                placeholder="用户名"
+                autoComplete="username"
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="password"
+              label="密码"
+              rules={[{ required: true, message: '请输入密码' }]}
+            >
+              <Input.Password
+                prefix={<LockOutlined />}
+                placeholder="密码"
+                autoComplete="current-password"
+              />
+            </Form.Item>
+
+            {/* 审计 BUG-07：会话时长由令牌决定（refresh 方案待 D10），不承诺具体天数 */}
+            <Form.Item name="remember_me" valuePropName="checked">
+              <Checkbox>记住我</Checkbox>
+            </Form.Item>
+
+            <Form.Item style={{ marginBottom: 12 }}>
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={loading}
+                block
+                autoInsertSpace={false}
+              >
+                {loading ? '登录中…' : '登录'}
+              </Button>
+            </Form.Item>
+          </Form>
+
+          {formError === COPY_NETWORK ? (
+            <Button
+              type="link"
+              autoInsertSpace={false}
+              onClick={() => {
+                setFormError(null)
+                form.submit()
+              }}
+              style={{ paddingLeft: 0 }}
+            >
+              重试
             </Button>
-          </Form.Item>
-        </Form>
+          ) : null}
 
-        {formError === COPY_NETWORK ? (
-          <Button
-            type="link"
-            autoInsertSpace={false}
-            onClick={() => {
-              setFormError(null)
-              form.submit()
-            }}
-            style={{ paddingLeft: 0 }}
-          >
-            重试
-          </Button>
-        ) : null}
-
-        <p style={{ textAlign: 'center', marginBottom: 0, color: 'var(--color-text-secondary, #595959)' }}>
-          没有账号？
-          <a href={OFFICIAL_REGISTER_HREF}>企业注册</a>
-        </p>
-      </Card>
+          <p style={{ textAlign: 'center', marginBottom: 0, color: 'var(--color-text-secondary, #595959)' }}>
+            没有账号？
+            <Typography.Link href={OFFICIAL_REGISTER_HREF}>企业注册</Typography.Link>
+          </p>
+        </div>
+      </main>
     </div>
   )
 }

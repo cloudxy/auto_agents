@@ -17,9 +17,11 @@ jest.mock('../services/api', () => {
 // babel-jest 工厂引用 mock* 前缀变量（render 时才读取，无 TDZ）——RelayGroups.test 同款
 const mockUserState: { current: Record<string, unknown> | null } = { current: null };
 
+const mockLogout = jest.fn();
+
 jest.mock('../store/useAuthStore', () => ({
-  useAuthStore: (sel: (s: { user: Record<string, unknown> | null }) => unknown) =>
-    sel({ user: mockUserState.current }),
+  useAuthStore: (sel: (s: { user: Record<string, unknown> | null; logout: () => void }) => unknown) =>
+    sel({ user: mockUserState.current, logout: mockLogout }),
 }));
 
 jest.mock('antd', () => {
@@ -50,6 +52,7 @@ const mockMembers: { current: unknown[] } = { current: [OWNER_ROW, ALICE_ROW] };
 beforeEach(() => {
   (message.error as jest.Mock).mockClear();
   (message.success as jest.Mock).mockClear();
+  mockLogout.mockClear();
   mockUserState.current = OWNER_USER; // 默认 owner：既有用例行为不变
   mockMembers.current = [OWNER_ROW, ALICE_ROW];
   (api.get as jest.Mock).mockClear();
@@ -62,7 +65,7 @@ test('renders member list with owner row visible', async () => {
   render(<Members />);
   await waitFor(() => expect(screen.getByText('owner-acme')).toBeInTheDocument());
   expect(screen.getByText('alice')).toBeInTheDocument();
-  expect(screen.getByText(/租户内部事务/)).toBeInTheDocument();
+  expect(screen.getByText(/企业内部事务/)).toBeInTheDocument();
 });
 
 test('delete confirm copy matches backend semantics (audit preserved)', async () => {
@@ -174,9 +177,9 @@ describe('T-20 FR-89 只读成员页隐藏写控件', () => {
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(screen.getAllByText('启用')).toHaveLength(2);
 
-    // 只读视角角色以下拉同形的 Tag 呈现（不再可改）
-    expect(screen.getByText('operator')).toBeInTheDocument();
-    expect(screen.getByText('owner')).toBeInTheDocument();
+    // 只读视角角色以下拉同形的 Tag 呈现（不再可改）；批次 5 起显示中文角色名
+    expect(screen.getByText('操作员')).toBeInTheDocument();
+    expect(screen.getByText('企业负责人')).toBeInTheDocument();
   });
 
   test('GWT-89.2 单人企业（接口成功）：负责人能看见自己', async () => {
@@ -233,8 +236,9 @@ test('GWT-M21 add form has no 平台超管 option', async () => {
   fireEvent.mouseDown(screen.getByLabelText('租户角色'));
   expect(screen.queryByText('平台超管')).not.toBeInTheDocument();
   expect(screen.queryByText('platform_admin')).not.toBeInTheDocument();
-  expect(screen.getAllByText('admin（可管理成员）').length).toBeGreaterThan(0);
-  expect(screen.getAllByText('viewer（只读）').length).toBeGreaterThan(0);
+  // 批次 5 起角色显示中文名（值仍是 admin / viewer）
+  expect(screen.getAllByText('管理员（可管理成员）').length).toBeGreaterThan(0);
+  expect(screen.getAllByText('只读成员').length).toBeGreaterThan(0);
 });
 
 test('GWT-M21 empty login name: 请填写登录名, does not create', async () => {
@@ -261,4 +265,33 @@ test('GWT-M21 cross-tenant 404 is same-shape, not 抱歉', async () => {
   expect(screen.getByRole('button', { name: /返回工作台/ })).toBeInTheDocument();
   expect(screen.queryByText(/抱歉/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /添加成员/ })).not.toBeInTheDocument();
+});
+
+/**
+ * 决策 D23：负责人可把负责人转让给启用中的成员——须再次输入登录密码；
+ * 成功后本人降为管理员、会话失效 → 提示并登出重新登录。管理员看不到转让入口。
+ */
+test('owner transfers ownership with password confirm, then is logged out', async () => {
+  (api.post as jest.Mock).mockResolvedValueOnce({ success: true, code: 'SUCCESS', message: 'ok', data: { owner_id: 2 } });
+  render(<Members />);
+  await waitFor(() => expect(screen.getByText('alice')).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: '转让负责人' }));
+  const pwd = await screen.findByLabelText('你的登录密码');
+  fireEvent.change(pwd, { target: { value: 'Owner-Passw0rd!' } });
+  fireEvent.click(screen.getByRole('button', { name: /确认转让/ }));
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/members/2/transfer-ownership', { password: 'Owner-Passw0rd!' }));
+  await waitFor(() => expect(mockLogout).toHaveBeenCalled());
+  expect(message.success).toHaveBeenCalledWith(expect.stringMatching(/alice.*重新登录/));
+});
+
+test('admin sees no transfer entry; disabled member cannot receive ownership', async () => {
+  mockMembers.current = [OWNER_ROW, ALICE_ROW, { id: 4, username: 'bob', email: 'b@a.com', tenant_role: 'viewer', is_active: false }];
+  const { unmount } = render(<Members />);
+  await waitFor(() => expect(screen.getByText('bob')).toBeInTheDocument());
+  expect(screen.getAllByRole('button', { name: '转让负责人' })).toHaveLength(1); // 只有启用中的 alice
+  unmount();
+  mockUserState.current = ADMIN_USER;
+  render(<Members />);
+  await waitFor(() => expect(screen.getByText('alice')).toBeInTheDocument());
+  expect(screen.queryByRole('button', { name: '转让负责人' })).toBeNull();
 });

@@ -26,6 +26,7 @@ import {
 } from '../services/enterprise'
 import { LoadFailure } from '../components/LoadState'
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
+import { formatDate } from '@auto-agents/frontend-shared'
 
 const { Text } = Typography
 
@@ -254,7 +255,7 @@ const TenantsTab: React.FC = () => {
       },
     },
     { title: '到期', dataIndex: 'expires_at', width: 110,
-      render: (v: string | null) => (v ? new Date(v).toLocaleDateString('zh-CN') : '不过期') },
+      render: (v: string | null) => formatDate(v, '不过期') },
     {
       // 平台租户（GWT-94.2/94.3）：改名/停用入口禁用 + 守卫句旁注；无删除企业控件（GWT-94.4）
       title: '操作', width: 210,

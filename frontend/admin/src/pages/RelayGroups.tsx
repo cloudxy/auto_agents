@@ -38,16 +38,22 @@ import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
 const { Text, Paragraph } = Typography
 
 const GROUP_STATUS: Record<string, string> = { enabled: '启用', disabled: '停用' }
-const TOKEN_STATUS: Record<string, { label: string; color: string }> = {
+const TOKEN_STATUS: Record<string, { label: string; color: string; hint?: string }> = {
   active: { label: '已签发', color: 'green' },
+  exhausted: { label: '额度用尽', color: 'orange', hint: '该令牌的额度已用完，网关已暂停它；需要继续使用请签发新令牌' },
+  suspended: { label: '已暂停', color: 'gold', hint: '所属渠道组已停用，或本企业本月中转额度已用完；恢复后自动解除' },
   revoked: { label: '已吊销', color: 'red' },
   expired: { label: '已过期', color: 'default' },
 }
 
 const tokenStatusTag = (s: string) => {
   const meta = TOKEN_STATUS[s] || { label: s, color: 'default' }
-  return <Tag color={meta.color}>{meta.label}</Tag>
+  const tag = <Tag color={meta.color}>{meta.label}</Tag>
+  return meta.hint ? <Tooltip title={meta.hint}>{tag}</Tooltip> : tag
 }
+
+// 吊销是止损操作：已签发、额度用尽、已暂停的令牌都可以吊销（审计 BUG-28）
+const REVOCABLE = new Set(['active', 'exhausted', 'suspended'])
 
 const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false
 
@@ -266,7 +272,7 @@ const RelayGroups: React.FC = () => {
                    ...(canIssue ? [{
                      title: '操作', width: 90,
                      render: (_: unknown, r: RelayTokenRow) => (
-                       r.status === 'active' ? (
+                       REVOCABLE.has(r.status) ? (
                          <Button size="small" danger
                                  loading={revokeMutation.isPending && revokeMutation.variables === r.id}
                                  onClick={() => revokeMutation.mutate(r.id)}>吊销</Button>

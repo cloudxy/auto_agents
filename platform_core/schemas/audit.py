@@ -1,8 +1,8 @@
 """操作审计日志 Schema —— /admin/audit-logs 查询契约"""
-from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
+from platform_core.schemas.time_types import UTCDateTime
 
 
 class AuditLogResponse(BaseModel):
@@ -16,7 +16,7 @@ class AuditLogResponse(BaseModel):
     action: str
     target: str
     detail: Optional[str] = None
-    created_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
 
 
 class AuditLogListResponse(BaseModel):

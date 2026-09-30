@@ -21,6 +21,7 @@ const isOrgGhostPath = (pathname: string): boolean =>
 // 工单 69：19 页面全部 lazy——重依赖（recharts/代码编辑器等）按需分包，
 // 首屏只载 AdminLayout + 当前路由 chunk
 const Login = React.lazy(() => import('./pages/Login'))
+const VerifyEmail = React.lazy(() => import('./pages/VerifyEmail'))
 const Dashboard = React.lazy(() => import('./pages/Dashboard'))
 const Spiders = React.lazy(() => import('./pages/Spiders'))
 const SpiderLogs = React.lazy(() => import('./pages/SpiderLogs'))
@@ -101,6 +102,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<Page label="login"><Login /></Page>} />
             <Route path="/unauthorized" element={<Page label="unauthorized"><Unauthorized /></Page>} />
+            <Route path="/verify-email" element={<Page label="verify-email"><VerifyEmail /></Page>} />
 
             <Route element={<MainLayout />}>
               <Route index element={<Navigate to="/dashboard" replace />} />

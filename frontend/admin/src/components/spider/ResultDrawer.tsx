@@ -8,6 +8,7 @@ import { DownloadOutlined } from '@ant-design/icons'
 import { fetchResults, exportResults, fetchTaskStore } from '../../services/spiders'
 import type { Task, SpiderResult, TaskStoreStatus, SpiderMap } from './types'
 import { apiErrorMessage } from '../../utils/errorMessage'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 const { Text } = Typography
 
@@ -118,7 +119,7 @@ export const ResultDrawer: React.FC<ResultDrawerProps> = ({ task, spiderMap, onC
       render: (v: string | null) =>
         v ? <a href={v} target="_blank" rel="noreferrer">{v}</a> : '-',
     },
-    { title: '采集时间', dataIndex: 'created_at', key: 'created_at', width: 170 },
+    { title: '采集时间', dataIndex: 'created_at', key: 'created_at', width: 170, render: (v: string | null) => formatDateTime(v) },
     {
       title: '内容指纹',
       dataIndex: 'content_hash',

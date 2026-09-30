@@ -33,8 +33,9 @@ from backend.services.ai_planner.llm_client import (
 )
 from backend.services.llm_common.seam import seam as _seam
 from backend.services.spider_common import require_enqueue_tenant
-from platform_core.exceptions import BusinessException, NotFoundException
+from platform_core.exceptions import BusinessException, NotFoundException, ValidationException
 from platform_core.logger import get_logger
+from platform_core.outbound_guard import OutboundBlocked, assert_public_url
 from platform_core.schemas.ai_plan import (
     AiPlanCreate,
     AiPlanListResponse,
@@ -73,6 +74,13 @@ class AiPlannerService:
         logger.info(f"创建 AI 采集计划: target_url={payload.target_url}, by={created_by}")
         owner_id = require_enqueue_tenant(tenant_id)
         await self._reject_if_planning_disabled(owner_id)
+        # 审计 F4-1 / P0-8：schema 只做静态校验（挡不住 127.0.0.1.nip.io 这类解析到内网的域名）；
+        # 带 html_snippet 的离线规划虽不在线抓取，target_url 仍会成为试采起始地址，同样必须 DNS 复检
+        try:
+            await assert_public_url(payload.target_url)
+        except OutboundBlocked as exc:
+            logger.warning(f"AI 计划目标地址被出站守卫拒绝: {payload.target_url}")
+            raise ValidationException(message=f"目标地址不可用：{exc.message}", field="target_url") from exc
         plan_json = {"html_snippet": payload.html_snippet} if payload.html_snippet else None
         item = await self.repo.create(
             target_url=payload.target_url, status="draft", plan_json=plan_json,
@@ -289,7 +297,11 @@ class AiPlannerService:
                 await self.session.commit()
 
                 if passed:
-                    # 试采通过：保持 testing（可注册），注册时校验最近一次通过
+                    # 审计 BUG-18：试采通过进入 tested（非忙碌态）——原先停在 testing，
+                    # 属于忙碌态：不能再试采、不能删除，进程重启还会被对账改成 failed
+                    await self.repo.update_status(plan_id, "tested", error_message=None,
+                                                  test_task_id=task.id)
+                    await self.session.commit()
                     logger.info(f"AI 试采通过: plan_id={plan_id}, task_id={task.id}, reason={reason}")
                     return
 
@@ -391,8 +403,13 @@ class AiPlannerService:
             description=f"AI 生成的流程化采集（计划 #{plan_id}，目标 {target_url}）",
         )
         spider_svc = _seam().SpiderService(self.session)
+        # 审计 BUG-19：注册时把试采通过的参数写进定义——原先定义行没有 params，
+        # 按方案运行时缺 urls 直接失败或卡住
+        definition_params = dict(generated_params) if isinstance(generated_params, dict) else None
         try:
-            definition = await spider_svc.create_definition(payload, source="ai_generated")
+            definition = await spider_svc.create_definition(
+                payload, source="ai_generated", params=definition_params,
+            )
         except BusinessException as e:
             # m4：create_definition 已 commit 但 plan 状态更新失败时，重试会撞「已存在」；
             # 同名且 source=ai_generated 的定义即本次 AI 注册产物 → 幂等续走（不重复建定义）。
@@ -405,6 +422,8 @@ class AiPlannerService:
                 f"AI 计划注册幂等续走（定义已存在且来源为 ai_generated）: "
                 f"plan_id={plan_id}, definition={name}"
             )
+            if definition_params and not existing.params:
+                existing.params = definition_params
             definition = existing
 
         plan_json["registered_definition"] = definition.name

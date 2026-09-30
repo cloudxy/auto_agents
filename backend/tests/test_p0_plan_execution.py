@@ -32,6 +32,7 @@ async def test_flush_quota_exceeded_parks_only_that_tenant():
     repo.get_by_id = AsyncMock(side_effect=lambda tid: {1: t1, 2: t2}[tid])
     repo.batch_increment_result_counts = AsyncMock()
     repo.find_by_content_hash = AsyncMock(return_value=None)
+    repo.existing_hashes = AsyncMock(return_value=set())
     session = AsyncMock()
     session.commit = AsyncMock()
     session.add_all = MagicMock()
