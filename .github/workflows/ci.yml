@@ -2,6 +2,7 @@
 #
 # 五阶段质量关卡（对齐 /cicd Skill 与 /verify Skill 的验证约定）：
 # 1. python-lint-test:  ruff lint + pytest（backend/tests）
+#    security-audit:    pip-audit + npm audit --omit=dev（审计 P0-7）
 # 2. arch-check:        tools/check/arch.sh（R1–R13 + B1–B3）
 # 3. db-migration-gate: tools/check/db_ir.sh + db_migrations.sh
 # 4. frontend-build:    npm workspaces：shared dist → admin + official
@@ -87,7 +88,11 @@ jobs:
         # T10 扩容：基建冒烟 3 文件 + saas/members（真链路 JWT + 租户快照）+
         # auth 登录链 + admin 用户 CRUD + rbac 深链 + 方言回归（0e0aaf8）。
         # 时长估算：39 用例 ×（每测试独立 schema 建删 + create_all）≈ +1~2min，
-        # 未超时。若某文件在真库暴露方言差异（正是本通道目的），处置见
+        # 未超时。审计 BUG-42（2026-09-28）：048 merge 降级改 no-op、029/040 共用计费表降级幂等、
+        # 037/035 等先删索引后删外键的降级顺序修正后，迁移往返 / EXPLAIN / DDL 演练 6 个文件纳入本通道。
+        # BUG-43：UTC 历史换算脚本；BUG-33：目录导入 savepoint + 提交失败撤回（SQLite 驱动的
+        # SAVEPOINT 语义失真，库侧断言只在真库成立）。
+        # 若某文件在真库暴露方言差异（正是本通道目的），处置见
         # .scratch/p0-p1-2026-09/issues/T10.md 的分级方案：先单独验证修复，
         # 期间将该文件移入观察名单（不要整通道降级）。
         run: >-
@@ -100,6 +105,14 @@ jobs:
           backend/tests/test_auth_login_tenant.py
           backend/tests/test_admin_users_crud.py
           backend/tests/test_saas_rbac_deep.py
+          backend/tests/test_outbound_migration_041.py
+          backend/tests/test_t24_migration_042.py
+          backend/tests/test_t35_migration_043.py
+          backend/tests/test_db_behavior_loop.py
+          backend/tests/test_saas_ddl_drill.py
+          backend/tests/test_migrations_051_053.py
+          backend/tests/test_utc_backfill.py
+          backend/tests/test_tree_import.py
 
   arch-check:
     name: Architecture Red Lines (R1-R13 + B1-B3)
@@ -142,6 +155,36 @@ jobs:
             echo "$hits"
             exit 1
           fi
+
+  security-audit:
+    # 审计 R6-1 / P0-7：依赖漏洞门禁。Python 全量（工作区自身两包不在 PyPI，pip-audit 会跳过，
+    # 故不加 --strict）；前端只审运行时依赖（--omit=dev），构建链（CRA）残余风险随 Vite 迁移收口
+    name: Dependency Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Sync dependencies
+        run: uv sync --all-packages
+
+      - name: pip-audit (Python)
+        run: uv run pip-audit
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: npm audit (runtime dependencies)
+        run: npm audit --omit=dev --audit-level=high
 
   db-migration-gate:
     name: DB Migration Gate (check-db-ir + check-db-migrations)

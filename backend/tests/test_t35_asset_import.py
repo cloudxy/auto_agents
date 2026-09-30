@@ -478,3 +478,40 @@ def test_migration_043_chain_anchor():
     assert mod.revision == "043"
     assert mod.down_revision == "042"
     assert mod.revision != mod.down_revision
+
+
+# ---------------- 审计 BUG-33：落盘写到一半失败要撤干净，重试可成功 ----------------
+
+
+def test_bug33_partial_directory_write_is_undone_and_retry_succeeds(
+    db_client, db_session, import_env, tmp_path, monkeypatch,
+):
+    """插件目录第 2 个文件写盘失败：本项 failed、不留库行、不留半个目录；
+    去掉故障后重导成功（原先残留目录让 mkdir(exist_ok=False) 永远报「落盘失败」）。"""
+    from conftest import make_platform_admin_headers
+
+    pa = make_platform_admin_headers(db_session)
+    batch_dir = tmp_path / "assets-dir"
+    (batch_dir / "good-plugin").mkdir(parents=True)
+    (batch_dir / "good-plugin" / "plugin.json").write_text(
+        '{"name": "good-plugin", "description": "好插件"}', encoding="utf-8")
+    (batch_dir / "good-plugin" / "zz-extra.md").write_text("# 附加说明\n", encoding="utf-8")
+
+    real_write = Path.write_bytes
+
+    def _flaky(self, data):
+        if "zz-extra.md" in self.name and "library" in self.as_posix():
+            raise OSError("磁盘写入故障注入")
+        return real_write(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", _flaky)
+    first = db_client.post(IMPORT_URL, headers=pa, data={"directory": str(batch_dir)})
+    assert first.status_code == 200, first.text
+    assert first.json()["data"]["failed"] == 1
+    assert not (import_env["library"] / "plugins" / "good-plugin").exists()
+    assert {r.name for r in _assets(db_session)} == set()
+
+    monkeypatch.setattr(Path, "write_bytes", real_write)
+    again = db_client.post(IMPORT_URL, headers=pa, data={"directory": str(batch_dir)})
+    assert again.json()["data"]["succeeded"] == 1, again.text
+    assert (import_env["library"] / "plugins" / "good-plugin" / "zz-extra.md").is_file()

@@ -9,6 +9,7 @@ from platform_core.exceptions import NotFoundException
 from platform_core.logger import get_logger
 from platform_core.models.capability import CapabilityAsset
 from platform_core.models.skill import Skill
+from platform_core.timeutil import utc_iso
 
 logger = get_logger("service.capability")
 
@@ -55,10 +56,10 @@ class CapabilityService:
                 ),
                 "sync_state": r.sync_state,
                 "listing_state": r.listing_state,
-                "listed_at": r.listed_at.isoformat() if r.listed_at else None,
+                "listed_at": utc_iso(r.listed_at),
                 "source_type": r.source_type,
                 "logo": r.logo, "background": r.background,
-                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                "updated_at": utc_iso(r.updated_at),
                 # QA-4：治理目录端点原本不投影 featured，CatalogTab 星标一刷新
                 # 就丢（乐观更新短暂显示，切筛选/翻页立刻回退成"—"）。
                 "featured": int(r.featured or 0),
@@ -104,12 +105,11 @@ class CapabilityService:
         return list(rows), int(total)
 
     async def get_asset(self, asset_type: str, name: str) -> CapabilityAsset:
-        row = (await self.session.execute(
-            select(CapabilityAsset).where(
-                CapabilityAsset.asset_type == asset_type,
-                CapabilityAsset.name == name,
-            )
-        )).scalar_one_or_none()
+        """按名取资产（存活行优先；孪生行不再 500，审计 B4-4）"""
+        from backend.services.capability_lookup import find_named_asset
+
+        logger.info(f"查询资产详情 | type={asset_type} name={name}")
+        row = await find_named_asset(self.session, asset_type, name)
         if row is None:
             raise NotFoundException(resource=f"{asset_type} {name}")
         return row

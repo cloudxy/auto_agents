@@ -39,6 +39,7 @@ from sqlalchemy import delete, select
 
 from backend.services.llm_protocol import ProtocolError, execute_json, get_adapter
 from platform_core.logger import get_logger
+from platform_core.timeutil import utc_iso
 from platform_core.schemas.llm_provider import (
     LlmProviderCreate,
     LlmProviderResponse,
@@ -153,6 +154,7 @@ class LlmProviderService:
         if existing is not None:
             raise BusinessException(f"LLM 供应商 '{payload.name}' 已存在")
         LlmSecretVault.ensure_public_base_url(payload.base_url)
+        await LlmSecretVault.assert_outbound_base_url(payload.base_url)
         encrypted = self.encrypt_api_key(payload.api_key)
         # 归属随上下文：平台态 → 公共行（tenant NULL，兜底可见）；租户态 → 本租户 BYOK
         # （否则租户写入断言拒绝归属 None 的行）
@@ -219,6 +221,7 @@ class LlmProviderService:
 
         if "base_url" in changes:
             LlmSecretVault.ensure_public_base_url(changes["base_url"])
+            await LlmSecretVault.assert_outbound_base_url(changes["base_url"])
 
         if "api_key" in changes:
             submitted = changes.pop("api_key")
@@ -305,6 +308,7 @@ class LlmProviderService:
         provider = await self.repo.get_by_id(provider_id)
         if provider is None:
             raise NotFoundException(resource=f"LLM 供应商 {provider_id}")
+        await LlmSecretVault.assert_outbound_base_url(provider.base_url)
         api_key = self.decrypt_api_key(provider.api_key_encrypted)
         adapter = get_adapter(provider.provider_type or "openai_compatible")
         remote = await adapter.list_models(provider.base_url, api_key)
@@ -339,6 +343,7 @@ class LlmProviderService:
             )
         )).scalar_one_or_none()
 
+        await LlmSecretVault.assert_outbound_base_url(provider.base_url)
         api_key = self.decrypt_api_key(provider.api_key_encrypted)
         adapter = get_adapter(provider.provider_type or "openai_compatible")
         request = adapter.build_chat(
@@ -388,7 +393,7 @@ class LlmProviderService:
                 "model_id": r.model_id, "alias": r.alias or "", "model_tier": r.model_tier,
                 "priority": r.priority, "is_default": r.is_default, "enabled": r.enabled,
                 "health_status": r.health_status,
-                "last_checked_at": r.last_checked_at.isoformat() if r.last_checked_at else None,
+                "last_checked_at": utc_iso(r.last_checked_at),
                 "last_latency_ms": r.last_latency_ms,
             }
             for r in rows

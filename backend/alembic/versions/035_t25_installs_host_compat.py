@@ -90,10 +90,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        op.f("ix_capability_installs_tenant_id"),
-        table_name="capability_installs",
-    )
-    op.drop_index("idx_installs_asset", table_name="capability_installs")
+    # 审计 BUG-42：先删索引会撞「索引被外键依赖」（MySQL 1553）；删表连带索引与外键
     op.drop_table("capability_installs")
     op.drop_column("capability_assets", "host_compat")

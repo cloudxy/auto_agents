@@ -352,7 +352,9 @@ test('GWT-M33 tenant /settings is 404 same-shape, no settings form', async () =>
   expect(await screen.findByText('页面不存在或已被移除')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /返回工作台/ })).toBeInTheDocument()
   expect(screen.queryByText('当前账号不能改系统设置')).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: /保存并发布/ })).not.toBeInTheDocument()
+  // 设置页按钮已改名「保存」（B5-2）；同时断言平台名称表单项不在场，避免改名后断言落空
+  expect(screen.queryByRole('button', { name: /^保\s*存$/ })).not.toBeInTheDocument()
+  expect(screen.queryByLabelText(/网站\/平台名称/)).not.toBeInTheDocument()
 })
 
 test('GWT-M32 tenant /users is 404 same-shape', async () => {

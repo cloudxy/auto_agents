@@ -15,5 +15,13 @@ SKILLS:
   PUBLIC_API:
     ENABLED: true
     RATE_LIMIT_PER_MIN: 60
+  # URL 导入主机白名单（审计 BUG-22 / P0-3：SSRF 止血；`*.x.com` 匹配子域）
+  IMPORT:
+    ALLOWED_HOSTS:
+      - github.com
+      - api.github.com
+      - raw.githubusercontent.com
+      - codeload.github.com
+      - objects.githubusercontent.com
   ADAPTER_SYNC:
     ENABLED: false

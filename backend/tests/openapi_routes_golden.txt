@@ -142,6 +142,7 @@ PATCH /api/v1/spiders/tasks/{task_id}
 PATCH /api/v1/spiders/templates/{template_id}
 PATCH /api/v1/tenants/me/quota
 POST /api/v1/admin/internal-fixture-tenants
+POST /api/v1/admin/notify-config/test
 POST /api/v1/admin/payment-credentials/{channel}/validate
 POST /api/v1/admin/tenants
 POST /api/v1/admin/users
@@ -153,11 +154,18 @@ POST /api/v1/ai/plans/{plan_id}/test
 POST /api/v1/api-keys
 POST /api/v1/api-keys/{key_id}/revoke
 POST /api/v1/auth/login
+POST /api/v1/auth/logout
+POST /api/v1/auth/refresh
 POST /api/v1/auth/register
+POST /api/v1/auth/resend-verification
+POST /api/v1/auth/verify-email
+POST /api/v1/billing/admin/tenants/{tenant_id}/grant
 POST /api/v1/billing/checkout
 POST /api/v1/billing/notify/{channel}
 POST /api/v1/billing/orders
+POST /api/v1/billing/orders/{order_id}/cancel
 POST /api/v1/billing/orders/{order_id}/confirm
+POST /api/v1/billing/orders/{order_id}/retry-fulfillment
 POST /api/v1/capabilities/assets/prune-missing
 POST /api/v1/capabilities/backfill-first-party
 POST /api/v1/capabilities/import
@@ -179,6 +187,7 @@ POST /api/v1/llm/providers/{provider_id}/models/{model_id}/test
 POST /api/v1/llm/providers/{provider_id}/test
 POST /api/v1/members
 POST /api/v1/members/{member_id}/reset-password
+POST /api/v1/members/{member_id}/transfer-ownership
 POST /api/v1/newapi/models
 POST /api/v1/newapi/probe
 POST /api/v1/newapi/upstreams

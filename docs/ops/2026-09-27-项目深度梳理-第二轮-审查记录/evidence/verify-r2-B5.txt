@@ -1,0 +1,95 @@
+# verify-r2-B5（manager，2026-09-28，只读）
+$ B5-10 tenants vs tenant_signup_succeeded
+id	slug	created_at
+1	default	2026-09-03 11:51:47
+2	co-24634	2026-09-03 16:37:14
+3	co-25727	2026-09-03 16:55:27
+5	platform	2026-09-05 14:28:37
+10	c4-1789347758	2026-09-14 09:02:38
+signup_events
+0
+$ B5-4 超管所属租户
+id	username	tenant_id	slug	status
+1	admin	1	default	active
+$ B5-4 平台租户停用保护（服务层）
+            select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
+        if row is None:
+            raise NotFoundException(resource=f"租户 {tenant_id}")
+        if row.slug == PLATFORM_TENANT_SLUG:
+            if "name" in body and str(body.get("name") or "").strip() != row.name:
+                raise BusinessException("平台租户不可修改名称。")
+            if ("status" in body and str(body["status"]) != row.status
+                    and str(body["status"]) in ("active", "expired", "disabled")):
+                raise BusinessException("平台租户不可停用。")
+        elif "name" in body:  # 常规企业改名（T-27 / GWT-95.1；同名提交=no-op 放行）
+            new_name = str(body.get("name") or "").strip()
+$ 登录/请求时租户状态校验是否豁免平台超管
+backend/app/middleware/tenant_context.py:7:T5 决策 B 越权链收紧：platform_scope 仅 is_platform_admin 可入。旧条件
+backend/app/middleware/tenant_context.py:8:`is_platform_admin OR not tenant_id` 使 NULL 租户账号（公开注册历史产物）自动
+backend/app/middleware/tenant_context.py:12:F-01（重审收口）：claim 的 is_platform_admin 只承身份——进入 platform_scope 前
+backend/app/middleware/tenant_context.py:29:    assert_tenant_active,
+backend/app/middleware/tenant_context.py:93:                await assert_tenant_active(session, tenant_id)
+backend/app/middleware/tenant_context.py:136:        if payload.get("is_platform_admin"):
+backend/app/middleware/tenant_context.py:140:            if identity.is_platform_admin:
+backend/app/api/deps.py:22:from backend.services.tenant_expiry_service import assert_tenant_active
+backend/app/api/deps.py:50:    is_platform_admin=True → 平台超管（platform_scope；T5 后 DB 行挂 platform
+backend/app/api/deps.py:60:    is_platform_admin: bool = False
+backend/app/api/deps.py:100:    await assert_tenant_active(
+backend/app/api/deps.py:103:        is_platform_admin=identity.is_platform_admin,
+backend/app/api/deps.py:113:        is_platform_admin=identity.is_platform_admin,
+backend/app/api/deps.py:159:    logger.info(f"入队企业解析 | user={user.username} platform_admin={user.is_platform_admin}")
+backend/app/api/deps.py:160:    if user.is_platform_admin:
+backend/app/api/deps.py:176:    """平台级守卫：仅 is_platform_admin；非超管拒绝并留下越权记录（GWT-06.3）"""
+backend/app/api/deps.py:177:    if user.is_platform_admin:
+backend/app/api/deps.py:196:    if user.is_platform_admin:
+backend/services/auth_service.py:6:from backend.services.tenant_expiry_service import assert_tenant_active
+backend/services/auth_service.py:135:            await assert_tenant_active(
+
+        }
+        user.last_login_at = datetime.now(timezone.utc)
+        await emit_login_succeeded(self.session, user)
+        await self.session.commit()
+        logger.info(f"用户认证成功: {username}")
+        return snapshot
+
+    async def assert_tenant_login_allowed(self, user_data: dict) -> None:
+        """到期租户拒绝登录（平台超管豁免）。"""
+        logger.info(f"校验租户登录资格 | tenant={user_data.get('tenant_id')}")
+        tenant_id = user_data.get("tenant_id")
+        if not tenant_id or user_data.get("is_platform_admin"):
+            return
+        from sqlalchemy import select
+
+        from platform_core.models.tenant import Tenant
+
+        tenant = (await self.session.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
+        if tenant is not None and getattr(tenant, "status", None) == "expired":
+            raise AuthenticationException(message="租户已到期，请续费后再登录")
+
+    async def create_token(self, user_data: dict) -> TokenResponse:
+        """创建访问令牌"""
+async def assert_tenant_active(session: AsyncSession, tenant_id: int | None, *, is_platform_admin: bool = False) -> None:
+    logger.info(f"租户可用性检查 | tenant_id={tenant_id} platform={is_platform_admin}")
+    if is_platform_admin or tenant_id is None:
+        return
+    tenant = await session.get(Tenant, int(tenant_id))
+    status = getattr(tenant, "status", None) if tenant is not None else None
+    if tenant is None or status in _INACTIVE_STATUSES:
+        logger.warning(f"拒绝到期或停用租户 | tenant_id={tenant_id} status={status}")
+        raise AuthenticationException(
+            message=TENANT_EXPIRED_MESSAGE, code=AUTH_TENANT_EXPIRED
+        )
+
+
+# 把 expires_at < now 且 status=active 的租户置 expired；返回处理行数
+            )
+            return None
+        user = matched[0]
+        # FR-08：密码命中后再查企业状态，凭证错误不得走到期句
+        try:
+            await assert_tenant_active(
+                self.session,
+                getattr(user, "tenant_id", None),
+                is_platform_admin=bool(getattr(user, "is_platform_admin", False)),
+            )
+        except AuthenticationException:

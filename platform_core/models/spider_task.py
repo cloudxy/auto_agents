@@ -1,6 +1,6 @@
 """爬虫任务模型
 
-status 状态流转图（合法值 4 个；DB 层 VARCHAR(20)，枚举校验在应用层——迁移 027 起）：
+status 状态流转图（合法值 5 个；DB 层 VARCHAR(20)，枚举校验在应用层——迁移 027 起）：
 
     (创建) ──▶ pending ──▶ running ──▶ completed（终态）
                  │  ▲          │
@@ -10,7 +10,9 @@ status 状态流转图（合法值 4 个；DB 层 VARCHAR(20)，枚举校验在�
                  │      时自动重投（webhook finish_task，ZSET 延迟退避 1s→5s→15s）
                  └───▶ failed（投递失败，终态、不重试）
 
-    - 终态幂等：completed/failed 再收 finish_task 直接返回（spider_task_service）
+    pending / running ──▶ cancelled（终态；用户终止，只影响本任务——审计 BUG-15）
+
+    - 终态幂等：completed/failed/cancelled 再收 finish_task 直接返回（spider_task_service）
     - running 不可删除/编辑；仅 pending/queued 可编辑（queued 为历史防御值，
       当前无写入点）
     - 非法流转（如 completed → 任意、running → pending）在服务层守卫；

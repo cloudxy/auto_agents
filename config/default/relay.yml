@@ -21,3 +21,7 @@ RELAY:
   DEFAULT_WINDOW_QUOTA: 0           # 全局默认窗口用量上限（0=仅调度 Redis 配过的模型）
   DEFAULT_COOLDOWN_SECONDS: 3600    # 全局默认冷却（秒）
   DEFAULT_WINDOW_HOURS: 24          # 全局默认用量窗口（小时）
+  # 中转上线闸（审计 BUG-28 / F3-9，D19 = 卖）：令牌额度、渠道组停用、SKU 到期在网关侧执行
+  ENFORCE_ENABLED: true             # 执法巡检（未配置 LITELLM.BASE_URL 时自动不启动）
+  ENFORCE_INTERVAL_SECONDS: 600     # 巡检间隔（秒）
+  SKU_MONTHLY_TOKENS: 10000000      # 企业月度中转额度（token）；0=不限。运营参数，按成本模型调整；可被 tenants.quota.relay_tokens_month 覆盖

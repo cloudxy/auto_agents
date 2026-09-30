@@ -56,7 +56,16 @@ SCHEDULER_QUEUE_CLASS = "scrapy_redis.queue.SpiderPriorityQueue"
 REDIS_URL = project_settings.REDIS.DEFAULT.URL
 
 # === 中间件配置（按优先级排序）===
+# 出站守卫（审计 P0-8）：最先执行，内网 / 元数据地址零下载；本地联调自建靶站时把主机名
+# 加入 OUTBOUND_GUARD_ALLOWED_HOSTS（config/scrapy/local/settings.yml），不要关闭守卫
+OUTBOUND_GUARD_ENABLED = project_settings.get("OUTBOUND_GUARD_ENABLED", True)
+OUTBOUND_GUARD_ALLOWED_HOSTS = project_settings.get("OUTBOUND_GUARD_ALLOWED_HOSTS", []) or []
+
 DOWNLOADER_MIDDLEWARES = {
+    "middlewares.OutboundGuardMiddleware": 50,
+    # 决策 D8：robots 拒绝写进任务日志（替换原生 RobotsTxtMiddleware，同一优先级）
+    "scrapy.downloadermiddlewares.robotstxt.RobotsTxtMiddleware": None,
+    "middlewares.PoliteRobotsTxtMiddleware": 100,
     "middlewares.AccountSessionMiddleware": 250,
     "middlewares.FingerprintMiddleware": 300,
     "middlewares.ProxyMiddleware": 350,
@@ -115,3 +124,5 @@ PLAYWRIGHT_BROWSER = project_settings.get("PLAYWRIGHT.BROWSER", "chromium")
 
 # === 日志配置 ===
 LOG_LEVEL = project_settings.get("LOG_LEVEL", "INFO")
+# 逐请求日志带 [task=N]（审计 BUG-16：后端按任务标记隔离共享日志）
+LOG_FORMATTER = "utils.task_log_formatter.TaskLogFormatter"

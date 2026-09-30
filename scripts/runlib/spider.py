@@ -96,7 +96,7 @@ def run(spider_name: str | None, **kwargs) -> None:
 
 
 def _start_heartbeat(names: list[str]) -> None:
-    from datetime import datetime as dt
+    from datetime import datetime as dt, timezone
 
     from twisted.internet.task import LoopingCall
 
@@ -107,7 +107,8 @@ def _start_heartbeat(names: list[str]) -> None:
     hb_cfg = project_settings.get("WORKER_HEARTBEAT", {}) or {}
     interval = int(getattr(hb_cfg, "INTERVAL_SECONDS", 10) or 10)
     ttl = int(getattr(hb_cfg, "TTL_SECONDS", 30) or 30)
-    started = dt.now().isoformat(timespec="seconds")
+    # 带 +00:00 的 UTC（审计 BUG-43）：后台按北京时间渲染，不依赖工人宿主时区
+    started = dt.now(timezone.utc).isoformat(timespec="seconds")
 
     def beat() -> None:
         try:

@@ -16,7 +16,7 @@
   评估失败不挡调度；SCHEDULER.QUEUE_DEPTH_WARN 配置日志路径退役（无 _check_queue_depth）
 """
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,6 +25,7 @@ import pytest
 from backend.services.alert_service import AlertService
 from backend.services.schedule_service import SpiderScheduler
 from stubs import fake_async_session
+from platform_core.timeutil import utcnow
 
 RULE_TYPES = ("consecutive_failures", "result_drop", "task_timeout", "queue_depth")
 
@@ -118,7 +119,7 @@ async def test_queue_depth_under_threshold_no_trigger():
 async def test_queue_depth_silence_window_suppresses_repeat():
     """静默窗内重复命中不重复发送（GWT-105.1 后半）"""
     svc = _service()
-    rule = _qrule(last_triggered_at=datetime.now())  # 60 分钟窗口内
+    rule = _qrule(last_triggered_at=utcnow())  # 60 分钟窗口内
     _arm_queue_depth(svc, rule, depth=12)
 
     triggered = await svc.evaluate_queue_depth()
@@ -133,7 +134,7 @@ async def test_queue_depth_silence_window_suppresses_repeat():
 async def test_queue_depth_silence_window_expired_triggers_again():
     """窗口过期（61 分钟前触发过）恢复发送"""
     svc = _service()
-    rule = _qrule(last_triggered_at=datetime.now() - timedelta(minutes=61))
+    rule = _qrule(last_triggered_at=utcnow() - timedelta(minutes=61))
     _arm_queue_depth(svc, rule, depth=12)
 
     triggered = await svc.evaluate_queue_depth()

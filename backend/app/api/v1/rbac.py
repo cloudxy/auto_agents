@@ -9,7 +9,9 @@ T1 收口（R7）：本模块原有 2 处模块级 + 16 处函数内延迟 impor
 数据访问与业务校验已全部下沉 backend/services/rbac_service.py（RbacService），
 本层只做请求校验、审计编排与响应组装。
 """
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
@@ -17,6 +19,7 @@ from backend.app.api.deps import CurrentUser, require_admin, require_platform_ad
 from backend.app.responses import created, ok, updated
 from backend.services.rbac_service import RbacService
 from platform_core.db import get_async_db
+from platform_core.exceptions import ValidationException
 from platform_core.logger import get_logger
 from platform_core.schemas.auth import RequestBody
 from pydantic import Field
@@ -75,7 +78,8 @@ class RoleCreateRequest(RequestBody):
 
 
 class DepartmentCreateRequest(RequestBody):
-    tenant_id: int
+    # 仅平台超管可指定；租户管理员一律以身份归属租户为准（审计 R1-2：跨租户 IDOR 修复）
+    tenant_id: Optional[int] = None
     name: str = Field(..., min_length=1, max_length=64)
     description: str = Field(None, max_length=255)
 
@@ -154,14 +158,40 @@ async def update_role(
 
 # ---------------- 部门（租户组织树） ----------------
 
+
+def _scope_tenant(user: CurrentUser) -> Optional[int]:
+    """部门写操作的租户作用域：平台超管不限（None），其余一律本租户"""
+    return None if user.is_platform_admin else user.tenant_id
+
+
+def _department_tenant(user: CurrentUser, requested: Optional[int]) -> int:
+    """解析部门所属租户（审计 R1-2）
+
+    平台超管：必须显式指定 tenant_id；租户管理员：以身份归属为准，指定他租户按 404 同形拒绝
+    （不泄露他租户存在性）。
+    """
+    if user.is_platform_admin:
+        if requested is None:
+            raise ValidationException(message="平台超管需指定 tenant_id", field="tenant_id")
+        return int(requested)
+    if user.tenant_id is None:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if requested is not None and int(requested) != int(user.tenant_id):
+        logger.warning(f"部门跨租户访问拒绝 | user={user.username} tenant={user.tenant_id} requested={requested}")
+        raise HTTPException(status_code=404, detail="Not Found")
+    return int(user.tenant_id)
+
 @router.get("/departments")
 async def list_departments(
-    tenant_id: int,
-    _user: CurrentUser = Depends(require_admin),
+    tenant_id: Optional[int] = None,
+    user: CurrentUser = Depends(require_admin),
     service: RbacService = Depends(_service),
 ):
-    """部门列表（按租户；软删行排除；含成员计数）"""
-    return ok(data=await service.list_departments(tenant_id))
+    """部门列表（按租户；软删行排除；含成员计数）
+
+    非平台超管只能看本租户：tenant_id 省略即本租户，指定他租户 → 404 同形。
+    """
+    return ok(data=await service.list_departments(_department_tenant(user, tenant_id)))
 
 
 @router.post("/departments", status_code=201)
@@ -171,8 +201,10 @@ async def create_department(
     session: AsyncSession = Depends(get_async_db),
     service: RbacService = Depends(_service),
 ):
-    """创建部门（租户内名唯一）"""
-    result = await service.create_department(payload.model_dump())
+    """创建部门（租户内名唯一；租户取自身份，仅平台超管可指定）"""
+    data = payload.model_dump()
+    data["tenant_id"] = _department_tenant(user, payload.tenant_id)
+    result = await service.create_department(data)
     await record_audit(user, "department.create", f"department#{result['id']}",
                        detail={"tenant_id": result["tenant_id"], "name": result["name"]})
     return created(data={"id": result["id"], "name": result["name"]})
@@ -188,7 +220,7 @@ async def update_department(
 ):
     """编辑部门（改名/说明；成员挂接走用户管理）"""
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
-    await service.update_department(department_id, changes)
+    await service.update_department(department_id, changes, scope_tenant_id=_scope_tenant(user))
     await record_audit(user, "department.update", f"department#{department_id}", detail=changes)
     return updated(data={"id": department_id, **changes})
 
@@ -201,7 +233,7 @@ async def delete_department(
     service: RbacService = Depends(_service),
 ):
     """软删除部门（成员 department_id 置空回退未分组）"""
-    await service.delete_department(department_id)
+    await service.delete_department(department_id, scope_tenant_id=_scope_tenant(user))
     await record_audit(user, "department.delete", f"department#{department_id}")
     return ok(data={"id": department_id, "deleted": True})
 

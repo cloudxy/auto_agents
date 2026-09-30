@@ -2,3 +2,14 @@
 # 覆盖：AUTO_AGENTS_BILLING__RELAY_PRICE_CENTS
 BILLING:
   RELAY_PRICE_CENTS: 19900
+  # 待支付超时（审计 BUG-24）：在线单须长于通道支付窗口；线下对公单等人工确认收款
+  ONLINE_CHECKOUT_TTL_MINUTES: 1440
+  OFFLINE_CHECKOUT_TTL_HOURS: 168
+  # HMAC 夹具通知（沙箱 / CI 用，与真实网关共用商户密钥）；prod 由代码恒关，此处仅供其它环境关闭
+  FIXTURE_NOTIFY_ENABLED: true
+  # 决策 D17：按需定制、走「联系我们」的套餐（不能自助结账）
+  SALES_LED_PLANS: ["enterprise"]
+  # 决策 D22：到期前提醒（天）、到期后宽限（天）、巡检间隔（秒）
+  REMINDER_DAYS: [7, 3, 1]
+  GRACE_DAYS: 3
+  LIFECYCLE_INTERVAL_SECONDS: 3600

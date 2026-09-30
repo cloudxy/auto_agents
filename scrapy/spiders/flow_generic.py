@@ -75,6 +75,16 @@ class FlowGenericSpider(RedisSpider):
     """流程化采集爬虫：分页 / 详情页 / 条件过滤状态机"""
 
     name = "flow_generic"
+
+    # 决策 D7 / D8：地址由租户填写——默认遵守 robots.txt、自动限速、单域并发压低
+    #（平台自有的榜单类爬虫不受影响；站点级豁免见 OUTBOUND.ROBOTS_EXEMPT_DOMAINS）
+    custom_settings = {
+        "ROBOTSTXT_OBEY": True,
+        "AUTOTHROTTLE_ENABLED": True,
+        "AUTOTHROTTLE_START_DELAY": 1.0,
+        "AUTOTHROTTLE_TARGET_CONCURRENCY": 2.0,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 4,
+    }
     redis_key = "flow_generic:start_urls"
     # 采集目标由任务参数指定，不做域名白名单限制（风控由站点侧反爬配置兜底）
 

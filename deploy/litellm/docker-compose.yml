@@ -39,9 +39,9 @@ services:
         condition: service_healthy
     environment:
       TZ: ${TZ:-Asia/Shanghai}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-litellm}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-CHANGE_ME_MASTER}
-      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-sk-CHANGE_ME_SALT}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (see .env.example)}@postgres:5432/${POSTGRES_DB:-litellm}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required (see .env.example)}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?LITELLM_SALT_KEY is required (see .env.example)}
       STORE_MODEL_IN_DB: "True"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
@@ -72,7 +72,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-litellm}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (see .env.example)}
       POSTGRES_DB: ${POSTGRES_DB:-litellm}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:

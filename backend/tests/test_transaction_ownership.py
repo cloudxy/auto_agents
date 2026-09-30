@@ -64,7 +64,7 @@ async def test_service_write_methods_commit_at_boundary(db_session):
     async with db_session() as s:
         await MemberService(s).create_member(
             1, {"username": "tx-member", "email": "tx@local", "password": "Passw0rd!",
-                "tenant_role": "viewer"})
+                "tenant_role": "viewer"}, actor_role="owner")
     async with db_session() as s:
         row = (await s.execute(select(User).where(User.username == "tx-member"))).scalar_one()
         assert row.tenant_role == "viewer"

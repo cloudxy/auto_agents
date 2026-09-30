@@ -7,10 +7,11 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import record_audit
-from backend.app.api.deps import CurrentUser, require_login, require_platform_admin_or_404
+from backend.app.api.deps import CurrentUser, require_platform_admin_or_404
 from backend.app.responses import ApiResponse, ok, updated
-from backend.services.config_service import ConfigService
+from backend.services.config_service import GOVERNED_CONFIG_KEYS, ConfigService
 from platform_core.db import get_async_db
+from platform_core.exceptions import BusinessException
 
 router = APIRouter()
 
@@ -18,9 +19,14 @@ router = APIRouter()
 @router.get("/", response_model=ApiResponse[dict])
 async def get_configs(
     session: AsyncSession = Depends(get_async_db),
-    _user: CurrentUser = Depends(require_login),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> ApiResponse[dict]:
-    """获取所有系统配置（信封 data 为 {key: value} 字典）"""
+    """获取所有系统配置（信封 data 为 {key: value} 字典）。
+
+    仅平台超管（租户 404 同形）：全量里有通知机器人地址（钉钉 / 企微 URL 自带
+    access_token），原先 require_login，任何企业的任何成员都能读到。唯一消费方是
+    平台设置页。
+    """
     service = ConfigService(session)
     return ok(await service.get_all_configs())
 
@@ -43,6 +49,9 @@ async def update_config(
     user: CurrentUser = Depends(require_platform_admin_or_404),
 ) -> ApiResponse:
     """更新单个配置项（仅平台超管，租户写 404 同形；不声称官网已同步）。"""
+    if key in GOVERNED_CONFIG_KEYS:
+        raise BusinessException(message=f"配置 {key} 请在对应的专用开关里修改", code="CONFIG_KEY_GOVERNED",
+                                status_code=409)
     service = ConfigService(session)
     await service.set_config(key, data.value)
     await record_audit(user, "config.update", key)

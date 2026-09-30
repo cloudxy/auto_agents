@@ -4,6 +4,7 @@
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { message } from 'antd'
 
 jest.mock('../services/signup', () => ({
   tenantSignup: jest.fn(),
@@ -72,6 +73,13 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'onLine', { configurable: true, value: true })
 })
 
+// antd 6.6 起全局 message 提示带 role="alert"（@rc-component/notification 2.x）：上一例的
+// 「企业已创建」提示会留在 body 的全局容器里，被下一例的 findByRole('alert') 先找到
+afterEach(async () => {
+  message.destroy()
+  await waitFor(() => expect(screen.queryByText('企业已创建')).toBeNull())
+})
+
 test('GWT-04.1 success primary goes to admin login with from and named copy', async () => {
   signup.mockResolvedValue({
     tenant: { name: 'Acme Corp', slug: 'acme-corp' },
@@ -85,6 +93,8 @@ test('GWT-04.1 success primary goes to admin login with from and named copy', as
     '企业「Acme Corp」已开通，负责人 boss@acme.com。登录时请填写注册邮箱，登录后开始采集。',
   )).toBeInTheDocument()
   expect(document.body.textContent || '').not.toContain('企业「」')
+  // 决策 D21：告知已发验证邮件、验证后可用 AI 规划
+  expect(screen.getByText('我们已向注册邮箱发送验证邮件，验证后即可使用 AI 规划。')).toBeInTheDocument()
   const login = screen.getByRole('link', { name: '登录管理后台' })
   const href = login.getAttribute('href') || ''
   expect(href).toContain('/login?from=')

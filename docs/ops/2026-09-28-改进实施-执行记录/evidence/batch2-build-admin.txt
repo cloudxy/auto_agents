@@ -1,0 +1,30 @@
+  3.83 kB             build/static/js/5675.3132369a.chunk.js
+  3.67 kB             build/static/js/7955.0b101dea.chunk.js
+  3.65 kB             build/static/js/8517.344d072c.chunk.js
+  3.61 kB             build/static/js/9116.899c74b7.chunk.js
+  3.38 kB             build/static/js/4730.98ee3c7d.chunk.js
+  3.28 kB             build/static/js/496.a78f9263.chunk.js
+  3.27 kB             build/static/js/1118.f2f53fb2.chunk.js
+  3.23 kB             build/static/js/5731.0377f2b4.chunk.js
+  3.12 kB             build/static/js/3206.2f9b7e89.chunk.js
+  3.07 kB             build/static/js/9653.68493370.chunk.js
+  1.84 kB             build/static/js/3644.eafb8b93.chunk.js
+  1.69 kB             build/static/css/4448.97de6b0e.chunk.css
+  386 B               build/static/js/6639.9745c169.chunk.js
+  358 B               build/static/css/main.c8fca2cf.css
+  146 B               build/static/css/8387.771ec203.chunk.css
+
+The project was built assuming it is hosted at /.
+You can control this with the homepage field in your package.json.
+
+The build folder is ready to be deployed.
+You may serve it with a static server:
+
+  npm install -g serve
+  serve -s build
+
+Find out more about deployment here:
+
+  https://cra.link/deployment
+
+exit=0

@@ -14,7 +14,8 @@
 """
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Optional
 
 import redis.asyncio as aioredis
@@ -31,6 +32,7 @@ from config import settings
 from platform_core.db import get_manager
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
+from platform_core.timeutil import BUSINESS_TZ, to_utc_naive, utcnow
 from platform_core.queues import SCHEDULER_LOCK_KEY, distributed_lock
 from platform_core.schemas.spider import (
     ScheduleRequest,
@@ -52,8 +54,12 @@ def validate_cron(cron_expr: str) -> bool:
 
 
 def next_fire_time(cron_expr: str, base: Optional[datetime] = None) -> datetime:
+    """下一次触发时刻。cron 按业务时区（Asia/Shanghai）解释——用户写「0 9 * * *」指北京 9 点；
+    入参 base 与返回值都是 UTC naive（库内口径，审计 BUG-43）"""
     logger.debug(f"计算下一次触发时刻: cron={cron_expr}, base={base}")
-    return croniter(cron_expr, base or datetime.now()).get_next(datetime)
+    base_utc = base or utcnow()
+    local = base_utc.replace(tzinfo=timezone.utc).astimezone(BUSINESS_TZ)
+    return to_utc_naive(croniter(cron_expr, local).get_next(datetime))
 
 
 class ScheduleService:
@@ -160,6 +166,27 @@ class ScheduleService:
         return {"schedule_id": schedule_id, "spider_name": schedule.spider_name}
 
 
+def _snapshot(schedule) -> SimpleNamespace:
+    """计划行 → 标量快照（审计 B3-1：脱离会话生命周期，commit 过期后仍可读）"""
+    if isinstance(schedule, SimpleNamespace):
+        return schedule
+    return SimpleNamespace(
+        id=schedule.id,
+        spider_name=schedule.spider_name,
+        cron_expr=schedule.cron_expr,
+        params=schedule.params,
+        tenant_id=getattr(schedule, "tenant_id", None),
+    )
+
+
+async def _safe_rollback(session) -> None:
+    """入队失败后回滚会话，保证后续推进触发时刻的写入可用（回滚失败只记日志）"""
+    try:
+        await session.rollback()
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"调度会话回滚跳过: {e}")
+
+
 class SpiderScheduler:
     """后台触发循环：扫描到期计划并入队任务（多实例用 Redis 锁互斥）
 
@@ -236,22 +263,30 @@ class SpiderScheduler:
         ) as lock:
             if lock is None:
                 return  # 其他实例已在执行本轮
-            now = datetime.now()
+            now = utcnow()
             async with AsyncSession(self._engine()) as session:
                 # T-42（FR-105）：queue_depth 告警规则评估随每 tick 运行
                 # （不依赖到期计划；GWT-105.1「一个调度检查周期」），
                 # 持锁内单实例执行防多实例重复通知
                 await self._evaluate_queue_depth(session)
                 repo = SpiderScheduleRepository(session)
-                due_list = await repo.list_due(now)
-                for schedule in due_list:
-                    # 续期失败（锁易主/Redis 故障）：主动退出本轮，防多实例双跑
-                    if lock.lost:
-                        logger.warning(
-                            "调度锁已丢失（续期失败），提前退出本轮扫描"
-                        )
-                        return
-                    await self._fire(session, repo, schedule, now)
+                # 审计 B3-1：先把到期计划固化为标量快照。入队会 commit，默认
+                # expire_on_commit 会让同会话内所有 ORM 实例过期，随后再读
+                # schedule.id / cron_expr 触发异步惰性加载（MissingGreenlet）被吞掉，
+                # next_run_at 永不推进、首个之后的计划整轮失败
+                due_list = [_snapshot(s) for s in await repo.list_due(now)]
+            for schedule in due_list:
+                # 续期失败（锁易主/Redis 故障）：主动退出本轮，防多实例双跑
+                if lock.lost:
+                    logger.warning(
+                        "调度锁已丢失（续期失败），提前退出本轮扫描"
+                    )
+                    return
+                # 每条计划独立会话：一条入队失败（会话进入失败态）不连累其余计划
+                async with AsyncSession(self._engine(), expire_on_commit=False) as fire_session:
+                    await self._fire(
+                        fire_session, SpiderScheduleRepository(fire_session), schedule, now,
+                    )
 
     async def _evaluate_queue_depth(self, session: AsyncSession) -> None:
         """评估 queue_depth 告警规则（每 tick；SCHEDULER.QUEUE_DEPTH_WARN
@@ -275,6 +310,7 @@ class SpiderScheduler:
         入队被活跃键守卫拒绝（同爬虫已有任务）时仅跳过本次触发，
         仍推进 next_run_at，避免下一轮重复触发造成日志风暴。
         """
+        schedule = _snapshot(schedule)
         spider_name = schedule.spider_name
 
         # ── 1. 解析调度策略（存在 params JSON 的 _strategy 字段） ──
@@ -310,10 +346,12 @@ class SpiderScheduler:
                 f"调度触发被拒绝（跳过本次）: schedule_id={schedule.id}, "
                 f"spider={spider_name}, reason={e}"
             )
+            await _safe_rollback(session)
         except Exception as e:  # noqa: BLE001 其他失败也推进时刻，防止死循环触发
             logger.error(
                 f"调度触发失败: schedule_id={schedule.id}, spider={spider_name}, error={e}"
             )
+            await _safe_rollback(session)
         await self._advance_schedule(repo, schedule, now)
         if triggered:
             logger.info(f"调度触发完成: schedule_id={schedule.id}, spider={spider_name}")
@@ -373,7 +411,7 @@ class SpiderScheduler:
 
     @staticmethod
     async def _advance_schedule(repo, schedule, now: datetime) -> None:
-        """推进调度计划的触发时刻"""
+        """推进调度计划的触发时刻（schedule 为标量快照，不触发惰性加载）"""
         try:
             await repo.update(
                 schedule.id,

@@ -1,0 +1,6 @@
+$ uv run pip-audit
+No known vulnerabilities found
+Name                Skip Reason
+------------------- ----------------------------------------------------------------------------------
+auto-agents-backend Dependency not found on PyPI and could not be audited: auto-agents-backend (0.1.0)
+auto-agents-spider  Dependency not found on PyPI and could not be audited: auto-agents-spider (0.1.0)

@@ -16,7 +16,10 @@ from cryptography.fernet import Fernet
 from config import settings
 from platform_core.exceptions import BusinessException
 from platform_core.logger import get_logger
+from platform_core.outbound_guard import OutboundBlocked, assert_public_url, host_allowed
 from platform_core.schemas.llm_provider import is_private_base_url
+
+MSG_URL_BLOCKED = "连接失败：目标地址不允许访问"
 
 logger = get_logger("service.llm_vault")
 
@@ -81,15 +84,40 @@ class LlmSecretVault:
         return urlparse(base_url).hostname or ""
 
     @staticmethod
+    def private_url_blocked() -> bool:
+        """私网 base_url 是否拦截：prod 恒拦（不受配置影响，审计 P0-8）；其余环境按
+        LLM.PROVIDER_BLOCK_PRIVATE_URL（本地 new-api / ollama 属合法开发路径）"""
+        if os.getenv("APP_ENV", "local") == "prod":
+            return True
+        return bool(settings.get("LLM.PROVIDER_BLOCK_PRIVATE_URL", False))
+
+    @staticmethod
     def ensure_public_base_url(base_url: str) -> None:
-        """LLM.PROVIDER_BLOCK_PRIVATE_URL=true 时拒绝私网/环回 base_url（M6 式静态判定）"""
-        if not bool(settings.get("LLM.PROVIDER_BLOCK_PRIVATE_URL", False)):
+        """拦截开启时拒绝私网/环回 base_url（静态判定；DNS 级校验见 assert_outbound_base_url）"""
+        if not LlmSecretVault.private_url_blocked():
             return
         if is_private_base_url(base_url):
-            raise BusinessException(
-                "base_url 指向私网/环回地址，当前部署已禁用"
-                "（LLM.PROVIDER_BLOCK_PRIVATE_URL=true）"
-            )
+            raise BusinessException(MSG_URL_BLOCKED, code="LLM_PROVIDER_URL_BLOCKED")
+
+    @staticmethod
+    async def assert_outbound_base_url(base_url: str) -> None:
+        """保存 / 探测 / 测试前的出站复检（审计 BUG-22 / P0-8）
+
+        拦截开启时：DNS 解析后逐 IP 拒绝私网 / 环回 / 链路本地（127.0.0.1.nip.io 这类
+        域名静态判定挡不住）；LLM.PROVIDER_PRIVATE_HOSTS_ALLOWED 可显式豁免运维信任的
+        内网主机（如自建 ollama）。对外错误统一「连接失败」，不回显解析结果。
+        """
+        if not LlmSecretVault.private_url_blocked():
+            return
+        allowed = settings.get("LLM.PROVIDER_PRIVATE_HOSTS_ALLOWED", []) or []
+        host = LlmSecretVault.host_of(base_url)
+        if host and allowed and host_allowed(host, allowed):
+            return
+        try:
+            await assert_public_url(base_url, allowed_ports=None)
+        except OutboundBlocked as exc:
+            logger.warning(f"LLM 供应商地址被出站守卫拒绝 | host={host}")
+            raise BusinessException(MSG_URL_BLOCKED, code="LLM_PROVIDER_URL_BLOCKED") from exc
 
     @staticmethod
     def validated_probe_base_url(base_url: str) -> str:

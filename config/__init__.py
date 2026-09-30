@@ -48,7 +48,9 @@ settings = Dynaconf(
     dotenv_path=str(_config_dir / current_env / ".env"),
     load_dotenv=True,
     merge_enabled=True,
-    dotenv_override=True,
+    # 审计 R4-6 / P0-9：真实环境变量优先于 .env 文件（部署注入的密钥不能被仓库外的
+    # .env 旧值静默覆盖）；.env 只补齐环境里没有的键
+    dotenv_override=False,
 )
 
 # 动态注入 Redis URL（供 scrapy-redis、aioredis 等直接用）

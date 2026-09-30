@@ -129,11 +129,10 @@ class ExpertService:
         raise ValidationException(message="frontmatter 未闭合", field="url")
 
     async def get_expert_detail(self, name: str) -> dict:
-        asset = (await self.session.execute(
-            select(CapabilityAsset).where(
-                CapabilityAsset.asset_type == "expert", CapabilityAsset.name == name
-            )
-        )).scalar_one_or_none()
+        from backend.services.capability_lookup import find_named_asset
+
+        logger.info(f"查询专家详情 | name={name}")
+        asset = await find_named_asset(self.session, "expert", name)
         if asset is None:
             raise NotFoundException(resource=f"专家 {name}")
         detail = (await self.session.execute(
@@ -266,11 +265,10 @@ class TeamService:
         return snapshot
 
     async def get_team_detail(self, name: str) -> dict:
-        asset = (await self.session.execute(
-            select(CapabilityAsset).where(
-                CapabilityAsset.asset_type == "expert_team", CapabilityAsset.name == name
-            )
-        )).scalar_one_or_none()
+        from backend.services.capability_lookup import find_named_asset
+
+        logger.info(f"查询专家团详情 | name={name}")
+        asset = await find_named_asset(self.session, "expert_team", name)
         if asset is None:
             raise NotFoundException(resource=f"专家团 {name}")
         detail = (await self.session.execute(

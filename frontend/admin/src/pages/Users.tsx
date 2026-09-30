@@ -3,16 +3,17 @@
  *
  * 权限语义：role 单源（admin/operator/viewer → 后端 _ROLE_PERMISSIONS 下发）；
  * 归属公司 Select 数据源 /admin/tenants；防自锁（不可降级/停用/删除自己）由后端守卫。
- * 状态筛选走服务端 status 参数（active 默认不含已删 GWT-93.2 / deleted 已删筛选 GWT-93.1），
- * 搜索/角色/公司/部门保持本地过滤；恢复动作见 UsersRestore（GWT-93.3/93.4/93.9）。
+ * 筛选全部走服务端（决策 D11 / BUG-40：原先搜索/角色/公司/部门只过滤当前页、总数却是全库）：
+ * 状态（active 默认不含已删 GWT-93.2 / deleted 已删筛选 GWT-93.1）、搜索（回车 / 清空时生效）、
+ * 角色、公司、部门；任一筛选变化回到第 1 页。恢复动作见 UsersRestore（GWT-93.3/93.4/93.9）。
  */
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Alert, Avatar, Button, Empty, Form, Input, message, Modal, Popconfirm, Select,
   Space, Switch, Table, Tag,
 } from 'antd'
-import { PlusOutlined, UserOutlined } from '@ant-design/icons'
-import { fetchUsersPage } from '../services/admin'
+import { UserOutlined } from '@ant-design/icons'
+import { fetchUsersPage, type UsersPageQuery } from '../services/admin'
 import {
   createUser, deleteUser, updateUser,
   type UserCreatePayload, type UserItem, type UserUpdatePayload,
@@ -21,12 +22,19 @@ import { listDepartments, type DepartmentRow } from '../services/rbac'
 import { listTenants, type TenantRow } from '../services/platformOps'
 import { apiErrorMessage } from '../utils/errorMessage'
 import RestoreUserModal from './UsersRestore'
+import { UsersFilterBar } from '../components/users/UsersFilterBar'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 const ROLE_OPTIONS = [
   { value: 'admin', label: '管理员（全权）' },
   { value: 'operator', label: '操作员（创建/运行）' },
   { value: 'viewer', label: '只读' },
 ]
+
+/** 状态下拉 → 服务端 status（D11）：「在职（全部）」含停用；「在职·激活」只要启用中的 */
+const STATUS_QUERY: Record<string, UsersPageQuery['status']> = {
+  all: 'active', active: 'enabled', disabled: 'disabled', deleted: 'deleted',
+}
 
 const Users: React.FC = () => {
   const [loading, setLoading] = useState(false)
@@ -36,7 +44,8 @@ const Users: React.FC = () => {
   const pageSize = 20
   const [tenants, setTenants] = useState<TenantRow[]>([])
   const [departments, setDepartments] = useState<DepartmentRow[]>([])
-  // 列表筛选（状态=服务端 status 参数；搜索/角色/公司/部门为本地过滤）
+  // 列表筛选（全部服务端，D11）：searchInput 是输入框里的字，filterText 是已提交的搜索词
+  const [searchInput, setSearchInput] = useState('')
   const [filterText, setFilterText] = useState('')
   const [filterRole, setFilterRole] = useState('all')
   const [filterTenant, setFilterTenant] = useState<number | 'all'>('all')
@@ -52,29 +61,43 @@ const Users: React.FC = () => {
   const [listError, setListError] = useState(false)
   const [createForm] = Form.useForm()
   const [editForm] = Form.useForm()
+  // 只认最后一次请求的结果：筛选连续切换时，先发后到的旧响应不覆盖新结果
+  const requestSeq = useRef(0)
 
   const loadUsers = async (p: number) => {
+    const seq = ++requestSeq.current
     setLoading(true)
     setListError(false)
+    const query: UsersPageQuery = {
+      skip: (p - 1) * pageSize, limit: pageSize,
+      status: STATUS_QUERY[filterActive] ?? 'active',
+    }
+    if (filterText.trim()) query.q = filterText.trim()
+    if (filterRole !== 'all') query.role = filterRole
+    if (filterTenant !== 'all') query.tenant_id = filterTenant
+    if (filterDept !== 'all') query.department_id = filterDept
     try {
-      // 状态筛选走服务端（GWT-93.1/93.2）：默认视图不含已删，已删筛选只含软删行
-      const res = await fetchUsersPage<UserItem>({
-        skip: (p - 1) * pageSize, limit: pageSize,
-        status: deletedView ? 'deleted' : 'active',
-      })
+      const res = await fetchUsersPage<UserItem>(query)
+      if (seq !== requestSeq.current) return
       setUsers(res.items || [])
       setTotal(res.total || 0)
     } catch {
-      setListError(true) // FR-84：失败≠空表，页面级错误态 + 重试
+      if (seq === requestSeq.current) setListError(true) // FR-84：失败≠空表，页面级错误态 + 重试
     } finally {
-      setLoading(false)
+      if (seq === requestSeq.current) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadUsers(page)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, filterActive])
+  }, [page, filterActive, filterText, filterRole, filterTenant, filterDept])
+
+  /** 改筛选即回到第 1 页（第 3 页的筛选结果常常不足 3 页） */
+  const applyFilter = <T,>(setter: (v: T) => void) => (v: T) => {
+    setter(v)
+    setPage(1)
+  }
 
   useEffect(() => {
     listTenants().then(setTenants).catch(() => setTenants([]))
@@ -91,13 +114,15 @@ const Users: React.FC = () => {
     ...tenants.map((t) => ({ value: t.id, label: `${t.name}（${t.slug}）` })),
   ]
 
-  const clearLocalFilters = () => {
+  const clearFilters = () => {
+    setSearchInput('')
     setFilterText('')
     setFilterRole('all')
     setFilterTenant('all')
     setFilterDept('all')
+    setPage(1)
   }
-  const hasLocalFilter = filterText.trim() !== '' || filterRole !== 'all'
+  const hasFilter = filterText.trim() !== '' || filterRole !== 'all'
     || filterTenant !== 'all' || filterDept !== 'all'
 
   // ---------------- 创建 ----------------
@@ -212,7 +237,7 @@ const Users: React.FC = () => {
       },
     },
     { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 170,
-      render: (v: string | null) => (v ? new Date(v).toLocaleString('zh-CN') : '-') },
+      render: (v: string | null) => formatDateTime(v) },
     {
       title: '操作', key: 'action', width: 140,
       render: (_: unknown, record: UserItem) => {
@@ -239,16 +264,16 @@ const Users: React.FC = () => {
     },
   ]
 
-  // 空态按视图分野（edge-states 用户管理屏）：默认初始/已删筛选/本地筛选无匹配
+  // 空态按视图分野（edge-states 用户管理屏）：默认初始/已删筛选/筛选无匹配
   const emptyContent = deletedView
     ? (
       <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
              description="还没有已删除的用户。删除的用户会保留在这里，可恢复。" />
     )
-    : hasLocalFilter
+    : hasFilter || filterActive !== 'all'
       ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前筛选无匹配的用户。">
-          <Button onClick={clearLocalFilters}>清除筛选</Button>
+          <Button onClick={() => { clearFilters(); setFilterActive('all') }}>清除筛选</Button>
         </Empty>
       )
       : (
@@ -263,42 +288,16 @@ const Users: React.FC = () => {
           计数由分页 showTotal「共 N 位用户」同屏承担（信息不丢）；
           原 Card extra 的筛选行 + 新建保留为内容区动作行（GWT-99.3） */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-        <Space wrap>
-          <Input.Search placeholder="搜索用户名/邮箱" allowClear style={{ width: 180 }}
-                        value={filterText}
-                        onChange={(e) => setFilterText(e.target.value)}
-                        onSearch={setFilterText} />
-          <Select size="small" style={{ width: 110 }} value={filterRole} onChange={setFilterRole}
-                  options={[
-                    { value: 'all', label: '全部角色' },
-                    { value: 'admin', label: '管理员' },
-                    { value: 'operator', label: '操作员' },
-                    { value: 'viewer', label: '只读' },
-                  ]} />
-          <Select size="small" style={{ width: 130 }} value={filterTenant}
-                  onChange={(v) => setFilterTenant(v)}
-                  options={[
-                    { value: 'all', label: '全部公司' },
-                    ...tenants.map((tt) => ({ value: tt.id, label: tt.name })),
-                  ]} />
-          <Select size="small" style={{ width: 110 }} value={filterDept}
-                  onChange={setFilterDept} disabled={filterTenant === 'all'}
-                  options={[
-                    { value: 'all', label: '全部部门' },
-                    ...departments.map((d) => ({ value: d.id, label: d.name })),
-                  ]} />
-          <span data-testid="status-filter">
-            <Select size="small" style={{ width: 110 }} value={filterActive}
-                    onChange={(v) => { setFilterActive(v); if (page !== 1) setPage(1) }}
-                    options={[
-                      { value: 'all', label: '在职（全部）' },
-                      { value: 'active', label: '在职·激活' },
-                      { value: 'disabled', label: '已停用' },
-                      { value: 'deleted', label: '已删除' },
-                    ]} />
-          </span>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建用户</Button>
-        </Space>
+        <UsersFilterBar
+          searchInput={searchInput} onSearchInputChange={setSearchInput}
+          onSearch={applyFilter(setFilterText)}
+          role={filterRole} onRoleChange={applyFilter(setFilterRole)}
+          tenant={filterTenant}
+          onTenantChange={applyFilter((v: number | 'all') => { setFilterTenant(v); setFilterDept('all') })}
+          dept={filterDept} onDeptChange={applyFilter(setFilterDept)}
+          status={filterActive} onStatusChange={applyFilter(setFilterActive)}
+          tenants={tenants} departments={departments} onCreate={() => setCreateOpen(true)}
+        />
       </div>
       {listError ? (
         <Alert
@@ -309,16 +308,7 @@ const Users: React.FC = () => {
       ) : (
         <Table
           columns={columns}
-          dataSource={users.filter((u) => {
-            const kw = filterText.trim().toLowerCase()
-            if (kw && !(u.username.toLowerCase().includes(kw) || (u.email || '').toLowerCase().includes(kw))) return false
-            if (filterRole !== 'all' && (u.role || (u.is_admin ? 'admin' : 'operator')) !== filterRole) return false
-            if (filterTenant !== 'all' && (u.tenant_id ?? null) !== (filterTenant as number)) return false
-            if (filterDept !== 'all' && (u.department_id ?? null) !== (filterDept as number)) return false
-            if (filterActive !== 'all' && filterActive !== 'deleted'
-              && ((filterActive === 'active') !== u.is_active)) return false
-            return true
-          })}
+          dataSource={users}
           rowKey="id"
           loading={loading}
           locale={{ emptyText: emptyContent }}

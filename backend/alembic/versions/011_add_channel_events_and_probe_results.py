@@ -67,9 +67,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """回滚数据库结构"""
-    op.drop_index('ix_channel_probe_results_batch_id', table_name='channel_probe_results')
-    op.drop_index('ix_channel_probe_results_channel_created', table_name='channel_probe_results')
     op.drop_table('channel_probe_results')
-    op.drop_index('ix_channel_events_channel_created', table_name='channel_events')
-    op.drop_index('ix_channel_events_created_at', table_name='channel_events')
     op.drop_table('channel_events')

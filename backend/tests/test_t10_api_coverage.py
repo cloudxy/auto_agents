@@ -150,9 +150,9 @@ def test_task_store_status_404(db_client, operator_client):
 # ---------------------------------------------------------------------------
 
 
-def test_audit_logs_admin_ok(db_client, admin_client):
-    """admin 查审计日志：200 + 分页信封（total/items）"""
-    resp = admin_client.get("/api/v1/admin/audit-logs")
+def test_audit_logs_admin_ok(db_client, platform_admin_client):
+    """平台超管查审计日志：200 + 分页信封（total/items）"""
+    resp = platform_admin_client.get("/api/v1/admin/audit-logs")
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     assert isinstance(data["total"], int)
@@ -165,11 +165,16 @@ def test_audit_logs_anonymous_401(client):
     assert resp.json()["code"] == "AUTH_FAILED"
 
 
-def test_audit_logs_operator_403(operator_client):
-    """operator 直调 admin 端点 → 403（守卫存在性证明）"""
+def test_audit_logs_operator_404(operator_client):
+    """operator 直调平台全局审计 → 404 同形（平台面存在性隐藏）"""
     resp = operator_client.get("/api/v1/admin/audit-logs")
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "FORBIDDEN"
+    assert resp.status_code == 404
+
+
+def test_audit_logs_tenant_admin_404(admin_client):
+    """租户公司管理员（role=admin 非超管）不得读全平台审计（审计 R1-1 回归）"""
+    resp = admin_client.get("/api/v1/admin/audit-logs")
+    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -177,8 +182,9 @@ def test_audit_logs_operator_403(operator_client):
 # ---------------------------------------------------------------------------
 
 
-def test_notify_config_roundtrip(db_client, admin_client):
+def test_notify_config_roundtrip(db_client, platform_admin_client):
     """GET 默认空 → PUT 合法 URL → updated 回执 + GET 回读一致"""
+    admin_client = platform_admin_client
     resp = admin_client.get("/api/v1/admin/notify-config")
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -195,8 +201,9 @@ def test_notify_config_roundtrip(db_client, admin_client):
     assert again.json()["data"]["webhook_url"] == "https://hooks.example.com/t10"
 
 
-def test_notify_config_invalid_url_422(db_client, admin_client):
+def test_notify_config_invalid_url_422(db_client, platform_admin_client):
     """PUT 非 http(s) URL → 422，且配置未写入（副作用断言）"""
+    admin_client = platform_admin_client
     put = admin_client.put(
         "/api/v1/admin/notify-config",
         json={"dingtalk_url": "ftp://not-http.example.com"},
@@ -217,11 +224,19 @@ def test_notify_config_anonymous_401(client):
     ).status_code == 401
 
 
-def test_notify_config_operator_403(operator_client):
-    assert operator_client.get("/api/v1/admin/notify-config").status_code == 403
+def test_notify_config_operator_404(operator_client):
+    assert operator_client.get("/api/v1/admin/notify-config").status_code == 404
     assert operator_client.put(
         "/api/v1/admin/notify-config", json={"webhook_url": "https://x"}
-    ).status_code == 403
+    ).status_code == 404
+
+
+def test_notify_config_tenant_admin_404(admin_client):
+    """租户公司管理员不得读写平台通知出口（审计 R1-1 回归）"""
+    assert admin_client.get("/api/v1/admin/notify-config").status_code == 404
+    assert admin_client.put(
+        "/api/v1/admin/notify-config", json={"webhook_url": "https://x"}
+    ).status_code == 404
 
 
 # ---------------------------------------------------------------------------

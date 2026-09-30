@@ -165,24 +165,27 @@ class RbacService:
         await self.session.commit()
         return snapshot
 
-    async def update_department(self, department_id: int, changes: dict) -> None:
-        """编辑部门（改名/说明）"""
-        logger.info(f"更新部门 | department={department_id} fields={sorted(changes.keys())}")
-        dept = (await self.session.execute(
-            select(Department).where(Department.id == department_id, Department.deleted_at.is_(None))
-        )).scalar_one_or_none()
+    async def update_department(self, department_id: int, changes: dict,
+                                scope_tenant_id: int | None = None) -> None:
+        """编辑部门（改名/说明）；scope_tenant_id 非空时仅限该租户（跨租户 404 同形）"""
+        logger.info(f"更新部门 | department={department_id} fields={sorted(changes.keys())} scope={scope_tenant_id}")
+        stmt = select(Department).where(Department.id == department_id, Department.deleted_at.is_(None))
+        if scope_tenant_id is not None:
+            stmt = stmt.where(Department.tenant_id == scope_tenant_id)
+        dept = (await self.session.execute(stmt)).scalar_one_or_none()
         if dept is None:
             raise NotFoundException(resource=f"部门 {department_id}")
         for k, v in changes.items():
             setattr(dept, k, v)
         await self.session.commit()
 
-    async def delete_department(self, department_id: int) -> None:
-        """软删除部门（成员 department_id 置空回退未分组）"""
-        logger.info(f"删除部门 | department={department_id}")
-        dept = (await self.session.execute(
-            select(Department).where(Department.id == department_id)
-        )).scalar_one_or_none()
+    async def delete_department(self, department_id: int, scope_tenant_id: int | None = None) -> None:
+        """软删除部门（成员 department_id 置空回退未分组）；scope_tenant_id 非空时仅限该租户"""
+        logger.info(f"删除部门 | department={department_id} scope={scope_tenant_id}")
+        stmt = select(Department).where(Department.id == department_id, Department.deleted_at.is_(None))
+        if scope_tenant_id is not None:
+            stmt = stmt.where(Department.tenant_id == scope_tenant_id)
+        dept = (await self.session.execute(stmt)).scalar_one_or_none()
         if dept is None:
             raise NotFoundException(resource=f"部门 {department_id}")
         await self.session.execute(

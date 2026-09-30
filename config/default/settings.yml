@@ -7,11 +7,19 @@ VERSION: "0.1.0"
 # 密码哈希轮次（测试经 BCRYPT_ROUNDS=4 覆盖）
 AUTH:
   BCRYPT_ROUNDS: 12
+  # 决策 D21：注册邮箱验证链接有效期（小时）
+  EMAIL_VERIFY_TTL_HOURS: 72
+  # 决策 D1 = A：个人自助注册默认关闭（个人注册都进共享的 default 企业，数据会互相可见）；
+  # 个人用户走企业注册（一人企业）。关闭时 /auth/register 与不存在的路由同形 404。
+  PERSONAL_REGISTER_ENABLED: false
 
 # === 启用闸（Q-OPS-DUTY 未关：不代填号码）===
 # LLM.ENABLED 或 POWER_MARKET.ENABLED 为 true 时必须非空，否则拒绝启动。
 OPS:
   DUTY_CONTACT: ""
+  # 决策 D25：对外联系邮箱（官网页脚、企业档「联系我们」）与响应时效；上线前必须配置
+  CONTACT_EMAIL: ""
+  CONTACT_SLA: "工作日 24 小时内回复"
 
 # === 环境标识 ===
 ENVIRONMENT: "local"  # local, dev, prod
@@ -84,3 +92,7 @@ PLAYWRIGHT:
   MAX_PAGES: 2          # 最大并发渲染页面数
   TIMEOUT: 30           # 渲染超时（秒）
   BROWSER: "chromium"   # 浏览器类型（chromium/firefox/webkit）
+
+# === 站点地址（邮件里的链接用；prod 必须覆盖）===
+SITE:
+  ADMIN_URL: "http://127.0.0.1:9112"

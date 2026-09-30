@@ -8,13 +8,15 @@
 - zip-slip：成员路径拒绝绝对路径与 `..`（净化后再落盘，任何成员越界即整批拒绝）；
 - 上限：zip ≤20MB / 单文件 ≤2MB / 总文件 ≤100 / 子目录深度 ≤3。
 全部外呼 httpx 且 trust_env=False（3.2-A-8，防本机代理劫持）。
+- SSRF（审计 BUG-22 / P0-3）：导入只允许 GitHub 相关主机（SKILLS.IMPORT.ALLOWED_HOSTS），
+  禁止自动跟随重定向——每一跳经 platform_core.outbound_guard 复检主机白名单与公网 IP；
+  check_update 读取既有来源地址，不做主机白名单但同样逐跳拒绝内网。
 """
 import hashlib
 from backend.config_consts import (SKILLS_LIBRARY_ROOT)
 import io
 import re
 import zipfile
-from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Optional
 from urllib.parse import urlparse
@@ -28,6 +30,8 @@ from backend.services.skill_scoring_service import SkillScoringService
 from backend.services.skill_service import SkillService
 from platform_core.exceptions import ValidationException
 from platform_core.logger import get_logger
+from platform_core.timeutil import business_today
+from platform_core.outbound_guard import OutboundBlocked, guarded_get
 from platform_core.models.skill import Skill, SkillJob
 
 logger = get_logger("service.skill_import")
@@ -39,11 +43,34 @@ MAX_DEPTH = 3
 FETCH_TIMEOUT = 30.0
 
 _GITHUB_TREE_RE = re.compile(r"^https://github\.com/([^/]+)/([^/]+)/tree/([^/]+)/(.+)$")
+DEFAULT_IMPORT_HOSTS = (
+    "github.com", "api.github.com", "raw.githubusercontent.com",
+    "codeload.github.com", "objects.githubusercontent.com",
+)
+
+
+def _allowed_hosts() -> tuple[str, ...]:
+    """导入主机白名单（配置外置；空配置回退 GitHub 默认集）"""
+    from config import settings
+
+    hosts = settings.get("SKILLS.IMPORT.ALLOWED_HOSTS", None)
+    return tuple(hosts) if hosts else DEFAULT_IMPORT_HOSTS
+
+
+async def _guarded_fetch(client: httpx.AsyncClient, url: str, *, allowlist: bool = True) -> httpx.Response:
+    """逐跳校验的 GET；守卫拒绝统一转为 url 字段校验错误"""
+    try:
+        return await guarded_get(
+            client, url, allowed_hosts=_allowed_hosts() if allowlist else None,
+            require_https=allowlist,
+        )
+    except OutboundBlocked as exc:
+        raise ValidationException(message=f"{exc.message}: {url}", field="url") from exc
 
 
 def _make_client() -> httpx.AsyncClient:
-    """统一外呼客户端：trust_env=False（不读系统代理，防本机代理劫持）"""
-    return httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=True, trust_env=False)
+    """统一外呼客户端：trust_env=False（不读系统代理，防本机代理劫持）；重定向由 _guarded_fetch 逐跳处理"""
+    return httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=False, trust_env=False)
 
 
 def _parse_frontmatter(skill_md: str) -> dict:
@@ -120,7 +147,7 @@ class SkillImportService:
         return {"SKILL.md": await self._fetch_raw(url, client)}
 
     async def _fetch_raw(self, url: str, client: httpx.AsyncClient) -> bytes:
-        resp = await client.get(url)
+        resp = await _guarded_fetch(client, url)
         if resp.status_code != 200:
             raise ValidationException(message=f"拉取失败（HTTP {resp.status_code}）: {url}", field="url")
         if len(resp.content) > FILE_MAX_BYTES:
@@ -128,7 +155,7 @@ class SkillImportService:
         return resp.content
 
     async def _fetch_zip(self, url: str, client: httpx.AsyncClient) -> dict[str, bytes]:
-        resp = await client.get(url)
+        resp = await _guarded_fetch(client, url)
         if resp.status_code != 200:
             raise ValidationException(message=f"拉取失败（HTTP {resp.status_code}）: {url}", field="url")
         if len(resp.content) > ZIP_MAX_BYTES:
@@ -183,7 +210,7 @@ class SkillImportService:
     async def _fetch_github_subdir(self, match: re.Match, client: httpx.AsyncClient) -> dict[str, bytes]:
         owner, repo, ref, subdir = match.group(1), match.group(2), match.group(3), match.group(4)
         tree_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{ref}?recursive=1"
-        resp = await client.get(tree_url)
+        resp = await _guarded_fetch(client, tree_url)
         if resp.status_code != 200:
             raise ValidationException(message=f"GitHub tree API 失败（HTTP {resp.status_code}）", field="url")
         entries = [e for e in resp.json().get("tree", [])
@@ -262,7 +289,7 @@ class SkillImportService:
             content_hash = hashlib.sha256(b"".join(
                 files[k] for k in sorted(files)
             )).hexdigest()
-            today = date.today().isoformat()
+            today = business_today().isoformat()
             (skill_dir / "SOURCE.md").write_text(
                 f"# 来源\n\n- URL: {url}\n- 导入时间: {today}\n"
                 f"- content_hash: {content_hash[:12]}…\n",
@@ -330,7 +357,9 @@ class SkillImportService:
 
         client = _make_client()
         try:
-            resp = await client.get(row.source_url)
+            resp = await _guarded_fetch(client, row.source_url, allowlist=False)
+        except ValidationException as exc:
+            return {"name": name, "has_update": None, "reason": exc.message}
         finally:
             await client.aclose()
         if resp.status_code != 200:

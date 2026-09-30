@@ -16,6 +16,7 @@ import { ReloadOutlined } from '@ant-design/icons'
 import TenantSpaceOnly from '../components/TenantSpaceOnly'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 import {
   fetchOutboundKeys, issueOutboundKey, revokeOutboundKey,
   type OutboundKeyIssuedRow, type OutboundKeyRow,
@@ -44,8 +45,7 @@ const keyStatusTag = (s: string) => {
   return <Tag color={meta.color}>{meta.label}</Tag>
 }
 
-const formatTime = (v: string | null) =>
-  (v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '—')
+const formatTime = (v: string | null) => formatDateTime(v, '—')
 
 const OutboundKeys: React.FC = () => {
   const user = useAuthStore((s) => s.user)

@@ -270,11 +270,10 @@ def test_gwt_u35_5_product_plan_enterprise(db_client, db_session):
     resp = db_client.post(
         CHECKOUT, headers=owner, json={"product": "plan_enterprise", "channel": "alipay"},
     )
-    assert resp.status_code == 201, resp.text
-    data = resp.json()["data"]
-    assert data["product_code"] == "plan_enterprise"
-    assert data["amount_cents"] == 99900
-    assert _orders_of(db_session, tid)[0]["product"] == "plan_enterprise"
+    # 决策 D17：企业档走「联系我们」，不能自助结账（成交后平台开通，见 test_sales_led_grant.py）
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "PLAN_SALES_LED"
+    assert _orders_of(db_session, tid) == []
 
 
 def test_gwt_u35_6_product_relay(db_client, db_session, monkeypatch):
@@ -349,7 +348,7 @@ def test_gwt_u36_4_superadmin_cannot_pay(db_client, db_session):
     resp = db_client.post(
         CHECKOUT, headers=pa, json={"product": "plan_pro", "channel": "alipay"},
     )
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code == 403, resp.text  # 审计 BUG-27：策略性拒绝用 403
     assert resp.json()["code"] == "CHECKOUT_SUPERADMIN_FORBIDDEN"
     assert "超管不能代企业支付" in resp.json()["message"]
     assert _orders_of(db_session, tid) == []

@@ -52,7 +52,11 @@ async def tenant_usage_overview(
         })
     year_month = shanghai_year_month()
     logger.debug(f"用量看板 | tenant={user.tenant_id} month={year_month}")
-    return ok(data=await service.usage_overview(user.tenant_id, year_month))
+    data = await service.usage_overview(user.tenant_id, year_month)
+    # D19（2026-09-28 答复）：租户侧只显示 token，不显示平台成本（成本口径属运营侧）
+    for key in ("cost_by_provider", "cost_cents_total"):
+        data.pop(key, None)
+    return ok(data=data)
 
 
 @router.get("/usage/by-member")
@@ -67,6 +71,7 @@ async def tenant_usage_by_member(
 
 class DeliveryWebhookIn(BaseModel):
     url: str | None = Field(default=None, max_length=500)
+    rotate_secret: bool = False
 
 
 @router.get("/delivery-webhook")
@@ -76,8 +81,7 @@ async def get_delivery_webhook(
 ):
     if user.tenant_id is None:
         raise BusinessException("需要租户上下文")
-    url = await TenantSettingsService(session).get_delivery_webhook(user.tenant_id)
-    return ok(data={"delivery_webhook_url": url})
+    return ok(data=await TenantSettingsService(session).get_delivery_view(user.tenant_id))
 
 
 @router.put("/delivery-webhook")
@@ -88,7 +92,9 @@ async def put_delivery_webhook(
 ):
     if user.tenant_id is None:
         raise BusinessException("需要租户上下文")
-    data = await TenantSettingsService(session).set_delivery_webhook(user.tenant_id, payload.url)
+    data = await TenantSettingsService(session).set_delivery_webhook(
+        user.tenant_id, payload.url, rotate_secret=payload.rotate_secret,
+    )
     return ok(data=data)
 
 

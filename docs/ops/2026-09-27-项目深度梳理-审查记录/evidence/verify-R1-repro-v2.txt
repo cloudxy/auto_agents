@@ -1,0 +1,17 @@
+# verify-R1-repro-v2（manager，2026-09-27）：真实企业自助注册 → 登录链路；注册限流已打桩（与本问题无关，FakeRedis 无 pipeline）；临时测试文件跑完即删。
+# 注：第一段 audit-logs 422 是因传了 limit=200 超出参数上限，第二段（默认参数）为有效结果。
+REPRO signup 甲公司测试 -> HTTP 200 code=CREATED
+REPRO signup 乙公司测试 -> HTTP 200 code=CREATED
+REPRO self-signup ok: A tenant=1 user=owner-a; B tenant=2 user=owner-b
+REPRO signup owner A identity (role, tenant_role, is_platform_admin) = ('admin', 'owner', False)
+REPRO B creates own dept -> 201
+REPRO A lists B departments -> 200; sees B-own-dept: True
+REPRO A creates dept in B -> 201
+REPRO injected dept row tenant_id = 2 (B=2)
+REPRO A reads audit-logs -> 422; contains B owner 'owner-b': False
+REPRO A PUT /admin/notify-config (platform-global) -> 200
+REPRO control GET /admin/users -> 404
+REPRO same-second signups -> #1 HTTP 200 CREATED slug=tenant-20260927195740; #2 HTTP 200 CREATED slug=tenant-20260927195740-2
+2 passed in 3.70s
+REPRO A GET /admin/audit-logs -> 200; contains B owner 'owner-b': True; contains 'B-secret-dept': True
+1 passed in 3.48s

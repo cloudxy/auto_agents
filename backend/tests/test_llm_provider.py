@@ -605,8 +605,65 @@ class TestPrivateUrlSwitch:
                 name="p", base_url="http://10.0.0.5/v1", model="m")
             with pytest.raises(BusinessException) as ei:
                 await svc.create_provider(payload)
-        assert "PROVIDER_BLOCK_PRIVATE_URL" in str(ei.value)
+        # 审计 P0-8：对外统一「连接失败」，不回显配置键名与解析结果
+        assert ei.value.code == "LLM_PROVIDER_URL_BLOCKED"
+        assert "连接失败" in str(ei.value)
         svc.repo.create.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_switch_on_rejects_domain_resolving_private(self, monkeypatch):
+        """开关 true：域名解析到内网（127.0.0.1.nip.io）同样被拒——静态判定挡不住的情形"""
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", _FERNET_KEY)
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings(
+                **{"LLM.PROVIDER_BLOCK_PRIVATE_URL": True})):
+            svc = _service()
+            svc.repo.get_by_name = AsyncMock(return_value=None)
+            payload = LlmProviderCreate(name="p", base_url="http://127.0.0.1.nip.io:3000/v1", model="m")
+            with pytest.raises(BusinessException) as ei:
+                await svc.create_provider(payload)
+        assert ei.value.code == "LLM_PROVIDER_URL_BLOCKED"
+        svc.repo.create.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_prod_forces_block_even_if_switch_off(self, monkeypatch):
+        """APP_ENV=prod：开关误配 false 也拦截（fail-closed）"""
+        monkeypatch.setenv("APP_ENV", "prod")
+        from backend.services.llm_secret_vault import LlmSecretVault
+
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings(
+                **{"LLM.PROVIDER_BLOCK_PRIVATE_URL": False})):
+            with pytest.raises(BusinessException):
+                await LlmSecretVault.assert_outbound_base_url("http://10.1.2.3:11434/v1")
+
+    @pytest.mark.asyncio
+    async def test_allowlisted_private_host_exempt(self, monkeypatch):
+        """运维显式豁免的内网主机（自建 ollama）可用；其余内网仍拒"""
+        from backend.services.llm_secret_vault import LlmSecretVault
+
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings(**{
+                "LLM.PROVIDER_BLOCK_PRIVATE_URL": True,
+                "LLM.PROVIDER_PRIVATE_HOSTS_ALLOWED": ["ollama.localhost"]})):
+            await LlmSecretVault.assert_outbound_base_url("http://ollama.localhost:11434/v1")
+            with pytest.raises(BusinessException):
+                await LlmSecretVault.assert_outbound_base_url("http://other.localhost:11434/v1")
+
+    @pytest.mark.asyncio
+    async def test_probe_blocked_before_any_outbound(self, monkeypatch):
+        """探测（租户 operator 可触发）：拦截开启时内网地址零出站"""
+        from backend.services.llm_probe_engine import LlmProbeEngine
+
+        called: list = []
+
+        async def _spy(*a, **kw):
+            called.append(a)
+            return {}
+
+        monkeypatch.setattr("backend.services.llm_probe_engine.execute_json", _spy)
+        with patch("backend.services.llm_secret_vault.settings", _fake_settings(
+                **{"LLM.PROVIDER_BLOCK_PRIVATE_URL": True})):
+            with pytest.raises(BusinessException):
+                await LlmProbeEngine.probe_test("openai_compatible", "http://127.0.0.1.nip.io/v1", "k", "m")
+        assert called == []
 
     @pytest.mark.asyncio
     async def test_switch_on_rejects_private_update(self, monkeypatch):

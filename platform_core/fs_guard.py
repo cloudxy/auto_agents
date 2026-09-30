@@ -18,7 +18,14 @@
 """
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
+from uuid import uuid4
+
+from platform_core.logger import get_logger
+
+logger = get_logger("fs_guard")
 
 
 class PathEscapeError(OSError):
@@ -60,3 +67,72 @@ def assert_contained(dst: Path, root: Path) -> Path:
     if not dst_real.is_relative_to(root_real):
         raise PathEscapeError(f"越界写入拒绝（resolve 后不在收容根内）: {dst}")
     return dst_real
+
+
+class LandingJournal:
+    """可撤回的落盘日志（审计 BUG-33）：逐文件原子写，记下每个目标原来的样子。
+
+    - 写：先写同目录临时文件，再 os.replace（原子，不会留下写了一半的文件）；
+      目标已存在则先备份原内容。
+    - 撤回：按写入逆序，原来存在的从备份还原、原来不存在的删掉，本次新建的空目录删掉。
+    - mark() / rollback_to(mark)：配合数据库 savepoint 撤回单项；rollback_to(0) 撤回整批。
+
+    收容校验（assert_contained）仍由调用方在写之前做——本类只管原子性与可撤回。
+    """
+
+    def __init__(self, backup_dir: Path):
+        self._backup_dir = backup_dir
+        self._entries: list[tuple[Path, Path | None]] = []   # (目标, 备份；None=原先不存在)
+        self._dirs: list[Path] = []                          # 本次新建的目录（先建的在前）
+
+    def mark(self) -> int:
+        return len(self._entries)
+
+    def _ensure_dir(self, path: Path) -> None:
+        missing = []
+        cur = path
+        while not cur.exists():
+            missing.append(cur)
+            cur = cur.parent
+        for d in reversed(missing):
+            d.mkdir()
+            self._dirs.append(d)
+
+    def _place(self, dst: Path, fill) -> None:
+        self._ensure_dir(dst.parent)
+        backup: Path | None = None
+        if dst.exists():
+            self._backup_dir.mkdir(parents=True, exist_ok=True)
+            backup = self._backup_dir / f"{len(self._entries)}-{dst.name}"
+            shutil.copy2(dst, backup)
+        tmp = dst.with_name(f".{dst.name}.{uuid4().hex[:8]}.tmp")
+        try:
+            fill(tmp)
+            os.replace(tmp, dst)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+        self._entries.append((dst, backup))
+
+    def copy(self, src: Path, dst: Path) -> None:
+        self._place(dst, lambda tmp: shutil.copy2(src, tmp))
+
+    def write_bytes(self, dst: Path, data: bytes) -> None:
+        self._place(dst, lambda tmp: tmp.write_bytes(data))
+
+    def rollback_to(self, mark: int) -> None:
+        while len(self._entries) > mark:
+            dst, backup = self._entries.pop()
+            try:
+                if backup is None:
+                    dst.unlink(missing_ok=True)
+                else:
+                    os.replace(backup, dst)
+            except OSError as exc:  # 撤回尽力而为：记录后继续撤其余文件
+                logger.error(f"落盘撤回失败 | path={dst} err={exc}")
+        for d in reversed(self._dirs):
+            try:
+                d.rmdir()  # 只删空目录；仍有别的文件说明不是本次独占，保留
+            except OSError:
+                continue
+        self._dirs = [d for d in self._dirs if d.exists()]

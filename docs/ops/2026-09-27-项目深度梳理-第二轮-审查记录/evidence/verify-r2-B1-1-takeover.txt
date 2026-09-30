@@ -1,0 +1,10 @@
+REPRO owner creates admin member -> 200
+REPRO tenant admin resets OWNER password -> 200
+REPRO login as owner with admin-set password -> SUCCESS
+REPRO tenant admin PATCH self -> owner -> 200 owner
+REPRO tenant admin POST new member as owner -> 200
+REPRO platform-tenant admin login -> ok is_platform_admin= False
+REPRO platform-tenant admin lists members -> sees superadmin: True
+REPRO platform-tenant admin resets SUPERADMIN password -> 200
+REPRO login as superadmin with hijacked password -> SUCCESS is_platform_admin=True
+2 passed in 2.51s

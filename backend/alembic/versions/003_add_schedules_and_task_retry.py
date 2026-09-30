@@ -48,9 +48,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """降级数据库结构"""
-    op.drop_index(op.f('ix_spider_schedules_next_run_at'), table_name='spider_schedules')
-    op.drop_index(op.f('ix_spider_schedules_spider_name'), table_name='spider_schedules')
-    op.drop_index(op.f('ix_spider_schedules_id'), table_name='spider_schedules')
     op.drop_table('spider_schedules')
     op.drop_column('spider_tasks', 'started_at')
     op.drop_column('spider_tasks', 'retry_count')

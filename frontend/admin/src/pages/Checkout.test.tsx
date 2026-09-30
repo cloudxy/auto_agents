@@ -8,6 +8,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 jest.mock('../services/billing', () => ({
+  cancelOrder: jest.fn(),
   previewCheckout: jest.fn(),
   createCheckout: jest.fn(),
   createOrder: jest.fn(),
@@ -61,10 +62,11 @@ function pageCopy(): string {
   return document.body.textContent || ''
 }
 
-function assertNoForbidden() {
+/** allowCancel：审计 BUG-24 后「待支付」态有正式的「取消订单」；其余状态仍不得出现任何取消入口 */
+function assertNoForbidden(opts: { allowCancel?: boolean } = {}) {
   const copy = pageCopy()
   FORBIDDEN.forEach((s) => expect(copy).not.toContain(s))
-  expect(screen.queryByRole('button', { name: /取消/ })).toBeNull()
+  if (!opts.allowCancel) expect(screen.queryByRole('button', { name: /取消/ })).toBeNull()
 }
 
 beforeEach(() => {
@@ -125,7 +127,7 @@ test('GWT-M11.1 unconfigured submit creates 待支付 and wait-confirm copy', as
   expect(screen.getByText(GOLD_WAIT)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: GOLD_SUBMIT })).toBeNull()
   expect(screen.queryByRole('button', { name: '去支付' })).toBeNull()
-  assertNoForbidden()
+  assertNoForbidden({ allowCancel: true })  // 待支付态有正式的「取消订单」（审计 BUG-24）
 })
 
 test('GWT-M11.1 pending gold wait from notice when can_pay is not false', async () => {
@@ -145,7 +147,7 @@ test('GWT-M11.1 pending gold wait from notice when can_pay is not false', async 
   expect(await screen.findByText(GOLD_PENDING)).toBeInTheDocument()
   expect(screen.getByText(GOLD_WAIT)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: GOLD_SUBMIT })).toBeNull()
-  assertNoForbidden()
+  assertNoForbidden({ allowCancel: true })  // 待支付态有正式的「取消订单」（审计 BUG-24）
 })
 
 test('GWT-M11.1 pending gold wait when all channels configured=false', async () => {
@@ -165,7 +167,7 @@ test('GWT-M11.1 pending gold wait when all channels configured=false', async () 
   expect(await screen.findByText(GOLD_PENDING)).toBeInTheDocument()
   expect(screen.getByText(GOLD_WAIT)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: GOLD_SUBMIT })).toBeNull()
-  assertNoForbidden()
+  assertNoForbidden({ allowCancel: true })  // 待支付态有正式的「取消订单」（审计 BUG-24）
 })
 
 test('GWT-M11.8 duplicate submit is 已有待支付, never 已有未完成的支付', async () => {
@@ -196,7 +198,7 @@ test('GWT-M11.3 operator GET is 请联系本企业管理员开通, no order', as
   assertNoForbidden()
 })
 
-test('checkout_pending renders 待支付, no cancel, no 已开通', async () => {
+test('checkout_pending renders 待支付 with 取消订单, no 已开通', async () => {
   ;(previewCheckout as jest.Mock).mockResolvedValue({
     product: 'relay', channels: NONE, empty_state: null, can_pay: false, order_id: 7, amount_cents: 9900,
   })
@@ -210,7 +212,24 @@ test('checkout_pending renders 待支付, no cancel, no 已开通', async () => 
   expect(screen.queryByRole('button', { name: GOLD_SUBMIT })).toBeNull()
   expect(pageCopy()).not.toContain('已开通')
   expect(createCheckout).not.toHaveBeenCalled()
-  assertNoForbidden()
+  expect(screen.getByRole('button', { name: /取消订单/ })).toBeInTheDocument()
+  assertNoForbidden({ allowCancel: true })
+})
+
+test('BUG-24 cancel pending order calls cancelOrder after confirm', async () => {
+  ;(previewCheckout as jest.Mock).mockResolvedValue({
+    product: 'plan_pro', channels: NONE, empty_state: null, can_pay: false, order_id: 9, amount_cents: 29900,
+  })
+  ;(listMyOrders as jest.Mock).mockResolvedValue([
+    { id: 9, status: 'checkout_pending', product_code: 'plan_pro', amount_cents: 29900, amount_yuan: 299 },
+  ])
+  const { cancelOrder } = jest.requireMock('../services/billing')
+  ;(cancelOrder as jest.Mock).mockResolvedValue({ id: 9, status: 'unpaid' })
+  renderCheckout()
+  fireEvent.click(await screen.findByRole('button', { name: /取消订单/ }))
+  const confirmButtons = await screen.findAllByRole('button', { name: /取消订单/ })
+  fireEvent.click(confirmButtons[confirmButtons.length - 1])
+  await waitFor(() => expect(cancelOrder).toHaveBeenCalledWith(9))
 })
 
 test('fulfilled renders 已开通, not 已确认', async () => {
@@ -283,7 +302,7 @@ test('online pending order with pay_url renders alipay CTA (no forbidden copy)',
   const link = await screen.findByRole('link', { name: '前往支付宝支付' })
   expect(link).toHaveAttribute('href', 'https://openapi.alipay.com/gateway.do?sign=abc')
   expect(fetchPayIntent).toHaveBeenCalledWith(21)
-  assertNoForbidden()
+  assertNoForbidden({ allowCancel: true })  // 待支付态有正式的「取消订单」（审计 BUG-24）
 })
 
 test('online pending order with qr_code_image renders wechat QR (no forbidden copy)', async () => {
@@ -300,7 +319,7 @@ test('online pending order with qr_code_image renders wechat QR (no forbidden co
   renderCheckout()
   expect(await screen.findByText(GOLD_PENDING)).toBeInTheDocument()
   expect(await screen.findByAltText('微信支付二维码')).toHaveAttribute('src', 'data:image/svg+xml;base64,AAAA')
-  assertNoForbidden()
+  assertNoForbidden({ allowCancel: true })  // 待支付态有正式的「取消订单」（审计 BUG-24）
 })
 
 test('offline channel pending order does not call fetchPayIntent', async () => {
@@ -313,4 +332,16 @@ test('offline channel pending order does not call fetchPayIntent', async () => {
   renderCheckout()
   expect(await screen.findByText(GOLD_PENDING)).toBeInTheDocument()
   expect(fetchPayIntent).not.toHaveBeenCalled()
+})
+
+test.each([
+  ['PLAN_SALES_LED', '该套餐按需定制，请联系我们：sales@example.com。', '/billing/checkout?product=plan_enterprise'],
+  ['SUBSCRIPTION_DOWNGRADE_AT_PERIOD_END', '当前企业档有效期至 2026-12-01，到期后自动转为免费档，届时可购买专业档；如需提前调整请联系我们。', '/billing/checkout?product=plan_pro'],
+])('D17 / D22：%s 显示原因与返回定价，不出现提交按钮', async (code, msg, path) => {
+  ;(previewCheckout as jest.Mock).mockRejectedValueOnce({ response: { status: 409, data: { code, message: msg } } })
+  renderCheckout(path)
+  expect(await screen.findByText(msg)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: GOLD_SUBMIT })).toBeNull()
+  expect(screen.getByRole('button', { name: /返回定价/ })).toBeInTheDocument()
+  expect(createCheckout).not.toHaveBeenCalled()
 })

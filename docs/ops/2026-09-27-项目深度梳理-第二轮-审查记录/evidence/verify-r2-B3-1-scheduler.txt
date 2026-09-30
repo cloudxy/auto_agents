@@ -1,0 +1,4 @@
+REPRO due schedules: 1
+REPRO _fire raised: MissingGreenlet: greenlet_spawn has not been called; can't call await_only() here. Was IO attempted in an unexpected place? (Ba
+REPRO after fire: last_run_at=None next_run_at=2026-09-28 00:28:35.088331 (was 00:28:35) -> advanced=False
+1 passed in 2.03s

@@ -62,14 +62,18 @@ async def test_similar_confirm_merges_mutually(db_session):
         assert rows["web-scrape"].similar_to in (None, [])
 
 
-def test_similar_suggest_viewer_403(db_client, viewer_client, db_engine, db_session):
-    """只读 403（SH-07：守卫 require_operator）。"""
+def test_similar_suggest_viewer_404(db_client, viewer_client, db_engine, db_session):
+    """非平台超管 404 同形（审计 B4-1：平台技能库 + 平台模型花费，仅超管）。"""
     resp = viewer_client.post("/api/v1/skills/similar-suggest")
-    assert resp.status_code == 403
+    assert resp.status_code == 404
 
 
-def test_operator_similar_suggest_success_outbound_is_gateway_url(
-    db_client, operator_client, db_engine, db_session, monkeypatch,
+def test_similar_suggest_tenant_operator_and_admin_404(db_client, operator_client, db_engine, db_session):
+    assert operator_client.post("/api/v1/skills/similar-suggest").status_code == 404
+
+
+def test_platform_similar_suggest_success_outbound_is_gateway_url(
+    db_client, platform_admin_client, db_engine, db_session, monkeypatch,
 ):
     """GWT-70.7：经办 HTTP 等到 outbound=网关 URL。禁止仅 HTTP 200 勾。"""
     import asyncio
@@ -99,7 +103,7 @@ def test_operator_similar_suggest_success_outbound_is_gateway_url(
     )
     asyncio.run(_seed(db_session))
     try:
-        resp = operator_client.post("/api/v1/skills/similar-suggest")
+        resp = platform_admin_client.post("/api/v1/skills/similar-suggest")
         assert outbound == [f"{GATEWAY_URL}/v1/chat/completions"]
         assert "https://pub" not in outbound[0]
         assert resp.status_code == 200
@@ -109,8 +113,8 @@ def test_operator_similar_suggest_success_outbound_is_gateway_url(
             settings.set("LLM.DATA_PLANE", prev)
 
 
-def test_operator_similar_suggest_no_model_envelope_only_70_10(
-    db_client, operator_client, db_engine, db_session, monkeypatch,
+def test_platform_similar_suggest_no_model_envelope_only_70_10(
+    db_client, platform_admin_client, db_engine, db_session, monkeypatch,
 ):
     """GWT-70.10：经办 HTTP 响应（及 Job）只「还没有平台模型」。"""
     import asyncio
@@ -140,7 +144,7 @@ def test_operator_similar_suggest_no_model_envelope_only_70_10(
     _install_gateway(monkeypatch, "no_model", outbound, "{}")
     asyncio.run(_seed(db_session))
     try:
-        resp = operator_client.post("/api/v1/skills/similar-suggest")
+        resp = platform_admin_client.post("/api/v1/skills/similar-suggest")
         assert resp.status_code != 200
         body = resp.json()
         _assert_only_sentence(body["message"], NO_MODEL_USER, GATEWAY_UNREACHABLE_USER)
@@ -159,8 +163,8 @@ def test_operator_similar_suggest_no_model_envelope_only_70_10(
     _assert_only_sentence(str(job.detail.get("reason")), NO_MODEL_USER, GATEWAY_UNREACHABLE_USER)
 
 
-def test_operator_similar_suggest_unreachable_envelope_only_74_6(
-    db_client, operator_client, db_engine, db_session, monkeypatch,
+def test_platform_similar_suggest_unreachable_envelope_only_74_6(
+    db_client, platform_admin_client, db_engine, db_session, monkeypatch,
 ):
     """GWT-74.6：经办 HTTP 响应（及 Job）只「平台 LLM 网关不可达」。"""
     import asyncio
@@ -190,7 +194,7 @@ def test_operator_similar_suggest_unreachable_envelope_only_74_6(
     _install_gateway(monkeypatch, "unreachable", outbound, "{}")
     asyncio.run(_seed(db_session))
     try:
-        resp = operator_client.post("/api/v1/skills/similar-suggest")
+        resp = platform_admin_client.post("/api/v1/skills/similar-suggest")
         assert resp.status_code != 200
         body = resp.json()
         _assert_only_sentence(body["message"], GATEWAY_UNREACHABLE_USER, NO_MODEL_USER)
@@ -211,7 +215,7 @@ def test_operator_similar_suggest_unreachable_envelope_only_74_6(
     )
 
 
-def test_similar_endpoints(db_client, admin_client, db_engine, db_session, monkeypatch):
+def test_similar_endpoints(db_client, platform_admin_client, db_engine, db_session, monkeypatch):
     import asyncio
 
     import backend.services.skill_service as svc_mod

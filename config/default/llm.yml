@@ -19,6 +19,8 @@ LLM:
   TIMEOUT: 120                # 单次请求超时（秒）
   MAX_RETRIES: 3              # 指数退避重试次数
   MAX_TOKENS_BUDGET: 200000   # token 预算熔断阈值（月度累计用量超过即拒绝调用）
+  # 决策 D21：平台全局日预算上限（全部企业当天合计 token；0 = 不设上限）。免费档可用平台 LLM 的前置闸
+  PLATFORM_DAILY_TOKEN_CAP: 5000000
   MAX_ITERATIONS: 2           # 试采失败自动修复迭代上限
   # P0-3 用量持久化：Redis 日/月计数 → llm_token_usage 表定时聚合
   # 预算口径同步升级为"当月累计"（原口径为进程启动以来，重启即清零）
@@ -55,3 +57,7 @@ LLM:
   FAILOVER:
     COOLDOWN_THRESHOLD: 2    # 连续失败达此值进入冷却
     COOLDOWN_SECONDS: 300    # 冷却窗口（秒），过期自动恢复
+
+# AI 规划（决策 D21 前置闸）：送进 LLM 的页面 HTML 长度上限（字符；清洗后截断）
+AI_PLANNER:
+  MAX_HTML_CHARS: 15000

@@ -1,0 +1,12 @@
+# 批次 6 前端门禁 · 2026-09-30
+# admin：npx jest（全量）
+Test Suites: 63 passed, 63 total
+Tests:       445 passed, 445 total
+# admin：npm run build → Compiled successfully.（删除无人调用的 register() 后全量测试与构建重跑，结果同上）
+# official：npx jest（全量）
+Test Suites: 16 passed, 16 total
+Tests:       94 passed, 94 total
+# official：npm run build → Compiled successfully.
+# admin e2e：npm run e2e -w admin
+  2 passed (13.2s)
+# tsc --noEmit（admin）无输出；eslint（本批改动文件）无输出

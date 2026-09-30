@@ -27,6 +27,10 @@ export const resetMemberPassword = (id: number, newPassword: string): Promise<vo
 export const deleteMember = (id: number): Promise<void> =>
   api.delete(`/members/${id}`).then(() => undefined)
 
+/** 转让负责人（决策 D23）：仅负责人本人、须输入登录密码；成功后本人降为管理员、会话失效 */
+export const transferOwnership = (id: number, password: string): Promise<{ owner_id: number }> =>
+  api.post(`/members/${id}/transfer-ownership`, { password }).then((r) => unwrap<{ owner_id: number }>(r))
+
 export interface MemberAuditRow {
   id: number
   actor_name: string

@@ -4,7 +4,7 @@
 import React from 'react'
 import { Table, Button, Tag, Space, Popconfirm, Tooltip, Typography, Select } from 'antd'
 import {
-  PlayCircleOutlined, PauseCircleOutlined, StopOutlined, CaretRightOutlined,
+  PlayCircleOutlined, StopOutlined,
   EyeOutlined, FileTextOutlined, DeleteOutlined, StarOutlined, LoadingOutlined,
   SyncOutlined, PlusOutlined, ReloadOutlined, EditOutlined,
 } from '@ant-design/icons'
@@ -14,6 +14,7 @@ import type { Task, SpiderMap } from './types'
 import { SPIDER_WORKER_OFFLINE_COPY, STILL_RUNNING_COPY, ZERO_ITEMS_DONE_COPY } from './copy'
 import { LoadEmpty } from '../LoadState'
 import { CANNOT_SUBMIT_COLLECT, CLEAR_FILTERS, EMPTY_TASKS_COPY, FILTERED_TASKS_EMPTY } from '../../constants/collectCopy'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 const { Text } = Typography
 
@@ -37,8 +38,6 @@ export interface TaskListProps {
   onPaginationChange: (page: number, pageSize: number) => void
   onRun: (task: Task) => void
   onCreateNew: () => void
-  onPause: (task: Task) => void
-  onResume: (task: Task) => void
   onStop: (task: Task) => void
   onDelete: (task: Task) => void
   onSaveTemplate: (task: Task) => void
@@ -55,7 +54,7 @@ export const TaskList: React.FC<TaskListProps> = ({
   statusFilter, onStatusFilterChange,
   spiderFilter, onSpiderFilterChange, spiderOptions,
   onPaginationChange,
-  onRun, onCreateNew, onPause, onResume, onStop, onDelete,
+  onRun, onCreateNew, onStop, onDelete,
   onSaveTemplate, onViewLog, onViewResult, onEdit, onRefresh,
 }) => {
   const TYPE_META: Record<string, { label: string; color: string }> = {
@@ -70,17 +69,18 @@ export const TaskList: React.FC<TaskListProps> = ({
       title: '采集方案',
       dataIndex: 'spider_name',
       key: 'spider_name',
+      width: 160,
       render: (name: string) => (
-        <Space orientation="vertical" size={0}>
-          <Text strong>{spiderMap[name]?.title || name}</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>{name}</Text>
+        <Space orientation="vertical" size={0} style={{ maxWidth: 150 }}>
+          <Text strong ellipsis title={spiderMap[name]?.title || name}>{spiderMap[name]?.title || name}</Text>
+          <Text type="secondary" ellipsis style={{ fontSize: 12 }} title={name}>{name}</Text>
         </Space>
       ),
     },
     {
       title: '类型',
       key: 'type',
-      width: 110,
+      width: 100,
       render: (_: unknown, record: Task) => {
         const type = spiderMap[record.spider_name]?.type
         if (!type) return '-'
@@ -102,7 +102,7 @@ export const TaskList: React.FC<TaskListProps> = ({
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 150,
+      width: 140,
       render: (status: string, record: Task) => {
         const meta = STATUS_META[status] || { label: status, color: 'default' }
         const offline = Boolean(record.worker_offline)
@@ -124,7 +124,7 @@ export const TaskList: React.FC<TaskListProps> = ({
         return record.error_message ? (
           <Space orientation="vertical" size={0}>
             <Tooltip title={record.error_message}>{tag}</Tooltip>
-            <Text type="danger" ellipsis style={{ maxWidth: 150, fontSize: 12 }} title={record.error_message}>
+            <Text type="danger" ellipsis style={{ maxWidth: 130, fontSize: 12 }} title={record.error_message}>
               {record.error_message}
             </Text>
           </Space>
@@ -135,7 +135,7 @@ export const TaskList: React.FC<TaskListProps> = ({
       title: '采集结果',
       dataIndex: 'result_count',
       key: 'result_count',
-      width: 110,
+      width: 100,
       render: (count: number, record: Task) => {
         if (!count && (record.status === 'pending' || record.status === 'running')) {
           return STILL_RUNNING_COPY
@@ -144,13 +144,14 @@ export const TaskList: React.FC<TaskListProps> = ({
         return count
       },
     },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 170, render: (v: string | null) => formatDateTime(v) },
     {
       title: '操作',
       key: 'action',
-      width: 380,
+      width: 300,
+      fixed: 'right',
       render: (_: unknown, record: Task) => (
-        <Space size="small" wrap>
+        <Space size={2} wrap>
           {canCreate && (
             <Tooltip title="以该任务的参数再次运行">
               <Button
@@ -164,42 +165,19 @@ export const TaskList: React.FC<TaskListProps> = ({
               </Button>
             </Tooltip>
           )}
+          {/* 决策 D6：「暂停」先下线（现有暂停会丢请求、最后显示已完成）；运行中只留终止 */}
           {canOperate && record.status === 'running' && (
-            <>
-              <Popconfirm
-                title="确认暂停该任务？"
-                description="暂停后将跳过后续请求，直到点击恢复。"
-                okText="暂停"
-                onConfirm={() => onPause(record)}
-              >
-                <Button type="link" size="small" icon={<PauseCircleOutlined />}>
-                  暂停
-                </Button>
-              </Popconfirm>
-              <Popconfirm
-                title="确认终止该任务？"
-                description="终止后将立即停止，任务置为失败状态。"
-                okText="终止"
-                okButtonProps={{ danger: true }}
-                onConfirm={() => onStop(record)}
-              >
-                <Button type="link" danger size="small" icon={<StopOutlined />}>
-                  终止
-                </Button>
-              </Popconfirm>
-            </>
-          )}
-          {canOperate && record.status === 'running' && (
-            <Tooltip title="若任务已暂停，点击恢复继续采集（未暂停时点击无副作用）">
-              <Button
-                type="link"
-                size="small"
-                icon={<CaretRightOutlined />}
-                onClick={() => onResume(record)}
-              >
-                恢复
+            <Popconfirm
+              title="确认终止该任务？"
+              description="只终止这一个任务，已采集的结果保留；需要时可「再次运行」。"
+              okText="终止"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => onStop(record)}
+            >
+              <Button type="link" danger size="small" icon={<StopOutlined />}>
+                终止
               </Button>
-            </Tooltip>
+            </Popconfirm>
           )}
           <Button
             type="link"
@@ -217,25 +195,28 @@ export const TaskList: React.FC<TaskListProps> = ({
           >
             日志
           </Button>
+          {/* 批次 5：次要动作收成带提示的图标按钮，行不再折成两三行 */}
           {canOperate && record.status === 'pending' && (
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => onEdit(record)}
-            >
-              编辑
-            </Button>
+            <Tooltip title="编辑">
+              <Button
+                type="text"
+                size="small"
+                aria-label="编辑"
+                icon={<EditOutlined />}
+                onClick={() => onEdit(record)}
+              />
+            </Tooltip>
           )}
           {canCreate && (
-            <Button
-              type="link"
-              size="small"
-              icon={<StarOutlined />}
-              onClick={() => onSaveTemplate(record)}
-            >
-              收藏
-            </Button>
+            <Tooltip title="收藏为任务模板">
+              <Button
+                type="text"
+                size="small"
+                aria-label="收藏"
+                icon={<StarOutlined />}
+                onClick={() => onSaveTemplate(record)}
+              />
+            </Tooltip>
           )}
           {canDelete && (
             <Popconfirm
@@ -247,15 +228,16 @@ export const TaskList: React.FC<TaskListProps> = ({
               disabled={record.status === 'running'}
               onConfirm={() => onDelete(record)}
             >
-              <Button
-                type="link"
-                danger
-                size="small"
-                icon={<DeleteOutlined />}
-                disabled={record.status === 'running'}
-              >
-                删除
-              </Button>
+              <Tooltip title={record.status === 'running' ? '运行中不能删除' : '删除'}>
+                <Button
+                  type="text"
+                  danger
+                  size="small"
+                  aria-label="删除"
+                  icon={<DeleteOutlined />}
+                  disabled={record.status === 'running'}
+                />
+              </Tooltip>
             </Popconfirm>
           )}
         </Space>
@@ -317,6 +299,7 @@ export const TaskList: React.FC<TaskListProps> = ({
         dataSource={tasks}
         rowKey="id"
         loading={loading}
+        scroll={{ x: 'max-content' }}
         pagination={{
           total,
           current: page,

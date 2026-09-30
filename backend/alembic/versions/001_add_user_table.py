@@ -42,6 +42,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """降级数据库结构"""
-    op.drop_index(op.f('ix_users_email'), table_name='users')
-    op.drop_index(op.f('ix_users_username'), table_name='users')
     op.drop_table('users')

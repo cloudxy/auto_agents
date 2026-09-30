@@ -1,8 +1,8 @@
 """产品事件契约（Router/Service 边界；禁止 import ORM）"""
-from datetime import datetime
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from platform_core.schemas.time_types import UTCDateTime
 
 PUBLIC_EVENT_NAMES = ("official_page_viewed", "official_cta_clicked")
 CTA_FUNNEL = ("register_free", "pricing_pro", "pricing_enterprise", "login", "browse_market")
@@ -52,7 +52,7 @@ class PublicEventIn(BaseModel):
 
     event_name: Literal["official_page_viewed", "official_cta_clicked"]
     anonymous_id: str = Field(..., min_length=1, max_length=64)
-    occurred_at: Optional[datetime] = None
+    occurred_at: Optional[UTCDateTime] = None
     props: Optional[dict[str, Any]] = None
 
     @field_validator("props")
@@ -65,18 +65,19 @@ class ProductEventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    occurred_at: datetime
+    occurred_at: UTCDateTime
     event_name: str
     tenant_id: Optional[int] = None
     actor_user_id: Optional[int] = None
     anonymous_id: Optional[str] = None
     role: Optional[str] = None
     props: Optional[dict[str, Any]] = None
-    created_at: datetime
+    created_at: UTCDateTime
     is_internal_fixture: Optional[bool] = None
 
 
 class ProductEventListOut(BaseModel):
     total: int
     items: list[ProductEventOut]
+    # 展示 / 切日时区。时间字段本身是带 +00:00 的 UTC（审计 BUG-43：原先 UTC 值被标成上海时间）
     timezone: str = "Asia/Shanghai"

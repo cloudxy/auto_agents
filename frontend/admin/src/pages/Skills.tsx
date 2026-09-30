@@ -7,7 +7,7 @@
  */
 import React, { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { TIER_COLORS } from '@auto-agents/frontend-shared'
+import { formatDateTime, TIER_COLORS } from '@auto-agents/frontend-shared'
 import {
   Alert, Button, Drawer, Form, Input, InputNumber, message, Modal, Select,
   Space, Table, Tabs, Tag, Typography,
@@ -113,7 +113,7 @@ const Skills: React.FC<{ onSubscribe?: (name: string) => void }> = ({ onSubscrib
     { title: '同步', dataIndex: 'sync_state', width: 105, render: (s: string) => (
       <Tag color={SYNC_COLORS[s] || 'default'}>{s}</Tag>
     )},
-    { title: '更新时间', dataIndex: 'updated_at', width: 170, render: (v?: string | null) => v ? new Date(v).toLocaleString('zh-CN') : '—' },
+    { title: '更新时间', dataIndex: 'updated_at', width: 170, render: (v?: string | null) => formatDateTime(v, '—') },
     { title: '操作', width: 140, render: (_: unknown, r: SkillItem) => (
       <Space>
         {onSubscribe ? <Button size="small" onClick={() => onSubscribe(r.name)}>订阅</Button> : null}

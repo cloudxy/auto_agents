@@ -1,0 +1,36 @@
+架构合规检查（13 条红线 + 4 条边界）
+======================================
+✓ R1: 硬编码连接串
+✓ R2: 明文 password
+✓ R3: scrapy → backend 反向依赖
+✓ R4: scrapy 使用 SQLAlchemy
+✓ R5: DOWNLOAD_DELAY 已配置
+✓ R6: USER_AGENT 配置存在
+✓ R7: API 层 import models
+✓ R8: models 反向 import schemas
+✓ R9: 无循环 import
+✓ R10: service 方法入口缺 logger
+✓ R11: backend 同步 redis_client() 直调（阻塞事件循环）
+✓ R12: spider_service 门面白名单外 import（应直接依赖子 Service）
+✓ R13: 租户过滤收口（安装点/裸语句/豁免清单同步）
+
+--- 核心代码边界 ---
+✓ B1: platform_core → backend/scrapy 反向依赖
+✓ B2: backend → scrapy 直接依赖
+✓ B3: config → 业务模块反向依赖
+✓ B4: power_market 禁 spider_/newapi_/litellm_/relay_/channel_/ai_planner/llm_gateway 直连
+✓ B4: ai_planner 禁 llm_gateway.admin（三模式）
+✓ B4: ai_planner 除 llm_client.py 禁 llm_gateway.chat（三模式）
+✓ B4: 禁止 LITELLM.DB_DSN
+✓ B4: 禁止 create_async_engine 打网关库
+
+--- 发布物密钥（FR-14）---
+✓ FR-14: config.gen.yaml 不在跟踪树
+✓ FR-14: 跟踪的 deploy/config 无上游 Key 样例模式
+✓ FR-14: compose 密钥变量无默认值
+
+--- 插件引用（PL）---
+✓ PL: 插件只以引用方式使用（仓库，6 个中枢插件）
+
+✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥 + PL 插件引用，全部通过）
+exit=0

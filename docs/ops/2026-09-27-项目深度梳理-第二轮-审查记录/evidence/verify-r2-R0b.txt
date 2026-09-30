@@ -1,0 +1,74 @@
+# verify-r2-R0b（manager，2026-09-28，只读）
+$ V-a mcp_servers env 键名（只列键名与是否有值，不输出值）
+1
+Traceback (most recent call last):
+  File "<stdin>", line 2, in <module>
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 505, in run
+    with Popen(*popenargs, **kwargs) as process:
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 951, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1821, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'mysql'
+$ V-b SKILLS.ADAPTER_SYNC.ENABLED
+1:config/default/skills.yml:18:  ADAPTER_SYNC:
+2:config/default/skills.yml-19-    ENABLED: false
+
+
+@router.post("/sync-adapters")
+async def sync_adapters(
+    user: CurrentUser = Depends(require_admin),
+    service: SkillService = Depends(_service),
+    session: AsyncSession = Depends(get_async_db),
+):
+    """触发 sync.sh 分发（受 SKILLS.ADAPTER_SYNC.ENABLED 开关约束）"""
+    result = await service.sync_adapters()
+    await record_audit(user, "skill.adapters.sync", "adapters", detail={"ok": result["ok"]})
+    return ok(data=result)
+
+$ V-d rg -n "LITELLM\.ENABLED|LITELLM\.SHADOW|SHADOW\.ENABLED" backend --glob !**/tests/**
+rg exit=1
+$ V-e tenant_context.py 145-175
+            if identity.tenant_id is None:
+                logger.warning(f"拒绝无租户归属的降级平台 token | sub={payload.get('sub')}")
+                return self._reject()
+            denied = await self._guard_tenant_active(request, identity.tenant_id)
+            if denied is not None:
+                return denied
+            with tenant_scope(identity.tenant_id):
+                return await call_next(request)
+
+        tenant_id = payload.get("tenant_id")
+        if tenant_id is None:
+            # 非平台超管且无租户归属：024 后合法用户不落此分支（迁移已回填全部
+            # NULL 行 + register 挂 default），到达即旧 token/伪造 token
+            logger.warning(f"拒绝无租户归属的非平台超管 token | sub={payload.get('sub')}")
+            return self._reject()
+        try:
+            scoped_id = int(tenant_id)
+        except (TypeError, ValueError):
+            logger.warning(f"拒绝租户字段不合法 token | sub={payload.get('sub')}")
+            return self._reject()
+        denied = await self._guard_tenant_active(request, scoped_id)
+        if denied is not None:
+            return denied
+        with tenant_scope(scoped_id):
+            return await call_next(request)
+$ V-a（重跑）mcp_servers env 键名与是否有值（不输出值）
+ERROR 1054 (42S22) at line 1: Unknown column 'name' in 'field list'
+
+$ V-c 第二轮窗口（09-27 22:50 起）开发库新增行（按小时/来源）
+hr	actor_name	action	n
+09-27 18	m-owner	member.create	1
+09-27 18	m-owner	member.delete	1
+t	event_name	tenant_id	n
+09-27 18:23	sync_completed	NULL	3
+09-27 22:55	login_succeeded	1	1
+09-27 22:55	official_page_viewed	NULL	10
+09-27 22:57	login_succeeded	1	1
+09-27 22:58	duty_entry_opened	NULL	1
+09-28 00:46	login_succeeded	1	1
+09-28 00:48	login_succeeded	1	1
+09-28 00:48	official_page_viewed	NULL	2
+$ V-a（重跑2）capability_plugins.mcp_servers env 键名与是否有值（不输出值）
+plugins with mcp_servers: 0

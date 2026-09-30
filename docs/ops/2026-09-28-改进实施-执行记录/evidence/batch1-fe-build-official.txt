@@ -1,0 +1,40 @@
+
+File sizes after gzip:
+
+  167.14 kB (-545 B)  build/static/js/main.f6dd28ce.js
+  43.92 kB            build/static/js/18.f4075907.chunk.js
+  38 kB               build/static/js/814.f8c21078.chunk.js
+  24.92 kB            build/static/js/704.c79961a4.chunk.js
+  23.44 kB            build/static/js/496.ebdd75e9.chunk.js
+  12.88 kB            build/static/js/974.6559ea09.chunk.js
+  11.28 kB            build/static/js/303.2c5284bf.chunk.js
+  8.65 kB             build/static/js/832.ed10e6d9.chunk.js
+  7.6 kB              build/static/js/584.538fb411.chunk.js
+  6.86 kB             build/static/js/819.61ffee2b.chunk.js
+  6.64 kB             build/static/js/894.8b9f4b42.chunk.js
+  3.8 kB              build/static/js/465.b2096e93.chunk.js
+  3.62 kB             build/static/js/359.88e4dd8a.chunk.js
+  3.54 kB             build/static/js/56.2cdd6858.chunk.js
+  2.56 kB             build/static/css/819.813ffecd.chunk.css
+  2.48 kB             build/static/js/966.17d2729c.chunk.js
+  1.37 kB             build/static/js/435.9d923bb0.chunk.js
+  1.02 kB             build/static/js/170.e1abf296.chunk.js
+  853 B               build/static/css/359.3936de52.chunk.css
+  692 B               build/static/css/56.2e358ae1.chunk.css
+  653 B (+8 B)        build/static/css/main.3db2dc50.css
+  401 B               build/static/js/988.f7282d81.chunk.js
+
+The project was built assuming it is hosted at /.
+You can control this with the homepage field in your package.json.
+
+The build folder is ready to be deployed.
+You may serve it with a static server:
+
+  npm install -g serve
+  serve -s build
+
+Find out more about deployment here:
+
+  https://cra.link/deployment
+
+exit=0

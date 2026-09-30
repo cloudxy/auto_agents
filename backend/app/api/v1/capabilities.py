@@ -6,7 +6,7 @@
 当第一段吞掉，三条静态详情路由恒 404（B5 修复 B1c F-1）。
 新增二段式路由一律置于 get_capability_detail（本文件末尾）之前。
 """
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api._helpers import omit_local_abs_paths_for_non_platform_admin
@@ -29,6 +29,7 @@ from backend.services.power_market import (
 )
 from backend.services.power_market.types import PatchInstallRequest, SubscribeRequest
 from platform_core.db import get_async_db
+from platform_core.timeutil import utc_iso
 
 router = APIRouter()
 
@@ -39,6 +40,25 @@ def _service(session: AsyncSession = Depends(get_async_db)) -> CapabilityService
 
 def _market(session: AsyncSession = Depends(get_async_db)) -> PowerMarketService:
     return PowerMarketService(session)
+
+
+async def _public_detail_or_404(
+    user: CurrentUser, market: PowerMarketService, asset_type: str, name: str,
+) -> dict | None:
+    """非超管详情闸（审计 B4-4 / P0-3）：只放行市场开放且已上架、治理可公开的资产
+
+    超管返回 None（走治理详情）；其余身份未上架 / 黑名单 / 软删 / 市场关闭一律 404
+    同形，不泄露存在性。放行时返回公开货架投影（不含 AI 建议分、同步态、库路径等治理字段）。
+    """
+    if user.is_platform_admin:
+        return None
+    try:
+        item = await market.get_public(asset_type, name)
+    except ValidationException:
+        item = None
+    if not item or item.get("market_closed"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    return item
 
 
 @router.get("")
@@ -141,13 +161,18 @@ async def backfill_first_party_listing(
 @router.get("/plugins/{name}")
 async def get_plugin(
     name: str,
-    _user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_login),
     session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
 ):
-    """插件详情（manifest/mcp_servers/健康态）"""
+    """插件详情（manifest/mcp_servers/健康态）；非超管仅限已上架，且不含验证明细"""
     from backend.services.plugin_service import PluginService
 
-    return ok(data=await PluginService(session).get_plugin_detail(name))
+    public = await _public_detail_or_404(user, market, "plugin", name)
+    data = await PluginService(session).get_plugin_detail(name)
+    if public is not None:
+        data.pop("verify_detail", None)
+    return ok(data=data)
 
 
 @router.post("/plugins/{name}/verify")
@@ -176,12 +201,14 @@ async def verify_plugin(
 @router.get("/experts/{name}")
 async def get_expert(
     name: str,
-    _user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_login),
     session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
 ):
-    """专家详情（persona/tools/skills/mcp）"""
+    """专家详情（persona/tools/skills/mcp）；非超管仅限已上架"""
     from backend.services.expert_service import ExpertService
 
+    await _public_detail_or_404(user, market, "expert", name)
     return ok(data=await ExpertService(session).get_expert_detail(name))
 
 
@@ -213,24 +240,28 @@ async def upsert_team(
 @router.get("/teams/{name}")
 async def get_team(
     name: str,
-    _user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_login),
     session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
 ):
-    """专家团详情"""
+    """专家团详情；非超管仅限已上架"""
     from backend.services.expert_service import TeamService
 
+    await _public_detail_or_404(user, market, "expert_team", name)
     return ok(data=await TeamService(session).get_team_detail(name))
 
 
 @router.get("/teams/{name}/export")
 async def export_team(
     name: str,
-    _user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_login),
     session: AsyncSession = Depends(get_async_db),
+    market: PowerMarketService = Depends(_market),
 ):
-    """专家团导出（TEAM.md 文档形态）"""
+    """专家团导出（TEAM.md 文档形态）；非超管仅限已上架"""
     from backend.services.expert_service import TeamService
 
+    await _public_detail_or_404(user, market, "expert_team", name)
     return ok(data={"markdown": await TeamService(session).export_team_md(name)})
 
 
@@ -417,13 +448,19 @@ async def get_capability_detail(
     name: str,
     user: CurrentUser = Depends(require_login),
     service: CapabilityService = Depends(_service),
+    market: PowerMarketService = Depends(_market),
 ):
     """统一详情（治理字段 + 类型化细节由各域端点补充）
+
+    非超管：只返回已上架资产的公开投影（未上架 / 黑名单 / 市场关闭 → 404 同形，审计 B4-4）。
 
     注意：本路由为二段式动态段，必须保持在文件末尾注册，否则遮蔽
     /plugins/{name} /experts/{name} /teams/{name} 三条静态详情路由（恒 404）。
     非超管不发出本机绝对路径（GWT-14.1/14.2）；相对库路径可保留。
     """
+    public = await _public_detail_or_404(user, market, asset_type, name)
+    if public is not None:
+        return ok(data=omit_local_abs_paths_for_non_platform_admin(public, user))
     asset = await service.get_asset(asset_type, name)
     data = {
         "id": asset.id, "asset_type": asset.asset_type, "name": asset.name,
@@ -435,7 +472,7 @@ async def get_capability_detail(
         "similar_to": asset.similar_to, "file_path": asset.file_path,
         "sync_state": asset.sync_state,
         "listing_state": asset.listing_state,
-        "listed_at": asset.listed_at.isoformat() if asset.listed_at else None,
+        "listed_at": utc_iso(asset.listed_at),
         "source_type": asset.source_type,
     }
     return ok(data=omit_local_abs_paths_for_non_platform_admin(data, user))

@@ -37,11 +37,18 @@ export interface PluginDetail {
   bundled_skills?: string[]
 }
 
+/** 治理目录分页（审计 BUG-31：原先固定取前 50 条并丢弃 total，超过 50 条的资产永远看不到） */
 export const listAssets = (
   type?: string, listingState?: string,
+  opts: { page?: number; pageSize?: number; q?: string } = {},
 ): Promise<{ total: number; items: AssetRow[] }> =>
-  api.get('/capabilities', { params: { type, listing_state: listingState, page_size: 50 } })
-    .then((r) => unwrap<{ total: number; items: AssetRow[] }>(r))
+  api.get('/capabilities', {
+    params: {
+      type, listing_state: listingState,
+      page: opts.page ?? 1, page_size: opts.pageSize ?? 20,
+      ...(opts.q ? { q: opts.q } : {}),
+    },
+  }).then((r) => unwrap<{ total: number; items: AssetRow[] }>(r))
 
 export const patchListing = (
   assetType: string,

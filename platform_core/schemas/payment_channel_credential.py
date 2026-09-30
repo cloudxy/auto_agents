@@ -1,8 +1,8 @@
 """商户凭据契约。HTTP 读回无密文全文；Put.secrets 仅写入。"""
-from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+from platform_core.schemas.time_types import UTCDateTime
 
 PaymentChannel = Literal["alipay", "wechat"]
 SECRETS_MASK = "********"
@@ -35,11 +35,11 @@ class PaymentChannelCredentialOut(BaseModel):
     channel: str
     merchant_no: str
     key_version: int
-    rotated_at: Optional[datetime] = None
+    rotated_at: Optional[UTCDateTime] = None
     created_by: Optional[str] = None
     updated_by: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDateTime
+    updated_at: UTCDateTime
 
 
 class PaymentChannelCredentialView(BaseModel):
@@ -50,11 +50,11 @@ class PaymentChannelCredentialView(BaseModel):
     merchant_no: Optional[str] = None
     secrets_masked: Optional[str] = None
     key_version: Optional[int] = None
-    rotated_at: Optional[datetime] = None
+    rotated_at: Optional[UTCDateTime] = None
     created_by: Optional[str] = None
     updated_by: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
+    updated_at: Optional[UTCDateTime] = None
 
 
 class PaymentChannelCredentialListOut(BaseModel):

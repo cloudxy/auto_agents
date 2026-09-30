@@ -37,5 +37,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_index(op.f('ix_spider_task_templates_id'), table_name='spider_task_templates')
     op.drop_table('spider_task_templates')

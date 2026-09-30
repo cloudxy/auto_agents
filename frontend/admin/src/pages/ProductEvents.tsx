@@ -9,6 +9,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { listProductEvents, type ProductEventRow } from '../services/productEvents'
 import { LoadEmpty, LoadFailure } from '../components/LoadState'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 const { Text } = Typography
 
@@ -44,7 +45,7 @@ const ProductEvents: React.FC = () => {
   }
 
   const columns: ColumnsType<ProductEventRow> = [
-    { title: '发生时间', dataIndex: 'occurred_at', width: 200 },
+    { title: '发生时间', dataIndex: 'occurred_at', width: 200, render: (v: string | null) => formatDateTime(v) },
     { title: '事件', dataIndex: 'event_name', width: 220 },
     { title: '企业', dataIndex: 'tenant_id', width: 80, render: (v) => v ?? '-' },
     { title: '匿名身份', dataIndex: 'anonymous_id', width: 160, render: (v) => v ?? '-' },

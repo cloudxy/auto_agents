@@ -61,8 +61,13 @@ def _clean_html_sync(html: str) -> str:
     text = _TAB_SPACES.sub(" ", text)
     text = _MULTI_NEWLINE.sub("\n", text)
     text = text.strip()
-    if len(text) > _MAX_HTML_CHARS:
-        text = text[:_MAX_HTML_CHARS]
+    # 决策 D21 前置闸：送进 LLM 的输入长度上限（AI_PLANNER.MAX_HTML_CHARS，缺省 _MAX_HTML_CHARS）
+    from config import settings
+
+    section = settings.get("AI_PLANNER") or {}
+    cap = int((section.get("MAX_HTML_CHARS") if hasattr(section, "get") else None) or _MAX_HTML_CHARS)
+    if len(text) > cap:
+        text = text[:cap]
     return text
 
 

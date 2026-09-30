@@ -65,5 +65,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """回滚数据库结构"""
-    op.drop_index('ix_spider_definitions_name', table_name='spider_definitions')
     op.drop_table('spider_definitions')

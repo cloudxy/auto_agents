@@ -17,6 +17,9 @@ from backend.services.quota_service import GATEWAY_UNREACHABLE_USER
 from backend.services.relay_sku_gate import (
     load_sku_status, raise_missing, require_active_sku, sku_page as build_sku_page,
 )
+from backend.services.relay_enforcement import (
+    GatewayEnforcementError, reconcile_tenant, reconcile_tokens, record_daily_usage,
+)
 from backend.services.relay_usage import (
     apply_usage, emit_usage_event, observe_gateway_usage, usage_snapshot,
 )
@@ -95,11 +98,30 @@ def _group_out(row: RelayGroup) -> RelayGroupOut:
 
 
 def _token_status(row: RelayToken) -> str:
+    """revoked / expired / exhausted（额度用尽）/ suspended（组停用、SKU 到期、企业额度用尽）/ active"""
     if row.revoked_at is not None:
         return "revoked"
-    if row.expires_at is not None and row.expires_at < datetime.now(timezone.utc):
-        return "expired"
+    expires = row.expires_at
+    if expires is not None:
+        cmp_now = datetime.now(timezone.utc)
+        if expires.tzinfo is None:
+            cmp_now = cmp_now.replace(tzinfo=None)
+        if expires < cmp_now:
+            return "expired"
+    reason = getattr(row, "blocked_reason", None)
+    quota = int(row.quota_tokens if row.quota_tokens is not None else -1)
+    if reason == "quota_exhausted" or (quota >= 0 and int(row.used_tokens or 0) >= quota):
+        return "exhausted"
+    if reason:
+        return "suspended"
     return "active"
+
+
+def _split_observation(obs) -> tuple[int, Optional[datetime], Optional[dict]]:
+    """观察结果兼容 (used, last_used) 与 (used, last_used, daily) 两种形态"""
+    used, last_used = obs[0], obs[1]
+    daily = obs[2] if len(obs) > 2 else None
+    return int(used or 0), last_used, daily
 
 
 class RelayService:
@@ -168,15 +190,36 @@ class RelayService:
             row.tpm_limit = max(0, int(payload.tpm_limit))
         if payload.models is not None:
             row.models_json = list(payload.models)
+        status_changed = False
         if payload.status is not None:
             if payload.status not in ("enabled", "disabled"):
                 raise BusinessException(message="状态只能是 enabled/disabled", code="RELAY_BAD_STATUS")
+            status_changed = payload.status != row.status
             row.status = payload.status
+        if status_changed:
+            # 审计 BUG-28：停用 / 启用在网关侧生效（封 / 解封组内全部令牌）；网关失败则整次不生效
+            await self.session.flush()
+            tokens = (await self.session.execute(
+                select(RelayToken).where(
+                    RelayToken.group_id == row.id, RelayToken.revoked_at.is_(None),
+                    RelayToken.gateway_key_id.isnot(None),
+                )
+            )).scalars().all()
+            try:
+                await reconcile_tokens(self.session, tokens, strict=True)
+            except GatewayEnforcementError as exc:
+                await self.session.rollback()
+                raise BusinessException(
+                    message="平台网关暂时不可用，渠道组状态未变更，请稍后重试。",
+                    code="RELAY_GATEWAY_UNAVAILABLE", status_code=502,
+                ) from exc
         await self.session.commit()
         await self.session.refresh(row)
         return _group_out(row)
 
     async def list_tokens(self, tenant_id: int) -> list[RelayTokenOut]:
+        """未吊销令牌（含额度用尽 / 暂停）。SKU 非 active 时隐藏（GWT-U23.4）——
+        到期令牌已由执法巡检在网关侧封禁，隐藏不再意味着「泄露的 key 仍可用」（审计 BUG-28）"""
         logger.info(f"列出令牌 | tenant={tenant_id}")
         if await load_sku_status(self.session, tenant_id) != "active":
             return []
@@ -185,7 +228,7 @@ class RelayService:
                 RelayToken.tenant_id == tenant_id, RelayToken.revoked_at.is_(None),
             ).order_by(RelayToken.id.desc())
         )).scalars().all()
-        return [self._token_out(r) for r in rows if _token_status(r) == "active"]
+        return [self._token_out(r) for r in rows if _token_status(r) != "expired"]
 
     async def issue_token(
         self, tenant_id: int, actor_tenant_role: Optional[str], payload: RelayTokenCreate,
@@ -198,6 +241,7 @@ class RelayService:
         group = await self._owned_group(tenant_id, payload.group_id)
         if group.status != "enabled":
             raise BusinessException(message="渠道组已停用", code="RELAY_GROUP_DISABLED")
+        await self._assert_tenant_relay_quota_left(tenant_id)
         # ADR-0019 决策 1：先网关登记虚拟 Key，再本地落 hash——失败即签发失败
         raw, gateway_key_id = await self._register_gateway_key(tenant_id, group)
         row = RelayToken(
@@ -232,7 +276,7 @@ class RelayService:
         )).scalar_one_or_none()
         if row is None:
             raise_missing()
-        await require_active_sku(self.session, tenant_id)
+        # 审计 BUG-28：吊销是止损操作，不受 SKU 状态限制（到期后泄露的 key 也必须能作废）
         _require_issuer_role(actor_tenant_role)
         if row.revoked_at is None:
             # ADR-0019 决策 4：吊销 = 网关作废在前 + 本地 revoked；网关失败不本地假吊销
@@ -269,9 +313,11 @@ class RelayService:
         degraded = False
         if row.gateway_key_id and row.revoked_at is None:
             try:
-                used, last_used = await self._observe_gateway_usage(row)
+                used, last_used, daily = _split_observation(await self._observe_gateway_usage(row))
+                used = await self._record_usage(row, used, daily)
                 transitioned = apply_usage(row, used, last_used)
                 snap = usage_snapshot(row) if transitioned else None
+                await reconcile_tokens(self.session, [row], strict=False)
                 await self.session.commit()
                 await self.session.refresh(row)
                 if snap is not None:
@@ -306,7 +352,8 @@ class RelayService:
         observed: list[tuple[RelayToken, int, Optional[datetime]]] = []
         try:
             for row in rows:
-                used, last_used = await self._observe_gateway_usage(row)
+                used, last_used, daily = _split_observation(await self._observe_gateway_usage(row))
+                used = await self._record_usage(row, used, daily)
                 observed.append((row, used, last_used))
         except httpx.HTTPError as exc:
             logger.warning(
@@ -325,6 +372,7 @@ class RelayService:
             if apply_usage(row, used, last_used):
                 transitioned.append((row, usage_snapshot(row)))
         if observed:
+            await reconcile_tenant(self.session, tenant_id, strict=False)
             await self.session.commit()
             for _row, snap in transitioned:
                 await emit_usage_event(self.session, snap)
@@ -353,8 +401,43 @@ class RelayService:
             raise_missing()
         return self._token_out(row)
 
-    async def _observe_gateway_usage(self, row: RelayToken) -> tuple[int, Optional[datetime]]:
+    async def _assert_tenant_relay_quota_left(self, tenant_id: int) -> None:
+        """企业月度中转额度用尽时拒绝签发（D19：中转单独计配额）"""
+        from backend.services.quota_service import shanghai_year_month
+        from backend.services.relay_enforcement import tenant_month_relay_used, tenant_relay_limit
+        from platform_core.models.tenant import Tenant
+
+        limit = tenant_relay_limit(await self.session.get(Tenant, tenant_id))
+        if limit <= 0:
+            return
+        used = await tenant_month_relay_used(self.session, tenant_id, shanghai_year_month())
+        if used >= limit:
+            raise BusinessException(
+                message="本月中转额度已用完，下月自动恢复；需要更多额度请联系平台。",
+                code="RELAY_TENANT_QUOTA_EXHAUSTED", status_code=422,
+            )
+
+    async def _observe_gateway_usage(self, row: RelayToken):
         return await observe_gateway_usage(row)
+
+    async def _record_usage(self, row: RelayToken, used: int, daily: Optional[dict]) -> int:
+        """写日粒度事实并返回单调累计值（审计 F3-9）；观察形态不带按日明细时整笔记今天"""
+        if daily is None:
+            recorded = int(row.used_tokens or 0)
+            if used > recorded:
+                from backend.services.relay_enforcement import utc_now_naive
+                from platform_core.models.relay import RelayUsageDaily
+
+                today = utc_now_naive().date()
+                existing_today = (await self.session.execute(
+                    select(RelayUsageDaily.total_tokens).where(
+                        RelayUsageDaily.token_id == row.id, RelayUsageDaily.stat_date == today)
+                )).scalar_one_or_none() or 0
+                daily = {today: int(existing_today) + (used - recorded)}
+            else:
+                daily = {}
+        total = await record_daily_usage(self.session, row, daily)
+        return max(int(used), total)
 
     async def _owned_token(self, tenant_id: int, token_id: int) -> RelayToken:
         row = (await self.session.execute(

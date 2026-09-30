@@ -60,9 +60,9 @@
 
 | 术语 | 含义 |
 |---|---|
-| 中转站（relay） | 平台 LLM 网关（**LiteLLM Proxy**）+ 本平台值班编排（渠道额度窗口 / 真伪探针）。new-api 为 **已退役运行时**，不与 LiteLLM 长期双通道并存。租户渠道组 / 虚拟令牌仍待产品拍板，不发给租户。 |
+| 中转站（relay） | 平台 LLM 网关（**LiteLLM Proxy**）+ 本平台值班编排（渠道额度窗口 / 真伪探针）。new-api 为 **已退役运行时**，不与 LiteLLM 长期双通道并存。租户渠道组 / 虚拟令牌按 D19（2026-09-28：卖）作为中转 SKU 发给企业，额度 / 停用 / 到期在网关侧执行，见 [ADR-0027](docs/adr/ADR-0027-credential-planes.md)。 |
 | 渠道 | 用户文案可仍叫「渠道」；值班列表来自网关侧模型/部署，不是 new-api channel。 |
-| 令牌（平台路径） | 网关虚拟钥匙，**不发给租户**，直至租户中转 SKU 另开需求。 |
+| 令牌（平台路径） | 网关虚拟钥匙。平台自用的 LiteLLM Key 不发给租户；企业购买中转 SKU 后由企业负责人签发自己的中转令牌（凭据平面见 [ADR-0027](docs/adr/ADR-0027-credential-planes.md)）。 |
 | 租户（tenant） | SaaS 隔离单元；行级隔离经 tenant_context 事件钩子（tenant_scope / platform_scope）。 |
 | 配额（quota） | tenants.quota 三类：任务并发 / 结果存储 / LLM token 月度。内部业务码可以是 `QUOTA_EXCEEDED`；**用户可见文案不得渲染该码或裸 429**。 |
 | 资产评分（asset scoring） | 四维 rubric（completeness/doc_quality/maintenance/real_world_effect）AI 建议 + 人工终评（人工权威）；tier S/A/B/C 派生。按资产类型可配维度集。 |

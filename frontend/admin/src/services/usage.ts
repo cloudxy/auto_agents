@@ -14,8 +14,8 @@ export interface UsageOverview {
   quota?: { task_concurrency: number; result_storage: number; llm_tokens_month: number }
   usage?: { task_concurrency: number; result_storage: number; llm_tokens_month: number }
   llm_by_provider?: Record<string, number>
-  cost_by_provider?: Record<string, number>
-  cost_cents_total?: number
+  /** 中转月度用量（D19：与 LLM token 分开计；未开通中转为 null） */
+  relay?: { sku_status: string; used_tokens: number; limit_tokens: number } | null
   timezone?: string
   year_month?: string
   alerts?: UsageAlert[]
@@ -38,13 +38,15 @@ export const fetchUsageByMember = (): Promise<MemberUsageRow[]> =>
 
 export interface DeliveryWebhook {
   delivery_webhook_url: string | null
+  /** 本企业独立签名密钥（仅企业管理员可见；配置 URL 后生成） */
+  signing_secret?: string | null
 }
 
 export const fetchDeliveryWebhook = (): Promise<DeliveryWebhook> =>
   api.get('/tenants/me/delivery-webhook').then((r) => unwrap<DeliveryWebhook>(r))
 
-export const putDeliveryWebhook = (url: string | null): Promise<DeliveryWebhook> =>
-  api.put('/tenants/me/delivery-webhook', { url }).then((r) => unwrap<DeliveryWebhook>(r))
+export const putDeliveryWebhook = (url: string | null, rotateSecret = false): Promise<DeliveryWebhook> =>
+  api.put('/tenants/me/delivery-webhook', { url, rotate_secret: rotateSecret }).then((r) => unwrap<DeliveryWebhook>(r))
 
 export interface UpgradeIntent {
   action: 'checkout' | 'contact_admin' | string

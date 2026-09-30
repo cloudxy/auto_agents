@@ -29,6 +29,17 @@ from backend.tasks.consumer import SpiderTaskConsumer
 from platform_core.queues import ITEM_QUEUE
 from platform_core.schemas.spider import AlertRuleRequest, AlertRuleUpdateRequest
 
+
+@pytest.fixture(autouse=True)
+def _personal_register_enabled():
+    """决策 D1：个人注册默认关闭；本文件验证开启时的行为，显式打开开关"""
+    from config import settings
+
+    original = settings.get("AUTH.PERSONAL_REGISTER_ENABLED")
+    settings.set("AUTH.PERSONAL_REGISTER_ENABLED", True)
+    yield
+    settings.set("AUTH.PERSONAL_REGISTER_ENABLED", original)
+
 GOOD_LLM_JSON = json.dumps({
     "selectors": [{"name": "title", "type": "css", "expr": "h1::text"}],
     "pagination": None,
@@ -426,6 +437,10 @@ class TestFlushBatchCountsRecompute:
         repo.batch_increment_result_counts = AsyncMock()
         repo.find_by_content_hash = AsyncMock(
             side_effect=lambda h, **kw: MagicMock() if h == dup_hash else None
+        )
+        # R2-1 后批量查重走 existing_hashes（按租户 + 爬虫一次查完）
+        repo.existing_hashes = AsyncMock(
+            side_effect=lambda tenant, spider, hashes: {h for h in hashes if h == dup_hash}
         )
 
         session = AsyncMock()
