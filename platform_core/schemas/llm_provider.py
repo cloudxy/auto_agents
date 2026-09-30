@@ -14,13 +14,13 @@ test 端点返回 {ok, latency_ms, model, error}。
 - is_active 不在 Create/Update 中开放（激活走专用端点 /activate，保证单激活互斥）
 """
 import ipaddress
-from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from platform_core.schemas.base import RequestBody
+from platform_core.schemas.time_types import UTCDateTime
 
 # 协议白名单（B-M1：经 llm_protocol 适配器支持三协议）
 PROVIDER_TYPES = ("openai_compatible", "anthropic", "google_gemini")
@@ -199,8 +199,8 @@ class LlmProviderResponse(BaseModel):
     enabled: bool = True
     tenant_id: Optional[int] = Field(None, description="所属租户；NULL=平台级行")
     remark: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
+    updated_at: Optional[UTCDateTime] = None
 
 
 class LlmProviderTestResponse(BaseModel):

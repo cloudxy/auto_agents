@@ -43,7 +43,7 @@ from backend.services.asset_import_sandbox import (
 )
 from backend.services.product_event_service import emit_product_event
 from platform_core.exceptions import ValidationException
-from platform_core.fs_guard import PathEscapeError, assert_contained
+from platform_core.fs_guard import LandingJournal, PathEscapeError, assert_contained
 from platform_core.logger import get_logger
 from platform_core.models.asset_import import AssetImportBatch, AssetImportItem
 from platform_core.models.capability import CapabilityAsset
@@ -128,18 +128,18 @@ def _dir_files(pkg: Path) -> list[tuple[str, Path]]:
     return sorted((p.relative_to(pkg).as_posix(), p) for p in pkg.rglob("*") if p.is_file())
 
 
-def _contained_write(dest: Path, data: bytes) -> None:
+def _contained_write(dest: Path, data: bytes, journal: LandingJournal) -> None:
     """写入前收容断言：目标必须落在资产目录内、且路径中无符号链接（GWT-100.7 兜底）。
 
     收容检查委派给 `platform_core.fs_guard.assert_contained`（QA-1 修复：全仓
-    路径收容唯一实现，与 hub_import._land 共用同一份断言）。
+    路径收容唯一实现，与 hub_import._land 共用同一份断言）。写入经落盘日志原子写、
+    可撤回（审计 BUG-33）。
     """
     try:
         dest = assert_contained(dest, _landing_root())
     except PathEscapeError as exc:
         raise OSError(f"越界写入拒绝: {dest}") from exc
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(data)
+    journal.write_bytes(dest, data)
 
 
 class AssetImportService:
@@ -286,8 +286,10 @@ class AssetImportService:
         origin = batch.origin
         pendings = _collect_candidates(sandbox)
         pendings.extend(_unmatched_entry_failures(pendings, guard))
+        # 审计 BUG-33：落盘日志放在沙箱里，随沙箱清理；整批提交失败时据此撤回本次落盘
+        journal = LandingJournal(sandbox / ".landing-backup")
         items = [
-            await self._dispatch(p, _entry_failure_for(p, guard))
+            await self._dispatch(p, _entry_failure_for(p, guard), journal)
             for p in pendings
         ]
         counts = {s: sum(1 for i in items if i.status == s)
@@ -303,7 +305,12 @@ class AssetImportService:
                 batch_id=batch_id, asset_type=i.asset_type, name=i.name,
                 status=i.status, reason=i.reason, asset_id=i.asset_id,
             ))
-        await self.session.commit()
+        try:
+            await self.session.commit()
+        except Exception:
+            journal.rollback_to(0)
+            logger.error(f"asset_import 提交失败，已撤回本次落盘 | batch={batch_id}")
+            raise
         await self._emit_event(batch_id, origin, items, counts, actor_id=actor_id)
         payload = {
             "batch_id": batch_id, "origin": origin, "status": "completed",
@@ -323,7 +330,9 @@ class AssetImportService:
             f"succeeded={counts['succeeded']} failed={counts['failed']} skipped={counts['skipped']}")
         return payload
 
-    async def _dispatch(self, p: PendingAsset, entry_failure: "str | None") -> _ItemResult:
+    async def _dispatch(
+        self, p: PendingAsset, entry_failure: "str | None", journal: LandingJournal,
+    ) -> _ItemResult:
         if entry_failure:
             return _ItemResult(p.asset_type, p.name, "failed", reason=entry_failure)
         if p.error:
@@ -337,6 +346,7 @@ class AssetImportService:
         )).scalar_one_or_none()
         if existing is not None:  # 幂等键=类型+名称（GWT-100.8），不产生第二行
             return _ItemResult(p.asset_type, p.name, "skipped")
+        mark = journal.mark()
         try:
             async with self.session.begin_nested():
                 asset = CapabilityAsset(
@@ -348,29 +358,32 @@ class AssetImportService:
                 self.session.add(asset)
                 await self.session.flush()
                 asset_id = int(asset.id)  # P-BE-01：commit 前取 id
-                self._land(p)
+                self._land(p, journal)
         except IntegrityError:
+            journal.rollback_to(mark)
             return _ItemResult(p.asset_type, p.name, "skipped")  # 并发撞 uq 幂等键
         except OSError as exc:
+            journal.rollback_to(mark)  # 写了一半的目录撤掉：否则重试永远撞「目录已存在」
             logger.warning(f"导入落盘失败 | type={p.asset_type} name={p.name} err={exc}")
             return _ItemResult(p.asset_type, p.name, "failed", reason=f"落盘失败: {exc}"[:512])
         return _ItemResult(p.asset_type, p.name, "succeeded", asset_id=asset_id)
 
-    def _land(self, p: PendingAsset) -> None:
+    def _land(self, p: PendingAsset, journal: LandingJournal) -> None:
         """落盘资产目录（限定 capability-library 对应子目录，NFR-04）"""
         root = _landing_root()
         if p.single_file:
             _contained_write(root / _TYPE_DIRS[p.asset_type] / f"{p.name}.md",
-                             p.files[0][1].read_bytes())
+                             p.files[0][1].read_bytes(), journal)
             return
         dest = root / _TYPE_DIRS[p.asset_type] / p.name
         try:
             dest = assert_contained(dest, root)
         except PathEscapeError as exc:
             raise OSError(f"越界写入拒绝: {p.name}") from exc
-        dest.mkdir(parents=True, exist_ok=False)
+        if dest.exists():  # 新建语义：不合并进已有目录（原 mkdir(exist_ok=False) 口径）
+            raise FileExistsError(f"目标目录已存在: {dest}")
         for rel, src in p.files:
-            _contained_write(dest.joinpath(*PurePosixPath(rel).parts), src.read_bytes())
+            _contained_write(dest.joinpath(*PurePosixPath(rel).parts), src.read_bytes(), journal)
 
     @staticmethod
     def _file_path(p: PendingAsset) -> str:

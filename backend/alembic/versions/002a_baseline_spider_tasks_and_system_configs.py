@@ -63,9 +63,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """回滚基线（注意：spider_tasks 含业务数据，downgrade 过此版本会连带删表）"""
-    op.drop_index(op.f("ix_system_configs_config_key"), table_name="system_configs")
-    op.drop_index(op.f("ix_system_configs_id"), table_name="system_configs")
     op.drop_table("system_configs")
-    op.drop_index(op.f("ix_spider_tasks_spider_name"), table_name="spider_tasks")
-    op.drop_index(op.f("ix_spider_tasks_id"), table_name="spider_tasks")
     op.drop_table("spider_tasks")

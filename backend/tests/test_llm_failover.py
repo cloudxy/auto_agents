@@ -27,6 +27,8 @@ def _patch(monkeypatch, cfg, chain, http_behavior, notifications):
         return cfg
 
     monkeypatch.setattr("backend.services.ai_planner_service._resolve_llm_runtime_config", _resolve)
+    # 重试退避是真实 sleep（1s、2s…）：本文件测的是换路与告警，不是退避时长
+    monkeypatch.setattr(lc, "_RETRY_BASE_DELAY", 0.0)
     # 共享 client 缓存跨测试会残留旧闭包，逐用例清空（provider 路径专用缓存）
     lc._HTTP_CLIENTS.clear()
     lc._HTTP_CLIENT_OWNER.clear()

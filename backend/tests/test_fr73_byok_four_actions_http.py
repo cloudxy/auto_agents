@@ -239,6 +239,16 @@ def test_post_test_byok_gateway_down_repair_flow_not_74_1(
     _assert_not_74_1_or_quota(data.get("error_message") or "")
 
 
+_D32_PENDING = pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "D32 待答复：P0-3 临时按 D32-A 把技能库重评 / 同类建议收为平台超管专属（审计 B4-1），"
+        "租户 BYOK 触发 GWT-73.8/73.9/73.11/73.12 暂停；D32 选 B 放开后本标记会因 XPASS 变红，届时移除"
+    ),
+)
+
+
+@_D32_PENDING
 def test_post_rescore_byok_consume_once_outbound_own_row(
     db_client, db_engine, db_session, monkeypatch, t17_plane,
 ):
@@ -256,6 +266,7 @@ def test_post_rescore_byok_consume_once_outbound_own_row(
     assert resp.status_code == 200
 
 
+@_D32_PENDING
 def test_post_rescore_byok_gateway_down_consume_once_not_74_1(
     db_client, db_engine, db_session, monkeypatch, t17_plane,
 ):
@@ -276,6 +287,7 @@ def test_post_rescore_byok_gateway_down_consume_once_not_74_1(
     _assert_not_74_1_or_quota(err)
 
 
+@_D32_PENDING
 def test_similar_suggest_byok_outbound_own_row(
     db_client, db_engine, db_session, monkeypatch, t17_plane,
 ):
@@ -292,6 +304,7 @@ def test_similar_suggest_byok_outbound_own_row(
     assert resp.json()["data"]["clusters"] == [["t17-sim-a", "t17-sim-b"]]
 
 
+@_D32_PENDING
 def test_similar_suggest_byok_gateway_down_not_74_1(
     db_client, db_engine, db_session, monkeypatch, t17_plane,
 ):
@@ -312,3 +325,18 @@ def test_similar_suggest_byok_gateway_down_not_74_1(
     assert GATEWAY_UNREACHABLE_USER not in str(body)
     assert PROVIDER_ERROR_USER not in str(body)
     assert NO_MODEL_USER not in str(body)
+
+
+def test_d32a_tenant_byok_cannot_rescore_or_suggest(
+    db_client, db_engine, db_session, monkeypatch, t17_plane,
+):
+    """D32-A 临时口径（审计 B4-1）：租户带 BYOK 行也不能重评平台技能 / 触发同类建议；404 且零出站"""
+    outbound: list[str] = []
+    _wire_byok(monkeypatch, db_engine, db_session, outbound, SCORE_JSON)
+    _install_score_queue(monkeypatch)
+    headers, tid = _operator_headers(db_session, "t17-d32a")
+    _seed_own_row(db_session, tid, monkeypatch)
+    name = _seed_skill(db_session, "rate-me-d32a")
+    assert db_client.post(f"/api/v1/skills/{name}/rescore", headers=headers).status_code == 404
+    assert db_client.post("/api/v1/skills/similar-suggest", headers=headers).status_code == 404
+    assert outbound == []

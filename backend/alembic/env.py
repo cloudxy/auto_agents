@@ -60,10 +60,16 @@ def run_migrations_offline():
         context.run_migrations()
 
 def run_migrations_online():
+    # 审计 BUG-43：迁移里的 CURRENT_TIMESTAMP 种子与应用同一时钟（UTC）
+    extra = {}
+    if config.get_main_option("sqlalchemy.url").startswith("mysql"):
+        from platform_core.timeutil import MYSQL_UTC_CONNECT_ARGS
+        extra["connect_args"] = dict(MYSQL_UTC_CONNECT_ARGS)
     connectable = engine_from_config(
         config.get_section(config.config_ini_section),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        **extra,
     )
     with connectable.connect() as connection:
         context.configure(

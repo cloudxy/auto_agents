@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.ai_planner.llm_client import llm_chat
 from platform_core.exceptions import AuthorizationException, ValidationException
 from platform_core.logger import get_logger
+from platform_core.timeutil import business_date_of, business_today, utc_iso
 from platform_core.models.skill import Skill, SkillJob, SkillReview
 
 if TYPE_CHECKING:  # T6 解环：仅类型注解（skill_import_service 运行时依赖本模块，方向单向）
@@ -507,7 +508,7 @@ class SkillService:
                 "description": r.content or "", "kind": (self._extra_of(r) or {}).get("kind", ""),
                 "repo": (self._extra_of(r) or {}).get("repo", ""),
                 "review_status": self._review_of(r) or "pending",
-                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "created_at": utc_iso(r.created_at),
             }
             for r in rows
         ]
@@ -701,7 +702,7 @@ class SkillService:
             capability["rubric"] = row.rubric_human or {}
             capability["reviewed_by"] = row.reviewed_by
             capability["reviewed_at"] = (
-                row.reviewed_at.date().isoformat() if row.reviewed_at else None
+                business_date_of(row.reviewed_at).isoformat() if row.reviewed_at else None
             )
             capability["notes"] = row.review_notes
             meta["capability"] = capability
@@ -730,7 +731,7 @@ class SkillService:
                 return
             changelog = skill_dir / "CHANGELOG.md"
             existing = changelog.read_text(encoding="utf-8") if changelog.exists() else "# 更新记录\n"
-            line = f"- {date.today().isoformat()} | {summary}\n"
+            line = f"- {business_today().isoformat()} | {summary}\n"
             changelog.write_text(existing + line, encoding="utf-8")
         except OSError as exc:
             logger.error(f"CHANGELOG 追加失败 | skill={row.name} err={exc}")

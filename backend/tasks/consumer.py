@@ -17,17 +17,20 @@ import hashlib
 import json
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List, Optional
 
 import redis.asyncio as aioredis
 from sqlalchemy import func
+from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from backend.config_consts import (TASKS_STALE_TASK_HOURS)
 from platform_core.db import get_manager
 from platform_core.logger import get_logger
+from platform_core.timeutil import utcnow
 from platform_core.queues import (
     ACTIVE_TASK_KEY,
     ACTIVE_TASK_TTL,
@@ -37,6 +40,7 @@ from platform_core.queues import (
     LEGACY_ACTIVE_TASK_PREFIX,
     TASK_CONTROL_KEY,
     TASK_LOG_OFFSET_KEY,
+    TASK_LOG_OFFSET_TTL,
     TASK_QUEUE_PRIORITIES,
     TASK_RESULTS_KEY,
     item_hold_queue,
@@ -61,6 +65,11 @@ _BLPOP_TIMEOUT = 5
 
 # 期 3：ingest 批量化 —— 单次 lpop 拉取条数（替代逐条 blpop 的 Redis round-trip）
 _INGEST_POP_COUNT = 20
+# 回流失败的单条消息最多重放次数，超过进死信（审计 R2-1：毒消息不再无限循环）
+_MAX_REDO_ATTEMPTS = 3
+_REDO_ATTEMPTS_KEY = "_redo_attempts"
+# 基础设施类故障（库/网络不可用）：整批暂存重放，不计入单条重放次数
+_TRANSIENT_ERRORS = (OperationalError, InterfaceError, SATimeoutError, ConnectionError, OSError)
 # 无新消息时的休眠秒数：保证定期 flush 节奏 + 避免 lpop 空转烧 CPU
 # （原 blpop timeout=1 同等语义：无消息时最多约该间隔才做一次 flush 检查）
 _INGEST_IDLE_SLEEP = 0.2
@@ -238,6 +247,7 @@ class SpiderTaskConsumer:
         task_id = msg.get("task_id")
         spider_name = msg.get("spider_name", "")
         logger.info(f"消费任务消息: task_id={task_id}, spider={spider_name}")
+        msg = await self._with_db_params(msg)
 
         # A4：分发前检查控制键，如果已有 stop 控制键则直接置 failed（用户已终止）
         try:
@@ -266,12 +276,16 @@ class SpiderTaskConsumer:
             return
 
         # 1. 任务置 running（同时写 started_at，供运行时长统计）
+        # 审计 BUG-12：只从 pending 迁移（CAS）。重复 / 迟到的分发消息原先无条件 UPDATE，
+        # 把已完成 / 已失败的任务翻回 running，并再抓一遍
         async with AsyncSession(self._engine()) as session:
             repo = SpiderTaskRepository(session)
-            task = await repo.update(task_id, status="running", started_at=func.now())
+            task = await repo.update(
+                task_id, only_if_status=("pending",), status="running", started_at=func.now(),
+            )
             await session.commit()
             if task is None:
-                logger.warning(f"任务不存在，丢弃消息: task_id={task_id}")
+                logger.warning(f"任务不存在或已不在待执行状态（重复 / 迟到消息），丢弃: task_id={task_id}")
                 return
 
         # 2. 写活跃任务关联（供并发槽位控制 / 终态回调）+ 投递 start URL
@@ -317,13 +331,34 @@ class SpiderTaskConsumer:
             f"任务已分发: task_id={task_id}, spider={spider_name}, urls={len(urls)}"
         )
 
+    async def _with_db_params(self, msg: dict) -> dict:
+        """分发以数据库行为准（审计 BUG-13）：待执行任务被编辑后，队列里的旧消息仍带旧 params；
+        按 task_id 取库内最新 params 覆盖消息快照。读库失败沿用消息内容（不阻断分发）"""
+        task_id = msg.get("task_id")
+        if not task_id:
+            return msg
+        try:
+            async with AsyncSession(self._engine()) as session:
+                task = await SpiderTaskRepository(session).get_by_id(task_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"分发读取任务参数失败，沿用消息快照: task_id={task_id}, error={e}")
+            return msg
+        if task is None:
+            return msg
+        merged = dict(msg)
+        db_params = getattr(task, "params", None)
+        if isinstance(db_params, str) and db_params != msg.get("params"):
+            logger.info(f"分发参数以库内为准（任务已编辑）: task_id={task_id}")
+            merged["params"] = db_params
+        return merged
+
     async def _record_log_offset(self, task_id) -> None:
         """记录分发时刻的爬虫日志文件大小（失败仅记日志，不阻断分发）"""
         try:
             log_path = resolve_spider_log_path()
             offset = os.path.getsize(log_path) if log_path and os.path.isfile(log_path) else 0
             await self._redis.set(
-                TASK_LOG_OFFSET_KEY.format(task_id=task_id), offset, ex=ACTIVE_TASK_TTL
+                TASK_LOG_OFFSET_KEY.format(task_id=task_id), offset, ex=TASK_LOG_OFFSET_TTL
             )
         except Exception as e:  # noqa: BLE001
             logger.warning(f"记录任务日志偏移量失败: task_id={task_id}, error={e}")
@@ -477,7 +512,7 @@ class SpiderTaskConsumer:
         stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", TASKS_STALE_TASK_HOURS) or 0)
         if stale_hours <= 0 or self._redis is None:
             return
-        cutoff = datetime.now() - timedelta(hours=stale_hours)
+        cutoff = utcnow() - timedelta(hours=stale_hours)
         async with AsyncSession(self._engine()) as session:
             candidates = await SpiderTaskRepository(session).find_stale_running(
                 cutoff, limit=self._STALE_BATCH
@@ -512,7 +547,7 @@ class SpiderTaskConsumer:
         stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", TASKS_STALE_TASK_HOURS) or 0)
         if stale_hours <= 0 or self._redis is None:
             return
-        cutoff = datetime.now() - timedelta(hours=stale_hours)
+        cutoff = utcnow() - timedelta(hours=stale_hours)
         async with AsyncSession(self._engine()) as session:
             candidates = await SpiderTaskRepository(session).find_stale_pending(
                 cutoff, limit=self._STALE_BATCH
@@ -614,9 +649,9 @@ class SpiderTaskConsumer:
                         logger.error(f"关停 flush 残余批次失败: {e}")
                 raise
             except Exception as e:  # noqa: BLE001
-                logger.error(f"ingest 循环异常: {e}")
+                logger.error(f"ingest 循环异常: {type(e).__name__}: {e}")
                 if batch:
-                    await self._park_messages(ITEM_REDO_QUEUE, batch)
+                    await self._recover_failed_batch(list(batch), e)
                     batch.clear()
                     batch_counts.clear()
                 await asyncio.sleep(1)
@@ -627,6 +662,41 @@ class SpiderTaskConsumer:
                 await self._flush_batch(batch, batch_counts)
             except Exception as e:  # noqa: BLE001
                 logger.error(f"退出前 flush 残余批次失败: {e}")
+
+    async def _recover_failed_batch(self, batch: list[dict], error: Exception) -> None:
+        """批次落库失败后的隔离恢复（审计 R2-1）
+
+        - 基础设施故障（库连接/超时）：整批原样进 REDO，不计重放次数，等依赖恢复；
+        - 数据类故障（唯一键冲突、字段超长等）：逐条单独落库，好消息照常入库，
+          仍失败的单条累加重放次数，超过上限进死信留档——一条毒消息不再拖住整批。
+        """
+        if isinstance(error, _TRANSIENT_ERRORS):
+            logger.warning(f"回流批次遇基础设施故障，整批暂存重放: n={len(batch)}")
+            await self._park_messages(ITEM_REDO_QUEUE, batch)
+            return
+        logger.warning(f"回流批次数据异常，转逐条隔离落库: n={len(batch)} error={type(error).__name__}")
+        for msg in batch:
+            try:
+                await self._flush_batch([msg], {})
+            except _TRANSIENT_ERRORS:
+                await self._park_messages(ITEM_REDO_QUEUE, [msg])
+            except Exception as e:  # noqa: BLE001 单条失败只影响自身
+                await self._redo_or_dead(msg, e)
+
+    async def _redo_or_dead(self, msg: dict, error: Exception) -> None:
+        """单条失败：累加重放次数；达到上限进死信（带原因），否则回 REDO"""
+        attempts = int(msg.get(_REDO_ATTEMPTS_KEY) or 0) + 1
+        retry = dict(msg)
+        retry[_REDO_ATTEMPTS_KEY] = attempts
+        if attempts >= _MAX_REDO_ATTEMPTS:
+            retry["_reject_reason"] = f"回流落库连续失败 {attempts} 次: {type(error).__name__}: {str(error)[:200]}"
+            logger.error(
+                f"回流消息进死信: task_id={msg.get('task_id')} attempts={attempts} error={error}"
+            )
+            await self._park_messages(DEAD_ITEM_QUEUE, [retry])
+            return
+        logger.warning(f"回流消息回 REDO: task_id={msg.get('task_id')} attempts={attempts}")
+        await self._park_messages(ITEM_REDO_QUEUE, [retry])
 
     async def _flush_batch(
         self, messages: list[dict], counts: dict[int, int]
@@ -677,9 +747,26 @@ class SpiderTaskConsumer:
                 )
                 task_owner_cache[tid] = self._task_owner_id(task)
 
-            # ── 2. 构建 SpiderResult 实例（跳过增量去重命中项）──
+            # ── 2. 构建 SpiderResult 实例（跳过批内重复 / 库内已存在项）──
             result_repo = SpiderResultRepository(session)
             mirror_msgs: list[tuple[int, dict]] = []  # (task_id, msg)
+            # 唯一键 (tenant_id, spider_name, content_hash) 对全部任务生效（不止 incremental）：
+            # 批内重复与库内已存在都必须在 flush 前剔除，否则整批 IntegrityError（审计 R2-1）
+            seen_keys: set[tuple[int, str, str]] = set()
+            existing_cache: dict[tuple[int, str], set[str]] = {}
+            pending_hashes: dict[tuple[int, str], list[str]] = {}
+            for msg in messages:
+                owner = task_owner_cache.get(msg["task_id"])
+                if owner is None:
+                    continue
+                item0 = msg.get("item") or {}
+                pending_hashes.setdefault((owner, msg.get("spider_name", "")), []).append(
+                    self._content_hash(item0)
+                )
+            for (owner, spider), hashes in pending_hashes.items():
+                existing_cache[(owner, spider)] = await result_repo.existing_hashes(
+                    owner, spider, hashes
+                )
 
             for msg in messages:
                 task_id = msg["task_id"]
@@ -699,25 +786,15 @@ class SpiderTaskConsumer:
 
                 # B5：content_hash = md5(url + title + content)
                 url_val = str(item.get("url") or "")[:500]
-                title_val = item.get("title") or ""
-                content_val = item.get("content") or ""
-                content_hash = hashlib.md5(
-                    f"{url_val}{title_val}{content_val}".encode()
-                ).hexdigest()
+                content_hash = self._content_hash(item)
 
-                # 增量去重（B5）：task params.incremental=true 时跳过重复
-                params = task_params_cache.get(task_id, {})
-                if params.get("incremental") and content_hash:
-                    existing = await result_repo.find_by_content_hash(
-                        content_hash, tenant_id=owner_id, spider_name=spider_name
-                    )
-                    if existing:
-                        logger.debug(
-                            f"增量去重：重复内容已跳过: hash={content_hash}, url={url_val}"
-                        )
-                        # 去重项不计入 result_count，修正 batch_counts
-                        counts[task_id] = max(0, counts[task_id] - 1)
-                        continue
+                # 去重（B5 + R2-1）：批内重复或库内已存在 → 跳过，不计 result_count
+                key = (owner_id, spider_name, content_hash)
+                if key in seen_keys or content_hash in existing_cache.get((owner_id, spider_name), set()):
+                    logger.debug(f"重复内容已跳过: hash={content_hash}, url={url_val}")
+                    counts[task_id] = max(0, counts[task_id] - 1)
+                    continue
+                seen_keys.add(key)
 
                 # 未映射字段进 extra
                 mapped = {"url", "title", "content", "source"}
@@ -783,11 +860,15 @@ class SpiderTaskConsumer:
             # ── 4. 批量累加 result_count ──
             await SpiderTaskRepository(session).batch_increment_result_counts(counts)
 
-            # ── 5. 多存储双写（4.2）：命中 redis/csv 目标时追加任务级缓存 ──
-            await self._mirror_batch(mirror_msgs, task_store_cache)
-
-            # ── 6. 单次 commit ──
+            # ── 5. 单次 commit ──
             await session.commit()
+
+        # ── 6. 多存储双写（4.2）：只镜像已提交的结果（审计 R2-1：原先先镜像后提交，
+        #    提交失败重放会重复镜像）；镜像失败不回滚已落库数据，只记日志
+        try:
+            await self._mirror_batch(mirror_msgs, task_store_cache)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"多存储镜像失败（结果已落库）: n={len(mirror_msgs)} error={e}")
 
         for orphan in orphans:
             await self._reject_orphan_item(
@@ -849,13 +930,9 @@ class SpiderTaskConsumer:
         # 数据质量评分（B1）：由 Scrapy 侧 QualityCheckPipeline 写入 item
         quality_score = item.pop("_quality_score", None)
 
-        # B5：计算 content_hash（md5 of url+title+content），用于增量去重
+        # B5：计算 content_hash（md5 of url+title+content），用于去重
         url_val = str(item.get("url") or "")[:500]
-        title_val = item.get("title") or ""
-        content_val = item.get("content") or ""
-        content_hash = hashlib.md5(
-            f"{url_val}{title_val}{content_val}".encode()
-        ).hexdigest()
+        content_hash = self._content_hash(item)
 
         mapped = {"url", "title", "content", "source"}
         extra = {k: v for k, v in item.items() if k not in mapped}
@@ -868,21 +945,15 @@ class SpiderTaskConsumer:
             if owner_id is None:
                 pass
             else:
-                params = {}
-                if task and task.params:
-                    try:
-                        params = json.loads(task.params)
-                    except (TypeError, ValueError):
-                        pass
-                if params.get("incremental") and content_hash:
-                    existing = await SpiderResultRepository(session).find_by_content_hash(
-                        content_hash,
-                        tenant_id=owner_id,
-                        spider_name=spider_name or None,
-                    )
-                    if existing:
-                        logger.debug(f"增量去重：重复内容已跳过: hash={content_hash}, url={url_val}")
-                        return
+                # 唯一键对全部任务生效：重复内容一律跳过（审计 R2-1，不止 incremental）
+                existing = await SpiderResultRepository(session).find_by_content_hash(
+                    content_hash,
+                    tenant_id=owner_id,
+                    spider_name=spider_name or None,
+                )
+                if existing:
+                    logger.debug(f"重复内容已跳过: hash={content_hash}, url={url_val}")
+                    return
 
                 repo = SpiderResultRepository(session)
                 await repo.create_for_task(
@@ -927,3 +998,11 @@ class SpiderTaskConsumer:
     @staticmethod
     def _engine():
         return get_manager().async_engines["DEFAULT"]
+
+    @staticmethod
+    def _content_hash(item: dict) -> str:
+        """B5 内容指纹：md5(url[:500] + title + content)，与唯一键 content_hash 同口径"""
+        url_val = str(item.get("url") or "")[:500]
+        title_val = item.get("title") or ""
+        content_val = item.get("content") or ""
+        return hashlib.md5(f"{url_val}{title_val}{content_val}".encode()).hexdigest()

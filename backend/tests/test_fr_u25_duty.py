@@ -33,6 +33,7 @@ from backend.services.newapi_overview_service import (
     _ModelFetchResult,
 )
 from conftest import make_tenant_owner_headers
+from platform_core.timeutil import utcnow
 
 OVERVIEW = "/api/v1/newapi/overview"
 EVENTS = "/api/v1/newapi/events"
@@ -237,9 +238,9 @@ def test_overview_latest_probe_scoped_to_current_gateway_refs(api_client, monkey
         monkeypatch, events=1, batch_id="batch-u25",
         latest={cid_a: row_a},
     )
-    before = datetime.now()
+    before = utcnow()
     resp = api_client.get(OVERVIEW)
-    after = datetime.now()
+    after = utcnow()
     assert resp.status_code == 200
     latest_mock.assert_awaited()
     kwargs = latest_mock.await_args.kwargs

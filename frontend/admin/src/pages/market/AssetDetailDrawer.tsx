@@ -14,6 +14,7 @@ import { fetchPublicCapability, type PublicCapabilityCard } from '../../services
 import { READONLY_SUBSCRIBE, cardTitle, typeLabelOf } from './shelfCopy'
 import AssetVisual, { visualIndex } from './AssetVisual'
 import MarkdownBody from './MarkdownBody'
+import { formatDate } from '@auto-agents/frontend-shared'
 import './AssetDetailDrawer.css'
 
 const { Paragraph, Text } = Typography
@@ -42,8 +43,8 @@ const mdBodyOf = (data: PublicCapabilityCard | undefined): string => {
   return data.skill_md || data.body_md || data.persona_md || ''
 }
 
-const formatDate = (raw?: string | null): string => {
-  const day = (raw || '').slice(0, 10)
+const formatUpdated = (raw?: string | null): string => {
+  const day = formatDate(raw, '')
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? `更新于 ${day}` : ''
 }
 
@@ -145,7 +146,7 @@ const AssetDetailDrawer: React.FC<Props> = ({
                 {data.install_count != null && data.install_count >= 1
                   ? `已订阅 ${data.install_count.toLocaleString('zh-Hans')} 次` : null}
                 {data.install_count != null && data.install_count >= 1 && data.updated_at ? ' · ' : null}
-                {formatDate(data.updated_at)}
+                {formatUpdated(data.updated_at)}
               </Text>
             </div>
           </div>

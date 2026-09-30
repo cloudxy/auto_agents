@@ -8,6 +8,8 @@ export interface PlanRow {
   period: string
   quota_json?: string | null
   is_public?: number
+  /** 按需定制、走「联系我们」（决策 D17） */
+  sales_led?: boolean
 }
 
 export type PayChannel = 'offline' | 'alipay' | 'wechat'
@@ -40,6 +42,10 @@ export interface OrderRow {
   pay_url?: string | null
   qr_code_url?: string | null
   qr_code_image?: string | null
+  /** cancel / timeout / channel_error / unconfigured */
+  fail_reason?: string | null
+  /** 订单关闭后才收到的成功通知（钱到了但未开通，需人工处理） */
+  late_notify_at?: string | null
 }
 
 export interface SubscriptionRow {
@@ -48,6 +54,11 @@ export interface SubscriptionRow {
   status: string
   current_period_end: string | null
   tenant_id: number | null
+  /** 决策 D22：当前套餐与宽限截止 */
+  plan_slug?: string | null
+  plan_name?: string | null
+  grace_until?: string | null
+  in_grace?: boolean
 }
 
 export interface CheckoutChannel {
@@ -100,3 +111,22 @@ export const listPendingOrders = (): Promise<OrderRow[]> =>
 
 export const confirmOrder = (orderId: number): Promise<OrderRow> =>
   api.post(`/billing/orders/${orderId}/confirm`).then((r) => unwrap<OrderRow>(r))
+
+/** 买方取消本企业待支付单（审计 BUG-24）；已付款 / 已关闭 409 */
+export const cancelOrder = (orderId: number): Promise<OrderRow> =>
+  api.post(`/billing/orders/${orderId}/cancel`).then((r) => unwrap<OrderRow>(r))
+
+/** 超管补偿：已付款待开通的单重新开通（审计 BUG-25） */
+export const retryFulfillment = (orderId: number): Promise<OrderRow> =>
+  api.post(`/billing/orders/${orderId}/retry-fulfillment`).then((r) => unwrap<OrderRow>(r))
+
+/** 平台为定制客户开通套餐（决策 D17）：合同金额（分）+ 期数 */
+export const grantPlan = (
+  tenantId: number,
+  body: { product: 'plan_enterprise' | 'plan_pro'; amount_cents: number; periods: number; note?: string },
+): Promise<OrderRow> =>
+  api.post(`/billing/admin/tenants/${tenantId}/grant`, body).then((r) => unwrap<OrderRow>(r))
+
+/** 对外联系（决策 D25） */
+export const fetchPublicContact = (): Promise<import('@auto-agents/frontend-shared').PublicContact> =>
+  api.get('/public/ops-contact').then((r) => unwrap<import('@auto-agents/frontend-shared').PublicContact>(r))

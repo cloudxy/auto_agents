@@ -16,6 +16,7 @@ import SpiderLogs from './SpiderLogs'
 import { usePermission } from '../hooks/usePermission'
 import type { Dayjs } from 'dayjs'
 import { fetchAuditLogs } from '../services/admin'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 const { Text } = Typography
 
@@ -72,7 +73,7 @@ const AuditLogsTab: React.FC = () => {
       title: '详情', dataIndex: 'detail', key: 'detail', ellipsis: true,
       render: (v: string | null) => (v ? <Text code style={{ fontSize: 12 }}>{v}</Text> : '-'),
     },
-    { title: '操作时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+    { title: '操作时间', dataIndex: 'created_at', key: 'created_at', width: 180, render: (v: string | null) => formatDateTime(v) },
   ]
 
   if (!isAdmin) {

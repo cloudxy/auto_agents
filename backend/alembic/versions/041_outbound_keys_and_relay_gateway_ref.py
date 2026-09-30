@@ -75,5 +75,4 @@ def downgrade() -> None:
     op.drop_constraint("uk_relay_tokens_gateway_key_id", "relay_tokens", type_="unique")
     op.drop_column("relay_tokens", "spend_synced_at")
     op.drop_column("relay_tokens", "gateway_key_id")
-    op.drop_index("idx_outbound_keys_tenant_created", table_name="outbound_keys")
     op.drop_table("outbound_keys")

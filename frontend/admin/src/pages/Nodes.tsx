@@ -10,6 +10,7 @@ import { ClusterOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { fetchNodesPage } from '../services/admin'
 import { LoadEmpty, LoadFailure } from '../components/LoadState'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 const { Text } = Typography
 
@@ -60,7 +61,7 @@ const Nodes: React.FC = () => {
         <Space orientation="vertical" size={0}>
           <Text strong><ClusterOutlined style={{ marginRight: 6 }} />{record.worker_id}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            PID {record.pid ?? '-'} · 启动于 {record.started_at || '-'} · 重启 {record.respawn_count} 次
+            PID {record.pid ?? '-'} · 启动于 {formatDateTime(record.started_at)} · 重启 {record.respawn_count} 次
           </Text>
         </Space>
       ),

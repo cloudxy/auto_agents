@@ -20,7 +20,7 @@ from backend.services.background_session import (
     platform_tenant_id_or_none,
 )
 from backend.services.tenant_expiry_service import assert_tenant_active
-from backend.services.user_service import load_auth_identity
+from backend.services.user_service import load_auth_identity, token_version_matches
 from backend.utils.auth import decode_access_token
 from platform_core.db import get_async_db
 from platform_core.exceptions import (
@@ -96,6 +96,9 @@ async def get_current_user(
         identity = await load_auth_identity(session, user_id)
     if identity is None or not identity.is_active:
         raise AuthenticationException(message="用户不存在或已停用")
+    if not token_version_matches(payload, identity):
+        # 审计 QA-B1-12：密码已重置，旧令牌作废
+        raise AuthenticationException(message="登录已失效，请重新登录")
     # FR-08：已颁发会话在后续请求拒绝到期/停用企业（禁止只挡登录）
     await assert_tenant_active(
         session,

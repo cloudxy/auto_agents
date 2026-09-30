@@ -6,6 +6,9 @@ from platform_core.logger import get_logger
 
 logger = get_logger("api")
 
+# 受治理的键：只能经专用接口改（带业务校验与审计），通用配置写接口拒绝（决策 D34 / BUG-32）
+GOVERNED_CONFIG_KEYS = frozenset({"power_market.enabled"})
+
 class ConfigService:
     def __init__(self, session: AsyncSession):
         self.session = session

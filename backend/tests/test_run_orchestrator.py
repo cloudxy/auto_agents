@@ -9,6 +9,11 @@ from scripts.runlib import ctl, paths
 @pytest.fixture
 def runmod(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "RUN_DIR", tmp_path)
+    # start / restart 会先跑 .agents → 能力市场同步（子进程连真库）。单测只验编排，
+    # 同步打桩；原先未打桩，每跑一次测试就往开发库写 3 次同步（2026-09-29 实证）
+    synced: list = []
+    monkeypatch.setattr(ctl, "cmd_sync_agents", lambda env: synced.append(env) or 0)
+    ctl._test_synced = synced
     return ctl
 
 
@@ -78,6 +83,7 @@ def test_start_spawns_when_stopped(runmod, monkeypatch):
     monkeypatch.setattr(runmod, "_spawn", lambda name, env: spawned.append(name) or True)
     assert runmod.cmd_start(["backend"], env=None) == 0
     assert spawned == ["backend"]
+    assert runmod._test_synced == [None]  # 启动前同步仍会被调用（行为不变，只是不连真库）
 
 
 def test_stop_noop_when_stopped(runmod, monkeypatch, capsys):

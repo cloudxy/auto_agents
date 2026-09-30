@@ -43,6 +43,12 @@ class User(TenantMixin, SoftDeleteMixin, Base):
                        comment="所属租户（平台超管挂 platform 租户）")
     tenant_role = Column(String(20), comment="租户角色：owner/admin/operator/viewer")
     department_id = Column(Integer, comment="所属部门（departments.id；SaaS 组织树一层）")
+    token_version = Column(Integer, nullable=False, default=0, server_default="0",
+                           comment="会话版本：重置密码 +1，旧令牌 tv 不等即失效（迁移 054）")
+    # 决策 D21 前置闸（迁移 056）：自助注册的负责人待验证邮箱；按企业判定能否用平台 LLM
+    email_verify_pending = Column(Boolean, nullable=False, default=False, server_default="0",
+                                  comment="自助注册待验证邮箱（1 = 未验证；存量与成员为 0）")
+    email_verified_at = Column(DateTime, nullable=True, comment="邮箱验证时刻（UTC）")
     is_platform_admin = Column(Boolean, nullable=False, default=False, server_default="0",
                                comment="平台超级管理员（跨租户，挂 platform 租户）")
     role = Column(String(20), nullable=False, default="operator", server_default="operator",

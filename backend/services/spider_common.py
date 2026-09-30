@@ -143,13 +143,30 @@ def _read_task_log_sync(
     tail: int,
     keyword: str | None = None,
     level: str | None = None,
+    end: int | None = None,
+    task_marker: int | None = None,
 ) -> list[str]:
-    """同步读取并过滤任务日志（供 asyncio.to_thread 调用）"""
-    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+    """同步读取并过滤任务日志（供 asyncio.to_thread 调用）
+
+    审计 BUG-16：
+    - 读 [offset, end) 窗口；没有起点偏移时返回空（原先读整份共享文件，含其他租户的日志）
+    - task_marker 给定时只保留带本任务标记的行（`[task=N]` 或 `task_id=N`，
+      Scrapy 侧 TaskLogFormatter 负责打标），窗口内并发任务的行不外泄
+    """
+    if offset is None:
+        return []
+    with open(log_path, "rb") as f:
         size = os.fstat(f.fileno()).st_size
-        if offset is not None and 0 < offset <= size:
-            f.seek(offset)
-        lines = f.read().splitlines()
+        start = offset if 0 <= offset <= size else size
+        stop = end if end is not None and start <= end <= size else size
+        f.seek(start)
+        lines = f.read(stop - start).decode("utf-8", errors="replace").splitlines()
+
+    if task_marker is not None:
+        import re
+
+        pattern = re.compile(rf"(\[task={int(task_marker)}\]|task_id={int(task_marker)}\b)")
+        lines = [ln for ln in lines if pattern.search(ln)]
 
     if not keyword and not level:
         return lines[-tail:]

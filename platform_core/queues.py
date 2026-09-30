@@ -89,6 +89,11 @@ ACTIVE_TASK_TTL: Final[int] = 86400
 
 # 任务日志偏移量（string，value = 分发时刻日志文件字节大小），用于切出任务日志区间
 TASK_LOG_OFFSET_KEY: Final[str] = "spider:task_log_offset:{task_id}"
+# 任务日志窗口终点（终态时刻的日志文件大小；审计 BUG-16：读 [start, end) 而不是 start→文件尾）
+TASK_LOG_END_KEY: Final[str] = "spider:task_log_end:{task_id}"
+# 日志窗口键保留期：与日志文件留存对齐（原先跟随 ACTIVE_TASK_TTL 一天后过期，
+# 过期后读取回退为「整份文件」，把其他租户的日志一起返回）
+TASK_LOG_OFFSET_TTL: Final[int] = 7 * 86400
 
 # 阶段 4.2 数据源多存储：任务级结果缓存（list，元素为结果消息 JSON）；
 # store_to=redis 时供直接读取，store_to=csv 时终态落盘后保留至过期，默认 7 天过期
@@ -295,6 +300,8 @@ __all__ = [
     "DEAD_ITEM_QUEUE",
     "ACTIVE_TASK_TTL",
     "TASK_LOG_OFFSET_KEY",
+    "TASK_LOG_END_KEY",
+    "TASK_LOG_OFFSET_TTL",
     "TASK_RESULTS_KEY",
     "SCHEDULER_LOCK_KEY",
     "LEGACY_ACTIVE_TASK_PREFIX",

@@ -2,6 +2,7 @@
  * new-api 运维域共享常量与格式化（工单 80 拆分自 NewApiOps.tsx）
  */
 import { CHANNEL_STATUS, type DutyPageState, type ProbeVerdict } from '../../services/newapi'
+import { formatDateTime } from '@auto-agents/frontend-shared'
 
 export const STATUS_TAG: Record<number, { color: string; text: string }> = {
   [CHANNEL_STATUS.ENABLED]: { color: 'green', text: '启用' },
@@ -126,11 +127,8 @@ export const ACTION_TAG: Record<string, { color: string; text: string }> = {
   enabled: { color: 'green', text: '上线' },
 }
 
-export const fmtTime = (v?: string | null): string => {
-  if (!v) return '-'
-  const d = new Date(v)
-  return Number.isNaN(d.getTime()) ? v : d.toLocaleString('zh-CN', { hour12: false })
-}
+/** 北京时间展示（审计 BUG-43：统一走 shared 格式化，不依赖浏览器时区） */
+export const fmtTime = (v?: string | null): string => formatDateTime(v)
 
 export const fmtQuota = (v?: number | null): string =>
   v === null || v === undefined ? '-' : Number(v).toLocaleString('zh-CN')

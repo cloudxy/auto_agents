@@ -157,6 +157,7 @@ class AuthService:
             "tenant_id": getattr(user, "tenant_id", None),
             "tenant_role": getattr(user, "tenant_role", None),
             "is_platform_admin": bool(getattr(user, "is_platform_admin", False)),
+            "token_version": int(getattr(user, "token_version", 0) or 0),
         }
         user.last_login_at = datetime.now(timezone.utc)
         await emit_login_succeeded(self.session, user)
@@ -182,16 +183,10 @@ class AuthService:
         """创建访问令牌"""
         # S1-3：claims 只承身份——tenant_id/tenant_role/is_platform_admin 随行携带；
         # role 仅为兼容存量消费方保留，权限判定一律 DB 快照重算
-        access_token = create_access_token(
-            data={
-                "sub": user_data["username"],
-                "user_id": user_data["id"],
-                "role": user_data.get("role", "operator"),
-                "tenant_id": user_data.get("tenant_id"),
-                "tenant_role": user_data.get("tenant_role"),
-                "is_platform_admin": bool(user_data.get("is_platform_admin", False)),
-            }
-        )
+        from backend.services.session_service import access_claims
+
+        # 与登录签发（session_service.issue_session）同一份 claims；tv = 会话版本（QA-B1-12）
+        access_token = create_access_token(data=access_claims(user_data))
         
         logger.info(f"生成 Token | user={user_data['username']}")
         

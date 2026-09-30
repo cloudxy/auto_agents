@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import (
-    CurrentUser, require_admin, require_login,
+    CurrentUser, require_login,
     require_platform_admin, require_platform_admin_or_404,
 )
 from platform_core.schemas.auth import AdminUserCreateRequest, AdminUserUpdateRequest
@@ -22,6 +22,10 @@ from backend.services.spider_service import SpiderService
 from backend.services.tenant_admin_service import TenantAdminService
 from backend.services.user_service import UserService
 from platform_core.db import get_async_db, get_async_readonly_db
+from platform_core.exceptions import BusinessException
+from platform_core.logger import get_logger
+
+logger = get_logger("api.admin")
 
 router = APIRouter()
 
@@ -64,14 +68,18 @@ async def get_stats(
 async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    status: str = Query("active", pattern="^(active|deleted|disabled)$",
-                        description="active=默认（不含已删）；deleted=已删除；disabled=已停用"),
-    q: Optional[str] = Query(None, max_length=50, description="按登录名筛选"),
+    status: str = Query("active", pattern="^(active|enabled|deleted|disabled)$",
+                        description="active=在职（含停用，默认）；enabled=在职·激活；disabled=已停用；deleted=已删除"),
+    q: Optional[str] = Query(None, max_length=50, description="登录名或邮箱包含"),
+    role: Optional[str] = Query(None, pattern="^(admin|operator|viewer)$", description="角色"),
+    tenant_id: Optional[int] = Query(None, ge=1, description="归属公司"),
+    department_id: Optional[int] = Query(None, ge=1, description="所属部门"),
     service: UserService = Depends(_user_service),
     _user: CurrentUser = Depends(require_platform_admin_or_404),
 ):
-    """用户列表（用户管理页陈列，不含密码哈希；status=deleted 为已删筛选）"""
-    data = await service.list_users(skip=skip, limit=limit, status=status, q=q)
+    """用户列表（不含密码哈希；筛选全部在服务端、total 与筛选一致——决策 D11）"""
+    data = await service.list_users(skip=skip, limit=limit, status=status, q=q, role=role,
+                                    tenant_id=tenant_id, department_id=department_id)
     return ok(data=data.model_dump())
 
 
@@ -142,7 +150,7 @@ async def list_audit_logs(
     start_time: Optional[datetime] = Query(None, description="操作时间起（ISO 8601）"),
     end_time: Optional[datetime] = Query(None, description="操作时间止（ISO 8601）"),
     service: AuditService = Depends(_audit_service),
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
 ):
     """审计日志分页查询（操作人/操作类型/时间范围过滤；仅管理员）"""
     data = await service.list_logs(
@@ -204,11 +212,12 @@ class PowerMarketSwitchBody(BaseModel):
 @router.get("/power-market")
 async def get_power_market_switch(
     _user: CurrentUser = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_async_db),
 ):
     """市场总开关（超管可读；租户公司管理员拒绝且开关不变，GWT-U11.3）。"""
     from backend.services.power_market.flag import is_power_market_enabled
 
-    return ok(data={"enabled": is_power_market_enabled()})
+    return ok(data={"enabled": await is_power_market_enabled(session)})
 
 
 @router.put("/power-market")
@@ -217,10 +226,10 @@ async def put_power_market_switch(
     user: CurrentUser = Depends(require_platform_admin),
     session: AsyncSession = Depends(get_async_db),
 ):
-    """超管打开/关闭能力市场总开关。yaml 默认 false；本写覆盖运行时。"""
+    """超管打开/关闭能力市场总开关（决策 D34：写库，重启不丢；打开须已配值班联系人）"""
     from backend.services.power_market.flag import set_power_market_enabled
 
-    enabled = set_power_market_enabled(body.enabled)
+    enabled = await set_power_market_enabled(session, body.enabled)
     await record_audit(user, "power_market.switch", "POWER_MARKET.ENABLED",
         detail={"enabled": enabled},
     )
@@ -232,7 +241,7 @@ async def put_power_market_switch(
 @router.get("/dead-items")
 async def list_dead_items(
     limit: int = 100,
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
 ):
     """查看结果回流死信（缺 task_id 等无法归属的载荷留档）"""
     from backend.services.dead_item_service import DeadItemService
@@ -243,7 +252,7 @@ async def list_dead_items(
 @router.delete("/dead-items/{index}")
 async def discard_dead_item(
     index: int,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
 ):
     """丢弃单条死信（按队列 index）"""
@@ -260,7 +269,7 @@ async def discard_dead_item(
 
 @router.delete("/dead-items")
 async def clear_dead_items(
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
 ):
     """清空死信队列（排障终态动作）"""
@@ -282,7 +291,7 @@ _NOTIFY_CFG_KEYS = {
 
 @router.get("/notify-config")
 async def get_notify_config(
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
     service: ConfigService = Depends(_config_service),
 ):
     """通知渠道配置（三渠道 URL；密钥类仍走 env，不入库不入此接口）"""
@@ -295,7 +304,7 @@ async def get_notify_config(
 @router.put("/notify-config")
 async def put_notify_config(
     body: dict,
-    user: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(require_platform_admin_or_404),
     session: AsyncSession = Depends(get_async_db),
     service: ConfigService = Depends(_config_service),
 ):
@@ -317,9 +326,31 @@ async def put_notify_config(
     return ok(data={"updated": sorted(updates.keys())})
 
 
+@router.post("/notify-config/test")
+async def test_notify_channel(
+    body: dict,
+    user: CurrentUser = Depends(require_platform_admin_or_404),
+):
+    """配置页「发送测试」（审计 BUG-36）：对指定渠道发一条测试消息，结果如实返回"""
+    from backend.services.notify_service import NotifyService
+
+    channel = str(body.get("channel") or "webhook")
+    try:
+        sent = await NotifyService().send_test(channel)
+    except ValueError as exc:
+        raise BusinessException(message=str(exc), code="NOTIFY_CHANNEL_INVALID", status_code=422) from exc
+    except Exception as exc:  # noqa: BLE001 发送失败以业务结果返回给配置页
+        logger.warning(f"通知测试发送失败 | channel={channel} err={type(exc).__name__}")
+        return ok(data={"channel": channel, "sent": False, "reason": "发送失败，请检查地址是否可达"})
+    if not sent:
+        return ok(data={"channel": channel, "sent": False, "reason": "该渠道尚未配置地址"})
+    await record_audit(user, "notify.test", f"notify:{channel}")
+    return ok(data={"channel": channel, "sent": True, "reason": None})
+
+
 @router.get("/webhook-status")
 async def webhook_status(
-    _user: CurrentUser = Depends(require_admin),
+    _user: CurrentUser = Depends(require_platform_admin_or_404),
 ):
     """Webhook 配置状态（B6 工单 91）：只读展示，密钥仅回显配置态（布尔）不回显值
 

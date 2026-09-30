@@ -23,6 +23,25 @@ from config import settings
 from backend.config_consts import (RELAY_PROBE_ENABLED, RELAY_SCHEDULER_ENABLED)
 from platform_core.logger import get_logger
 
+def _install_utc_json_encoder() -> None:
+    """dict 出参里的 datetime 也带 +00:00（审计 BUG-43）。
+
+    schema 出参由 UTCDateTime 负责；没有 response_model、直接返回 dict 的接口走
+    jsonable_encoder，其按类型查 ENCODERS_BY_TYPE。库里是 UTC naive，默认 isoformat
+    不带偏移，前端 new Date() 会按浏览器本地时区解释、差 8 小时。只作用于 datetime
+    对象，不碰字符串（采集结果里的原文时间串原样返回）。
+    """
+    from datetime import datetime
+
+    from fastapi import encoders
+
+    from platform_core.timeutil import utc_iso
+
+    encoders.ENCODERS_BY_TYPE[datetime] = utc_iso
+
+
+_install_utc_json_encoder()
+
 # Webhook 签名密钥的默认占位符（config/default/webhook.yml）——已随仓库公开，
 # 沿用即意味着外部回调可被任意伪造，启动时必须拒绝（P0-2）
 _WEBHOOK_SECRET_PLACEHOLDER = "change-me-in-production"
@@ -176,6 +195,27 @@ def create_app():
                 await newapi_probe.start()
             except Exception as e:  # noqa: BLE001 失败仅告警，不阻断应用启动
                 get_logger("global").warning(f"渠道探针启动失败（忽略）: {e}")
+        # 中转执法巡检（审计 BUG-28 / D19）：SKU 到期落库 + 令牌网关封禁对齐；
+        # 未配置 LiteLLM 网关或 RELAY.ENFORCE_ENABLED=false 时 start() 内自行跳过
+        relay_enforcement = None
+        if _run_bg:
+            from backend.services.relay_enforcement import RelayEnforcementService
+
+            relay_enforcement = RelayEnforcementService()
+            try:
+                await relay_enforcement.start()
+            except Exception as e:  # noqa: BLE001 失败仅告警不阻断启动
+                get_logger("global").warning(f"中转执法巡检启动失败（忽略）: {e}")
+        # 账期巡检（决策 D22 / 审计 B2-1）：到期提醒 → 宽限 → 降免费档（不停用企业）
+        subscription_lifecycle = None
+        if _run_bg:
+            from backend.services.subscription_lifecycle import SubscriptionLifecycleService
+
+            subscription_lifecycle = SubscriptionLifecycleService()
+            try:
+                await subscription_lifecycle.start()
+            except Exception as e:  # noqa: BLE001 失败仅告警不阻断启动
+                get_logger("global").warning(f"账期巡检启动失败（忽略）: {e}")
         retention = None
         if _run_bg and settings.get("RETENTION.ENABLED", True):
             from backend.services.retention_service import RetentionService
@@ -197,6 +237,16 @@ def create_app():
         yield
         # 关闭链（评审 L1）：各 stop() 独立 try/except，单一组件关闭失败
         # 不阻断其余组件的停止（避免残留后台任务/连接泄漏）
+        if subscription_lifecycle is not None:
+            try:
+                await subscription_lifecycle.stop()
+            except Exception as e:  # noqa: BLE001 关闭失败仅告警，继续关闭其余组件
+                get_logger("global").warning(f"账期巡检停止失败（忽略）: {e}")
+        if relay_enforcement is not None:
+            try:
+                await relay_enforcement.stop()
+            except Exception as e:  # noqa: BLE001 关闭失败仅告警，继续关闭其余组件
+                get_logger("global").warning(f"中转执法巡检停止失败（忽略）: {e}")
         if newapi_probe is not None:
             try:
                 await newapi_probe.stop()

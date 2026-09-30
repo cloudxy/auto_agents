@@ -51,5 +51,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """回滚数据库结构"""
-    op.drop_index(op.f('ix_ai_plans_target_url'), table_name='ai_plans')
     op.drop_table('ai_plans')

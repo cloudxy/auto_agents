@@ -43,13 +43,26 @@ def _service(session: AsyncSession = Depends(get_async_db)) -> AiPlannerService:
 
 async def require_planning_operator(
     user: CurrentUser = Depends(require_login),
+    session: AsyncSession = Depends(get_async_db),
 ) -> CurrentUser:
-    """规划提交守卫：只读拒绝句「当前账号不能开始规划」，可见处无 FORBIDDEN。"""
+    """规划提交守卫：只读拒绝句「当前账号不能开始规划」，可见处无 FORBIDDEN。
+
+    决策 D21：规划用平台 LLM（免费档也可用）；企业负责人验证邮箱前整家企业不能规划（防批量注册薅额度）。
+    """
     if user.role not in ("admin", "operator"):
         logger.warning(f"只读提交规划被拒绝 | user={user.username} role={user.role}")
         raise BusinessException(
             message=PLANNING_READONLY_COPY, code="PLANNING_ROLE_NOT_ALLOWED",
         )
+    if not user.is_platform_admin:
+        from backend.services.email_verification_service import EMAIL_NOT_VERIFIED, company_verify_pending
+
+        if await company_verify_pending(session, user.tenant_id):
+            logger.info(f"企业负责人未验证邮箱，拒绝规划 | tenant={user.tenant_id}")
+            raise BusinessException(
+                message="企业负责人验证邮箱后才能使用 AI 规划。请到注册邮箱点验证链接，或在后台重新发送。",
+                code=EMAIL_NOT_VERIFIED, status_code=403,
+            )
     return user
 
 

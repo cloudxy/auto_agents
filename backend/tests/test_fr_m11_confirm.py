@@ -6,7 +6,7 @@ import asyncio
 from sqlalchemy import select
 
 from backend.tests.payment_notify_support import (
-    checkout, install_fernet, order_row, post_notify, signed_body, sku_count,
+    allow_self_serve_enterprise, checkout, install_fernet, order_row, post_notify, signed_body, sku_count,
     sku_status, sub_plan_slug, tenant_quota,
 )
 from conftest import make_platform_admin_headers, make_tenant_owner_headers
@@ -164,6 +164,7 @@ def _late_success(db_client, db_session, fx) -> None:
 def test_gwt_m11_18_late_notify_enterprise_no_stack(db_client, db_session, monkeypatch):
     """GWT-M11.18：企业档已开通后迟到成功通知 → late_notify_at；配额不叠；SKU 仍 active。"""
     install_fernet(monkeypatch)
+    allow_self_serve_enterprise(monkeypatch)  # D17 默认销售主导；这里钉履约幂等
     fx = checkout(db_client, db_session, slug="m11-18e", product="plan_enterprise")
     _late_success(db_client, db_session, fx)
     row = order_row(db_session, fx["tid"])

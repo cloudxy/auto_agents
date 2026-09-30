@@ -24,6 +24,8 @@ jest.mock('../services/platformOps', () => ({
 jest.mock('../services/billing', () => ({
   listPendingOrders: jest.fn(),
   confirmOrder: jest.fn(),
+  retryFulfillment: jest.fn(),
+  grantPlan: jest.fn(),
   CHANNEL_LABEL: { offline: '线下转账', alipay: '支付宝', wechat: '微信支付' },
 }))
 jest.mock('../services/productEvents', () => ({
@@ -188,4 +190,100 @@ test('GWT-84.3 tenant direct hit on /platform-ops is 404 shell for both pending-
   expect(screen.queryByText('在线支付未开通。确认收款后把企业套餐配额改到该订单档。')).not.toBeInTheDocument()
   expect(screen.queryByPlaceholderText('如 market_subscribe_succeeded')).not.toBeInTheDocument()
   expect(screen.queryByText(/暂无数据/)).not.toBeInTheDocument()
+})
+
+
+test('BUG-25 paid-but-not-fulfilled row offers 重新开通 and calls retryFulfillment', async () => {
+  const { retryFulfillment } = jest.requireMock('../services/billing')
+  ;(retryFulfillment as jest.Mock).mockReset().mockResolvedValue({ ...ORDER, status: 'fulfilled' })
+  orders.mockResolvedValue([{ ...ORDER, id: 42, status: 'paid_pending_fulfillment', channel: 'alipay' }])
+  renderOps()
+  fireEvent.click(screen.getByText('待确认收款'))
+  expect(await screen.findByText('已付款待开通')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '确认收款' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '重新开通' }))
+  const oks = await screen.findAllByRole('button', { name: '重新开通' })
+  fireEvent.click(oks[oks.length - 1])
+  await waitFor(() => expect(retryFulfillment).toHaveBeenCalledWith(42))
+})
+
+test('BUG-25 paid after cancel/timeout is flagged for manual handling', async () => {
+  orders.mockResolvedValue([
+    { ...ORDER, id: 43, status: 'unpaid', fail_reason: 'cancel', late_notify_at: '2026-09-28T01:00:00Z', channel: 'wechat' },
+  ])
+  renderOps()
+  fireEvent.click(screen.getByText('待确认收款'))
+  expect(await screen.findByText('关单后到账')).toBeInTheDocument()
+  expect(screen.getByText('需人工处理')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '确认收款' })).toBeNull()
+})
+
+describe('BUG-38 禁用企业：二次确认 + 填原因 + 进行中锁 + 平台 / 默认租户受保护', () => {
+  const { patchTenant } = jest.requireMock('../services/platformOps')
+  const PROTECTED = [
+    { id: 5, slug: 'platform', name: '平台租户', status: 'active', quota: null, expires_at: null },
+    { id: 1, slug: 'default', name: '默认租户', status: 'active', quota: null, expires_at: null },
+  ]
+
+  beforeEach(() => {
+    ;(patchTenant as jest.Mock).mockReset().mockResolvedValue(undefined)
+  })
+
+  test('点「禁用」先弹确认框，写明影响；不填原因不能提交；取消不发请求', async () => {
+    renderOps()
+    fireEvent.click(await screen.findByRole('button', { name: /^禁\s*用$/ }))
+    expect(await screen.findByText(/禁用后该企业全部成员将无法登录/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认禁用' }))
+    expect(await screen.findByText('请填写禁用原因')).toBeInTheDocument()
+    expect(patchTenant).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }))
+    expect(patchTenant).not.toHaveBeenCalled()
+  })
+
+  test('填原因后确认：带原因提交一次（重复点击不重复提交）', async () => {
+    let release: () => void = () => undefined
+    ;(patchTenant as jest.Mock).mockImplementation(() => new Promise<void>((r) => { release = r }))
+    renderOps()
+    fireEvent.click(await screen.findByRole('button', { name: /^禁\s*用$/ }))
+    fireEvent.change(await screen.findByPlaceholderText(/禁用原因/), { target: { value: '长期欠费' } })
+    const ok = screen.getByRole('button', { name: '确认禁用' })
+    fireEvent.click(ok)
+    fireEvent.click(ok)
+    await waitFor(() => expect(patchTenant).toHaveBeenCalledTimes(1))
+    expect(patchTenant).toHaveBeenCalledWith(1, { status: 'disabled', reason: '长期欠费' })
+    release()
+  })
+
+  test('platform / default 两行没有「禁用」按钮', async () => {
+    ;(listTenants as jest.Mock).mockResolvedValue(PROTECTED)
+    renderOps()
+    expect(await screen.findByText('平台租户')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^禁\s*用$/ })).toBeNull()
+    expect(screen.getAllByText('受保护').length).toBe(2)
+  })
+
+  test('状态中文标签；未单独设置配额显示「默认配额」', async () => {
+    ;(listTenants as jest.Mock).mockResolvedValue([
+      TENANT_ROW, { ...TENANT_ROW, id: 2, slug: 'b', name: 'B', status: 'disabled', quota: null },
+    ])
+    renderOps()
+    expect(await screen.findByText('正常')).toBeInTheDocument()
+    expect(screen.getByText('已禁用')).toBeInTheDocument()
+    expect(screen.getByText('默认配额')).toBeInTheDocument()
+    expect(screen.queryByText('- / - / -')).toBeNull()
+  })
+})
+
+test('D17 开通套餐：按合同金额（元→分）与期数为企业开通企业档', async () => {
+  const { grantPlan } = jest.requireMock('../services/billing')
+  ;(grantPlan as jest.Mock).mockReset().mockResolvedValue({ id: 9, status: 'fulfilled' })
+  renderOps()
+  fireEvent.click(await screen.findByRole('button', { name: /开通套餐/ }))
+  fireEvent.change(await screen.findByLabelText('合同金额（元）'), { target: { value: '12000' } })
+  fireEvent.change(screen.getByLabelText('期数（月）'), { target: { value: '12' } })
+  fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'HT-2026-001' } })
+  fireEvent.click(screen.getByRole('button', { name: /确认开通/ }))
+  await waitFor(() => expect(grantPlan).toHaveBeenCalledWith(1, {
+    product: 'plan_enterprise', amount_cents: 1200000, periods: 12, note: 'HT-2026-001',
+  }))
 })

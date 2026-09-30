@@ -29,7 +29,7 @@ from backend.services.power_market.agents_hub import _upsert_item_listing
 from backend.services.power_market.agents_hub_scan import HubItem, collect_agents_hub
 from backend.services.plugin_service import _plugin_manifest_path
 from platform_core.exceptions import ValidationException
-from platform_core.fs_guard import PathEscapeError, assert_contained
+from platform_core.fs_guard import LandingJournal, PathEscapeError, assert_contained
 from platform_core.logger import get_logger
 
 logger = get_logger("service.power_market")
@@ -210,12 +210,19 @@ async def preview_tree_import(session, files: list[UploadedFile]) -> dict:
 
 
 async def confirm_tree_import(session, files: list[UploadedFile], *, agents_root) -> dict:
-    """确认：落盘到真实 .agents 根 + upsert 入库（单项失败不整批回滚，GWT-07.5）。
+    """确认：upsert 入库 + 落盘到真实 .agents 根（单项失败不整批回滚，GWT-07.5）。
 
     QA-10：contract §4 #4 要求响应带 batch_id 但实现之前没给——回执号不入库
     （db-spec §10 裁定），只是一次导入批次的关联令牌，随 import_completed
     事件一起发（emit_import_completed 的 batch_id 形参此前一直存在但从未被
     传值）。用 uuid4 而不是自增 id：这批资产本身不建表，没有天然的行 id 可用。
+
+    事务与落盘（审计 BUG-33 / B4 QA-5）：
+    - 每项一个 savepoint，**先写库**（flush 成功）**再落盘**；任一步失败只回滚本项的
+      savepoint 并撤回本项已落的文件——会话不会被打成待回滚，后续项不受牵连。
+    - 落盘经 fs_guard.LandingJournal：逐文件写临时文件再 os.replace（原子），覆盖前备份原内容。
+    - 整批在本函数内提交（ADR-0007 D3 自持事务）；提交失败则按日志把本次写过的文件
+      全部恢复原状，再上抛——磁盘与库保持一致。
     """
     logger.info(f"hub_import.confirm | parts={len(files)} root={agents_root}")
     _guard_count(files)
@@ -225,11 +232,15 @@ async def confirm_tree_import(session, files: list[UploadedFile], *, agents_root
     with tempfile.TemporaryDirectory(prefix="hub-import-") as tmp:
         items, skipped = _collect(Path(tmp), files)
         staged = Path(tmp) / "stage" / ".agents"
+        journal = LandingJournal(Path(tmp) / "backup")
         for item in items:
+            mark = journal.mark()
             try:
-                _land(staged, Path(agents_root), item)
-                action = await _upsert_item_listing(session, item, listing="unlisted")
+                async with session.begin_nested():
+                    action = await _upsert_item_listing(session, item, listing="unlisted")
+                    _land(staged, Path(agents_root), item, journal)
             except Exception as exc:  # noqa: BLE001 单项失败入清单，不中断整批
+                journal.rollback_to(mark)
                 failed.append({"name": item.name, "reason": str(exc)})
                 logger.warning(
                     f"hub_import 单项失败 | type={item.asset_type} "
@@ -240,7 +251,12 @@ async def confirm_tree_import(session, files: list[UploadedFile], *, agents_root
                 created += 1
             elif action == "updated":
                 updated += 1
-        await session.flush()
+        try:
+            await session.commit()
+        except Exception:
+            journal.rollback_to(0)
+            logger.error(f"hub_import 提交失败，已撤回本次落盘 | batch={batch_id} files={journal.mark()}")
+            raise
     return {
         "created": created, "updated": updated, "failed": failed, "skipped": skipped,
         "batch_id": batch_id,
@@ -259,7 +275,7 @@ def _collect(tmp: Path, files: list[UploadedFile]) -> tuple[list[HubItem], list[
     return items, skipped
 
 
-def _land(staged_agents: Path, real_agents: Path, item: HubItem) -> None:
+def _land(staged_agents: Path, real_agents: Path, item: HubItem, journal: LandingJournal) -> None:
     """把该资产在暂存 .agents 下的产物复制到真实 .agents 同名位置（update 语义）。
 
     QA-1 修复：落盘前经 `assert_contained` 做出口路径收容——`.agents/plugins/*`
@@ -283,11 +299,15 @@ def _land(staged_agents: Path, real_agents: Path, item: HubItem) -> None:
         dst = assert_contained(dst, real_agents)
     except PathEscapeError as exc:
         raise ValueError(f"落盘路径逃逸收容根：{rel}") from exc
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    if src.is_dir():
-        shutil.copytree(src, dst, dirs_exist_ok=True)
-    else:
-        shutil.copy2(src, dst)
+    # 审计 BUG-33：逐文件经日志原子写（可撤回）；合并式更新语义不变——只覆盖上传树里的文件
+    sources = sorted(p for p in src.rglob("*") if p.is_file()) if src.is_dir() else [src]
+    for file_src in sources:
+        target = dst / file_src.relative_to(src) if src.is_dir() else dst
+        try:
+            target = assert_contained(target, real_agents)
+        except PathEscapeError as exc:
+            raise ValueError(f"落盘路径逃逸收容根：{rel}") from exc
+        journal.copy(file_src, target)
 
 
 async def _actions(session, items: list[HubItem]) -> dict[tuple[str, str], str]:

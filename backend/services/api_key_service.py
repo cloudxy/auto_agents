@@ -1,7 +1,6 @@
 """租户 API Key 签发 / 校验 / 吊销。"""
 import hashlib
 import secrets
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -9,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_core.exceptions import NotFoundException
 from platform_core.logger import get_logger
+from platform_core.timeutil import to_utc_naive, utcnow
 from platform_core.models.api_key import ApiKey
 from platform_core.repository import BaseRepository
 from platform_core.schemas.api_key import ApiKeyCreate, ApiKeyCreated, ApiKeyOut
@@ -53,7 +53,7 @@ class ApiKeyService:
         row = await self.repo.get_by_id(key_id)
         if row is None or row.tenant_id != tenant_id:
             raise NotFoundException("API Key")
-        row.revoked_at = datetime.now(timezone.utc)
+        row.revoked_at = utcnow()
         await self.session.commit()
         await self.session.refresh(row)
         return ApiKeyOut.model_validate(row)
@@ -67,9 +67,11 @@ class ApiKeyService:
         row = (await self.session.execute(stmt)).scalar_one_or_none()
         if row is None or row.revoked_at is not None:
             return None
-        if row.expires_at is not None and row.expires_at <= datetime.now(timezone.utc):
+        now = utcnow()
+        # 库内 UTC naive（审计 BUG-43）；原先与带时区的 now 比较直接 TypeError
+        if row.expires_at is not None and to_utc_naive(row.expires_at) <= now:
             return None
-        row.last_used_at = datetime.now(timezone.utc)
+        row.last_used_at = now
         try:
             await self.session.commit()
         except Exception:  # noqa: BLE001 鉴权路径更新失败不阻断查询

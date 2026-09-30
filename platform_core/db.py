@@ -10,10 +10,13 @@ from sqlalchemy.pool import NullPool
 from urllib.parse import quote_plus
 from config import settings
 from platform_core.logger import get_logger
+from platform_core.timeutil import MYSQL_UTC_CONNECT_ARGS
 
 # 测试态（TestClient 每请求新建事件循环）连接池中的连接会绑定旧循环，
 # 复用时报 "attached to a different loop"，改用 NullPool 每请求新建连接。
-_IN_PYTEST = "pytest" in sys.modules
+# 测试进程本身（pytest 已导入），或测试里拉起的子进程（继承 PYTEST_CURRENT_TEST；
+# 如 run.py start → scripts/sync_agents_hub.py）——两者都不得连非测试库（审计 BUG-44）
+_IN_PYTEST = "pytest" in sys.modules or bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
 
 class DBManager:
@@ -61,6 +64,17 @@ class DBManager:
             port = getattr(cfg, "PORT", 3306)
             user = getattr(cfg, "USER", "root")
             dbname = getattr(cfg, "DB_NAME", "")
+            if _IN_PYTEST:
+                # 审计 BUG-44 / QA-B1-6：测试进程里惰性 init_all 曾用真实开发库引擎覆盖
+                # conftest 注入的测试引擎，审计行、事件被写进开发库。测试态：
+                # ① 已注入的键不覆盖；② 库名不是测试 schema（test_ 前缀）一律拒连
+                if key in self.async_engines:
+                    continue
+                if not str(dbname).startswith("test_"):
+                    global_log.warning(
+                        f"测试进程拒绝连接非测试库 MySQL [{key}]: db={dbname}（审计 BUG-44 护栏）"
+                    )
+                    continue
             charset = getattr(cfg, "CHARSET", "utf8mb4")
             password = self._get_password("MYSQL", key)
 
@@ -73,9 +87,10 @@ class DBManager:
                 # P1-13：统一 pool_pre_ping（与 channel_scheduler 自建引擎口径一致），
                 # MySQL wait_timeout 后的陈旧连接借一次往返探测自动重连，
                 # 消除非整点回收窗口的 "server has gone away"
+                # 审计 BUG-43：会话固定 UTC，NOW()/CURRENT_TIMESTAMP 与 Python utcnow() 同一时钟
                 engine = create_engine(
                     sync_url, pool_size=5, max_overflow=10, pool_recycle=3600,
-                    pool_pre_ping=True,
+                    pool_pre_ping=True, connect_args=dict(MYSQL_UTC_CONNECT_ARGS),
                 )
                 with engine.connect() as conn:
                     conn.execute(text("SELECT 1"))
@@ -86,6 +101,7 @@ class DBManager:
                     "pool_recycle": 3600,
                     "pool_pre_ping": True,
                     "echo": False,
+                    "connect_args": dict(MYSQL_UTC_CONNECT_ARGS),
                 }
                 if _IN_PYTEST:
                     async_engine_kwargs["poolclass"] = NullPool

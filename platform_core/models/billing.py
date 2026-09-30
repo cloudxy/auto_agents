@@ -90,6 +90,10 @@ class Order(TenantMixin, Base):
     verified_at = Column(DateTime(timezone=True), nullable=True, comment="FR-U38 通过。NULL=从未验真")
     fulfilled_at = Column(DateTime(timezone=True), nullable=True, comment="开通完成。NULL=未完成")
     unpaid_at = Column(DateTime(timezone=True), nullable=True, comment="进入 unpaid。NULL=未入该终态")
+    amount_sig = Column(
+        String(64), nullable=True,
+        comment="下单金额快照 HMAC（防篡改，迁移 052）；NULL=存量行，确认时回退现价比对",
+    )
     open_product_slot = Column(
         String(32), Computed(OPEN_PRODUCT_SLOT_SQL, persisted=True),
         comment="STORED GENERATED：非终态且有商品码则为 product_code，否则 NULL",

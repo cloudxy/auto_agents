@@ -93,6 +93,4 @@ def downgrade() -> None:
     op.drop_table("system_caches")
     op.drop_table("i18n_translations")
     op.drop_table("i18n_locales")
-    op.drop_index("ix_archive_records_tenant_archived", table_name="archive_records")
-    op.drop_index(op.f("ix_archive_records_tenant_id"), table_name="archive_records")
     op.drop_table("archive_records")

@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from conftest import mysql_fidelity_enabled
+from test_alembic_baseline import alembic_db_url  # noqa: F401 (fixture：原先漏导入，保真通道恒 ERROR)
 
 pytestmark = pytest.mark.mysql_fidelity
 

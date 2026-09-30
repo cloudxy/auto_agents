@@ -164,7 +164,12 @@ def test_gwt_m11_12_concurrent_same_product_one_pending(db_client, db_session):
 
 
 def test_gwt_m11_13_http_cancel_rejected_stays_pending(db_client, db_session):
-    """GWT-M11.13：直打取消/unpaid → 404/405/422；单据仍待支付；无「未完成」。"""
+    """GWT-M11.13：直打改状态 → 404/405/422；单据仍待支付；无「未完成」。
+
+    审计 BUG-24（方案收费闸，2026-09-28 实施）：买方取消走正式接口
+    POST /billing/orders/{id}/cancel（语义见 test_billing_cancel_ttl.py），不再属于「直打」；
+    其余绕过状态机的写法仍须拒绝。
+    """
     from backend.tests.payment_notify_support import tenant_quota
 
     _seed_plans(db_session)
@@ -173,7 +178,6 @@ def test_gwt_m11_13_http_cancel_rejected_stays_pending(db_client, db_session):
     oid = created.json()["data"]["id"]
     before = tenant_quota(db_session, tid)
     attempts = (
-        ("POST", f"/api/v1/billing/orders/{oid}/cancel", None),
         ("POST", f"/api/v1/billing/checkout/{oid}/cancel", None),
         ("POST", f"/api/v1/billing/orders/{oid}/unpaid", None),
         ("PATCH", f"/api/v1/billing/orders/{oid}", {"status": "unpaid"}),
@@ -193,12 +197,10 @@ def test_gwt_m11_14_enterprise_pending_not_299(db_client, db_session):
     _seed_plans(db_session)
     owner, tid = make_tenant_owner_headers(db_session, slug="m11-14")
     resp = db_client.post(CHECKOUT, headers=owner, json={"product": "plan_enterprise"})
-    assert resp.status_code == 201, resp.text
-    data = resp.json()["data"]
-    assert data["product_code"] == "plan_enterprise"
-    assert data["amount_cents"] == 99900
-    assert data["amount_cents"] != 29900
-    assert _orders(db_session, tid)[0]["product"] == "plan_enterprise"
+    # 决策 D17：企业档不再自助下单（原断言「待支付单金额 ≠ 299」随之改为：不产生待支付单）
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "PLAN_SALES_LED"
+    assert _orders(db_session, tid) == []
 
 
 def test_gwt_m11_16_relay_pending(db_client, db_session, monkeypatch):

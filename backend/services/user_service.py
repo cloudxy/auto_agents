@@ -22,9 +22,14 @@ SEED_ADMIN_USERNAME = "admin"
 USER_RESTORED_EVENT = "user_restored"
 
 
-def _list_users_where(status: str, q: str | None):
-    """列表谓词：active=未删；deleted=已删；disabled=未删且停用；q=登录名包含。"""
-    from sqlalchemy import and_
+def _list_users_where(status: str, q: str | None, *, role: str | None = None,
+                      tenant_id: int | None = None, department_id: int | None = None):
+    """列表谓词（决策 D11：全部走服务端，total 与筛选一致）
+
+    status：active=在职（未删，含停用）；enabled=在职·激活；disabled=在职·停用；deleted=已删。
+    q：登录名或邮箱包含（大小写不敏感；% _ 按字面匹配）。role / tenant_id / department_id 精确匹配。
+    """
+    from sqlalchemy import and_, func, or_
 
     from platform_core.models.user import User
 
@@ -32,11 +37,20 @@ def _list_users_where(status: str, q: str | None):
         cond = User.deleted_at.isnot(None)
     elif status == "disabled":
         cond = and_(User.deleted_at.is_(None), User.is_active.is_(False))
+    elif status == "enabled":
+        cond = and_(User.deleted_at.is_(None), User.is_active.is_(True))
     else:
         cond = User.deleted_at.is_(None)
-    needle = (q or "").strip()
+    needle = (q or "").strip().lower()
     if needle:
-        cond = and_(cond, User.username.contains(needle))
+        cond = and_(cond, or_(func.lower(User.username).contains(needle, autoescape=True),
+                              func.lower(User.email).contains(needle, autoescape=True)))
+    if role:
+        cond = and_(cond, User.role == role)
+    if tenant_id is not None:
+        cond = and_(cond, User.tenant_id == tenant_id)
+    if department_id is not None:
+        cond = and_(cond, User.department_id == department_id)
     return cond
 
 
@@ -58,6 +72,7 @@ class AuthIdentity:
     tenant_role: str | None
     is_platform_admin: bool
     is_active: bool
+    token_version: int = 0
 
 
 # 鉴权身份加载（单一事实源，F-01）。含已软删行——删除时 is_active 已同步置 False，
@@ -79,7 +94,18 @@ async def load_auth_identity(session: AsyncSession, user_id: int) -> AuthIdentit
         tenant_role=user.tenant_role,
         is_platform_admin=bool(user.is_platform_admin),
         is_active=bool(user.is_active),
+        token_version=int(getattr(user, "token_version", 0) or 0),
     )
+
+
+def token_version_matches(payload: dict, identity: AuthIdentity) -> bool:
+    """令牌签发时的会话版本与库内一致（审计 QA-B1-12；旧令牌无 tv 视为 0）"""
+    logger.debug(f"会话版本比对 | user_id={identity.id}")
+    try:
+        claimed = int(payload.get("tv", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    return claimed == int(identity.token_version or 0)
 
 
 class UserService:
@@ -90,21 +116,22 @@ class UserService:
         self.repo = UserRepository(session)
 
     async def list_users(self, skip: int = 0, limit: int = 20,
-                         status: str = "active", q: str | None = None
-                         ) -> UserListResponse:
+                         status: str = "active", q: str | None = None, *,
+                         role: str | None = None, tenant_id: int | None = None,
+                         department_id: int | None = None) -> UserListResponse:
         """分页查询用户（JOIN tenants 带归属公司名；不含密码哈希）
 
-        status：active=未删（含停用）；deleted=已删；disabled=未删且停用。
-        q：按登录名包含筛选（FR-M32）。
+        筛选全部在服务端（决策 D11 / BUG-40），口径见 _list_users_where。
         """
-        logger.info(f"查询用户列表: skip={skip} limit={limit} status={status} q={q}")
+        logger.info(f"查询用户列表: skip={skip} limit={limit} status={status} q={q} "
+                    f"role={role} tenant={tenant_id} dept={department_id}")
         from sqlalchemy import func, select
 
         from platform_core.models.department import Department
         from platform_core.models.tenant import Tenant
         from platform_core.models.user import User
 
-        cond = _list_users_where(status, q)
+        cond = _list_users_where(status, q, role=role, tenant_id=tenant_id, department_id=department_id)
         rows = (await self.session.execute(
             select(User, Tenant.name.label("tenant_name"),
                    Department.name.label("department_name"))
@@ -215,13 +242,18 @@ class UserService:
         if user is None:
             raise BusinessException(f"用户不存在: {user_id}")
         changes = payload.model_dump(exclude_unset=True, exclude_none=True)
+        from platform_core.roles import tenant_role_from_legacy
+
         if "role" in changes:
             if user_id == actor_id and changes["role"] != "admin":
                 raise BusinessException("不能降级自己的 admin 角色（防自锁）")
+            if user.tenant_role == "owner" and changes["role"] != "admin":
+                # 审计 QA-B1-4：平台用户页改角色曾把 owner 覆盖成普通角色，企业就此没有负责人
+                raise BusinessException("企业负责人的角色不能在此修改，请先转让负责人")
             user.role = changes["role"]
             user.is_admin = changes["role"] == "admin"
-            if user.tenant_id is not None:
-                user.tenant_role = changes["role"]
+            if user.tenant_id is not None and user.tenant_role != "owner":
+                user.tenant_role = tenant_role_from_legacy(changes["role"])
         if "is_active" in changes:
             if user_id == actor_id and not changes["is_active"]:
                 raise BusinessException("不能停用自己（防自锁）")
@@ -233,8 +265,13 @@ class UserService:
                 )).scalar_one_or_none()
                 if tenant is None:
                     raise ValidationException(message=f"租户不存在: {changes['tenant_id']}", field="tenant_id")
+            if user.tenant_role == "owner" and changes["tenant_id"] != user.tenant_id:
+                # 迁走负责人会让原企业失去唯一负责人（审计 QA-B1-4）
+                raise BusinessException("企业负责人不能直接迁到其他企业，请先转让负责人")
             user.tenant_id = changes["tenant_id"]
-            user.tenant_role = None if changes["tenant_id"] is None else (user.role or "operator")
+            user.tenant_role = (
+                None if changes["tenant_id"] is None else tenant_role_from_legacy(user.role)
+            )
         if "department_id" in changes:
             if changes["department_id"] is not None:
                 from platform_core.models.department import Department

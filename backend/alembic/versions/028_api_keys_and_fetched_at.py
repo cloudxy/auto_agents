@@ -61,6 +61,4 @@ def _create_api_keys() -> None:
 
 def downgrade() -> None:
     op.drop_column("spider_results", "fetched_at")
-    op.drop_index("ix_api_keys_key_hash", table_name="api_keys")
-    op.drop_index("ix_api_keys_tenant_id", table_name="api_keys")
     op.drop_table("api_keys")

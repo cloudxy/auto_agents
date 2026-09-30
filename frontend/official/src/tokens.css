@@ -41,3 +41,8 @@
   min-height: var(--size-touch);
   min-width: var(--size-touch);
 }
+
+/* 定价页推荐档：Ribbon 外层撑满列高，三张卡等高 */
+.pricing-ribbon {
+  height: 100%;
+}

@@ -121,5 +121,4 @@ def downgrade() -> None:
     op.drop_column("users", "tenant_role")
     op.drop_column("users", "tenant_id")
 
-    op.drop_index(op.f("ix_tenants_slug"), table_name="tenants")
     op.drop_table("tenants")

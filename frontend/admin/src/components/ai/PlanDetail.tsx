@@ -8,7 +8,7 @@
 import React from 'react'
 import {
   Alert, Button, Collapse, Empty, Form, Input, InputNumber, Select, Space,
-  Steps, Table, Tag, Typography,
+  Table, Tag, Typography,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -58,12 +58,6 @@ const historyColumns: ColumnsType<AiPlanTestHistory> = [
       : <Tag color="error">未通过</Tag>,
   },
   { title: '说明', dataIndex: 'reason', key: 'reason', ellipsis: true },
-]
-
-const stepItems = [
-  { title: '创建计划' },
-  { title: '方案预览与调整' },
-  { title: '试采与上线' },
 ]
 
 export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpenLog, onOpenResult }) => {
@@ -360,7 +354,7 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
       {collectBlock?.kind === 'quota' && (
         <QuotaBlockAlert cta={collectBlock.cta} style={{ marginBottom: 16 }} />
       )}
-      <Steps current={step} items={stepItems} style={{ marginBottom: 24, maxWidth: 860 }} />
+      {/* 进度条只在页面层（AiPlans）画一条：原先这里再画一条措辞不同的，两条并列（批次 5） */}
       {step > 0 && plan && (
         <div style={{ marginBottom: 16 }}>
           <Space wrap>

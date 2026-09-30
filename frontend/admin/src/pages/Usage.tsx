@@ -20,6 +20,8 @@ import {
 } from '../constants/collectCopy'
 import MyOrders from './MyOrders'
 import { useAuthStore } from '../store/useAuthStore'
+import { formatDateTime } from '@auto-agents/frontend-shared'
+import SubscriptionBanner from '../components/usage/SubscriptionBanner'
 
 const { Title, Text } = Typography
 
@@ -118,6 +120,8 @@ const Usage: React.FC = () => {
           label: '用量',
           children: (
             <div>
+              {/* 决策 D22：当前套餐与到期 / 宽限状态 */}
+              <SubscriptionBanner canRenew={buyer} />
               <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
                 本月按 Asia/Shanghai 日历{data.year_month ? `（${data.year_month}）` : ''}
               </Text>
@@ -160,7 +164,7 @@ const Usage: React.FC = () => {
                   const limit = quota[key]
                   const percent = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0
                   return (
-                    <Col span={8} key={key}>
+                    <Col xs={24} sm={8} key={key}>
                       <Card>
                         <Text type="secondary">{label}</Text>
                         <div style={{ margin: '12px 0' }}>
@@ -173,19 +177,37 @@ const Usage: React.FC = () => {
                   )
                 })}
               </Row>
-              <Card title={`LLM 成本（本月 ${((data.cost_cents_total ?? 0) / 100).toFixed(2)} 元）`} style={{ marginTop: 16 }}>
+              {data.relay ? (
+                <Card title="中转用量（本月）" style={{ marginTop: 16 }}>
+                  <Text type="secondary">经平台 LLM 网关调用消耗的 tokens，与上方 LLM 月度额度分开计算。</Text>
+                  <div style={{ margin: '12px 0' }}>
+                    <Title level={3} style={{ margin: 0, display: 'inline-block' }}>
+                      {data.relay.used_tokens.toLocaleString()}
+                    </Title>
+                    <Text type="secondary">
+                      {data.relay.limit_tokens > 0 ? ` / ${data.relay.limit_tokens.toLocaleString()} tokens` : ' tokens（不限额）'}
+                    </Text>
+                  </div>
+                  {data.relay.limit_tokens > 0 && (
+                    <Progress
+                      percent={Math.min(100, Math.round((data.relay.used_tokens / data.relay.limit_tokens) * 100))}
+                      status={data.relay.used_tokens >= data.relay.limit_tokens ? 'exception' : 'normal'}
+                    />
+                  )}
+                </Card>
+              ) : null}
+              {/* D19（2026-09-28）：租户侧只显示 token，不显示平台成本 */}
+              <Card title="LLM 用量（本月，按模型来源）" style={{ marginTop: 16 }}>
                 <Table
                   rowKey="provider"
                   size="small" pagination={false}
                   dataSource={Object.entries(data.llm_by_provider || {}).map(([provider, tokens]) => ({
                     provider,
                     tokens,
-                    cost: (data.cost_by_provider?.[provider] || 0) / 100,
                   }))}
                   columns={[
-                    { title: '供应商', dataIndex: 'provider', render: (v: string) => <Text code>{v}</Text> },
+                    { title: '模型来源', dataIndex: 'provider', render: (v: string) => <Text code>{v}</Text> },
                     { title: 'Tokens', dataIndex: 'tokens', render: (v: number) => v.toLocaleString() },
-                    { title: '金额（元）', dataIndex: 'cost', render: (v: number) => v.toFixed(2) },
                   ]}
                   locale={{ emptyText: '本月暂无 LLM 用量' }}
                 />
@@ -200,7 +222,7 @@ const Usage: React.FC = () => {
                     { title: '成员', dataIndex: 'member' },
                     { title: '任务数', dataIndex: 'tasks', width: 120 },
                     { title: '最近活跃', dataIndex: 'last_active_at', width: 200,
-                      render: (v: string | null) => (v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '-') },
+                      render: (v: string | null) => formatDateTime(v) },
                   ]}
                 />
               </Card>

@@ -11,6 +11,11 @@ export interface LoginParams {
 
 export interface LoginResponse {
   access_token: string
+  /** 刷新令牌与访问令牌有效秒数（决策 D10） */
+  refresh_token?: string
+  expires_in?: number
+  /** 决策 D21：企业负责人待验证邮箱（验证前不能用 AI 规划） */
+  email_verify_pending?: boolean
   token_type: string
   username: string
   is_admin: boolean
@@ -31,10 +36,22 @@ export const login = (params: LoginParams): Promise<LoginResponse> => {
     .then((res) => unwrap<LoginResponse>(res))
 }
 
-/**
- * 用户注册（P1-3 修复：后端期望 JSON body——旧实现把密码放 URL query
- * 且 body 为 null，必然 422，且密码会进各级访问日志）
- */
-export const register = (username: string, email: string, password: string) => {
-  return api.post('/auth/register', { username, email, password })
-}
+/** 用刷新令牌换一对新令牌（决策 D10；由 api 客户端在 401 时静默调用） */
+export const refreshSessionTokens = (refreshToken: string): Promise<{ access_token: string; refresh_token: string }> =>
+  api.post('/auth/refresh', { refresh_token: refreshToken })
+    .then((res) => unwrap<{ access_token: string; refresh_token: string }>(res))
+
+/** 登出：作废本会话的刷新令牌 */
+export const logoutSession = (refreshToken: string): Promise<void> =>
+  api.post('/auth/logout', { refresh_token: refreshToken }).then(() => undefined)
+
+// 个人自助注册已关闭（决策 D1）：新企业走官网 /register（企业注册），后台不再调用 /auth/register
+
+
+/** 点邮件里的验证链接（决策 D21；无需登录） */
+export const verifyEmail = (token: string): Promise<void> =>
+  api.post('/auth/verify-email', { token }).then(() => undefined)
+
+/** 重新发送验证邮件（60 秒一次） */
+export const resendVerification = (): Promise<void> =>
+  api.post('/auth/resend-verification').then(() => undefined)

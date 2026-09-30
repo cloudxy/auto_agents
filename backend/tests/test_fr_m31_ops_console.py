@@ -67,7 +67,10 @@ def test_gwt_m31_3_tenant_ops_is_404(db_client, db_session):
     assert confirm.status_code == 404
 
 
-def test_gwt_m31_6_enterprise_wrong_299_rejected(db_client, db_session):
+def test_gwt_m31_6_enterprise_wrong_299_rejected(db_client, db_session, monkeypatch):
+    from backend.tests.payment_notify_support import allow_self_serve_enterprise
+
+    allow_self_serve_enterprise(monkeypatch)  # D17 默认销售主导；存量企业档订单确认仍校验金额
     _seed_plans(db_session)
     owner, tid = make_tenant_owner_headers(db_session, slug="m31-6")
     pa = make_platform_admin_headers(db_session)

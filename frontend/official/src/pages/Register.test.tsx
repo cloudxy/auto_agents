@@ -85,6 +85,8 @@ test('GWT-04.1 success primary goes to admin login with from and named copy', as
     '企业「Acme Corp」已开通，负责人 boss@acme.com。登录时请填写注册邮箱，登录后开始采集。',
   )).toBeInTheDocument()
   expect(document.body.textContent || '').not.toContain('企业「」')
+  // 决策 D21：告知已发验证邮件、验证后可用 AI 规划
+  expect(screen.getByText('我们已向注册邮箱发送验证邮件，验证后即可使用 AI 规划。')).toBeInTheDocument()
   const login = screen.getByRole('link', { name: '登录管理后台' })
   const href = login.getAttribute('href') || ''
   expect(href).toContain('/login?from=')

@@ -3,7 +3,7 @@
 职责：
 - enqueue：数据库登记 + 投递 Redis 优先级队列（数据闭环入口）
 - finish_task：Webhook 回调落地，幂等终态推进（含自动重试/告警/通知）
-- control_task：暂停/恢复/终止运行中的任务（Redis 控制键通信）
+- control_task：终止任务；暂停先下线（D6），恢复只清旧暂停键
 - delete_task：删除任务及级联结果（running 拒绝）
 - list_tasks / get_task：任务查询
 
@@ -36,6 +36,7 @@ from backend.services.spider_common import (
     extract_flow,
     extract_store_targets,
     require_enqueue_tenant,
+    resolve_spider_log_path,
 )
 from backend.services.spider_worker_gate import (
     SPIDER_WORKER_OFFLINE_CODE,
@@ -101,6 +102,13 @@ def _spawn_side_effect(coro) -> "asyncio.Task":
     _SIDE_EFFECT_TASKS.add(task)
     task.add_done_callback(_side_effect_done)
     return task
+
+
+def queue_message(task_id: int, spider_name: str, params: Optional[str]) -> str:
+    """优先级主队列消息的唯一构造点（投递与编辑搬迁共用，保证 LREM 字节一致）"""
+    logger.debug(f"构造队列消息 | task_id={task_id} spider={spider_name}")
+    return json.dumps({"task_id": task_id, "spider_name": spider_name, "params": params},
+                      ensure_ascii=False)
 
 
 class SpiderTaskService:
@@ -177,7 +185,7 @@ class SpiderTaskService:
             raise
         await self._check_enqueue_quota(owner_id, spider_name)
 
-    async def _ensure_spider_available(self, spider_name: str) -> None:
+    async def _ensure_spider_available(self, spider_name: str, tenant_id: Optional[int] = None) -> None:
         """入队前注册表校验：DB 优先（存在且 enabled），无记录回退 yml 种子
 
         - DB 有记录且停用 → 拒绝（停用爬虫不允许再入队）
@@ -187,7 +195,7 @@ class SpiderTaskService:
         """
         definition = None
         try:
-            definition = await SpiderDefinitionRepository(self.session).get_by_name(spider_name)
+            definition = await SpiderDefinitionRepository(self.session).get_by_name(spider_name, tenant_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"注册表 DB 校验失败，跳过: spider={spider_name}, error={e}")
             return
@@ -203,7 +211,9 @@ class SpiderTaskService:
             raise BusinessException(f"爬虫 {spider_name} 未在注册表登记，请先登记后再提交任务")
         logger.warning(f"配置种子不可读，跳过注册表校验: spider={spider_name}")
 
-    async def _definition_default_params(self, spider_name: str) -> Optional[str]:
+    async def _definition_default_params(
+        self, spider_name: str, tenant_id: Optional[int] = None,
+    ) -> Optional[str]:
         """取定义参数（T-39 / GWT-103.1：方案编辑后，后续未带 params 的任务按新定义执行）
 
         定义行无 params（None/非 dict/空）返回 None（既有行为不变）；
@@ -211,7 +221,7 @@ class SpiderTaskService:
         """
         logger.debug(f"读取定义参数默认值: spider={spider_name}")
         try:
-            definition = await SpiderDefinitionRepository(self.session).get_by_name(spider_name)
+            definition = await SpiderDefinitionRepository(self.session).get_by_name(spider_name, tenant_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"定义参数读取失败（跳过默认填充）: spider={spider_name}, error={e}")
             return None
@@ -236,14 +246,14 @@ class SpiderTaskService:
         # FR-103 / GWT-103.1：请求未带 params 时取定义参数（显式 params 优先）。
         # 放在流程段识别之前：flow 型定义的镜像参数含 flow 段，需参与 flow_generic 归并。
         if params is None:
-            params = await self._definition_default_params(spider_name)
+            params = await self._definition_default_params(spider_name, owner_id)
 
         # 阶段 5.1：含流程段（分页/详情/过滤）的任务统一归入 flow_generic 执行
         if extract_flow(params) is not None:
             spider_name = FLOW_SPIDER_NAME
 
         # 阶段 6：注册表校验（DB 优先，yml 兜底；停用/未登记拒绝）
-        await self._ensure_spider_available(spider_name)
+        await self._ensure_spider_available(spider_name, owner_id)
 
         await self._reject_if_blocked(owner_id, spider_name)
 
@@ -277,10 +287,7 @@ class SpiderTaskService:
         await self.session.refresh(task)
 
         # 投递任务消息到对应优先级队列（不含 tenant_id：工人不决定归属，LREM 与 update 对齐）
-        message = json.dumps(
-            {"task_id": task.id, "spider_name": spider_name, "params": params},
-            ensure_ascii=False,
-        )
+        message = queue_message(task.id, spider_name, params)
         try:
             await get_async_redis().rpush(task_queue(priority), message)
         except Exception as e:  # noqa: BLE001
@@ -345,27 +352,11 @@ class SpiderTaskService:
             return SpiderTaskResponse.model_validate(task)
 
         target_priority = update_kwargs.get("priority", old_priority)
-        # repo.update 前固化旧消息快照（字段须与 enqueue 投递完全一致，含 tenant_id）。
-        old_message = json.dumps(
-            {
-                "task_id": task.id,
-                "spider_name": task.spider_name,
-                "params": task.params,
-                "tenant_id": getattr(task, "tenant_id", None),
-                "priority": old_priority,
-            },
-            ensure_ascii=False,
-        )
-        new_message = json.dumps(
-            {
-                "task_id": task.id,
-                "spider_name": task.spider_name,
-                "params": new_params,
-                "tenant_id": getattr(task, "tenant_id", None),
-                "priority": target_priority,
-            },
-            ensure_ascii=False,
-        )
+        # repo.update 前固化旧消息快照——与 enqueue 投递同一个构造函数（审计 BUG-13：原先这里
+        # 多带 tenant_id / priority，与投递字节不一致，LREM 永远命不中，改优先级从未生效）。
+        # 参数改动不依赖搬迁：分发时以数据库行为准（consumer._dispatch）。
+        old_message = queue_message(task.id, task.spider_name, task.params)
+        new_message = queue_message(task.id, task.spider_name, new_params)
 
         updated = await self.repo.update(task_id, **update_kwargs)
         await self.session.commit()
@@ -497,6 +488,22 @@ class SpiderTaskService:
             )
             return False
 
+    async def _record_log_end(self, task_id: int) -> None:
+        """终态时记录任务日志窗口终点（审计 BUG-16）；失败只记日志"""
+        import os
+
+        from platform_core.queues import TASK_LOG_END_KEY, TASK_LOG_OFFSET_TTL
+
+        try:
+            log_path = resolve_spider_log_path()
+            size = os.path.getsize(log_path) if log_path and os.path.isfile(log_path) else None
+            if size is not None:
+                await get_async_redis().set(
+                    TASK_LOG_END_KEY.format(task_id=task_id), size, ex=TASK_LOG_OFFSET_TTL,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"记录任务日志终点失败: task_id={task_id}, error={e}")
+
     async def finish_task(
         self,
         task_id: int,
@@ -513,7 +520,7 @@ class SpiderTaskService:
         task = await self.repo.get_by_id(task_id)
         if task is None:
             raise NotFoundException("爬虫任务")
-        if task.status in ("completed", "failed"):
+        if task.status in ("completed", "failed", "cancelled"):
             return SpiderTaskResponse.model_validate(task)
 
         # 失败自动重试（ZSET 延迟入队：退避 1s→5s→15s，consumer 扫描到期成员重投主队列）
@@ -585,6 +592,7 @@ class SpiderTaskService:
                 await redis.srem(tenant_active_key(tid, task.spider_name), task_id)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"清理活跃任务关联失败: task_id={task_id}, error={e}")
+        await self._record_log_end(task_id)
 
         # 期 3 webhook 主路径减负：CSV 落盘 / 终态通知 / 告警评估三大副作用
         # 移入后台任务（_spawn_side_effect 强引用防 GC），主路径在终态落库 +
@@ -661,9 +669,9 @@ class SpiderTaskService:
 
                 manager = get_manager()
                 async with AsyncSession(manager.async_engines["DEFAULT"]) as sess:
-                    url = await TenantSettingsService(sess).get_delivery_webhook(tid)
+                    url, secret = await TenantSettingsService(sess).get_delivery_config(tid)
                 if url:
-                    await DeliveryWebhookService().deliver(url, {
+                    await DeliveryWebhookService().deliver(url, secret=secret, payload={
                         "event": "task.finished",
                         "task_id": task_id,
                         "spider_name": snapshot["spider_name"],
@@ -772,6 +780,15 @@ class SpiderTaskService:
         task = await self.repo.get_by_id(task_id)
         if task is None:
             raise NotFoundException("爬虫任务")
+        if action == "stop":
+            return await self._cancel_task(task)
+        if action == "pause":
+            # 决策 D6：现有暂停只丢弃后续请求，空闲 30 秒后任务被判完成、请求丢失（BUG-14）；
+            # 真挂起有客户需要再做，先下线。resume 保留，清掉旧版本留下的暂停键
+            raise BusinessException(
+                message="暂停功能暂未开放；如需停下，请终止任务后「再次运行」。",
+                code="TASK_PAUSE_UNAVAILABLE", status_code=409,
+            )
         if task.status != "running":
             raise BusinessException(f"任务当前状态为 {task.status}，仅运行中的任务可控制")
 
@@ -787,6 +804,37 @@ class SpiderTaskService:
                 return {"task_id": task_id, "action": action, "message": f"任务已{action}"}
         except Exception as e:  # noqa: BLE001
             raise BusinessException(f"控制指令写入 Redis 失败: {e}")
+
+    async def _cancel_task(self, task) -> dict:
+        """终止任务（审计 BUG-15）：只终止这一个任务
+
+        原先写 stop 控制键后由 Scrapy 中间件 close_spider——共享爬虫进程整体关闭，
+        同实例上其他租户的任务一并被杀。现在：任务按 CAS 直接置终态 cancelled（待执行 /
+        运行中均可终止）、释放并发槽；stop 控制键只让 Scrapy 丢弃该任务剩余请求。
+        """
+        task_id = int(task.id)
+        spider_name = str(task.spider_name)
+        tid = getattr(task, "tenant_id", None)
+        updated = await self.repo.update(
+            task_id, only_if_status=("pending", "running"),
+            status="cancelled", error_message="用户终止", completed_at=func.now(),
+        )
+        if updated is None:
+            current = await self.repo.get_by_id(task_id)
+            status = getattr(current, "status", None)
+            raise BusinessException(f"任务当前状态为 {status}，已结束的任务无法终止")
+        await self.session.commit()
+        try:
+            redis = get_async_redis()
+            await redis.set(TASK_CONTROL_KEY.format(task_id=task_id), "stop", ex=self._CONTROL_TTL)
+            await redis.srem(ACTIVE_TASK_KEY.format(spider_name=spider_name), task_id)
+            if isinstance(tid, int):
+                await redis.srem(tenant_active_key(tid, spider_name), task_id)
+        except Exception as e:  # noqa: BLE001 任务已终止落库；控制键 / 槽位清理失败只记日志
+            logger.warning(f"终止后清理控制键 / 槽位失败: task_id={task_id}, error={e}")
+        await self._record_log_end(task_id)
+        logger.info(f"任务已终止（仅本任务）: task_id={task_id}")
+        return {"task_id": task_id, "action": "stop", "message": "任务已终止"}
 
     # ------------------------------------------------------------------
     # 数据源多存储（4.2）：终态 CSV 落盘
@@ -851,7 +899,9 @@ class SpiderTaskService:
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(f, fieldnames=SpiderTaskService._EXPORT_COLUMNS)
             writer.writeheader()
-            writer.writerows(rows)
+            from backend.utils.csv_safe import safe_csv_row
+
+            writer.writerows(safe_csv_row(r) for r in rows)  # 审计 BUG-20：公式注入
         return path
 
     def _store_dir(self) -> str:

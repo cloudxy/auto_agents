@@ -388,6 +388,96 @@ class RetryMiddleware:
         )
 
 
+class OutboundGuardMiddleware:
+    """出站守卫（审计 BUG-22 / F4-1 / P0-8）：禁止爬虫请求内网 / 回环 / 链路本地 / 云元数据地址
+
+    - 目标来自租户（AI 计划、通用 / 流程爬虫的 urls），必须在真正下载前拦截；
+    - 只放行 http(s)（file:// ftp:// s3:// 等一律拒绝，防本地文件读取）；
+    - 重定向产生的新请求会重新经过下载中间件，因此每一跳都复检；
+    - 解析结果按主机缓存 5 分钟，避免每个请求阻塞 reactor 做 DNS。
+    已知边界：Playwright 渲染时浏览器自行加载的子资源不经过本中间件（P1-6 统一收口）。
+    """
+
+    _CACHE_SECONDS = 300.0
+
+    def __init__(self, enabled: bool = True, allowed_hosts=()):
+        self._enabled = enabled
+        self._allowed_hosts = tuple(allowed_hosts or ())
+        self._cache: dict = {}
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(
+            enabled=crawler.settings.getbool("OUTBOUND_GUARD_ENABLED", True),
+            allowed_hosts=crawler.settings.getlist("OUTBOUND_GUARD_ALLOWED_HOSTS"),
+        )
+
+    def _verdict(self, url: str) -> str:
+        """返回拒绝原因；放行返回空串"""
+        from urllib.parse import urlparse
+
+        from platform_core.outbound_guard import OutboundBlocked, check_url, host_allowed
+
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme in ("http", "https") and host and self._allowed_hosts \
+                and host_allowed(host, self._allowed_hosts):
+            return ""
+        key = (parsed.scheme, host)
+        now = time.time()
+        cached = self._cache.get(key)
+        if cached is not None and now - cached[1] < self._CACHE_SECONDS:
+            return cached[0]
+        try:
+            check_url(url, allowed_ports=None)
+            reason = ""
+        except OutboundBlocked as exc:
+            reason = exc.message
+        self._cache[key] = (reason, now)
+        return reason
+
+    def process_request(self, request, spider):
+        if not self._enabled or request.url.startswith(("data:", "about:")):
+            return None
+        reason = self._verdict(request.url)
+        if not reason:
+            # 决策 D8：站点级豁免 robots.txt（本中间件优先级 50，先于 robots 中间件 100 执行）
+            from urllib.parse import urlparse
+
+            from platform_core.outbound_guard import robots_exempt
+
+            if robots_exempt((urlparse(request.url).hostname or "").lower()):
+                request.meta["dont_obey_robotstxt"] = True
+        if reason:
+            logger.warning(
+                f"出站守卫拒绝请求: spider={getattr(spider, 'name', '?')} "
+                f"task_id={request.meta.get('task_id')} url={request.url[:200]} reason={reason}"
+            )
+            raise IgnoreRequest(f"出站守卫拒绝: {reason}")
+        return None
+
+
+from scrapy.downloadermiddlewares.robotstxt import RobotsTxtMiddleware  # noqa: E402
+
+
+class PoliteRobotsTxtMiddleware(RobotsTxtMiddleware):
+    """robots.txt 拒绝时记一条带 task_id 的告警（决策 D8）
+
+    Scrapy 原生只打 DEBUG，租户看到的是「0 条结果」却不知道原因；这里把原因写进任务日志。
+    只有 ROBOTSTXT_OBEY=true 的爬虫（租户填地址的通用 / 流程爬虫）启用，其余抛 NotConfigured。
+    """
+
+    def process_request_2(self, rp, request):
+        try:
+            super().process_request_2(rp, request)
+        except IgnoreRequest:
+            logger.warning(
+                f"目标站点 robots.txt 不允许采集: task_id={request.meta.get('task_id')} "
+                f"url={request.url[:200]}（平台默认遵守 robots.txt）"
+            )
+            raise
+
+
 class FingerprintMiddleware:
     """请求指纹中间件 - 辅助去重"""
     def process_request(self, request, spider):
@@ -455,9 +545,10 @@ class TaskControlMiddleware:
 
         action = str(action).strip().lower()
         if action == "stop":
-            logger.warning(f"用户终止任务，关闭爬虫: task_id={task_id}")
-            spider.crawler.engine.close_spider(spider, reason="user_stopped")
-            return None
+            # 审计 BUG-15：只丢弃该任务的请求。原先 close_spider 关闭整个共享实例，
+            # 同实例上其他租户的任务一起被杀；任务终态由后端直接置 cancelled
+            logger.info(f"任务已终止，丢弃其请求: task_id={task_id}, url={request.url}")
+            raise IgnoreRequest()
         if action == "pause":
             logger.debug(f"任务已暂停，跳过请求: task_id={task_id}, url={request.url}")
             raise IgnoreRequest()

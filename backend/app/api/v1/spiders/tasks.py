@@ -122,7 +122,7 @@ async def control_task(
     session: AsyncSession = Depends(get_async_db),
     user: CurrentUser = Depends(require_operator),
 ) -> ApiResponse[dict]:
-    """控制运行中的任务：暂停/恢复/终止（A4；body 必填，缺失时 422）"""
+    """控制任务：终止；暂停先下线（D6，409 TASK_PAUSE_UNAVAILABLE）；恢复只清旧暂停键（body 必填，缺失时 422）"""
     result = await service.control_task(task_id, payload.action)
     await record_audit(user, "task.control", f"task#{task_id}", {"action": payload.action})
     return ok(result)
@@ -135,10 +135,16 @@ async def get_task_logs(
     keyword: Optional[str] = Query(None, description="全文搜索关键词（大小写不敏感）"),
     level: Optional[str] = Query(None, description="日志级别过滤：DEBUG/INFO/WARNING/ERROR/CRITICAL"),
     service: SpiderQueryService = Depends(_query_service),
-    _user: CurrentUser = Depends(require_login),
+    user: CurrentUser = Depends(require_login),
 ) -> ApiResponse[TaskLogResponse]:
-    """任务运行日志（尾部 N 行，支持关键词搜索和级别过滤）"""
-    return ok(await service.task_logs(task_id, lines=lines, keyword=keyword, level=level))
+    """任务运行日志（尾部 N 行，支持关键词搜索和级别过滤）
+
+    共享爬虫进程的日志混有并发任务：非平台超管只看带本任务标记的行（审计 BUG-16）。
+    """
+    return ok(await service.task_logs(
+        task_id, lines=lines, keyword=keyword, level=level,
+        only_task_lines=not user.is_platform_admin,
+    ))
 
 
 @router.get("/tasks/{task_id}/quality", response_model=ApiResponse[TaskQualityReportResponse])

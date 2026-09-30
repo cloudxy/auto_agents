@@ -9,11 +9,11 @@ verdict 判定口径（与 channel_probe_service._score_probe_batch 对齐）：
 - spoofed：伪装（身份矛盾 / 同题逐字重复 / 参考相似度过低）
 - offline：不可用（探针调用过半失败）
 """
-from datetime import datetime
 from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+from platform_core.schemas.time_types import UTCDateTime
 
 
 class ProbeVerdict(str, Enum):
@@ -51,7 +51,7 @@ class ChannelEventResponse(BaseModel):
     window_hours: Optional[int] = Field(None, description="统计窗口（小时）")
     reason: Optional[str] = Field(None, description="原因说明")
     source: str = Field(..., description="来源：scheduler/manual")
-    created_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
 
 
 class ChannelEventListResponse(BaseModel):
@@ -73,7 +73,7 @@ class ChannelProbeResultResponse(BaseModel):
     scores: Optional[dict] = Field(None, description="10 维探针得分与启发式指标")
     latency_ms: Optional[int] = Field(None, description="身份探针往返延迟（毫秒）")
     batch_id: str = Field(..., description="巡检批次（uuid hex）")
-    created_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
 
 
 class ChannelProbeResultListResponse(BaseModel):

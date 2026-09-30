@@ -3,7 +3,10 @@
     "target": "ES2019",
     "module": "ES2020",
     "moduleResolution": "node",
-    "lib": ["ES2019", "DOM"],
+    "lib": [
+      "ES2019",
+      "DOM"
+    ],
     "strict": true,
     "declaration": true,
     "declarationMap": true,
@@ -12,7 +15,10 @@
     "rootDir": "src",
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "types": []
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }

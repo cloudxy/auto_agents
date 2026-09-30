@@ -86,7 +86,7 @@ class NotifyService:
             "retry_count": retry_count,
             "error_message": error_message,
         }
-        for channel in self._channels:
+        for channel in await self._effective_channels():
             try:
                 if channel == "log":
                     self._notify_log(payload)
@@ -102,6 +102,37 @@ class NotifyService:
                     logger.warning(f"未知通知渠道，已跳过: channel={channel}")
             except Exception as e:  # noqa: BLE001 通知失败不影响主流程
                 logger.error(f"通知渠道执行失败: channel={channel}, task_id={task_id}, error={e}")
+
+    async def _effective_channels(self) -> list[str]:
+        """生效渠道 = 配置文件声明的渠道 ∪ 已配置 URL 的渠道（审计 BUG-36）
+
+        原先只读 NOTIFY.CHANNELS（默认只有 log）：在配置页填好的 webhook / 钉钉 / 企业微信
+        地址写进了 system_configs，渠道却从未启用，通知永远不发。
+        """
+        channels = list(self._channels)
+        for channel in ("webhook", "dingtalk", "wechat_work"):
+            if channel not in channels and await self._channel_url(channel):
+                channels.append(channel)
+        return channels
+
+    async def send_test(self, channel: str) -> bool:
+        """配置页「发送测试」：对单个渠道发一条测试消息；未配置返回 False，发送失败抛出"""
+        logger.info(f"通知渠道测试发送 | channel={channel}")
+        if channel not in ("webhook", "dingtalk", "wechat_work"):
+            raise ValueError(f"不支持测试的渠道: {channel}")
+        url = await self._channel_url(channel)
+        if not url:
+            return False
+        text = "这是一条测试通知：渠道配置可用。"
+        body = (
+            {"event": "notify.test", "text": text} if channel == "webhook"
+            else {"msgtype": "text", "text": {"content": f"[notify.test] {text}"}} if channel == "dingtalk"
+            else {"msgtype": "markdown", "markdown": {"content": f"[notify.test] {text}"}}
+        )
+        async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
+            resp = await client.post(url, json=body)
+        resp.raise_for_status()
+        return True
 
     async def _channel_url(self, channel: str) -> str:
         """渠道 URL 惰性解析：system_configs（配置页可写）优先，回退 settings 固化值。
@@ -141,7 +172,7 @@ class NotifyService:
         if not self._enabled:
             return
         full = f"[{event}] {text}"
-        for channel in self._channels:
+        for channel in await self._effective_channels():
             try:
                 if channel == "log":
                     logger.info(full)

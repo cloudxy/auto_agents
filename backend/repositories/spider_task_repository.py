@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from platform_core.models.spider_task import SpiderTask
 from platform_core.repository import BaseRepository
+from platform_core.timeutil import business_date
 
 
 class SpiderTaskRepository(BaseRepository[SpiderTask]):
@@ -112,8 +113,11 @@ class SpiderTaskRepository(BaseRepository[SpiderTask]):
         return float(value) if value is not None else None
 
     async def daily_task_counts(self, since: datetime) -> List[Tuple[str, int]]:
-        """按日统计任务数（created_at >= since），返回 [(yyyy-mm-dd, count)] 升序"""
-        day = func.date(SpiderTask.created_at)
+        """按日统计任务数（created_at >= since），返回 [(yyyy-mm-dd, count)] 升序
+
+        按 Asia/Shanghai 业务日切（审计 BUG-43：原 DATE(created_at) 按 UTC 切，上海 0–8 点落到前一天）
+        """
+        day = business_date(SpiderTask.created_at)
         stmt = (
             select(day, func.count(SpiderTask.id))
             .where(SpiderTask.created_at >= since)

@@ -2,12 +2,12 @@
 
 状态映射（总方案 3.2-A-4）：存量 active→testing、experimental→experimental、deprecated→deprecated。
 """
-from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from platform_core.schemas.base import PaginationQuery
+from platform_core.schemas.time_types import UTCDateTime
 
 SKILL_STATUSES = ("experimental", "testing", "stable", "recommended", "deprecated", "blacklist")
 SKILL_SOURCE_TYPES = ("self_built", "network_imported", "marketplace_crawled")
@@ -38,7 +38,7 @@ class SkillReviewResponse(BaseModel):
     notes: Optional[str] = None
     content_hash: Optional[str] = None
     prompt_version: Optional[str] = None
-    created_at: Optional[datetime] = None
+    created_at: Optional[UTCDateTime] = None
 
 
 class SkillResponse(BaseModel):
@@ -56,15 +56,15 @@ class SkillResponse(BaseModel):
     source_type: str
     source_url: str = ""
     source_author: str = ""
-    imported_at: Optional[datetime] = None
+    imported_at: Optional[UTCDateTime] = None
     score: Optional[float] = None
     ai_suggested_score: Optional[float] = None
     tier: Optional[str] = None
     reviewed_by: Optional[str] = None
-    reviewed_at: Optional[datetime] = None
+    reviewed_at: Optional[UTCDateTime] = None
     similar_to: Optional[List[str]] = None
     sync_state: str = "ok"
-    updated_at: Optional[datetime] = None
+    updated_at: Optional[UTCDateTime] = None
 
 
 class SkillDetailResponse(SkillResponse):
@@ -98,8 +98,8 @@ class SkillJobResponse(BaseModel):
     succeeded: int = 0
     failed: int = 0
     detail: Optional[dict] = None
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
+    started_at: Optional[UTCDateTime] = None
+    finished_at: Optional[UTCDateTime] = None
 
 
 class SkillScoringRationale(BaseModel):

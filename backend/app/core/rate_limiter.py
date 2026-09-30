@@ -77,13 +77,45 @@ EVENTS_PUBLIC_RATE_POLICY = RateLimitPolicy(
 )
 
 
+_DEFAULT_TRUSTED_PROXIES = (
+    "127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7",
+)
+
+
+def _peer_is_trusted_proxy(peer: str) -> bool:
+    """直连对端是否为已配置的可信反代（SECURITY.TRUSTED_PROXIES，默认环回 + 私网）"""
+    import ipaddress
+
+    from config import settings
+
+    section = settings.get("SECURITY") or {}
+    configured = section.get("TRUSTED_PROXIES") if hasattr(section, "get") else None
+    nets = configured if configured is not None else _DEFAULT_TRUSTED_PROXIES
+    try:
+        ip = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    for net in nets:
+        try:
+            if ip in ipaddress.ip_network(str(net), strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def resolve_client_ip(request: Request, xff_mode: XffMode = "none") -> str:
-    """按策略取客户端 IP（XFF 首跳客户端可伪造，仅允许取最右可信反代值）"""
-    if xff_mode == "last":
+    """按策略取客户端 IP
+
+    审计 BUG-34：只有直连对端是可信反代时才采信 X-Forwarded-For，并取最右值（反代写入）；
+    公网直连时 XFF 整条都是客户端自填的，一律忽略，按连接地址限流。
+    """
+    peer = request.client.host if request.client else "unknown"
+    if xff_mode == "last" and _peer_is_trusted_proxy(peer):
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
             return forwarded.split(",")[-1].strip()
-    return request.client.host if request.client else "unknown"
+    return peer
 
 
 def policy_key(policy: RateLimitPolicy, identity: str) -> str:

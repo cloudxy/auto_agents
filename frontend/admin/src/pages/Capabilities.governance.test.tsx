@@ -139,7 +139,8 @@ test('GWT-37.4 merged sentence keeps listed child', async () => {
   const group = await screen.findByRole('group', { name: '上架 dev-team' })
   fireEvent.click(within(group).getByText('已上架'))
   expect(await screen.findByText(MERGED)).toBeInTheDocument()
-  expect(screen.getByText(/最近上架 2026-01-02T00:00:00/)).toBeInTheDocument()
+  // 接口时间是 UTC，展示按北京时间（审计 BUG-43）
+  expect(screen.getByText(/最近上架 2026-01-02 08:00:00/)).toBeInTheDocument()
 })
 
 test('GWT-37.5 plugin drawer has no bulk-list control', async () => {
@@ -209,7 +210,7 @@ test('GWT-37.6 listed_at remains after unlist in the row', async () => {
     items: [row({ listing_state: 'unlisted', listed_at: '2026-03-01T08:00:00' })],
   })
   renderPage()
-  expect(await screen.findByText(/最近上架 2026-03-01T08:00:00/)).toBeInTheDocument()
+  expect(await screen.findByText(/最近上架 2026-03-01 16:00:00/)).toBeInTheDocument()  // UTC 08:00 = 北京 16:00
 })
 
 test('GWT-40.1 unknown health still allows listing', async () => {
@@ -299,4 +300,18 @@ test('GWT-M41 tenant has no author-submit CTA', async () => {
   expect(screen.queryByText('成为作者')).not.toBeInTheDocument()
   expect(screen.queryByText('发布到能力市场')).not.toBeInTheDocument()
   expect(screen.queryByTestId('governance-shell')).not.toBeInTheDocument()
+})
+
+test('BUG-31 catalog paginates on the server: total from API, page 2 fetches page 2', async () => {
+  list.mockImplementation((_type?: string, _listing?: string, opts?: { page?: number }) => Promise.resolve({
+    total: GOVERNANCE_PAGE_SIZE + 5,
+    items: [row({ id: opts?.page ?? 1, name: `skill-p${opts?.page ?? 1}` })],
+  }))
+  renderPage()
+  expect(await screen.findByText(`共 ${GOVERNANCE_PAGE_SIZE + 5} 条`)).toBeInTheDocument()
+  fireEvent.click(screen.getByTitle('2'))
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith(
+    undefined, undefined, expect.objectContaining({ page: 2, pageSize: GOVERNANCE_PAGE_SIZE }),
+  ))
+  expect(await screen.findByText('skill-p2')).toBeInTheDocument()
 })

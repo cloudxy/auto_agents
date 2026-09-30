@@ -23,6 +23,7 @@ from backend.services.schedule_service import (
 from backend.services.spider_query_service import SpiderQueryService
 from backend.services.spider_task_service import _SIDE_EFFECT_TASKS, SpiderTaskService
 from platform_core.exceptions import BusinessException, NotFoundException
+from platform_core.timeutil import utcnow
 
 
 async def _drain_side_effects() -> None:
@@ -302,7 +303,7 @@ class TestExportResults:
                 "id": 1, "task_id": 1, "spider_name": "example", "url": "https://e.com",
                 "title": "标题", "content": "内容,含逗号", "source": "web",
                 "item_type": "BaseItem", "extra": '{"k": "v"}',
-                "created_at": "2026-08-29T10:00:00",
+                "created_at": "2026-08-29T18:00:00+08:00",  # 库存 UTC 10:00 → 导出北京时间（BUG-43）
             },
             {
                 "id": 2, "task_id": 1, "spider_name": "example", "url": None,
@@ -343,7 +344,7 @@ class TestExportResults:
                 "id": 1, "task_id": 1, "spider_name": "example", "url": "https://e.com",
                 "title": "标题", "content": "内容", "source": "web",
                 "item_type": "BaseItem", "extra": None,
-                "created_at": "2026-08-29T10:00:00",
+                "created_at": "2026-08-29T18:00:00+08:00",  # 库存 UTC 10:00 → 导出北京时间（BUG-43）
             },
             {
                 "id": 2, "task_id": 1, "spider_name": "example", "url": None,
@@ -485,7 +486,8 @@ class TestTaskLogOffset:
         assert resp.lines == ["new-task-line-1", "new-task-line-2"]
 
     @pytest.mark.asyncio
-    async def test_logs_fallback_without_offset(self, tmp_path):
+    async def test_logs_empty_without_offset(self, tmp_path):
+        """审计 BUG-16：没有起点偏移时返回空——原先回退读整份共享文件，把别的租户的日志一起返回"""
         log_file = tmp_path / "spider.log"
         log_file.write_text("line-a\nline-b\n", encoding="utf-8")
 
@@ -494,7 +496,37 @@ class TestTaskLogOffset:
         with patch("backend.services.spider_query_service.resolve_spider_log_path", return_value=str(log_file)):
             with patch.object(SpiderQueryService, "_task_log_offset", AsyncMock(return_value=None)):
                 resp = await svc.task_logs(1)
-        assert resp.lines == ["line-a", "line-b"]
+        assert resp.lines == []
+
+    @pytest.mark.asyncio
+    async def test_logs_window_and_task_marker(self, tmp_path):
+        """[start, end) 窗口 + 租户视角只保留本任务标记行（并发任务 7 的行不外泄）"""
+        before = "2026 | INFO | x | [task=1] before-window\n"
+        window = (
+            "2026 | INFO | scrapy.core.engine | [task=1] Crawled (200) <GET https://a.example/1>\n"
+            "2026 | INFO | scrapy.core.engine | [task=7] Crawled (200) <GET https://secret.example/x>\n"
+            "2026 | INFO | scrapy.extensions.logstats | Crawled 3 pages\n"
+            "2026 | WARNING | middlewares | 出站守卫拒绝请求: task_id=1 url=http://10.0.0.1\n"
+        )
+        after = "2026 | INFO | x | [task=1] after-window\n"
+        log_file = tmp_path / "spider.log"
+        log_file.write_text(before + window + after, encoding="utf-8")
+        start = len(before.encode("utf-8"))
+        end = start + len(window.encode("utf-8"))
+
+        svc = _query_service()
+        svc.repo.get_by_id = AsyncMock(return_value=_task())
+        with patch("backend.services.spider_query_service.resolve_spider_log_path", return_value=str(log_file)), \
+             patch.object(SpiderQueryService, "_task_log_offset", AsyncMock(return_value=start)), \
+             patch.object(SpiderQueryService, "_task_log_end", AsyncMock(return_value=end)):
+            tenant_view = await svc.task_logs(1, only_task_lines=True)
+            admin_view = await svc.task_logs(1)
+        assert tenant_view.lines == [
+            "2026 | INFO | scrapy.core.engine | [task=1] Crawled (200) <GET https://a.example/1>",
+            "2026 | WARNING | middlewares | 出站守卫拒绝请求: task_id=1 url=http://10.0.0.1",
+        ]
+        assert len(admin_view.lines) == 4  # 超管看完整窗口，但不越过窗口
+        assert all("window" not in ln for ln in admin_view.lines)
 
 
 class TestScheduleService:
@@ -513,8 +545,7 @@ class TestScheduleService:
         assert validate_cron("not a cron") is False
 
     def test_next_fire_time_future(self):
-        from datetime import datetime
-        assert next_fire_time("* * * * *") > datetime.now()
+        assert next_fire_time("* * * * *") > utcnow()
 
     @pytest.mark.asyncio
     async def test_create_rejects_unknown_spider(self):
@@ -563,7 +594,7 @@ class TestScheduleService:
         svc.repo.find_by_spider = AsyncMock(return_value=None)
         created = MagicMock(
             id=1, spider_name="example", cron_expr="*/10 * * * *", params=None,
-            enabled=True, last_run_at=None, next_run_at=datetime.now(),
+            enabled=True, last_run_at=None, next_run_at=utcnow(),
             created_at=None, updated_at=None,
         )
         svc.repo.create = AsyncMock(return_value=created)

@@ -48,13 +48,11 @@ def get_password_hash(password: str) -> str:
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """创建 JWT Token"""
     to_encode = data.copy()
-    
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    
-    to_encode.update({"exp": expire})
+    now = datetime.now(timezone.utc)
+    expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    # typ 区分访问 / 刷新令牌（决策 D10）：refresh 令牌不能拿来当访问令牌
+    to_encode.setdefault("typ", "access")
+    to_encode.update({"exp": expire, "iat": int(now.timestamp())})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     
     # 脱敏：只记录用户标识，不记录 token 内容
@@ -63,10 +61,22 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
+def decode_token_any(token: str, *, verify_exp: bool = True) -> Optional[dict]:
+    """解码并验签任意类型的本站令牌（访问 / 刷新）；失败返回 None"""
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM],
+                          options={"verify_exp": verify_exp})
+    except jwt.InvalidTokenError:
+        return None
+
+
 def decode_access_token(token: str) -> Optional[dict]:
-    """解码 JWT Token"""
+    """解码访问令牌；刷新令牌（typ=refresh）一律拒绝"""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("typ", "access") != "access":
+            logger.warning("拒绝非访问令牌用于鉴权")
+            return None
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("Token 已过期")

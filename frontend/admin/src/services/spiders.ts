@@ -153,10 +153,10 @@ export const deleteTask = (taskId: number): Promise<{ task_id: number; removed_r
     .delete(`/spiders/tasks/${taskId}`)
     .then((res) => unwrap<{ task_id: number; removed_results: number }>(res))
 
-/** 控制运行中的任务：暂停/恢复/终止（A4） */
+/** 终止任务（暂停先下线，决策 D6：后端对 pause 回 409 TASK_PAUSE_UNAVAILABLE） */
 export const controlTask = (
   taskId: number,
-  action: 'pause' | 'resume' | 'stop'
+  action: 'stop'
 ): Promise<{ task_id: number; action: string; message: string }> =>
   api
     .post(`/spiders/tasks/${taskId}/control`, { action })

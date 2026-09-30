@@ -35,6 +35,12 @@ def install_fernet(monkeypatch) -> None:
     monkeypatch.setenv("LLM_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 
+def allow_self_serve_enterprise(monkeypatch) -> None:
+    """企业档临时放开自助结账：决策 D17 默认走「联系我们」（BILLING.SALES_LED_PLANS），
+    但该名单可按部署配置清空，存量企业档订单也仍会付款 / 迟到回调——企业档履约口径仍要钉住"""
+    monkeypatch.setattr("backend.services.billing_service._sales_led_slugs", lambda: set())
+
+
 def seed_plans(db_session) -> None:
     async def _go():
         async with db_session() as s:

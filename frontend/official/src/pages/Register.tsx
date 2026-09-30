@@ -20,6 +20,7 @@ const COPY_INCOMPLETE_GENERIC = '注册未完成，请检查填写内容'
 const COPY_OFFLINE = '创建企业失败：网络不可用。检查连接后重试。'
 const COPY_CREATED_TOAST = '企业已创建'
 const COPY_LOGIN_ADMIN = '登录管理后台'
+const COPY_VERIFY_EMAIL = '我们已向注册邮箱发送验证邮件，验证后即可使用 AI 规划。'
 const COPY_REGISTER_ANOTHER = '再注册一家'
 const FREE_TIER_LINE = `免费档：${FREE_TIER_FEATURE_COPY.task_concurrency} / ${FREE_TIER_FEATURE_COPY.result_storage} / ${FREE_TIER_FEATURE_COPY.llm_tokens_month}`
 const TOUCH_TARGET_STYLE: React.CSSProperties = {
@@ -131,15 +132,14 @@ const Register: React.FC = () => {
   return (
     <div
       style={{
-        minHeight: '100vh',
+        // 审计 B5-8：不再套一整屏高（外层 main 已 flex:1），窄屏首屏不空出一大块
         background: 'var(--color-surface-sunken)',
         display: 'flex',
-        alignItems: 'center',
         justifyContent: 'center',
-        padding: 24,
+        padding: '48px 16px',
       }}
     >
-      <Card style={{ width: 420, background: 'var(--color-surface)' }}>
+      <Card style={{ width: '100%', maxWidth: 420, background: 'var(--color-surface)' }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <Link
             to="/"
@@ -170,6 +170,10 @@ const Register: React.FC = () => {
               }
               description={(
                 <Space wrap style={{ marginTop: 8 }}>
+                  {/* 决策 D21：负责人验证注册邮箱后企业才能用 AI 规划 */}
+                  <Text type="secondary" style={{ display: 'block', width: '100%' }}>
+                    {COPY_VERIFY_EMAIL}
+                  </Text>
                   <Button
                     type="primary"
                     href={ADMIN_LOGIN_HREF}

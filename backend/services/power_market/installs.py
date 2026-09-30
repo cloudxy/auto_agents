@@ -30,6 +30,7 @@ from backend.services.power_market.types import (
 from platform_core.exceptions import BusinessException, ValidationException
 from platform_core.logger import get_logger
 from platform_core.models.capability import CapabilityAsset, CapabilityInstall
+from platform_core.timeutil import utc_iso
 
 logger = get_logger("service.power_market")
 
@@ -254,5 +255,5 @@ def _project_install(install: CapabilityInstall, asset: CapabilityAsset, *, writ
         "can_uninstall": bool(writer),
         "resubscribe_allowed": bool(writer) and listed and not locked,
         "resubscribe_hint": MSG_DELISTED_RESUBSCRIBE if delisted else None,
-        "created_at": install.created_at.isoformat() if install.created_at else None,
+        "created_at": utc_iso(install.created_at),
     }

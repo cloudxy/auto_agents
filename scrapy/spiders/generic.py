@@ -26,6 +26,16 @@ class GenericSpider(RedisSpider):
     """选择器规则随请求下发的通用采集爬虫"""
 
     name = "generic"
+
+    # 决策 D7 / D8：地址由租户填写——默认遵守 robots.txt、自动限速、单域并发压低
+    #（平台自有的榜单类爬虫不受影响；站点级豁免见 OUTBOUND.ROBOTS_EXEMPT_DOMAINS）
+    custom_settings = {
+        "ROBOTSTXT_OBEY": True,
+        "AUTOTHROTTLE_ENABLED": True,
+        "AUTOTHROTTLE_START_DELAY": 1.0,
+        "AUTOTHROTTLE_TARGET_CONCURRENCY": 2.0,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 4,
+    }
     redis_key = "generic:start_urls"
     # 采集目标由任务参数指定，不做域名白名单限制（风控由站点侧反爬配置兜底）
 

@@ -185,20 +185,37 @@ class PaymentNotifyService:
             props={"channel": channel, "product": product, "tenant_id": tid},
         )
 
-    async def _fulfill(self, order_id: int) -> None:
+    async def fulfill_pending(self, order_id: int) -> bool:
+        """已付款待开通 → 履约（通知路径与超管补偿共用）；成功返回 True"""
         logger.info(f"开通履约 | order={order_id}")
         order = await self.orders.get_fresh(order_id)
         if order is None or order.status != "paid_pending_fulfillment":
             logger.info(f"开通跳过非处理中单据 | order={order_id} status={getattr(order, 'status', None)}")
-            return
+            return False
+        tid = int(order.tenant_id)
+        product = str(order.product_code or "")
         now = datetime.now(timezone.utc)
-        await self._fulfill_product(order, now)
+        try:
+            await self._fulfill_product(order, now)
+        except Exception as exc:  # noqa: BLE001 履约失败不回吐给通道（避免通道无限重推），留单补偿
+            await self.session.rollback()
+            logger.error(f"履约失败，订单停在已付款待开通 | order={order_id} err={exc}")
+            await emit_product_event(
+                self.session, "fulfillment_failed", tenant_id=tid,
+                props={"order_id": order_id, "product": product,
+                       "reason": getattr(exc, "code", type(exc).__name__)},
+            )
+            return False
         rows = await self.orders.cas_mark_fulfilled(order_id, _utc_naive())
         if rows == 0:
             await self.session.rollback()
             logger.info(f"开通 CAS 0 行，回滚履约 | order={order_id}")
-            return
+            return False
         await self.session.commit()
+        return True
+
+    async def _fulfill(self, order_id: int) -> None:
+        await self.fulfill_pending(order_id)
 
     async def _fulfill_product(self, order: Order, now: datetime) -> None:
         from backend.services.billing_fulfill import fulfill_checkout_product

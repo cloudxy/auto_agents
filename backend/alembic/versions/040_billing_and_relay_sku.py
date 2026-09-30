@@ -161,12 +161,7 @@ def _grant_relay_menu() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_relay_tokens_tenant_id", table_name="relay_tokens")
-    op.drop_table("relay_tokens")
-    op.drop_index("ix_relay_groups_tenant_id", table_name="relay_groups")
-    op.drop_table("relay_groups")
-    op.drop_index("ix_orders_tenant_id", table_name="orders")
-    op.drop_table("orders")
-    op.drop_index("ix_tenant_subscriptions_tenant_id", table_name="tenant_subscriptions")
-    op.drop_table("tenant_subscriptions")
-    op.drop_table("plans")
+    # 审计 BUG-42：与 029 分支共用计费表，逐表存在性判断（另一分支可能已处理）
+    for table in ("relay_tokens", "relay_groups", "orders", "tenant_subscriptions", "plans"):
+        if _has_table(table):
+            op.drop_table(table)  # 删表连带其索引
