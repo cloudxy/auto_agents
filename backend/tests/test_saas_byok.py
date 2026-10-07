@@ -138,13 +138,11 @@ async def test_no_own_key_falls_back_to_platform(db_session, monkeypatch):
 @pytest.mark.asyncio
 async def test_platform_fallback_subject_to_token_quota(db_session, monkeypatch):
     """平台兜底 + token 配额联动：满额拒绝发生在真正 HTTP 出站前。"""
-    from datetime import date
-
     import backend.services.ai_planner_service as aps
     import backend.services.ai_planner.llm_client as lc
     from backend.services.llm_common import LlmRuntimeConfig
     from platform_core.exceptions import BusinessException
-    from backend.services.quota_service import PLAN_FULL_CTA, PLAN_FULL_USER
+    from backend.services.quota_service import PLAN_FULL_CTA, PLAN_FULL_USER, shanghai_today
     from platform_core.models.llm_token_usage import LlmTokenUsage
 
     t1, t2 = await _seed(db_session, monkeypatch)
@@ -154,8 +152,9 @@ async def test_platform_fallback_subject_to_token_quota(db_session, monkeypatch)
         a_row = (await s.execute(select(LlmProvider).where(LlmProvider.name == "a-key"))).scalar_one()
         a_row.is_active = False
         a_row.enabled = False
+        # 用量落在当前业务日：套餐闸按 Asia/Shanghai 当月统计，写死日期跨月即失效
         s.add(LlmTokenUsage(tenant_id=t1, provider_name="provider:plat", model="m",
-                            stat_date=date(2026, 9, 1), total_tokens=150))
+                            stat_date=shanghai_today(), total_tokens=150))
         await s.commit()
 
     outbound: list = []
