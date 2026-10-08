@@ -1,0 +1,9 @@
+# 项目级 Grok 配置（仅 [mcp_servers] / [plugins] / [permission] / [mcp] 生效）。
+# 启用哪些插件只认仓库根 plugins-lock.json；.grok/plugins/<name> 由
+# `python3 scripts/agents_plugins.py sync` 生成（→ .agents/plugins/<name>）。
+# 不要再 grok plugin install 这些名字：会在 ~/.grok/installed-plugins 留下哈希副本并双载。
+
+[plugins]
+enabled = [
+  "sdlc-workflow",
+]

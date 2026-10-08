@@ -374,7 +374,7 @@ API Routes → Services → Repositories → Models(ORM)
 bash tools/check/arch.sh      # 退出码 = 违规数（pre-commit 与 CI 自动执行）
 ```
 
-核心：禁止硬编码连接串/密钥；爬虫禁止 import backend、禁止直写主库；爬虫必须配反爬（DOWNLOAD_DELAY + UA 轮换）；API 层禁止 import ORM；async 上下文禁止同步 Redis 链式直调（统一 `get_async_redis()`）。条数以 `tools/check/arch.sh` 为准（R1–R13 + B1–B3）；规则正文 `.claude/rules/project_rule.md`。
+核心：禁止硬编码连接串/密钥；爬虫禁止 import backend、禁止直写主库；爬虫必须配反爬（DOWNLOAD_DELAY + UA 轮换）；API 层禁止 import ORM；async 上下文禁止同步 Redis 链式直调（统一 `get_async_redis()`）。条数以 `tools/check/arch.sh` 为准（R1–R13 + B1–B3）；规则正文 `.agents/rules/project_rule.md`。
 
 ### 质量门禁
 
@@ -439,7 +439,7 @@ CI 五阶段：Python lint+test → 架构红线 → DB 迁移门禁 → 前端�
 ## 相关文档
 
 - 平台方案 / ADR / 诊断档案：`docs/` 为本地私有内容不入库
-- 项目规则：`.claude/rules/project_rule.md`；机械检查：`tools/check/arch.sh`（R1–R13 + B1–B3）
+- 项目规则：`.agents/rules/project_rule.md`；机械检查：`tools/check/arch.sh`（R1–R13 + B1–B3）
 - 词汇：`CONTEXT.md`
 - 平台 LLM 网关：`deploy/litellm/`（new-api 历史编排：`deploy/newapi/`，默认不启）
 - 开发协作中枢：`.agents/README.md`
