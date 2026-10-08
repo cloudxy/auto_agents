@@ -15,8 +15,13 @@ set -u
 # shellcheck source=common.sh
 . "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
-# 收集 DBML 文件
-DBML_FILES=$(find . -name "*.dbml" -not -path "./.venv/*" -not -path "./node_modules/*" 2>/dev/null)
+# 收集 DBML 文件：git 仓库内只查入库 + 已暂存的（与 CI 检出内容一致；
+# 未跟踪的草稿不拦与之无关的提交，暂存后照样受检）；非 git 环境退回全盘 find
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    DBML_FILES=$(git ls-files -- '*.dbml' | while read -r f; do [ -f "$f" ] && printf './%s\n' "$f"; done)
+else
+    DBML_FILES=$(find . -name "*.dbml" -not -path "./.venv/*" -not -path "./node_modules/*" 2>/dev/null)
+fi
 
 if [ -z "$DBML_FILES" ]; then
     # 无 DBML → 检查 alembic/versions 是否有增量破坏性变更（作为兜底）

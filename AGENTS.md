@@ -96,7 +96,7 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-typ
 
 `.agents/agents/*.md` 与 `.agents/commands/*.md` 是**顶层游离资产位**（feat-agents-market OQ-1）：目录导入落盘与同步扫描都认这两处，不属于任何插件；目录不存在时行为与扩展前一致。
 
-第三方插件正文只在 `~/.zcode/local-plugins/`。仓库内只在 `.agents/plugins/<name>` 放符号链接。**所有 AI 工具只能引用插件、禁止复制**（不用 `claude plugin install` / `grok plugin install` / `codex plugin add`；`tools/check/arch.sh` PL 段把关，细则见 `.agents/README.md`）。Grok/Claude/Codex 启用子集：`sdlc-workflow` / `dev-team` / `drama-skills` / `oh-story`。`superpowers` / `mattpocock-skills` 只留在农场给产品扫描（已含于 `dev-team`）。跳过 `sdlc-workflow-eval-workspace`。
+第三方插件采用「引用 + 锁文件」：仓库根 `plugins-lock.json` 是启用插件的唯一清单（git 来源 + 固定 commit + 接入哪些宿主），目前只有 `sdlc-workflow`（`https://github.com/cloudxy/sdlc-plugins`）。正文只在本机 `~/.zcode/local-plugins/<name>`，仓库内只放符号链接：`python3 scripts/agents_plugins.py sync` 按锁克隆缺失正文、建好 `.agents/plugins` 与各宿主适配器链接、删掉锁外插件的链接；`check` 只读校验；正文更新并推到远端后用 `lock` 改锁。**所有 AI 工具只能引用插件、禁止复制**（不用 `claude plugin install` / `grok plugin install` / `codex plugin add`；`tools/check/arch.sh` PL 段按锁文件把关，细则见 `.agents/README.md`）。
 
 调用：Claude/Grok `/name`。ZCode Agent：`$name` 调 skill，`/` 调 command（[原文](https://zcode.z.ai/en/docs/agents)）。description 每轮最多注入 250 字符，见 `.agents/README.md`。
 

@@ -28,7 +28,7 @@
 |---|---|
 | **开发协作中枢** | `.agents/`：本仓库写代码时加载的项目 skill 与第三方插件指针。契约见 `.agents/README.md`。 |
 | **产品目录** | `capability-library/`：能力市场扫描/治理的内容树。与中枢分开，不要把产品目录当成 IDE 技能库。 |
-| **Grok/Claude 启用子集** | `sdlc-workflow` / `dev-team` / `drama-skills` / `oh-story`。`superpowers` / `mattpocock-skills` 只留在农场给扫描（已含于 `dev-team`）。 |
+| **插件锁** | 仓库根 `plugins-lock.json`：启用插件的唯一清单（git 来源 + 固定 commit + 宿主）。目前只有 `sdlc-workflow`；链接由 `scripts/agents_plugins.py sync` 维护。 |
 
 ## 数据库设计域（D 线）
 

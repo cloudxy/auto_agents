@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "plugins": {
+    "sdlc-workflow": {
+      "source": "https://github.com/cloudxy/sdlc-plugins.git",
+      "ref": "main",
+      "commit": "d9b8329b0de1d4f24c4e9841513bf4a0d4421c30",
+      "localPath": "~/.zcode/local-plugins/sdlc-workflow",
+      "hosts": ["claude", "grok", "codex"]
+    }
+  }
+}
