@@ -3,7 +3,7 @@
 多应用混合平台：FastAPI 后端 + Scrapy 分布式爬虫 + React 双前端（admin 后台 / official 官网），
 统一配置、统一基础设施、统一 Python 环境。
 
-本文件是**所有 AI 工具共用的唯一项目指南**：Codex、Grok、Gemini 等直接读取；Claude Code 经 `CLAUDE.md` 的 `@AGENTS.md` 导入，Claude 专属内容（子代理、hooks）只写在 `CLAUDE.md`。
+本文件是**所有 AI 工具共用的唯一项目指南**：Codex、Grok 直接读取；Gemini 经根目录 `GEMINI.md`（指向本文件的链接，任意子目录启动都能读到）与 `.gemini/settings.json` 的 `context.fileName` 读取；Claude Code 经 `CLAUDE.md` 的 `@AGENTS.md` 导入，Claude 专属内容（子代理、hooks）只写在 `CLAUDE.md`。不要再新建其他工具的指令文件副本。
 
 ## 核心架构哲学
 

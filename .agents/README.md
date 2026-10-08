@@ -13,6 +13,8 @@
 
 宿主适配器（发现路径各工具自己认）：
 
+- **Gemini CLI**（0.60 实测）：原生读 `.agents/skills`；项目指南经根 `GEMINI.md` → `AGENTS.md` 链接 + `.gemini/settings.json`（`context.fileName`）。两者都只在**受信任**目录生效，首次在本仓库启动 Gemini 时选择信任
+
 - `.grok/plugins/<name>` → `plugins/<name>`（只链 `plugins-lock.json` 里 hosts 含 grok 的插件）
 - `.claude/skills` → `skills/`
 - **Claude Code 插件**：`.claude/settings.json` 的 `extraKnownMarketplaces` 把每个 `./.agents/plugins/<name>` 注册成 directory marketplace，`enabledPlugins` 启用锁内 hosts 含 claude 的插件。插件从 `plugins/<name>` 原地加载，不进 `~/.claude/plugins/cache`，源头改了下次会话生效
