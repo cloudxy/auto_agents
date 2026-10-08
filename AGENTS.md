@@ -3,6 +3,30 @@
 多应用混合平台：FastAPI 后端 + Scrapy 分布式爬虫 + React 双前端（admin 后台 / official 官网），
 统一配置、统一基础设施、统一 Python 环境。
 
+本文件是**所有 AI 工具共用的唯一项目指南**：Codex、Grok、Gemini 等直接读取；Claude Code 经 `CLAUDE.md` 的 `@AGENTS.md` 导入，Claude 专属内容（子代理、hooks）只写在 `CLAUDE.md`。
+
+## 核心架构哲学
+
+- **配置即代码**：所有配置外置、版本化、环境隔离
+- **日志即证据**：关键路径必须留痕且可追溯
+- **独立部署优于耦合**：本地统一 venv（uv workspace），部署仍可按子项目独立 `uv sync --package`
+- **爬取与存储分离**：爬虫只采集和清洗，不负责持久化（禁止直写主库，走 Redis 队列）
+- **反爬是生存底线**：每个爬虫必须实现反爬策略
+
+## 技术栈
+
+| 模块 | 技术 |
+|------|------|
+| 后端 | FastAPI ≥0.135 + SQLAlchemy 2 + PyMySQL/aiomysql + redis-py + Pydantic 2 + PyJWT + Loguru |
+| 爬虫 | Scrapy ≥2.15 + scrapy-redis + Selenium + DrissionPage |
+| 前端 | React 19 + TypeScript + Ant Design 6 + React Router v7 + Axios + React Query + Zustand |
+| 配置 | Dynaconf ≥3.2 |
+| 数据库 | MySQL 8 / Redis 6+（compose 用 Redis 7） |
+| 包管理 | uv workspace（Python）/ npm workspaces（前端） |
+| 迁移 | Alembic ≥1.18 |
+| 基建 | Docker + GitHub Actions（五阶段 CI） |
+| 平台 LLM 网关 | LiteLLM Proxy（目标运行时）；new-api 管控面默认关闭 |
+
 ## 模块地图
 
 | 模块 | 路径 | 职责 |
@@ -15,7 +39,9 @@
 | 初始化 | `init_project.sh` | 新人一键：工具 / 依赖 / .env / 库 / 管理员 |
 | 编排 | `run.py` + `scripts/runlib/` | 统一启停（默认 start 全部；stop / restart） |
 | 产品目录 | `capability-library/` | 能力资产内容与扫描入口（`plugins/` 适配器 → `.agents/plugins`） |
-| 开发协作 | `.agents/` | 项目 skill + 第三方插件指针农场；宿主目录只做适配器 |
+| 部署 | `deploy/` | `litellm/` 平台 LLM 网关编排；`newapi/` 已退役运行时的历史编排（默认不启） |
+| 质量门禁 | `tools/` | `check/`（arch / db / frontend / 插件引用）+ OpenAPI 导出 |
+| 开发协作 | `.agents/` | 项目 skill、规则、第三方插件指针（按 `plugins-lock.json`）；`.claude/` `.codex/` `.grok/` 只做适配器 |
 
 ## 环境红线（uv workspace，必须遵守）
 
@@ -37,7 +63,15 @@
 - 租户过滤收口（R13）；`spider_service` 门面白名单（R12）
 - 核心边界：`platform_core/` 只依赖 `config/`（B1）；`backend/` 禁止 import `scrapy/`（B2）；`config/` 不依赖任何业务模块（B3）；四柱域 import 边界（B4，ADR-0010：`power_market` 禁 spider_/newapi_/litellm_/relay_/channel_/ai_planner/llm_gateway 直连；`ai_planner` 只禁 llm_gateway.admin，chat 仅 llm_client.py 可用；backend 对网关只走 HTTP，禁 DSN/create_async_engine）
 
-规则正文：`.claude/rules/project_rule.md`。
+## 规则（`.agents/rules/`，所有工具共用）
+
+回答、写代码、改架构前按触发条件读对应规则（Claude Code 经 `.claude/rules` 链接自动加载，其他工具按需读取）：
+
+| 规则 | 何时读 |
+|------|--------|
+| [`project_rule.md`](.agents/rules/project_rule.md) | 新建模块、改分层、引入依赖、涉及数据 / 配置：架构哲学、红线、模块边界 |
+| [`answer_rule.md`](.agents/rules/answer_rule.md) | 回答问题、输出方案、写代码：解决问题优先、用证据说话 |
+| [`pua.md`](.agents/rules/pua.md) | 同一问题失败 ≥ 2 次、想放弃、用户不满：穷尽式问题解决 |
 
 ## 编码 / 日志 / 配置（常驻约定，不是 skill）
 
@@ -57,9 +91,11 @@
 - `backend/app/api/__init__.py` — API 版本路由聚合（v1/v2）
 - `platform_core/__init__.py` — 基建初始化（`init_log / init_db / init_storage`）
 - `config/__init__.py` — Dynaconf 加载入口
+- `scrapy/settings.py` — 爬虫配置（从 `config/` 注入）
 - `init_project.sh` — 新人一键初始化
 - `tools/check/arch.sh` — 架构红线扫描（退出码 = 违规数）
 - `.agents/README.md` — 开发协作中枢契约
+- `plugins-lock.json` + `scripts/agents_plugins.py` — 第三方插件锁与同步（`sync` / `check` / `lock`）
 - `.claude/hooks/*.sh` — Claude Code Hook（bash >= 3.2 + grep/sed/awk；jq 可选）
 
 ## 快速开始
@@ -70,10 +106,13 @@ uv run python run.py                       # 默认启动全部（已运行则�
 uv run python run.py status                # 查看运行状态
 uv run python run.py stop                  # 停止全部
 uv run python run.py restart               # 强制重启
+uv run python run.py start backend         # 单独启动：backend / spider / frontend
+uv run python run.py spider --list         # 列出爬虫
 uv run pytest -x -q backend/tests          # 后端测试
 bash tools/check/arch.sh                   # 架构合规检查（退出码 = 违规数）
 npm run gen:api                            # 后端 OpenAPI 变更后：dump → shared 类型重生成 → shared 重建
 uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type post-checkout
+python3 scripts/agents_plugins.py sync     # 按 plugins-lock.json 接好第三方插件（新机器首次）
 ```
 
 端口：backend `9111` / admin `9112` / official `9113`。
@@ -92,7 +131,7 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-typ
 
 ## Skill 路由（`.agents/`）
 
-中枢契约见 `.agents/README.md`。项目 skill 在 `.agents/skills/`（`.claude/skills` 指向它）。产品扫描走 `capability-library/`（**技能治理在主 API `v1/skills` + `v1/capabilities`**）。
+中枢契约见 `.agents/README.md`。项目 skill 在 `.agents/skills/`：Codex、Grok、Gemini 原生读取这个目录，只有 Claude Code 需要 `.claude/skills` 链接过来（不要再给其他工具建链接，会出现同名技能重复）。产品扫描走 `capability-library/`（**技能治理在主 API `v1/skills` + `v1/capabilities`**）。
 
 `.agents/agents/*.md` 与 `.agents/commands/*.md` 是**顶层游离资产位**（feat-agents-market OQ-1）：目录导入落盘与同步扫描都认这两处，不属于任何插件；目录不存在时行为与扩展前一致。
 
@@ -125,4 +164,12 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-typ
 
 single-context：根级 `CONTEXT.md`（词汇）；`docs/` 为本地私有不入库。
 
-Claude 侧完整指南见 `CLAUDE.md`。架构事实冲突以 `tools/check/arch.sh` 与 `.claude/rules/project_rule.md` 为准。
+## 项目状态
+
+已落地：异常 / CORS / 日志收敛到 `platform_core`；Python 单一 `.venv`；前端 npm workspaces + `frontend/shared`；开发协作中枢 `.agents/`（skill、规则、插件锁）。
+
+进行中：四柱程序（采集出数环 / SaaS / LiteLLM 数据面 / 能力市场）。平台 LLM 网关目标为 LiteLLM；`/api/v1/newapi` 与 `deploy/newapi` 是遗留管控面，默认关闭，不作为长期运行时。
+
+待办：开发中枢与产品内容源解耦（决策 D2）——能力市场同步目前直接扫描 `.agents/`，本仓库的开发 skill 会被当成产品资产上架；解耦前不要往 `.agents/agents/`、`.agents/commands/` 放开发专用内容。
+
+Claude 专属内容见 `CLAUDE.md`。架构事实冲突以 `tools/check/arch.sh` 与 `.agents/rules/project_rule.md` 为准。
