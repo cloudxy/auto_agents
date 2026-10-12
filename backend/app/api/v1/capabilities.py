@@ -154,8 +154,8 @@ async def backfill_first_party_listing(
 
 
 # feat-agents-market AD-1：破坏性扫描入口 POST /scan-plugins 已删除
-# （软删根因 plugin_service._retract_missing_plugins 一并退役；.agents 同步走
-#   capabilities_gov.sync_agents-hub，非破坏 upsert，GWT-01.3 验收线）。
+# （软删根因 plugin_service._retract_missing_plugins 一并退役；hub 同步走
+#   capabilities_gov 的 sync 端点（根为 SKILLS.AGENTS_ROOT），非破坏 upsert，GWT-01.3 验收线）。
 
 
 @router.get("/plugins/{name}")
@@ -193,7 +193,7 @@ async def verify_plugin(
 
 # ---------- P6 C5/C6：专家域（详情/组队） ----------
 # POST /scan-experts 已退役（K4）：扫的是 capability-library/experts/，OQ-2
-# 切根到 .agents 后该目录已不存在于仓库，每次扫描恒空——保留端点只会让
+# 切根到 hub 根后该目录已不存在于仓库，每次扫描恒空——保留端点只会让
 # 管理员误以为「扫描成功、0 条」是正常结果。ExpertService.scan_experts()
 # 方法本身保留（接受显式 root 参数，供内部/测试按需从任意目录导入专家）。
 

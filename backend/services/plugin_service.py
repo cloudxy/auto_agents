@@ -1,8 +1,9 @@
 """插件资产域服务（P6 C3）：plugin.json 解析 + 插件详情 + MCP 验证
 
 feat-agents-market AD-1：破坏性扫描入口 scan_plugins / _retract_missing_plugins
-已退役（.agents 软删 bug 根因，FR-01 验收线 = 不存在能造成软删的扫描入口）。
-扫描/同步统一走 power_market.agents_hub（.agents 真相源，非破坏 upsert）。
+已退役（软删 bug 根因，FR-01 验收线 = 不存在能造成软删的扫描入口）。
+扫描/同步统一走 power_market.agents_hub（产品 hub 根 SKILLS.AGENTS_ROOT 为真相源，非破坏 upsert；
+D2 后缺省 runtime/agents-hub，不再是开发中枢 .agents）。
 """
 import re
 from datetime import datetime, timezone
