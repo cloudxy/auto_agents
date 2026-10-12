@@ -98,6 +98,13 @@ class ExpertService:
             asset.title = str(frontmatter.get("description") or "")[:1024]
             asset.sync_state = "ok"
 
+        await self._upsert_expert_detail(asset, frontmatter, persona)
+        return asset
+
+    async def _upsert_expert_detail(
+        self, asset: CapabilityAsset, frontmatter: dict, persona: str,
+    ) -> None:
+        """专家详情行（capability_experts）upsert：persona/tools/捆绑技能/MCP/模型偏好"""
         detail = (await self.session.execute(
             select(CapabilityExpert).where(CapabilityExpert.asset_id == asset.id)
         )).scalar_one_or_none()
@@ -112,7 +119,6 @@ class ExpertService:
         detail.mcp_refs = frontmatter.get("mcp") or []
         detail.model_pref = str(frontmatter.get("model") or "")
         await self.session.flush()
-        return asset
 
     @staticmethod
     def _parse_subagent(text: str) -> tuple[dict, str]:
