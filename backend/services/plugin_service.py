@@ -123,18 +123,7 @@ class PluginService:
         from backend.services.mcp_bridge import verify_plugin_server
 
         logger.info(f"插件验证 | plugin={name}")
-        asset = (await self.session.execute(
-            select(CapabilityAsset).where(
-                CapabilityAsset.asset_type == "plugin", CapabilityAsset.name == name
-            )
-        )).scalar_one_or_none()
-        if asset is None:
-            raise NotFoundException(resource=f"插件 {name}")
-        detail = (await self.session.execute(
-            select(CapabilityPlugin).where(CapabilityPlugin.asset_id == asset.id)
-        )).scalar_one_or_none()
-        if detail is None:
-            raise NotFoundException(resource=f"插件详情 {name}")
+        detail = await self._require_plugin_detail(name)
 
         servers = detail.mcp_servers or {}
         if not servers:
@@ -164,3 +153,19 @@ class PluginService:
         await self.session.flush()
         await self.session.commit()
         return {"health": overall, "detail": results}
+
+    async def _require_plugin_detail(self, name: str) -> CapabilityPlugin:
+        """按名取插件详情行；资产或详情缺失均 404"""
+        asset = (await self.session.execute(
+            select(CapabilityAsset).where(
+                CapabilityAsset.asset_type == "plugin", CapabilityAsset.name == name
+            )
+        )).scalar_one_or_none()
+        if asset is None:
+            raise NotFoundException(resource=f"插件 {name}")
+        detail = (await self.session.execute(
+            select(CapabilityPlugin).where(CapabilityPlugin.asset_id == asset.id)
+        )).scalar_one_or_none()
+        if detail is None:
+            raise NotFoundException(resource=f"插件详情 {name}")
+        return detail

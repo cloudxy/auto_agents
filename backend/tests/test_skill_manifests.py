@@ -53,7 +53,7 @@ async def test_sync_adapters_disabled_rejected(db_session, library_root):
 
 @pytest.mark.asyncio
 async def test_sync_adapters_runs_script(db_session, library_root, monkeypatch):
-    import backend.services.skill_service as svc_mod
+    import backend.services.skill_service_library as svc_mod  # sync_adapters 所在模块
     from config import settings
 
     settings.set("SKILLS.ADAPTER_SYNC.ENABLED", True)

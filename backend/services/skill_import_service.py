@@ -278,48 +278,60 @@ class SkillImportService:
             raise ValidationException(message=f"目标目录已存在: {skill_dir}", field="url")
         skill_dir.mkdir(parents=True)
         try:
-            for rel, data in files.items():
-                target = _safe_member_path(rel)
-                dest = skill_dir.joinpath(*target.parts)
-                if not dest.resolve().is_relative_to(skill_dir.resolve()):
-                    raise ValidationException(message=f"越界写入拒绝: {rel}", field="url")
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(data)
-
-            content_hash = hashlib.sha256(b"".join(
-                files[k] for k in sorted(files)
-            )).hexdigest()
-            today = business_today().isoformat()
-            (skill_dir / "SOURCE.md").write_text(
-                f"# 来源\n\n- URL: {url}\n- 导入时间: {today}\n"
-                f"- content_hash: {content_hash[:12]}…\n",
-                encoding="utf-8",
-            )
-            (skill_dir / "meta.yaml").write_text(
-                yaml.safe_dump({
-                    "name": name,
-                    "category": category or "uncategorized",
-                    "industries": industries or [],
-                    "status": "experimental",
-                    "similar_to": [],
-                    "source": {"url": url, "author": "", "imported_at": today, "content_hash": ""},
-                    "capability": {
-                        "score": None, "ai_suggested_score": None, "rubric": {},
-                        "reviewed_by": None, "reviewed_at": None, "notes": None,
-                    },
-                }, allow_unicode=True, sort_keys=False),
-                encoding="utf-8",
-            )
-            (skill_dir / "CHANGELOG.md").write_text(
-                f"# 更新记录\n\n- {today} | system | URL 导入: {url}\n",
-                encoding="utf-8",
-            )
+            self._write_members(skill_dir, files)
+            self._write_governance_files(skill_dir, name, files, url, category, industries)
         except Exception:
             import shutil
 
             shutil.rmtree(skill_dir, ignore_errors=True)
             raise
         return skill_dir
+
+    @staticmethod
+    def _write_members(skill_dir: Path, files: dict[str, bytes]) -> None:
+        """来源文件落盘：成员路径再净化 + resolve 越界复检（zip-slip 防线）"""
+        for rel, data in files.items():
+            target = _safe_member_path(rel)
+            dest = skill_dir.joinpath(*target.parts)
+            if not dest.resolve().is_relative_to(skill_dir.resolve()):
+                raise ValidationException(message=f"越界写入拒绝: {rel}", field="url")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+
+    @staticmethod
+    def _write_governance_files(
+        skill_dir: Path, name: str, files: dict[str, bytes], url: str,
+        category: Optional[str], industries: Optional[list[str]],
+    ) -> None:
+        """治理初值落盘：SOURCE.md + 初始 meta.yaml + CHANGELOG.md"""
+        content_hash = hashlib.sha256(b"".join(
+            files[k] for k in sorted(files)
+        )).hexdigest()
+        today = business_today().isoformat()
+        (skill_dir / "SOURCE.md").write_text(
+            f"# 来源\n\n- URL: {url}\n- 导入时间: {today}\n"
+            f"- content_hash: {content_hash[:12]}…\n",
+            encoding="utf-8",
+        )
+        (skill_dir / "meta.yaml").write_text(
+            yaml.safe_dump({
+                "name": name,
+                "category": category or "uncategorized",
+                "industries": industries or [],
+                "status": "experimental",
+                "similar_to": [],
+                "source": {"url": url, "author": "", "imported_at": today, "content_hash": ""},
+                "capability": {
+                    "score": None, "ai_suggested_score": None, "rubric": {},
+                    "reviewed_by": None, "reviewed_at": None, "notes": None,
+                },
+            }, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        (skill_dir / "CHANGELOG.md").write_text(
+            f"# 更新记录\n\n- {today} | system | URL 导入: {url}\n",
+            encoding="utf-8",
+        )
 
     async def _ingest_and_enqueue(self, name: str, skill_dir: Path) -> None:
         """落库（扫描该目录）+ 入评分队列（T6：模块级单向依赖，无函数内延迟 import）
