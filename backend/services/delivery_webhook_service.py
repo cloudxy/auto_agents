@@ -44,19 +44,7 @@ class DeliveryWebhookService:
             ts = str(int(time.time()))
             sig = hmac.new(key, f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
             try:
-                kwargs: dict = {"trust_env": False, "timeout": 10, "follow_redirects": False}
-                if transport is not None:
-                    kwargs["transport"] = transport
-                async with httpx.AsyncClient(**kwargs) as client:
-                    resp = await client.post(
-                        url,
-                        content=body.encode(),
-                        headers={
-                            "Content-Type": "application/json",
-                            "X-Webhook-Timestamp": ts,
-                            "X-Webhook-Signature": sig,
-                        },
-                    )
+                resp = await self._post_signed(url, body, ts, sig, transport)
                 # 只认 2xx：不跟随重定向时 3xx 表示并未投递到目标（审计 P0-8）
                 if 200 <= resp.status_code < 300:
                     logger.info(f"租户交付成功 | task={payload.get('task_id')} http={resp.status_code}")
@@ -68,3 +56,23 @@ class DeliveryWebhookService:
                 logger.warning(f"租户交付失败 attempt={attempt + 1}: {e}")
             await asyncio.sleep(min(8, 2 ** attempt))
         return False
+
+    @staticmethod
+    async def _post_signed(
+        url: str, body: str, ts: str, sig: str,
+        transport: Optional[httpx.AsyncBaseTransport],
+    ) -> httpx.Response:
+        """单次签名投递：不走系统代理、不跟随重定向"""
+        kwargs: dict = {"trust_env": False, "timeout": 10, "follow_redirects": False}
+        if transport is not None:
+            kwargs["transport"] = transport
+        async with httpx.AsyncClient(**kwargs) as client:
+            return await client.post(
+                url,
+                content=body.encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Webhook-Timestamp": ts,
+                    "X-Webhook-Signature": sig,
+                },
+            )
