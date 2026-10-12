@@ -110,6 +110,59 @@ def _is_tenant_model(obj) -> bool:
 _installed = False
 
 
+def _assert_tenant_ownership(session, flush_context, instances):
+    """写侧断言（before_flush）：租户态下 TenantMixin 新行必须归属本租户"""
+    tenant_id = current_tenant_id()
+    if tenant_id is None:
+        return  # 平台态/无上下文：不适用断言
+    for obj in session.new:
+        if not _is_tenant_model(obj):
+            continue
+        if getattr(obj, "tenant_id", None) != tenant_id:
+            raise ValueError(
+                f"租户写入断言失败：{type(obj).__name__} 归属 "
+                f"{getattr(obj, 'tenant_id', None)} 与上下文租户 {tenant_id} 不符"
+            )
+
+
+def _inject_tenant_filter(execute_state):
+    """读侧注入（do_orm_execute）：ORM select/update/delete 自动加 tenant_id 条件"""
+    from sqlalchemy.sql.dml import Delete, Update
+
+    tenant_id = current_tenant_id()
+    if tenant_id is None or not execute_state.is_orm_statement:
+        return
+    stmt = execute_state.statement
+
+    if isinstance(stmt, Update) or isinstance(stmt, Delete):
+        table = stmt.table
+        if table.name in _TENANT_EXEMPT:
+            return
+        if "tenant_id" not in table.c:
+            return
+        execute_state.statement = stmt.where(table.c.tenant_id == tenant_id)
+        return
+
+    # SELECT：with_loader_criteria 官方租户配方（自动覆盖 join/别名/子查询实体；
+    # 豁免表恒真跳过；平台共享表保留 NULL 行可见性）
+    from sqlalchemy.orm import with_loader_criteria
+
+    # lambda-SQL 约束：闭包非 SQL 对象参与运算会被绑成参数（集合成员判断
+    # → contains 报错），故豁免分支不存在——豁免表本就不继承 TenantMixin
+    # （with_loader_criteria 不匹配）；平台共享表用纯字符串比较分支
+    # （cls 非闭包，运行时求值）。
+    def _criteria(cls):
+        col = cls.tenant_id
+        if any(getattr(cls, "__tablename__", "") == name
+               for name in _PLATFORM_SHARED_READ):
+            return or_(col == tenant_id, col.is_(None))
+        return col == tenant_id
+
+    execute_state.statement = stmt.options(
+        with_loader_criteria(TenantMixin, _criteria, include_aliases=True)
+    )
+
+
 def install_tenant_isolation() -> None:
     """注册写侧断言与读侧注入（幂等；platform_core 导入链自动安装）"""
     global _installed
@@ -117,56 +170,8 @@ def install_tenant_isolation() -> None:
         return
     _installed = True
 
-    @event.listens_for(Session, "before_flush")
-    def _assert_tenant_ownership(session, flush_context, instances):
-        tenant_id = current_tenant_id()
-        if tenant_id is None:
-            return  # 平台态/无上下文：不适用断言
-        for obj in session.new:
-            if not _is_tenant_model(obj):
-                continue
-            if getattr(obj, "tenant_id", None) != tenant_id:
-                raise ValueError(
-                    f"租户写入断言失败：{type(obj).__name__} 归属 "
-                    f"{getattr(obj, 'tenant_id', None)} 与上下文租户 {tenant_id} 不符"
-                )
-
-    @event.listens_for(Session, "do_orm_execute")
-    def _inject_tenant_filter(execute_state):
-        from sqlalchemy.sql.dml import Delete, Update
-
-        tenant_id = current_tenant_id()
-        if tenant_id is None or not execute_state.is_orm_statement:
-            return
-        stmt = execute_state.statement
-
-        if isinstance(stmt, Update) or isinstance(stmt, Delete):
-            table = stmt.table
-            if table.name in _TENANT_EXEMPT:
-                return
-            if "tenant_id" not in table.c:
-                return
-            execute_state.statement = stmt.where(table.c.tenant_id == tenant_id)
-            return
-
-        # SELECT：with_loader_criteria 官方租户配方（自动覆盖 join/别名/子查询实体；
-        # 豁免表恒真跳过；平台共享表保留 NULL 行可见性）
-        from sqlalchemy.orm import with_loader_criteria
-
-        # lambda-SQL 约束：闭包非 SQL 对象参与运算会被绑成参数（集合成员判断
-        # → contains 报错），故豁免分支不存在——豁免表本就不继承 TenantMixin
-        # （with_loader_criteria 不匹配）；平台共享表用纯字符串比较分支
-        # （cls 非闭包，运行时求值）。
-        def _criteria(cls):
-            col = cls.tenant_id
-            if any(getattr(cls, "__tablename__", "") == name
-                   for name in _PLATFORM_SHARED_READ):
-                return or_(col == tenant_id, col.is_(None))
-            return col == tenant_id
-
-        execute_state.statement = stmt.options(
-            with_loader_criteria(TenantMixin, _criteria, include_aliases=True)
-        )
+    event.listen(Session, "before_flush", _assert_tenant_ownership)
+    event.listen(Session, "do_orm_execute", _inject_tenant_filter)
 
 
 install_tenant_isolation()
