@@ -48,32 +48,19 @@ def list_spiders() -> list[str]:
     return names
 
 
-def run(spider_name: str | None, **kwargs) -> None:
-    from scrapy.crawler import CrawlerRunner
-    from scrapy.spiderloader import SpiderLoader
-    from scrapy.utils.log import configure_logging
-    from scrapy.utils.project import get_project_settings
-    from scrapy.utils.reactor import install_reactor
-
-    install_reactor("twisted.internet.asyncioreactor.AsyncioSelectorReactor")
-    from twisted.internet import defer, reactor, task as twisted_task
-
-    settings = get_project_settings()
-    _configure_worker_logging(settings)
-    configure_logging(settings)
-    runner = CrawlerRunner(settings)
-    available = set(SpiderLoader.from_settings(settings).list())
+def _select_spiders(spider_name: str | None, available: set[str]) -> list[str]:
+    """指定爬虫必须存在（否则退出码 1）；未指定则全部（可能为空）"""
     if spider_name:
         if spider_name not in available:
             print(f"爬虫 '{spider_name}' 不存在")
             sys.exit(1)
-        names = [spider_name]
-    else:
-        names = sorted(available)
-        if not names:
-            print("未发现任何爬虫")
-            return
-    print(f"运行爬虫: {', '.join(names)}  (Ctrl+C 停止)")
+        return [spider_name]
+    return sorted(available)
+
+
+def _respawn_loop(runner, kwargs: dict):
+    """常驻重生：爬虫非人为结束（shutdown / ctrl_c / cancel 之外）后延迟重建，计数供心跳上报"""
+    from twisted.internet import defer, reactor, task as twisted_task
 
     respawn_delay = 5
 
@@ -89,6 +76,31 @@ def run(spider_name: str | None, **kwargs) -> None:
             print(f"[常驻] {name} 结束({reason})，{respawn_delay}s 后重生")
             yield twisted_task.deferLater(reactor, respawn_delay, lambda: None)
 
+    return run_forever
+
+
+def run(spider_name: str | None, **kwargs) -> None:
+    from scrapy.crawler import CrawlerRunner
+    from scrapy.spiderloader import SpiderLoader
+    from scrapy.utils.log import configure_logging
+    from scrapy.utils.project import get_project_settings
+    from scrapy.utils.reactor import install_reactor
+
+    install_reactor("twisted.internet.asyncioreactor.AsyncioSelectorReactor")
+    from twisted.internet import reactor
+
+    settings = get_project_settings()
+    _configure_worker_logging(settings)
+    configure_logging(settings)
+    runner = CrawlerRunner(settings)
+    available = set(SpiderLoader.from_settings(settings).list())
+    names = _select_spiders(spider_name, available)
+    if not names:
+        print("未发现任何爬虫")
+        return
+    print(f"运行爬虫: {', '.join(names)}  (Ctrl+C 停止)")
+
+    run_forever = _respawn_loop(runner, kwargs)
     _start_heartbeat(names)
     for name in names:
         run_forever(name)

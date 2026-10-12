@@ -34,6 +34,59 @@ def _make_rotation_func(max_size_mb: int):
     return should_rotate
 
 
+def _resolve_log_path(name: str, cfg, project_root: str) -> str:
+    """日志文件路径：相对路径强制转换为基于项目根目录 logs/ 的绝对路径"""
+    file_path = getattr(cfg, "FILE", getattr(cfg, "file", f"logs/{name}/{name}.log"))
+
+    # 如果是相对路径，强制转换为基于项目根目录 logs/ 的绝对路径
+    if not os.path.isabs(file_path):
+        # 确保路径格式为 logs/xxx/xxx.log
+        if not file_path.startswith('logs/'):
+            file_path = f"logs/{file_path}" if not file_path.startswith('/') else file_path.lstrip('/')
+        file_path = os.path.join(project_root, file_path)
+    return file_path
+
+
+def _add_logger_handlers(name: str, cfg, project_root: str) -> None:
+    """按单个 LOGGERS 段注册落盘处理器（及可选控制台处理器）"""
+    file_path = _resolve_log_path(name, cfg, project_root)
+
+    level = getattr(cfg, "LEVEL", getattr(cfg, "level", "INFO"))
+    max_size = getattr(cfg, "MAX_SIZE", getattr(cfg, "max_size", 100))
+    retention = getattr(cfg, "RETENTION", getattr(cfg, "retention", 30))
+    console = getattr(cfg, "CONSOLE", getattr(cfg, "console", False))
+
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    logger.add(
+        file_path,
+        level=level,
+        format=settings.LOG_FORMAT,
+        rotation=_make_rotation_func(max_size),
+        retention=f"{retention} days",
+        compression=None,
+        enqueue=True,
+        backtrace=True,
+        diagnose=False,
+        filter=lambda r, n=name: (
+            (n == "error" and r["level"].no >= 40) or
+            (n == "global" and (not r["extra"].get("name") or r["extra"].get("name") == "global")) or
+            (n != "global" and n != "error" and r["extra"].get("name") == n)
+        ),
+    )
+
+    if console:
+        logger.add(
+            sys.stderr,
+            level=level,
+            format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+            filter=lambda r, n=name: (
+                (n == "global" and (not r["extra"].get("name") or r["extra"].get("name") == "global")) or
+                (n != "global" and r["extra"].get("name") == n)
+            ),
+        )
+
+
 def init_log():
     """初始化所有日志处理器（数据驱动）"""
     logger.remove()
@@ -51,50 +104,7 @@ def init_log():
     for name, cfg in loggers_cfg.items():
         if name.startswith("_"):
             continue
-
-        file_path = getattr(cfg, "FILE", getattr(cfg, "file", f"logs/{name}/{name}.log"))
-        
-        # 如果是相对路径，强制转换为基于项目根目录 logs/ 的绝对路径
-        if not os.path.isabs(file_path):
-            # 确保路径格式为 logs/xxx/xxx.log
-            if not file_path.startswith('logs/'):
-                file_path = f"logs/{file_path}" if not file_path.startswith('/') else file_path.lstrip('/')
-            file_path = os.path.join(project_root, file_path)
-        
-        level = getattr(cfg, "LEVEL", getattr(cfg, "level", "INFO"))
-        max_size = getattr(cfg, "MAX_SIZE", getattr(cfg, "max_size", 100))
-        retention = getattr(cfg, "RETENTION", getattr(cfg, "retention", 30))
-        console = getattr(cfg, "CONSOLE", getattr(cfg, "console", False))
-
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-        logger.add(
-            file_path,
-            level=level,
-            format=settings.LOG_FORMAT,
-            rotation=_make_rotation_func(max_size),
-            retention=f"{retention} days",
-            compression=None,
-            enqueue=True,
-            backtrace=True,
-            diagnose=False,
-            filter=lambda r, n=name: (
-                (n == "error" and r["level"].no >= 40) or
-                (n == "global" and (not r["extra"].get("name") or r["extra"].get("name") == "global")) or
-                (n != "global" and n != "error" and r["extra"].get("name") == n)
-            ),
-        )
-
-        if console:
-            logger.add(
-                sys.stderr,
-                level=level,
-                format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-                filter=lambda r, n=name: (
-                    (n == "global" and (not r["extra"].get("name") or r["extra"].get("name") == "global")) or
-                    (n != "global" and r["extra"].get("name") == n)
-                ),
-            )
+        _add_logger_handlers(name, cfg, project_root)
 
     return logger
 

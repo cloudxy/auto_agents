@@ -95,19 +95,8 @@ def robots_exempt(host: str) -> bool:
     return bool(exempt) and host_allowed(host, exempt)
 
 
-def check_url(
-    url: str,
-    *,
-    allowed_ports: Optional[Iterable[int]] = DEFAULT_ALLOWED_PORTS,
-    allowed_hosts: Optional[Iterable[str]] = None,
-    require_https: bool = False,
-    resolve: bool = True,
-) -> None:
-    """同步校验出站 URL；不合规抛 OutboundBlocked
-
-    allowed_ports=None 表示不限端口（LLM 供应商等自定义端口场景）；
-    allowed_hosts 给出时先做白名单，再做 IP 校验（白名单不豁免私网判定）。
-    """
+def _checked_host(url: str, allowed_ports: Optional[Iterable[int]], require_https: bool) -> str:
+    """协议 / 主机名 / 端口校验，返回主机名"""
     parsed = urlparse(str(url or "").strip())
     schemes = ("https",) if require_https else ("http", "https")
     if parsed.scheme not in schemes:
@@ -121,6 +110,11 @@ def check_url(
         raise OutboundBlocked("目标地址端口不合法") from exc
     if allowed_ports is not None and port is not None and port not in tuple(allowed_ports):
         raise OutboundBlocked("目标地址端口不允许")
+    return host
+
+
+def _check_host_lists(host: str, allowed_hosts: Optional[Iterable[str]]) -> None:
+    """主机白名单（给出时）+ 平台禁采名单"""
     if allowed_hosts is not None and not host_allowed(host, allowed_hosts):
         logger.warning(f"出站主机不在白名单 | host={host}")
         raise OutboundBlocked("目标主机不在允许列表内")
@@ -129,20 +123,10 @@ def check_url(
     if blocked and host_allowed(host, blocked):
         logger.warning(f"出站主机在平台禁采名单 | host={host}")
         raise OutboundBlocked("目标站点不在平台允许的采集范围内")
-    if host.isdigit() or host.lower().startswith("0x"):
-        # glibc 解析语义下整数 / 十六进制编码命中 IP（2130706433 → 127.0.0.1）
-        raise OutboundBlocked()
-    try:
-        literal = ipaddress.ip_address(host)
-    except ValueError:
-        literal = None
-    if literal is not None:
-        if is_blocked_ip(literal):
-            logger.warning(f"出站目标为内网字面量 IP | host={host}")
-            raise OutboundBlocked()
-        return
-    if not resolve:
-        return
+
+
+def _check_resolved_ips(host: str) -> None:
+    """DNS 解析后逐个 IP 拒绝内网（无法解析同样拒绝）"""
     try:
         raw_ips = resolve_host_ips(host)
     except (socket.gaierror, UnicodeError, OSError) as exc:
@@ -157,6 +141,38 @@ def check_url(
         if is_blocked_ip(ip):
             logger.warning(f"出站域名解析到内网 | host={host}")
             raise OutboundBlocked()
+
+
+def check_url(
+    url: str,
+    *,
+    allowed_ports: Optional[Iterable[int]] = DEFAULT_ALLOWED_PORTS,
+    allowed_hosts: Optional[Iterable[str]] = None,
+    require_https: bool = False,
+    resolve: bool = True,
+) -> None:
+    """同步校验出站 URL；不合规抛 OutboundBlocked
+
+    allowed_ports=None 表示不限端口（LLM 供应商等自定义端口场景）；
+    allowed_hosts 给出时先做白名单，再做 IP 校验（白名单不豁免私网判定）。
+    """
+    host = _checked_host(url, allowed_ports, require_https)
+    _check_host_lists(host, allowed_hosts)
+    if host.isdigit() or host.lower().startswith("0x"):
+        # glibc 解析语义下整数 / 十六进制编码命中 IP（2130706433 → 127.0.0.1）
+        raise OutboundBlocked()
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if is_blocked_ip(literal):
+            logger.warning(f"出站目标为内网字面量 IP | host={host}")
+            raise OutboundBlocked()
+        return
+    if not resolve:
+        return
+    _check_resolved_ips(host)
 
 
 async def assert_public_url(url: str, **kwargs) -> None:

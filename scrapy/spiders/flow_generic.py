@@ -144,48 +144,60 @@ class FlowGenericSpider(RedisSpider):
         # 详情页分支：列表项内取链接发 stage=detail 请求（相对路径用 urljoin 归一）
         detail = flow.get("detail")
         if isinstance(detail, dict) and detail.get("list_selector") and detail.get("url_selector"):
-            url_selector = detail["url_selector"]
-            try:
-                for entry in response.css(detail["list_selector"]):
-                    href = entry.xpath(url_selector).get()
-                    if href:
-                        meta = {
-                            "stage": "detail",
-                            "flow": flow,
-                            **({"task_id": task_id} if task_id is not None else {}),
-                            **self._render_meta(response),
-                        }
-                        yield Request(response.urljoin(href.strip()), meta=meta, dont_filter=True)
-            except Exception as e:  # noqa: BLE001 选择器非法不中断整页
-                logger.warning(f"详情页链接提取失败: {detail!r}, error={e}")
+            yield from self._detail_requests(response, flow, detail, task_id)
 
         # 翻页分支：未达 max_pages 时提取下一页链接继续（dont_filter 防重）
         pagination = flow.get("pagination")
         if isinstance(pagination, dict) and pagination.get("selector"):
-            max_pages = _normalize_max_pages(pagination)
-            if page >= max_pages:
-                logger.info(f"已达最大翻页数，停止翻页: page={page}, max_pages={max_pages}")
-            else:
-                ptype = pagination.get("type", "css")
-                try:
-                    if ptype == "xpath":
-                        href = response.xpath(pagination["selector"]).get()
-                    else:
-                        href = response.css(pagination["selector"]).get()
-                except Exception as e:  # noqa: BLE001
-                    logger.warning(f"下一页选择器执行失败: {pagination!r}, error={e}")
-                    href = None
+            yield from self._next_page_requests(response, flow, pagination, task_id, page)
+
+    def _detail_requests(self, response, flow, detail, task_id):
+        """列表项内逐项取详情链接，发 stage=detail 请求（选择器非法不中断整页）"""
+        url_selector = detail["url_selector"]
+        try:
+            for entry in response.css(detail["list_selector"]):
+                href = entry.xpath(url_selector).get()
                 if href:
                     meta = {
-                        "stage": "list",
-                        "page": page + 1,
+                        "stage": "detail",
                         "flow": flow,
                         **({"task_id": task_id} if task_id is not None else {}),
                         **self._render_meta(response),
                     }
-                    yield Request(response.urljoin(str(href).strip()), meta=meta, dont_filter=True)
-                else:
-                    logger.info(f"未找到下一页链接，结束翻页: page={page}")
+                    yield Request(response.urljoin(href.strip()), meta=meta, dont_filter=True)
+        except Exception as e:  # noqa: BLE001 选择器非法不中断整页
+            logger.warning(f"详情页链接提取失败: {detail!r}, error={e}")
+
+    def _next_page_requests(self, response, flow, pagination, task_id, page):
+        """下一页请求：达 max_pages 或找不到下一页链接时结束翻页"""
+        max_pages = _normalize_max_pages(pagination)
+        if page >= max_pages:
+            logger.info(f"已达最大翻页数，停止翻页: page={page}, max_pages={max_pages}")
+            return
+        href = self._next_page_href(response, pagination)
+        if not href:
+            logger.info(f"未找到下一页链接，结束翻页: page={page}")
+            return
+        meta = {
+            "stage": "list",
+            "page": page + 1,
+            "flow": flow,
+            **({"task_id": task_id} if task_id is not None else {}),
+            **self._render_meta(response),
+        }
+        yield Request(response.urljoin(str(href).strip()), meta=meta, dont_filter=True)
+
+    @staticmethod
+    def _next_page_href(response, pagination: dict):
+        """按 pagination.type（css / xpath）执行下一页选择器；执行失败返回 None"""
+        ptype = pagination.get("type", "css")
+        try:
+            if ptype == "xpath":
+                return response.xpath(pagination["selector"]).get()
+            return response.css(pagination["selector"]).get()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"下一页选择器执行失败: {pagination!r}, error={e}")
+            return None
 
     # ------------------------------------------------------------------
     # stage=detail：按详情页选择器提取字段产出 Item
