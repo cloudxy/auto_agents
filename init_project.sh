@@ -30,7 +30,7 @@ install_tools() {
             log "安装 Node.js"
             brew install node
         else
-            die "请安装 Node.js 20：https://nodejs.org/"
+            die "请安装 Node.js 24 LTS（≥ 22.13，见 .nvmrc）：https://nodejs.org/"
         fi
     fi
     log "git $(git --version | awk '{print $3}')"

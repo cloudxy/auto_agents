@@ -19,7 +19,7 @@
 |------|------|
 | 后端 | FastAPI ≥0.135 + SQLAlchemy 2 + PyMySQL/aiomysql + redis-py + Pydantic 2 + PyJWT + Loguru |
 | 爬虫 | Scrapy ≥2.15 + scrapy-redis + Selenium + DrissionPage |
-| 前端 | React 19 + TypeScript + Ant Design 6 + React Router v7 + Axios + React Query + Zustand |
+| 前端 | React 19 + TypeScript 6 + Ant Design 6 + React Router v7 + Axios + React Query + Zustand；Vite 8 构建、Jest 30、ESLint 10（Node 24 LTS） |
 | 配置 | Dynaconf ≥3.2 |
 | 数据库 | MySQL 8 / Redis 6+（compose 用 Redis 7） |
 | 包管理 | uv workspace（Python）/ npm workspaces（前端） |
@@ -81,7 +81,7 @@
 
 **日志** — `from platform_core.logger import get_logger`；`get_logger("api"|"spider"|"admin"|"official")` 必须对上 `LOGGERS`。进程 stdout 在 `runtime/run/`。落盘 `logs/{global,api,admin,official,spider,error}/`。`backend/services/*.py` 公开方法入口要有 `logger.`（R10）。密码/Token 不入日志。
 
-**编码** — Python：`uv run ruff check .`（全仓，E9 + 全部 pyflakes F）。模块/函数下划线，类大驼峰。单函数 ≤ 40 行，单文件 ≤ 500 行。API 用 `backend.app.responses.ok/created`（health 探活除外）。前端：ESLint；业务 `.tsx` ≤ 400 行（F-7）；admin 用 Zustand + React Query；共享进 `frontend/shared` 经 dist。爬虫：`DOWNLOAD_DELAY` + `UserAgentMiddleware`；出口 `StorePipeline`。
+**编码** — Python：`uv run ruff check .`（全仓，E9 + 全部 pyflakes F）。模块/函数下划线，类大驼峰。单函数 ≤ 40 行，单文件 ≤ 500 行。API 用 `backend.app.responses.ok/created`（health 探活除外）。前端：ESLint（各应用 `eslint.config.mjs`，`npm run lint -w <app>`）；业务 `.tsx` ≤ 400 行（F-7）；admin 用 Zustand + React Query；共享进 `frontend/shared` 经 dist。爬虫：`DOWNLOAD_DELAY` + `UserAgentMiddleware`；出口 `StorePipeline`。
 
 ## 关键文件索引
 
@@ -125,7 +125,7 @@ python3 scripts/agents_plugins.py sync     # 按 plugins-lock.json 接好第三�
 - 后端改动：`uv run pytest -x -q backend/tests` 必须退出码 0；lint：`uv run ruff check .`（E9 + F，全仓）
 - 数据契约改动（models/schemas）：额外跑 `bash tools/check/arch.sh`
 - 迁移改动：`bash tools/check/db_ir.sh` + `bash tools/check/db_migrations.sh`（CI db-migration-gate 同款）
-- 前端改动：`npm run check-frontend`（F-5/F-6 门禁）；测试 `npm test -w admin` / `npm test -w official`
+- 前端改动：`npm run check-frontend`（F-2~F-8 门禁，含 ESLint）；构建 `npm run build -w admin` / `-w official`（`tsc --noEmit` + `vite build`）；测试 `npm test -w admin` / `npm test -w official`
 - 真库保真测试默认跳过，需 `MYSQL_FIDELITY=1`（CI 用 MySQL service container 承载）
 - CI 五阶段：Python lint+test / 架构红线 / DB 迁移门禁 / 前端构建 / Docker 校验
 

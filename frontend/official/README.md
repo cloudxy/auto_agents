@@ -1,46 +1,35 @@
-# Getting Started with Create React App
+# official —— AutoAgents 官网
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+React 19 + TypeScript + Ant Design 6 + Framer Motion，服务端状态用 TanStack Query。
+构建用 Vite，测试用 Jest（jsdom），lint 用 ESLint flat config（`eslint.config.mjs`）。
+跨应用共享代码在 `@auto-agents/frontend-shared`（经 `frontend/shared/dist` 消费）。
 
-## Available Scripts
+## 前置
 
-In the project directory, you can run:
+Node.js ≥ 22.13（推荐 24 LTS，见仓库根 `.nvmrc`）。依赖在仓库根统一安装：
 
-### `npm start`
+```bash
+npm ci                 # 仓库根执行（npm workspaces）
+npm run build:shared   # 先构建 shared 的 dist
+```
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+## 常用命令（仓库根执行，或在本目录去掉 `-w official`）
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+| 命令 | 作用 |
+|------|------|
+| `npm start -w official` | Vite 开发服务器：`http://127.0.0.1:9113`（端口取 `PORT`，被占直接失败） |
+| `npm run build -w official` | `tsc --noEmit` 类型检查 + `vite build`，产物在 `build/` |
+| `npm run preview -w official` | 本地预览 `build/` |
+| `npm run lint -w official` | ESLint（只有 error 让退出码非零） |
+| `npm test -w official` | Jest 单测 |
 
-### `npm test`
+一般用 `uv run python run.py start official` 启动：会注入端口，并把 `/api` 反代目标对齐 `config` 的 `API.HOST/PORT`。
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## 开发代理与环境变量
 
-### `npm run build`
-
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
-
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
-
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
+- 开发态请求走同源 `/api/v1`，由 `vite.config.mts` 的 `server.proxy` 转给后端：
+  目标取 `API_PROXY_TARGET`，缺省 `http://127.0.0.1:9111`。
+- 源码读 `process.env.REACT_APP_*`（沿用 CRA 约定），构建期静态替换；来源与 CRA 相同：
+  `.env`、`.env.local`、`.env.[mode]`、`.env.[mode].local`（`npm start` 为 development，`build` 为 production），
+  同名进程环境变量优先。键说明见 `.env.example`。
+- 只监听 `127.0.0.1`；需要局域网访问时临时用 `npm start -w official -- --host 0.0.0.0`。
