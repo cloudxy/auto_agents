@@ -19,6 +19,7 @@
 | `.agents/skills/` | 本仓库开发协作 skill（`/new-svc` `/check-arch` 等），随项目走 |
 | `.agents/plugins/` | 第三方插件指针农场（→ `~/.zcode/local-plugins/<name>`） |
 | `capability-library/` | 跨工具共享的 skill 目录库（治理元数据、评分、分发适配器、本地后台）；`plugins/` 是指向 `.agents/plugins` 的扫描入口 |
+| `runtime/agents-hub/` | 能力市场产品运行时内容根（`SKILLS.AGENTS_ROOT`，不入库）：同步 / 目录导入 / 失源清理只认它，不扫 `.agents/`（D2「分离」）；D2 前的存量迁移见 `scripts/db/migrate_agents_hub_root.py` |
 
 git 历史跟 auto_agents 主仓库走，每次改动一次 commit，方便回滚。
 

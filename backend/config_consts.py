@@ -16,7 +16,9 @@ STALE_TASK_HOURS ×3 / USAGE_FLUSH_INTERVAL ×3 等）；剩余低频调用点�
 
 # ---- 技能域 ----
 SKILLS_LIBRARY_ROOT = "capability-library"
-SKILLS_AGENTS_ROOT = ".agents"  # .agents 真相源根（feat-agents-market FR-01 同步/导入/prune）
+# 产品运行时 hub 根（D2：与开发中枢 .agents/ 分离；同步/目录导入/legacy 导入/prune 的统一根，
+# 默认落 gitignored 的 runtime/；存储格式与读兼容见 power_market/hub_paths.py）
+SKILLS_AGENTS_ROOT = "runtime/agents-hub"
 SKILLS_SCORING_ENABLED = False
 SKILLS_PUBLIC_RATE_PER_MIN = 60
 
