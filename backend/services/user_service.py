@@ -161,15 +161,39 @@ class UserService:
         平台超管账户显式挂 platform 租户（不再产 NULL 行）；username 查重按
         (目标租户, username) 口径（跨租户同名是产品既定能力）。
         """
-        import asyncio
-
         from sqlalchemy import select
         from sqlalchemy.exc import IntegrityError
 
-        from platform_core.exceptions import BusinessException, ValidationException
+        from platform_core.exceptions import BusinessException
         from platform_core.models.tenant import Tenant
-        from platform_core.models.user import User
-        from backend.utils.auth import get_password_hash
+
+        target_tenant_id, tenant_role, is_platform_admin = await self._resolve_create_target(payload)
+        await self._assert_create_unique(target_tenant_id, payload)
+        user = await self._build_user_row(payload, target_tenant_id, tenant_role, is_platform_admin)
+        self.session.add(user)
+        try:
+            await self.session.flush()
+        except IntegrityError:
+            # 并发占名竞态兜底（db-spec §16.1：恢复先落 → 并发新建撞唯一键 →
+            # 优雅报错，不裸奔 IntegrityError 500）
+            await self.session.rollback()
+            raise BusinessException("用户名或邮箱已被现有用户占用")
+        await self.session.refresh(user)  # onupdate/默认列需回读，防 expired 属性同步 IO
+        logger.info(f"创建用户 | id={user.id} username={payload.username} tenant={target_tenant_id}")
+        resp = UserResponse.model_validate(user)
+        resp.tenant_name = (await self.session.execute(
+            select(Tenant.name).where(Tenant.id == target_tenant_id)
+        )).scalar_one_or_none()
+        # ADR-0007 D2：快照先于 commit（resp 已是 Pydantic 固化值）
+        await self.session.commit()
+        return resp
+
+    async def _resolve_create_target(self, payload) -> tuple[int, str | None, bool]:
+        """新建账户归属 → (target_tenant_id, tenant_role, is_platform_admin)"""
+        from sqlalchemy import select
+
+        from platform_core.exceptions import ValidationException
+        from platform_core.models.tenant import Tenant
 
         tenant_role = None
         is_platform_admin = False
@@ -192,14 +216,29 @@ class UserService:
             if tenant is None:
                 raise ValidationException(message=f"租户不存在: {target_tenant_id}", field="tenant_id")
             tenant_role = "admin" if payload.role == "admin" else payload.role
+        return target_tenant_id, tenant_role, is_platform_admin
 
-        # 查重按在册行口径（042 唯一键在册化 / GWT-93.5/93.7 释放语义）：
-        # 已删行不阻塞新建；并发窗口由 DB 唯一键兜底（IntegrityError → 400）
+    async def _assert_create_unique(self, target_tenant_id: int, payload) -> None:
+        """查重按在册行口径（042 唯一键在册化 / GWT-93.5/93.7 释放语义）：
+        已删行不阻塞新建；并发窗口由 DB 唯一键兜底（IntegrityError → 400）
+        """
+        from platform_core.exceptions import BusinessException
+
         if await self.repo.exists_username_in_tenant(target_tenant_id, payload.username):
             raise BusinessException(f"用户名已存在: {payload.username}")
         if await self.repo.get_by_email(payload.email):
             raise BusinessException(f"邮箱已注册: {payload.email}")
-        user = User(
+
+    @staticmethod
+    async def _build_user_row(payload, target_tenant_id: int, tenant_role: str | None,
+                              is_platform_admin: bool):
+        """新建账户的 ORM 行（密码哈希转线程池；尚未 add 进会话）"""
+        import asyncio
+
+        from platform_core.models.user import User
+        from backend.utils.auth import get_password_hash
+
+        return User(
             username=payload.username,
             email=payload.email,
             password_hash=await asyncio.to_thread(get_password_hash, payload.password),
@@ -210,30 +249,12 @@ class UserService:
             tenant_role=tenant_role,
             is_platform_admin=is_platform_admin,
         )
-        self.session.add(user)
-        try:
-            await self.session.flush()
-        except IntegrityError:
-            # 并发占名竞态兜底（db-spec §16.1：恢复先落 → 并发新建撞唯一键 →
-            # 优雅报错，不裸奔 IntegrityError 500）
-            await self.session.rollback()
-            raise BusinessException("用户名或邮箱已被现有用户占用")
-        await self.session.refresh(user)  # onupdate/默认列需回读，防 expired 属性同步 IO
-        logger.info(f"创建用户 | id={user.id} username={payload.username} tenant={target_tenant_id}")
-        resp = UserResponse.model_validate(user)
-        resp.tenant_name = (await self.session.execute(
-            select(Tenant.name).where(Tenant.id == target_tenant_id)
-        )).scalar_one_or_none()
-        # ADR-0007 D2：快照先于 commit（resp 已是 Pydantic 固化值）
-        await self.session.commit()
-        return resp
 
     async def update_user(self, user_id: int, payload, actor_id: int) -> UserResponse:
         """编辑账户：角色分配（role 单源）/启停/归属调整"""
         from sqlalchemy import select
 
-        from platform_core.exceptions import BusinessException, ValidationException
-        from platform_core.models.tenant import Tenant
+        from platform_core.exceptions import BusinessException
         from platform_core.models.user import User
 
         user = (await self.session.execute(
@@ -242,50 +263,16 @@ class UserService:
         if user is None:
             raise BusinessException(f"用户不存在: {user_id}")
         changes = payload.model_dump(exclude_unset=True, exclude_none=True)
-        from platform_core.roles import tenant_role_from_legacy
-
         if "role" in changes:
-            if user_id == actor_id and changes["role"] != "admin":
-                raise BusinessException("不能降级自己的 admin 角色（防自锁）")
-            if user.tenant_role == "owner" and changes["role"] != "admin":
-                # 审计 QA-B1-4：平台用户页改角色曾把 owner 覆盖成普通角色，企业就此没有负责人
-                raise BusinessException("企业负责人的角色不能在此修改，请先转让负责人")
-            user.role = changes["role"]
-            user.is_admin = changes["role"] == "admin"
-            if user.tenant_id is not None and user.tenant_role != "owner":
-                user.tenant_role = tenant_role_from_legacy(changes["role"])
+            self._apply_role_change(user, changes["role"], is_self=user_id == actor_id)
         if "is_active" in changes:
             if user_id == actor_id and not changes["is_active"]:
                 raise BusinessException("不能停用自己（防自锁）")
             user.is_active = changes["is_active"]
         if "tenant_id" in changes:
-            if changes["tenant_id"] is not None:
-                tenant = (await self.session.execute(
-                    select(Tenant).where(Tenant.id == changes["tenant_id"])
-                )).scalar_one_or_none()
-                if tenant is None:
-                    raise ValidationException(message=f"租户不存在: {changes['tenant_id']}", field="tenant_id")
-            if user.tenant_role == "owner" and changes["tenant_id"] != user.tenant_id:
-                # 迁走负责人会让原企业失去唯一负责人（审计 QA-B1-4）
-                raise BusinessException("企业负责人不能直接迁到其他企业，请先转让负责人")
-            user.tenant_id = changes["tenant_id"]
-            user.tenant_role = (
-                None if changes["tenant_id"] is None else tenant_role_from_legacy(user.role)
-            )
+            await self._apply_tenant_change(user, changes["tenant_id"])
         if "department_id" in changes:
-            if changes["department_id"] is not None:
-                from platform_core.models.department import Department
-
-                dept = (await self.session.execute(
-                    select(Department).where(
-                        Department.id == changes["department_id"],
-                        Department.deleted_at.is_(None))
-                )).scalar_one_or_none()
-                if dept is None:
-                    raise ValidationException(message=f"部门不存在: {changes['department_id']}", field="department_id")
-                if user.tenant_id is None or dept.tenant_id != user.tenant_id:
-                    raise ValidationException(message="部门必须属于用户所在公司", field="department_id")
-            user.department_id = changes["department_id"]
+            await self._apply_department_change(user, changes["department_id"])
         await self.session.flush()
         await self.session.refresh(user)
         logger.info(f"更新用户 | id={user_id} fields={sorted(changes.keys())}")
@@ -298,6 +285,63 @@ class UserService:
             )).scalar_one_or_none()
         await self.session.commit()
         return resp
+
+    @staticmethod
+    def _apply_role_change(user, role: str, *, is_self: bool) -> None:
+        """角色分配（role 单源）：防自锁；企业负责人的角色不在此修改"""
+        from platform_core.exceptions import BusinessException
+        from platform_core.roles import tenant_role_from_legacy
+
+        if is_self and role != "admin":
+            raise BusinessException("不能降级自己的 admin 角色（防自锁）")
+        if user.tenant_role == "owner" and role != "admin":
+            # 审计 QA-B1-4：平台用户页改角色曾把 owner 覆盖成普通角色，企业就此没有负责人
+            raise BusinessException("企业负责人的角色不能在此修改，请先转让负责人")
+        user.role = role
+        user.is_admin = role == "admin"
+        if user.tenant_id is not None and user.tenant_role != "owner":
+            user.tenant_role = tenant_role_from_legacy(role)
+
+    async def _apply_tenant_change(self, user, tenant_id: int | None) -> None:
+        """归属调整：目标企业须存在；企业负责人不能直接迁走"""
+        from sqlalchemy import select
+
+        from platform_core.exceptions import BusinessException, ValidationException
+        from platform_core.models.tenant import Tenant
+        from platform_core.roles import tenant_role_from_legacy
+
+        if tenant_id is not None:
+            tenant = (await self.session.execute(
+                select(Tenant).where(Tenant.id == tenant_id)
+            )).scalar_one_or_none()
+            if tenant is None:
+                raise ValidationException(message=f"租户不存在: {tenant_id}", field="tenant_id")
+        if user.tenant_role == "owner" and tenant_id != user.tenant_id:
+            # 迁走负责人会让原企业失去唯一负责人（审计 QA-B1-4）
+            raise BusinessException("企业负责人不能直接迁到其他企业，请先转让负责人")
+        user.tenant_id = tenant_id
+        user.tenant_role = (
+            None if tenant_id is None else tenant_role_from_legacy(user.role)
+        )
+
+    async def _apply_department_change(self, user, department_id: int | None) -> None:
+        """部门调整：部门须在册且属于用户所在公司"""
+        if department_id is not None:
+            from sqlalchemy import select
+
+            from platform_core.exceptions import ValidationException
+            from platform_core.models.department import Department
+
+            dept = (await self.session.execute(
+                select(Department).where(
+                    Department.id == department_id,
+                    Department.deleted_at.is_(None))
+            )).scalar_one_or_none()
+            if dept is None:
+                raise ValidationException(message=f"部门不存在: {department_id}", field="department_id")
+            if user.tenant_id is None or dept.tenant_id != user.tenant_id:
+                raise ValidationException(message="部门必须属于用户所在公司", field="department_id")
+        user.department_id = department_id
 
     async def delete_user(self, user_id: int, actor_id: int) -> None:
         """软删除账户（种子 admin 不可删；防删自己；防删最后一个平台超管）"""
@@ -353,14 +397,10 @@ class UserService:
           在册判，任一冲突即拒绝（预检只为提前给友好文案，不当正确性依据）。
         """
         logger.info(f"恢复软删用户 | id={user_id} actor={actor_id}")
-        from sqlalchemy import select, update
-
-        from sqlalchemy.exc import IntegrityError
+        from sqlalchemy import select
 
         from platform_core.exceptions import BusinessException
         from platform_core.models.user import User
-
-        from backend.services.product_event_service import emit_product_event
 
         user = (await self.session.execute(
             select(User).where(User.id == user_id)
@@ -372,6 +412,16 @@ class UserService:
                 return await self._reactivate_disabled(user, actor_id)
             # GWT-93.9：已在册且启用 = no-op，状态保持、无事件、无副作用
             return UserResponse.model_validate(user)
+        return await self._restore_soft_deleted(user, user_id, actor_id)
+
+    async def _restore_soft_deleted(self, user, user_id: int, actor_id: int) -> UserResponse:
+        """软删行恢复：占用预检 → 条件 UPDATE → 回读快照 → 提交 → 上报（db-spec §16.1）"""
+        from sqlalchemy import select, update
+
+        from sqlalchemy.exc import IntegrityError
+
+        from platform_core.exceptions import BusinessException
+        from platform_core.models.user import User
 
         # 占用预检（同事务；在册口径——目标行本身已删，不参与判重）
         if await self.repo.exists_username_in_tenant(user.tenant_id, user.username):
@@ -399,6 +449,13 @@ class UserService:
         )).scalar_one()
         resp = UserResponse.model_validate(fresh)
         await self.session.commit()
+        await self._report_restored(result, user_id, tenant_id_snapshot, actor_id)
+        return resp
+
+    async def _report_restored(self, result, user_id: int, tenant_id_snapshot: int | None,
+                               actor_id: int) -> None:
+        """条件 UPDATE 命中才上报 user_restored（GWT-93.9：no-op 不重复上报）"""
+        from backend.services.product_event_service import emit_product_event
 
         if result.rowcount == 1:
             logger.info(f"恢复软删用户成功 | id={user_id} tenant={tenant_id_snapshot}")
@@ -411,7 +468,6 @@ class UserService:
         else:
             # rowcount=0：预检后、UPDATE 前被并发恢复抢先 → no-op、不重复上报
             logger.info(f"恢复软删用户 no-op（并发已恢复） | id={user_id}")
-        return resp
 
     async def _reactivate_disabled(self, user, actor_id: int) -> UserResponse:
         """停用（未软删）恢复：置回启用并上报 user_restored（GWT-M32.4）。"""

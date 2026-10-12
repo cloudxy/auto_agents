@@ -22,6 +22,49 @@ PASSWORD = "123456"
 EMAIL = "admin@example.com"
 
 
+async def _upsert_platform_admin(session, platform_tenant) -> None:
+    """不存在则创建平台超管，存在则重置密码与超管标记"""
+    # 平台超管按 (platform 租户, username) 精确取（跨租户可能存在同名 admin）
+    user = (await session.execute(
+        select(User).where(
+            User.username == USERNAME, User.tenant_id == platform_tenant.id)
+    )).scalar_one_or_none()
+
+    if user is None:
+        user = User(
+            username=USERNAME,
+            email=EMAIL,
+            password_hash=get_password_hash(PASSWORD),
+            is_admin=True,
+            is_active=True,
+            role="admin",
+            tenant_id=platform_tenant.id,
+            tenant_role=None,
+            is_platform_admin=True,
+        )
+        session.add(user)
+        await session.commit()
+        print(f"✅ 已创建平台超管账号: {USERNAME}（tenant=platform#{platform_tenant.id}）")
+    else:
+        user.password_hash = get_password_hash(PASSWORD)
+        user.is_admin = True
+        user.is_active = True
+        user.is_platform_admin = True
+        await session.commit()
+        print(f"✅ 已重置平台超管账号密码: {USERNAME}")
+
+
+async def _verify_platform_admin(session, platform_tenant) -> None:
+    """回读校验：密码可通过、超管标记生效"""
+    refreshed = (await session.execute(
+        select(User).where(
+            User.username == USERNAME, User.tenant_id == platform_tenant.id)
+    )).scalar_one()
+    assert verify_password(PASSWORD, refreshed.password_hash), "密码校验失败"
+    print(f"✅ 密码校验通过 | username={refreshed.username} | is_admin={refreshed.is_admin} "
+          f"| is_active={refreshed.is_active} | is_platform_admin={refreshed.is_platform_admin}")
+
+
 async def main():
     init_db()
     async for session in get_manager().get_async_session("DEFAULT"):
@@ -32,43 +75,9 @@ async def main():
             print("❌ platform 租户缺失：请先执行迁移 024（alembic upgrade head）")
             sys.exit(1)
 
-        # 平台超管按 (platform 租户, username) 精确取（跨租户可能存在同名 admin）
-        user = (await session.execute(
-            select(User).where(
-                User.username == USERNAME, User.tenant_id == platform_tenant.id)
-        )).scalar_one_or_none()
-
-        if user is None:
-            user = User(
-                username=USERNAME,
-                email=EMAIL,
-                password_hash=get_password_hash(PASSWORD),
-                is_admin=True,
-                is_active=True,
-                role="admin",
-                tenant_id=platform_tenant.id,
-                tenant_role=None,
-                is_platform_admin=True,
-            )
-            session.add(user)
-            await session.commit()
-            print(f"✅ 已创建平台超管账号: {USERNAME}（tenant=platform#{platform_tenant.id}）")
-        else:
-            user.password_hash = get_password_hash(PASSWORD)
-            user.is_admin = True
-            user.is_active = True
-            user.is_platform_admin = True
-            await session.commit()
-            print(f"✅ 已重置平台超管账号密码: {USERNAME}")
-
+        await _upsert_platform_admin(session, platform_tenant)
         # 验证
-        refreshed = (await session.execute(
-            select(User).where(
-                User.username == USERNAME, User.tenant_id == platform_tenant.id)
-        )).scalar_one()
-        assert verify_password(PASSWORD, refreshed.password_hash), "密码校验失败"
-        print(f"✅ 密码校验通过 | username={refreshed.username} | is_admin={refreshed.is_admin} "
-              f"| is_active={refreshed.is_active} | is_platform_admin={refreshed.is_platform_admin}")
+        await _verify_platform_admin(session, platform_tenant)
 
 
 if __name__ == "__main__":

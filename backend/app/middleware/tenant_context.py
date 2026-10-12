@@ -126,6 +126,25 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         request.state.auth_identity = identity  # 同请求生命周期，deps 快照直用
         return identity
 
+    async def _dispatch_platform_claim(self, request: Request, payload: dict, call_next):
+        """claim 自称平台超管：DB 复核通过进 platform_scope，已撤销则按 DB 行租户降级"""
+        identity = await self._verify_platform_claim(request, payload)
+        if identity is None:
+            return self._reject()
+        if identity.is_platform_admin:
+            with platform_scope():
+                return await call_next(request)
+        # 撤销降级（F-01）：DB 行已非平台超管 → 按其租户进 tenant_scope
+        # （deps 守卫消费同一快照，权限与隔离同步降级）；024 后合法行必有租户
+        if identity.tenant_id is None:
+            logger.warning(f"拒绝无租户归属的降级平台 token | sub={payload.get('sub')}")
+            return self._reject()
+        denied = await self._guard_tenant_active(request, identity.tenant_id)
+        if denied is not None:
+            return denied
+        with tenant_scope(identity.tenant_id):
+            return await call_next(request)
+
     async def dispatch(self, request: Request, call_next):
         auth = request.headers.get("Authorization", "")
         token = auth[7:].strip() if auth.startswith("Bearer ") else ""
@@ -134,22 +153,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if payload.get("is_platform_admin"):
-            identity = await self._verify_platform_claim(request, payload)
-            if identity is None:
-                return self._reject()
-            if identity.is_platform_admin:
-                with platform_scope():
-                    return await call_next(request)
-            # 撤销降级（F-01）：DB 行已非平台超管 → 按其租户进 tenant_scope
-            # （deps 守卫消费同一快照，权限与隔离同步降级）；024 后合法行必有租户
-            if identity.tenant_id is None:
-                logger.warning(f"拒绝无租户归属的降级平台 token | sub={payload.get('sub')}")
-                return self._reject()
-            denied = await self._guard_tenant_active(request, identity.tenant_id)
-            if denied is not None:
-                return denied
-            with tenant_scope(identity.tenant_id):
-                return await call_next(request)
+            return await self._dispatch_platform_claim(request, payload, call_next)
 
         tenant_id = payload.get("tenant_id")
         if tenant_id is None:
