@@ -32,7 +32,7 @@ jest.mock('../../hooks/usePermission', () => ({
 import { message } from 'antd'
 import PluginTab from './PluginTab'
 import { listAssets, syncAgentsHub } from '../../services/capabilities'
-import { SYNCING, SYNC_AGENTS, syncDoneCopy, syncFailCopy } from './marketCopy'
+import { SYNC_AGENTS, syncDoneCopy, syncFailCopy } from './marketCopy'
 
 const list = listAssets as jest.Mock
 const sync = syncAgentsHub as jest.Mock

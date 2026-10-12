@@ -17,7 +17,6 @@ jest.mock('../../services/usage', () => ({
   }),
 }))
 
-// eslint-disable-next-line import/first
 import { TaskModal } from './TaskModal'
 import { runSpider } from '../../services/spiders'
 import {
@@ -65,20 +64,17 @@ function renderModal(workerOffline?: boolean) {
 }
 
 const openModalSelect = (idx: number) => {
-  // eslint-disable-next-line testing-library/no-node-access
   const modal = document.querySelector('.ant-modal') as HTMLElement
   fireEvent.mouseDown(modal.querySelectorAll('.ant-select')[idx])
 }
 
 const clickDropdownOption = async (text: string) => {
   const node = await waitFor(() => {
-    // eslint-disable-next-line testing-library/no-node-access
     const hit = Array.from(document.querySelectorAll('.ant-select-item-option-content'))
       .find((e) => (e.textContent || '').trim() === text)
     if (!hit) throw new Error(`option not found: ${text}`)
     return hit
   })
-  // eslint-disable-next-line testing-library/no-node-access
   fireEvent.click(node.closest('.ant-select-item-option') as HTMLElement)
 }
 

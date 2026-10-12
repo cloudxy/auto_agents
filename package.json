@@ -2,6 +2,9 @@
   "name": "auto-agents",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "workspaces": [
     "frontend/*"
   ],
@@ -17,5 +20,13 @@
   "devDependencies": {
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3"
+  },
+  "overrides": {
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "^4.1.1"
+    },
+    "openapi-typescript": {
+      "typescript": "~6.0.3"
+    }
   }
 }

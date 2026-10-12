@@ -1,5 +1,4 @@
-/// <reference types="react-scripts" />
-
+// 构建期由 vite.config.mts 的 define 静态替换（与 CRA 同为 process.env.REACT_APP_*）
 namespace NodeJS {
   interface ProcessEnv {
     /** API 基地址（默认 http://localhost:9111/api/v1） */

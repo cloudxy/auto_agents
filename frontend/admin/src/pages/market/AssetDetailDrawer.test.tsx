@@ -77,7 +77,7 @@ test('GWT-05.1 正常：banner/头像/标签/示例区/md 正文（表格与代�
     origin_plugin_name: 'sdlc-workflow',
     featured: 1,
   }))
-  const { container } = renderDrawer()
+  renderDrawer()
   await waitFor(() => expect(screen.getByTestId('asset-drawer')).toBeInTheDocument())
   // Drawer 渲染进 body portal：查 document 而非 render container
   expect(document.querySelector('.markdown-body table')).toBeTruthy()

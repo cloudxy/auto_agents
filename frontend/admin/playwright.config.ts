@@ -15,7 +15,8 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: `npx serve -s build -l ${port}`,
+    // 先 npm run build -w admin；vite preview 托管 build/（SPA 回退 index.html），端口被占直接失败
+    command: `npx vite preview --port ${port} --strictPort --host 127.0.0.1`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

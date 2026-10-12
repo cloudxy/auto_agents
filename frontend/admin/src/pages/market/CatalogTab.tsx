@@ -79,7 +79,7 @@ const CatalogTab: React.FC<Props> = ({
   }, [type, listing, page, keyword])
 
   // refreshKey（T-36 导入完成计数）为显式重载触发器，不参与 load 逻辑
-  useEffect(() => { load() }, [load, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [load, refreshKey])
 
   const replace = (next: AssetRow) => {
     setRows((cur) => cur.map((r) => (r.id === next.id ? { ...r, ...next } : r)))

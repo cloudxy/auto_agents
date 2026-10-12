@@ -2,7 +2,7 @@
  * T-04 / GWT-U02.6·U02.7：申请提升分角色着陆。不建单。
  */
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom'
 
 jest.mock('../../services/usage', () => ({
