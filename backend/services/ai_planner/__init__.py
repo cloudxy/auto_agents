@@ -2,6 +2,9 @@
 
 模块边界（依赖只向包内/向下单向，包内模块互不经 import 引用）：
 - llm_client.py    LLM 客户端缓存 / 运行时配置解析入口 / chat completions / token 预算
+  （规模治理拆出 llm_client_pool / llm_client_request / llm_client_quota /
+  llm_client_failover 四个叶子：只被 llm_client 单向 import 并原样 re-export，
+  本身不 import 包内其他模块；llm_gateway.chat 仍只在 llm_client.py 内 import）
 - url_guard.py     SSRF 防护（M6）/ HTML 清洗 / 目标页单页抓取
 - prompting.py     Prompt 构造 / LLM 响应解析 / 参数组装 / 注册命名推导（纯函数）
 - state.py         后台任务启动 / 试采终态快照 / 失败兜底 / 启动对账
