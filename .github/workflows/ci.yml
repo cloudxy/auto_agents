@@ -3,7 +3,7 @@
 # 五阶段质量关卡（对齐 /cicd Skill 与 /verify Skill 的验证约定）：
 # 1. python-lint-test:  ruff lint + pytest（backend/tests）
 #    security-audit:    pip-audit + npm audit --omit=dev（审计 P0-7）
-# 2. arch-check:        tools/check/arch.sh（R1–R13 + B1–B3）
+# 2. arch-check:        tools/check/arch.sh（R1–R13 + B1–B4 + FR-14 + PL + SZ）
 # 3. db-migration-gate: tools/check/db_ir.sh + db_migrations.sh
 # 4. frontend-build:    npm workspaces：shared dist → admin + official
 # 5. docker-validate:   Dockerfile 构建 + compose 语法校验
@@ -65,7 +65,7 @@ jobs:
         run: uv sync
 
       - name: Ruff lint
-        run: uv run ruff check backend platform_core scripts
+        run: uv run ruff check .
 
       - name: Pytest
         env:
@@ -95,6 +95,8 @@ jobs:
         # 若某文件在真库暴露方言差异（正是本通道目的），处置见
         # .scratch/p0-p1-2026-09/issues/T10.md 的分级方案：先单独验证修复，
         # 期间将该文件移入观察名单（不要整通道降级）。
+        # 清单由 backend/tests/test_ci_fidelity_manifest.py 守护：按 MYSQL_FIDELITY 门控的
+        # 测试文件不在这里登记，普通通道即红（防止新文件整文件 skip 后永远不跑）。
         run: >-
           uv run pytest -q
           backend/tests/test_mysql_fidelity.py
@@ -113,9 +115,12 @@ jobs:
           backend/tests/test_migrations_051_053.py
           backend/tests/test_utc_backfill.py
           backend/tests/test_tree_import.py
+          backend/tests/test_explain_indexes.py
+          backend/tests/test_t14_migration_046.py
+          backend/tests/test_t42_fidelity_queue_depth.py
 
   arch-check:
-    name: Architecture Red Lines (R1-R13 + B1-B3)
+    name: Architecture Red Lines (R1-R13 + B1-B4)
     runs-on: ubuntu-latest
     env:
       APP_ENV: local
@@ -133,7 +138,7 @@ jobs:
       - name: Sync dependencies
         run: uv sync
 
-      - name: Run check-arch.sh
+      - name: Run tools/check/arch.sh
         run: bash tools/check/arch.sh
 
       # FR-14 / T-11：生成网关配置不得在跟踪树；样例模式不把真密钥写进 workflow。

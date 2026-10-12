@@ -15,7 +15,7 @@ import os
 import shutil
 import tempfile
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -100,19 +100,6 @@ def _make_sandbox() -> Path:
     if base:
         Path(base).mkdir(parents=True, exist_ok=True)
     return Path(tempfile.mkdtemp(prefix="asset-import-", dir=base or None))
-
-
-@dataclass
-class PendingAsset:
-    """分类产物：一个可判定类型的候选（或带解析错误的候选）"""
-
-    asset_type: str
-    name: str
-    title: str
-    group: str
-    files: list[tuple[str, Path]] = field(default_factory=list)  # (目标相对路径, 沙箱源)
-    single_file: bool = False  # command：单 .md 落 commands/<name>.md
-    error: str | None = None  # 解析/命名失败（failed item 原因）
 
 
 @dataclass

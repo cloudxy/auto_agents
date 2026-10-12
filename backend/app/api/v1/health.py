@@ -82,7 +82,7 @@ async def health_deep(session: AsyncSession = Depends(get_async_db)):
     与既有端点的区别：本文件其余端点失败时仍返回 200（unhealthy 只写在 body，
     供人工浏览）；Docker HEALTHCHECK / deploy/watchdog.sh 按 HTTP 状态码判定，
     对它们而言恒 200 等于浅探测——依赖挂掉仍"健康"是 2026-08 冻结事故的
-    发现盲区之一（复盘：docs/ops/incident-2026-08-backend-freeze.md）。
+    发现盲区之一（背景：docs/ops/runbook.md §5）。
     探测逻辑复用上方 health_db/health_redis（单一事实源），不另起实现。
     """
     logger = get_logger("api")

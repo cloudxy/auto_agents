@@ -41,9 +41,8 @@ def init_log():
     # 否则应用装配前（db init 等）的首批日志每条触发 KeyError 转储且落盘失败
     logger.configure(extra={"request_id": "-"})
 
-    # 日志根目录：项目根 / logs
+    # 项目根：相对日志路径统一落到 <项目根>/logs/ 下
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    log_root = os.path.join(project_root, 'logs')
 
     loggers_cfg = getattr(settings, "LOGGERS", {})
     if not hasattr(loggers_cfg, "keys"):

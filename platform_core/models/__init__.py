@@ -52,7 +52,6 @@ from platform_core.models.department import Department
 from platform_core.models.menu import Menu
 from platform_core.models.permission import Permission
 from platform_core.models.api_key import ApiKey
-from platform_core.models.billing import Order, Plan, TenantSubscription
 
 __all__ = [
     "Base", "SpiderTask", "SpiderResult", "SpiderSchedule", "SpiderDefinition",

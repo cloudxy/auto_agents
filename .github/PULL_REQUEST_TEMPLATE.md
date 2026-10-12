@@ -20,9 +20,9 @@
 
 ## 检查
 
-- [ ] `uv run pytest -q backend/tests`
-- [ ] `bash scripts/check-arch.sh`
-- [ ] 前端改动：`bash scripts/check-frontend.sh` + `CI= npm run build -w {admin|official|@auto-agents/frontend-shared}`
+- [ ] `uv run pytest -q backend/tests` + `uv run ruff check .`
+- [ ] `bash tools/check/arch.sh`
+- [ ] 前端改动：`bash tools/check/frontend.sh` + `CI= npm run build -w {admin|official|@auto-agents/frontend-shared}`
 - [ ] 登录 / 看板 / 用量 / 成员：先 build admin，再 `CI=1 npm run e2e -w admin`
 - [ ] 增删路由：已更新 `backend/tests/openapi_routes_golden.txt`
-- [ ] schema / 迁移：`/db-design` + `bash scripts/check-db-ir.sh` + `bash scripts/check-db-migrations.sh`
+- [ ] schema / 迁移：`/db-design` + `bash tools/check/db_ir.sh` + `bash tools/check/db_migrations.sh`

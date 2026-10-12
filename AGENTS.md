@@ -81,7 +81,7 @@
 
 **日志** — `from platform_core.logger import get_logger`；`get_logger("api"|"spider"|"admin"|"official")` 必须对上 `LOGGERS`。进程 stdout 在 `runtime/run/`。落盘 `logs/{global,api,admin,official,spider,error}/`。`backend/services/*.py` 公开方法入口要有 `logger.`（R10）。密码/Token 不入日志。
 
-**编码** — Python：`uv run ruff check backend platform_core scripts`。模块/函数下划线，类大驼峰。单函数 ≤ 40 行，单文件 ≤ 500 行。API 用 `backend.app.responses.ok/created`（health 探活除外）。前端：ESLint；业务 `.tsx` ≤ 400 行（F-7）；admin 用 Zustand + React Query；共享进 `frontend/shared` 经 dist。爬虫：`DOWNLOAD_DELAY` + `UserAgentMiddleware`；出口 `StorePipeline`。
+**编码** — Python：`uv run ruff check .`（全仓，E9 + 全部 pyflakes F）。模块/函数下划线，类大驼峰。单函数 ≤ 40 行，单文件 ≤ 500 行。API 用 `backend.app.responses.ok/created`（health 探活除外）。前端：ESLint；业务 `.tsx` ≤ 400 行（F-7）；admin 用 Zustand + React Query；共享进 `frontend/shared` 经 dist。爬虫：`DOWNLOAD_DELAY` + `UserAgentMiddleware`；出口 `StorePipeline`。
 
 ## 关键文件索引
 
@@ -122,7 +122,7 @@ python3 scripts/agents_plugins.py sync     # 按 plugins-lock.json 接好第三�
 ## 验证与交付约定
 
 - 任何「已完成」陈述必须伴随可验证输出（测试输出 / curl 结果 / 构建日志）
-- 后端改动：`uv run pytest -x -q backend/tests` 必须退出码 0；lint：`uv run ruff check backend platform_core scripts`（只查 E9+F401）
+- 后端改动：`uv run pytest -x -q backend/tests` 必须退出码 0；lint：`uv run ruff check .`（E9 + F，全仓）
 - 数据契约改动（models/schemas）：额外跑 `bash tools/check/arch.sh`
 - 迁移改动：`bash tools/check/db_ir.sh` + `bash tools/check/db_migrations.sh`（CI db-migration-gate 同款）
 - 前端改动：`npm run check-frontend`（F-5/F-6 门禁）；测试 `npm test -w admin` / `npm test -w official`
@@ -154,7 +154,7 @@ python3 scripts/agents_plugins.py sync     # 按 plugins-lock.json 接好第三�
 
 ### Issue tracker
 
-工单以本地 markdown 存放于 `.scratch/<feature>/`（spec + `issues/` 每票一文件）。约定文件 `docs/agents/issue-tracker.md` 为本地私有配置（不入库）。
+工单以本地 markdown 存放于 `.scratch/<feature>/`（spec + `issues/` 每票一文件；`.scratch/` 不入库）。约定见 `docs/agents/issue-tracker.md`（入库）。
 
 ### Triage labels
 
@@ -162,7 +162,7 @@ python3 scripts/agents_plugins.py sync     # 按 plugins-lock.json 接好第三�
 
 ### Domain docs
 
-single-context：根级 `CONTEXT.md`（词汇）；`docs/` 为本地私有不入库。
+single-context：根级 `CONTEXT.md`（词汇）。`docs/` 入库：`adr/`（架构决策）、`ops/`（运维手册 `runbook.md` 与审查记录）、`agents/`（技能约定）、`claims.md`（宣称 ↔ 实现锚点，CI 校验）。
 
 ## 项目状态
 

@@ -1,10 +1,12 @@
-# 生产环境 Web 配置（覆盖 default）
-# 只覆盖差异部分，其他配置继承 default
+# 生产环境 Web 配置（在 default 之上补齐 CORS 来源与允许头）
+#
+# ORIGINS 缺省为空 = 只允许同源访问（前端与 API 经同一域名反代时不需要跨域）。
+# 前后端分域部署时按实际域名注入，不要在这里写占位域名：
+#   AUTO_AGENTS_CORS__ORIGINS='["https://www.example.com", "https://admin.example.com"]'
+# 启动时 backend/app/cors_check.py 会对空来源、占位域名、localhost 来源、"*" 配凭据打告警。
 
 CORS:
-  ORIGINS:
-    - "https://your-domain.com"        # 官方网站（生产环境域名）
-    - "https://admin.your-domain.com"  # 管理后台（生产环境域名）
+  ORIGINS: []
   ALLOW_HEADERS:
     - "Content-Type"
     - "Authorization"

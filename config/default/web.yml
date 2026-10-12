@@ -1,10 +1,12 @@
 # Web 服务配置 - CORS 跨域配置
 # 注意：服务器端口配置在 api.yml 中
+#
+# 列表型键（ORIGINS / ALLOW_HEADERS）只在环境层 config/<env>/web.yml 定义：
+# config/__init__.py 开了 merge_enabled，Dynaconf 对两层都出现的列表做「追加」而不是覆盖——
+# 曾因此让生产带上 default 的 localhost 来源和 ALLOW_HEADERS "*"。
+# backend/tests/test_config_list_layers.py 守护：同一列表键不得同时出现在 default 与环境层。
 
 CORS:
-  ORIGINS:
-    - "http://localhost:9112"      # 管理后台
-    - "http://localhost:9113"      # 官方网站
   ALLOW_CREDENTIALS: true
   ALLOW_METHODS:
     - "GET"
@@ -13,5 +15,3 @@ CORS:
     - "PATCH"
     - "DELETE"
     - "OPTIONS"
-  ALLOW_HEADERS:
-    - "*"

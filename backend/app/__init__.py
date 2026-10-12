@@ -116,6 +116,8 @@ def create_app():
         """应用生命周期：密钥守卫 + Redis 队列消费者 + 定时调度器 + 代理健康管理 + LLM 用量聚合"""
         _validate_runtime_secrets()
         _validate_enablement_duty_contact()
+        from backend.app.cors_check import warn_cors_config
+        warn_cors_config(settings)
         import os as _os
         _run_bg = (_os.environ.get("APP_ROLE") or "all").strip().lower() in ("all", "worker")
         consumer = None
@@ -303,10 +305,10 @@ def create_app():
     # CORS 配置（从 web.yml 配置文件读取）
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS.ORIGINS,
-        allow_credentials=settings.CORS.ALLOW_CREDENTIALS,
-        allow_methods=settings.CORS.ALLOW_METHODS,
-        allow_headers=settings.CORS.ALLOW_HEADERS,
+        allow_origins=list(settings.get("CORS.ORIGINS", []) or []),
+        allow_credentials=bool(settings.get("CORS.ALLOW_CREDENTIALS", False)),
+        allow_methods=list(settings.get("CORS.ALLOW_METHODS", ["GET"]) or ["GET"]),
+        allow_headers=list(settings.get("CORS.ALLOW_HEADERS", []) or []),
     )
 
     # 请求 ID 中间件（链路追踪）

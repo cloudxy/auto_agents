@@ -7,6 +7,11 @@
 # 手动执行：bash tools/git/sync_main.sh
 #
 # 设计：fail-open —— checkout 已经发生，任何异常只告警不阻断（exit 0）
+#
+# 只自动合并「自己的工作分支」，以下情形只提示、不合并（避免切过去看一眼就静默多出一个
+# merge commit，下次 push 带上去）：
+# - 分支名命中 AUTO_SYNC_MAIN_SKIP（空格分隔的 glob，缺省 "release/* hotfix/* dependabot/* renovate/*"）；
+# - 分支最新提交的作者邮箱不是本机 git user.email（别人的分支，例如拉下来 review 的 PR 分支）。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -33,6 +38,24 @@ done
 CURRENT="$(git branch --show-current 2>/dev/null || true)"
 [ -n "$CURRENT" ] || skip "detached HEAD"
 [ "$CURRENT" != "$MAIN_BRANCH" ] || skip "当前就是 ${MAIN_BRANCH}，无需自合并"
+
+# 发布 / 机器人分支：只提示
+SKIP_PATTERNS="${AUTO_SYNC_MAIN_SKIP:-release/* hotfix/* dependabot/* renovate/*}"
+set -f  # 模式按字面交给 case，不做文件名展开
+for pattern in $SKIP_PATTERNS; do
+    # shellcheck disable=SC2254
+    case "$CURRENT" in
+        $pattern) set +f; skip "${CURRENT} 命中 AUTO_SYNC_MAIN_SKIP（${pattern}），需要时手动 git merge origin/${MAIN_BRANCH}" ;;
+    esac
+done
+set +f
+
+# 别人的分支：只提示（本机没配 user.email 时不做这层判断）
+ME="$(git config user.email 2>/dev/null || true)"
+TIP_AUTHOR="$(git log -1 --format=%ae HEAD 2>/dev/null || true)"
+if [ -n "$ME" ] && [ -n "$TIP_AUTHOR" ] && [ "$ME" != "$TIP_AUTHOR" ]; then
+    skip "${CURRENT} 最新提交作者是 ${TIP_AUTHOR}（不是你），不自动合并；需要时手动 git merge origin/${MAIN_BRANCH}"
+fi
 
 # 工作区有未提交改动时不自动合并（避免混入），提示手动处理
 if ! git diff-index --quiet HEAD -- 2>/dev/null; then

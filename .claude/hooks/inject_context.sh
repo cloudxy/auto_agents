@@ -2,7 +2,7 @@
 # UserPromptSubmit hook: 注入项目身份头 + 最近 3 条 memory 索引到主对话 context
 # 失败兜底：任何异常 exit 0，绝不阻塞用户
 #
-# 运行时依赖：bash >= 3.2, awk, grep, sed, head, ls
+# 运行时依赖：bash >= 3.2, awk, grep, sed, head, ls；iconv 可选（UTF-8 安全截断）
 
 # --- bash 版本检查（最低 3.2）---
 if [ -z "$BASH_VERSION" ]; then
@@ -30,11 +30,22 @@ MEMORY_INDEX="$PROJECT_DIR/.claude/MEMORY.md"
 # 体积上限（避免污染 context window）
 MAX_BYTES=1024
 
+# 按字节截断后丢掉被截断的半个 UTF-8 字符（head -c 会把中文切成非法字节序列）；
+# 没有 iconv 时退化为纯字节截断。iconv -c 丢弃字节时退出码为 1，必须吞掉：
+# 本脚本 trap 'exit 0' ERR，非零退出会让整个 hook 静默不输出
+utf8_head() {
+    if command -v iconv >/dev/null 2>&1; then
+        head -c "$1" | iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true
+    else
+        head -c "$1"
+    fi
+}
+
 OUT=""
 
 # 1) IDENTITY 头：取 Role + Mission 段（前 ~10 行非空内容）
 if [ -f "$IDENTITY" ]; then
-    HEAD=$(awk '/^## (Role|Mission)/{p=1} p && /^## /{c++; if(c>2) exit} p' "$IDENTITY" 2>/dev/null | head -c 600)
+    HEAD=$(awk '/^## (Role|Mission)/{p=1} p && /^## /{c++; if(c>2) exit} p' "$IDENTITY" 2>/dev/null | utf8_head 900)
     if [ -n "$HEAD" ]; then
         OUT="<project-identity>
 $HEAD
@@ -66,7 +77,7 @@ fi
 
 # 3) 截断到 MAX_BYTES，输出到 stdout（被 Claude Code 注入为 additionalContext）
 if [ -n "$OUT" ]; then
-    echo "$OUT" | head -c "$MAX_BYTES"
+    echo "$OUT" | utf8_head "$MAX_BYTES"
 fi
 
 exit 0

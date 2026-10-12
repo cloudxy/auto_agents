@@ -181,8 +181,11 @@ R13_OUTPUT=""
 if ! grep -q "from platform_core import tenant_context\|import platform_core.tenant_context\|from platform_core import.*tenant_context" backend/app/__init__.py platform_core/__init__.py 2>/dev/null; then
     R13_OUTPUT="platform_core/__init__.py 缺 tenant_context 安装导入（隔离钩子可能未安装）"
 fi
-# bash 3.2 兼容：命令替换 + heredoc（不用进程替换）；python 失败本身即违规（fail-loud）
-R13_SYNC="$(uv run python - <<'PYEOF' 2>/dev/null || echo "R13 豁免同步校验执行失败（uv/python 环境）"
+# bash 3.2 兼容：命令替换 + heredoc（不用进程替换）；python 失败本身即违规（fail-loud）。
+# stderr 落临时文件：失败时把真实原因（如 JWT.SECRET_KEY 未配置导致 create_app 抛错）附在违规里，
+# 不再只报一句笼统的「uv/python 环境」。
+R13_ERR="$(mktemp "${TMPDIR:-/tmp}/arch-r13.XXXXXX")"
+R13_SYNC="$(uv run python - 2>"$R13_ERR" <<'PYEOF'
 from backend.app import create_app
 
 create_app()  # 显式经组装点（不依赖模块级 app 实例的存在）
@@ -208,6 +211,12 @@ for p in problems:
     print(p)
 PYEOF
 )"
+R13_RC=$?
+if [ "$R13_RC" -ne 0 ]; then
+    R13_SYNC="R13 豁免同步校验执行失败（create_app 组装或导入出错，exit=$R13_RC），原因：
+$(grep -vE '^warning: ' "$R13_ERR" | tail -n 5 | sed 's/^/    /')"
+fi
+rm -f "$R13_ERR"
 if [ -n "$R13_OUTPUT" ] && [ -n "$R13_SYNC" ]; then
     R13_OUTPUT="$R13_OUTPUT
 $R13_SYNC"

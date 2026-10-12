@@ -34,7 +34,8 @@ COPY pyproject.toml uv.lock README.md ./
 COPY backend/ backend/
 COPY scrapy/ scrapy/
 COPY platform_core/ platform_core/
-RUN uv sync --package auto-agents-backend --no-dev && echo 'UV_SYNC_OK'
+# --locked：uv.lock 与 pyproject 不一致直接构建失败（不在镜像里悄悄重解析）
+RUN uv sync --locked --package auto-agents-backend --no-dev && echo 'UV_SYNC_OK'
 
 COPY config/ config/
 COPY scripts/ scripts/
@@ -47,8 +48,12 @@ COPY --from=frontend-builder /build/frontend/official/build /app/frontend-dist/o
 # - APP_ENV=prod 为部署缺省，运行时 -e APP_ENV=<env> 覆盖；
 # - HOST 缺省 0.0.0.0：config/default/api.yml 的 127.0.0.1 是本机开发缺省，
 #   容器内沿用会绑定回环 → 发布端口在容器外不可达
+# - UV_NO_SYNC=1：运行期 `uv run` 只用构建好的 .venv，不再按根项目重新同步——否则容器每次启动
+#   都会联网补装根项目的爬虫包与 dev 组（pytest / ruff / pip-audit / pre-commit 等 36 个包），
+#   出网受限的生产环境直接起不来（compose 的 command 同样经 uv run，共用本变量）。
 ENV APP_ENV=prod \
-    AUTO_AGENTS_API__HOST=0.0.0.0
+    AUTO_AGENTS_API__HOST=0.0.0.0 \
+    UV_NO_SYNC=1
 # 端口与 config/default/api.yml 的 API.PORT（9111）一致；config/prod 无 api.yml，
 # 生产回落同值（改端口须三处同步：api.yml / EXPOSE / HEALTHCHECK）
 EXPOSE 9111
