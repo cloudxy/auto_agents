@@ -165,9 +165,9 @@ async def test_flush_result_tenant_is_task_owner_not_message():
         "item": {"url": "https://wiz.example", "title": "wiz"},
         "tenant_id": 99,
     }
-    with patch("backend.tasks.consumer.AsyncSession", return_value=ctx), \
-         patch("backend.tasks.consumer.SpiderTaskRepository", return_value=repo), \
-         patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo), \
+    with patch("backend.tasks.consumer_store.AsyncSession", return_value=ctx), \
+         patch("backend.tasks.consumer_store.SpiderTaskRepository", return_value=repo), \
+         patch("backend.tasks.consumer_store.SpiderResultRepository", return_value=repo), \
          patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
                staticmethod(lambda: object())), \
          patch("backend.services.quota_service.QuotaService", return_value=qs):
@@ -199,9 +199,9 @@ async def test_flush_orphan_not_written_dead_letter_and_fail_task():
         "item": {"url": "https://orphan.example", "title": "no-owner"},
         "tenant_id": 3,
     }
-    with patch("backend.tasks.consumer.AsyncSession", return_value=ctx), \
-         patch("backend.tasks.consumer.SpiderTaskRepository", return_value=repo), \
-         patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo), \
+    with patch("backend.tasks.consumer_store.AsyncSession", return_value=ctx), \
+         patch("backend.tasks.consumer_store.SpiderTaskRepository", return_value=repo), \
+         patch("backend.tasks.consumer_store.SpiderResultRepository", return_value=repo), \
          patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
                staticmethod(lambda: object())):
         await consumer._flush_batch([msg], {8: 1})
@@ -232,9 +232,9 @@ async def test_flush_missing_task_not_written():
     repo.batch_increment_result_counts = AsyncMock()
     session, ctx = _flush_session()
     msg = {"task_id": 9, "spider_name": "s1", "item": {"url": "https://x"}}
-    with patch("backend.tasks.consumer.AsyncSession", return_value=ctx), \
-         patch("backend.tasks.consumer.SpiderTaskRepository", return_value=repo), \
-         patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo), \
+    with patch("backend.tasks.consumer_store.AsyncSession", return_value=ctx), \
+         patch("backend.tasks.consumer_store.SpiderTaskRepository", return_value=repo), \
+         patch("backend.tasks.consumer_store.SpiderResultRepository", return_value=repo), \
          patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
                staticmethod(lambda: object())):
         await consumer._flush_batch([msg], {9: 1})
@@ -258,9 +258,9 @@ async def test_ingest_single_orphan_skips_create():
     task_repo.get_by_id = AsyncMock(return_value=MagicMock(params=None, tenant_id=None))
     msg = {"task_id": 4, "spider_name": "example", "item": {"url": "https://a.b"}}
     with (
-        patch("backend.tasks.consumer.AsyncSession", return_value=session),
-        patch("backend.tasks.consumer.SpiderResultRepository", return_value=result_repo),
-        patch("backend.tasks.consumer.SpiderTaskRepository", return_value=task_repo),
+        patch("backend.tasks.consumer_store.AsyncSession", return_value=session),
+        patch("backend.tasks.consumer_store.SpiderResultRepository", return_value=result_repo),
+        patch("backend.tasks.consumer_store.SpiderTaskRepository", return_value=task_repo),
         patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
               staticmethod(lambda: object())),
     ):

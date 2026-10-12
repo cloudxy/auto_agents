@@ -11,71 +11,52 @@
 失败策略：
 - 单条消息处理失败只记日志，不中断循环（队列消费不丢循环）
 - 任务消息缺 urls 时直接把任务置 failed（错误信息可追溯到任务行）
+
+模块组成（按职责拆分，SpiderTaskConsumer 以 mixin 组合，实例方法名不变）：
+- 本模块：生命周期（start/stop）、start URL 载荷构建、任务分发、_fail_task
+- consumer_recovery.py：失败重试 ZSET 扫描 + running 超时回收 + 积压 pending 对账
+- consumer_ingest.py：结果回流循环 + 毒消息隔离（REDO / 死信）
+- consumer_store.py：批量 / 单条落库、多存储双写、无主拒收
 """
 import asyncio
-import hashlib
 import json
 import os
-import time
-from datetime import timedelta
 from typing import List, Optional
 
 import redis.asyncio as aioredis
 from sqlalchemy import func
-from sqlalchemy.exc import InterfaceError, OperationalError
-from sqlalchemy.exc import TimeoutError as SATimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from backend.config_consts import (TASKS_STALE_TASK_HOURS)
 from platform_core.db import get_manager
 from platform_core.logger import get_logger
-from platform_core.timeutil import utcnow
 from platform_core.queues import (
     ACTIVE_TASK_KEY,
     ACTIVE_TASK_TTL,
-    DEAD_ITEM_QUEUE,
     ITEM_QUEUE,
-    ITEM_REDO_QUEUE,
     LEGACY_ACTIVE_TASK_PREFIX,
     TASK_CONTROL_KEY,
     TASK_LOG_OFFSET_KEY,
     TASK_LOG_OFFSET_TTL,
     TASK_QUEUE_PRIORITIES,
-    TASK_RESULTS_KEY,
-    item_hold_queue,
     task_queue,
     tenant_active_key,
 )
-from platform_core.models.spider_result import SpiderResult
-from backend.repositories.spider_result_repository import SpiderResultRepository
 from backend.repositories.spider_task_repository import SpiderTaskRepository
 from backend.services.spider_service import (
     FLOW_SPIDER_NAME,
     extract_flow,
-    extract_store_targets,
     resolve_spider_log_path,
 )
 from backend.services.spider_task_service import RETRY_ZSET_KEY
+from backend.tasks.consumer_ingest import ResultIngestMixin
+from backend.tasks.consumer_recovery import TaskRecoveryMixin
 
 logger = get_logger("api")
 
 # blpop 超时（秒）：超时后回到循环顶部检查运行开关，保证可优雅退出
 _BLPOP_TIMEOUT = 5
-
-# 期 3：ingest 批量化 —— 单次 lpop 拉取条数（替代逐条 blpop 的 Redis round-trip）
-_INGEST_POP_COUNT = 20
-# 回流失败的单条消息最多重放次数，超过进死信（审计 R2-1：毒消息不再无限循环）
-_MAX_REDO_ATTEMPTS = 3
-_REDO_ATTEMPTS_KEY = "_redo_attempts"
-# 基础设施类故障（库/网络不可用）：整批暂存重放，不计入单条重放次数
-_TRANSIENT_ERRORS = (OperationalError, InterfaceError, SATimeoutError, ConnectionError, OSError)
-# 无新消息时的休眠秒数：保证定期 flush 节奏 + 避免 lpop 空转烧 CPU
-# （原 blpop timeout=1 同等语义：无消息时最多约该间隔才做一次 flush 检查）
-_INGEST_IDLE_SLEEP = 0.2
-# 重试 ZSET 扫描节奏（秒）与单次最多搬运条数
-_RETRY_SCAN_INTERVAL = 1.0
-_RETRY_BATCH = 100
 
 
 def extract_start_urls(params: Optional[str]) -> List[str]:
@@ -161,8 +142,14 @@ def build_start_payload(
     return json.dumps({"url": url, "task_id": task_id, **payload_extra}, ensure_ascii=False)
 
 
-class SpiderTaskConsumer:
+class SpiderTaskConsumer(TaskRecoveryMixin, ResultIngestMixin):
     """Redis 双队列消费者（任务分发 + 结果回流）"""
+
+    def __init__(self):
+        self._running = False
+        self._loops: List[asyncio.Task] = []
+        self._redis: Optional[aioredis.Redis] = None
+        self._requeued_counts: dict[int, int] = {}
 
     async def start(self) -> None:
         """启动两个消费循环（幂等：重复调用不叠加）"""
@@ -244,31 +231,22 @@ class SpiderTaskConsumer:
                 logger.error(f"任务分发失败: raw={message[1]!r}, error={e}")
 
     async def _dispatch(self, msg: dict) -> None:
+        """单条任务消息分发：控制键 → 流程切换 → 校验 urls → CAS 置 running → 投递"""
         task_id = msg.get("task_id")
         spider_name = msg.get("spider_name", "")
         logger.info(f"消费任务消息: task_id={task_id}, spider={spider_name}")
         msg = await self._with_db_params(msg)
 
         # A4：分发前检查控制键，如果已有 stop 控制键则直接置 failed（用户已终止）
-        try:
-            control_val = await self._redis.get(TASK_CONTROL_KEY.format(task_id=task_id))
-            if control_val and str(control_val).strip().lower() == "stop":
-                await self._fail_task(task_id, "user_stopped")
-                await self._redis.delete(TASK_CONTROL_KEY.format(task_id=task_id))
-                logger.info(f"任务分发前已终止（用户控制）: task_id={task_id}")
-                return
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"分发前检查控制键失败（放行）: task_id={task_id}, error={e}")
+        if await self._stopped_before_dispatch(task_id):
+            return
 
         # 阶段 5.1：识别流程参数 → 统一切到 flow_generic 爬虫执行；
         # 任务行同步改写，保证活跃键/并发槽位/关闭回调与实际执行爬虫一致。
         flow = extract_flow(msg.get("params"))
         if flow is not None and spider_name != FLOW_SPIDER_NAME:
             spider_name = FLOW_SPIDER_NAME
-            async with AsyncSession(self._engine()) as session:
-                await SpiderTaskRepository(session).update(task_id, spider_name=FLOW_SPIDER_NAME)
-                await session.commit()
-            logger.info(f"流程采集任务切换执行爬虫: task_id={task_id} → {FLOW_SPIDER_NAME}")
+            await self._switch_to_flow_spider(task_id)
 
         urls = extract_start_urls(msg.get("params"))
         if not urls:
@@ -276,8 +254,46 @@ class SpiderTaskConsumer:
             return
 
         # 1. 任务置 running（同时写 started_at，供运行时长统计）
-        # 审计 BUG-12：只从 pending 迁移（CAS）。重复 / 迟到的分发消息原先无条件 UPDATE，
-        # 把已完成 / 已失败的任务翻回 running，并再抓一遍
+        if not await self._mark_running(task_id):
+            return
+
+        # 2. 写活跃任务关联（供并发槽位控制 / 终态回调）+ 3. 投递 start URL
+        if not await self._deliver(msg, task_id, spider_name, flow, urls):
+            return
+
+        logger.info(
+            f"任务已分发: task_id={task_id}, spider={spider_name}, urls={len(urls)}"
+        )
+
+    async def _stopped_before_dispatch(self, task_id) -> bool:
+        """A4：已有 stop 控制键 → 任务置 failed 并清控制键，返回 True（本消息不再分发）
+
+        控制键读取 / 清理异常时放行（返回 False，照常分发）。
+        """
+        try:
+            control_val = await self._redis.get(TASK_CONTROL_KEY.format(task_id=task_id))
+            if control_val and str(control_val).strip().lower() == "stop":
+                await self._fail_task(task_id, "user_stopped")
+                await self._redis.delete(TASK_CONTROL_KEY.format(task_id=task_id))
+                logger.info(f"任务分发前已终止（用户控制）: task_id={task_id}")
+                return True
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"分发前检查控制键失败（放行）: task_id={task_id}, error={e}")
+        return False
+
+    async def _switch_to_flow_spider(self, task_id) -> None:
+        """流程采集任务：任务行执行爬虫改写为 flow_generic（阶段 5.1）"""
+        async with AsyncSession(self._engine()) as session:
+            await SpiderTaskRepository(session).update(task_id, spider_name=FLOW_SPIDER_NAME)
+            await session.commit()
+        logger.info(f"流程采集任务切换执行爬虫: task_id={task_id} → {FLOW_SPIDER_NAME}")
+
+    async def _mark_running(self, task_id) -> bool:
+        """任务 pending → running（CAS）；任务不存在或已不在待执行状态返回 False
+
+        审计 BUG-12：只从 pending 迁移（CAS）。重复 / 迟到的分发消息原先无条件 UPDATE，
+        把已完成 / 已失败的任务翻回 running，并再抓一遍。
+        """
         async with AsyncSession(self._engine()) as session:
             repo = SpiderTaskRepository(session)
             task = await repo.update(
@@ -286,50 +302,61 @@ class SpiderTaskConsumer:
             await session.commit()
             if task is None:
                 logger.warning(f"任务不存在或已不在待执行状态（重复 / 迟到消息），丢弃: task_id={task_id}")
-                return
+                return False
+        return True
 
-        # 2. 写活跃任务关联（供并发槽位控制 / 终态回调）+ 投递 start URL
-        # 任一步失败都会导致任务卡死 running（blpop 后消息已丢），用 _fail_task 兜底推终态。
-        # 先校验任务仍存在再写活跃键：若任务在排队期间被删除，
-        # 旧投递会让活跃集合残留幽灵成员，后续任务的并发槽位会被错误占用。
+    async def _deliver(self, msg: dict, task_id, spider_name: str, flow, urls: List[str]) -> bool:
+        """写活跃任务关联 + 投递 start URL；成功返回 True
+
+        任一步失败都会导致任务卡死 running（blpop 后消息已丢），用 _fail_task 兜底推终态。
+        先校验任务仍存在再写活跃键：若任务在排队期间被删除，
+        旧投递会让活跃集合残留幽灵成员，后续任务的并发槽位会被错误占用。
+        """
         try:
             async with AsyncSession(self._engine()) as session:
                 check_repo = SpiderTaskRepository(session)
                 still_exists = await check_repo.get_by_id(task_id)
             if still_exists is None:
                 logger.warning(f"任务已不存在（可能已被删除），丢弃分发: task_id={task_id}")
-                return
-            active_key = ACTIVE_TASK_KEY.format(spider_name=spider_name)
-            await self._redis.sadd(active_key, task_id)
-            await self._redis.expire(active_key, ACTIVE_TASK_TTL)
-            raw_tid = msg.get("tenant_id")
-            if isinstance(raw_tid, int):
-                tkey = tenant_active_key(raw_tid, spider_name)
-                await self._redis.sadd(tkey, task_id)
-                await self._redis.expire(tkey, ACTIVE_TASK_TTL)
+                return False
+            await self._register_active(task_id, spider_name, msg.get("tenant_id"))
             # 记录当前日志文件偏移量：供日志隔离切出本任务区间（各并发任务各自记录）
             await self._record_log_offset(task_id)
-            # 3. 投递 start URL（scrapy-redis 约定键 `<spider_name>:start_urls`）
-            # 载荷统一包装为 JSON 并携带 task_id：并发下结果归属走请求 meta（精确），
-            # TaskAwareRedisSpider / generic 解析 JSON；scrapy-redis 对 start_urls 天然 dont_filter。
-            # M4：flow 任务透传 AI 规划的 JS 渲染配置（flow_generic 从载荷 params 读取），
-            # 其余 params 键不透传防意外注入；非 flow 任务载荷结构零变化。
-            selectors = extract_selectors(msg.get("params"))
-            render_params = extract_render_params(msg.get("params")) if flow is not None else {}
-            payloads = [
-                build_start_payload(u, task_id, flow, selectors, render_params)
-                for u in urls
-            ]
-            for payload in payloads:
-                await self._redis.rpush(f"{spider_name}:start_urls", payload)
+            await self._push_start_urls(msg, task_id, spider_name, flow, urls)
         except Exception as e:  # noqa: BLE001
             logger.error(f"投递采集任务失败: task_id={task_id}, spider={spider_name}, error={e}")
             await self._fail_task(task_id, f"投递 start URL 失败: {e}")
-            return
+            return False
+        return True
 
-        logger.info(
-            f"任务已分发: task_id={task_id}, spider={spider_name}, urls={len(urls)}"
-        )
+    async def _register_active(self, task_id, spider_name: str, raw_tid) -> None:
+        """写活跃任务集合（爬虫级 + 租户级）并续 TTL：供并发槽位控制 / 终态回调"""
+        active_key = ACTIVE_TASK_KEY.format(spider_name=spider_name)
+        await self._redis.sadd(active_key, task_id)
+        await self._redis.expire(active_key, ACTIVE_TASK_TTL)
+        if isinstance(raw_tid, int):
+            tkey = tenant_active_key(raw_tid, spider_name)
+            await self._redis.sadd(tkey, task_id)
+            await self._redis.expire(tkey, ACTIVE_TASK_TTL)
+
+    async def _push_start_urls(
+        self, msg: dict, task_id, spider_name: str, flow, urls: List[str],
+    ) -> None:
+        """投递 start URL（scrapy-redis 约定键 `<spider_name>:start_urls`）
+
+        载荷统一包装为 JSON 并携带 task_id：并发下结果归属走请求 meta（精确），
+        TaskAwareRedisSpider / generic 解析 JSON；scrapy-redis 对 start_urls 天然 dont_filter。
+        M4：flow 任务透传 AI 规划的 JS 渲染配置（flow_generic 从载荷 params 读取），
+        其余 params 键不透传防意外注入；非 flow 任务载荷结构零变化。
+        """
+        selectors = extract_selectors(msg.get("params"))
+        render_params = extract_render_params(msg.get("params")) if flow is not None else {}
+        payloads = [
+            build_start_payload(u, task_id, flow, selectors, render_params)
+            for u in urls
+        ]
+        for payload in payloads:
+            await self._redis.rpush(f"{spider_name}:start_urls", payload)
 
     async def _with_db_params(self, msg: dict) -> dict:
         """分发以数据库行为准（审计 BUG-13）：待执行任务被编辑后，队列里的旧消息仍带旧 params；
@@ -374,635 +401,6 @@ class SpiderTaskConsumer:
         except Exception as e:  # noqa: BLE001
             logger.error(f"任务置 failed 失败: task_id={task_id}, error={e}")
 
-    async def _accept_message(self, raw: str, message: dict) -> bool:
-        """消息准入校验（P1-4）：缺 task_id 的结果转入死信队列留档，不再静默丢弃"""
-        if message.get("task_id"):
-            return True
-        logger.warning(
-            f"结果消息缺少 task_id，转入死信队列 {DEAD_ITEM_QUEUE}: "
-            f"spider={message.get('spider_name', '')}"
-        )
-        try:
-            await self._redis.rpush(DEAD_ITEM_QUEUE, raw)
-        except Exception as e:  # noqa: BLE001 死信写入失败不阻断回流主路径
-            logger.error(f"死信队列写入失败: {e}")
-        return False
-
-    @staticmethod
-    def _task_owner_id(task) -> Optional[int]:
-        """入队企业：只认任务行 tenant_id。工人消息里的 tenant 不是归属。"""
-        if task is None:
-            return None
-        raw = getattr(task, "tenant_id", None)
-        if raw is None:
-            return None
-        try:
-            tid = int(raw)
-        except (TypeError, ValueError):
-            return None
-        return tid if tid > 0 else None
-
-    async def _reject_orphan_item(self, msg: dict, task_id, reason: str) -> None:
-        """无主回流：不写入「我的结果」；死信留档；任务侧可查失败。"""
-        logger.warning(
-            f"回流无入队企业，不落结果: task_id={task_id}, reason={reason}"
-        )
-        dead = dict(msg)
-        dead["_reject_reason"] = reason
-        try:
-            await self._redis.rpush(
-                DEAD_ITEM_QUEUE, json.dumps(dead, ensure_ascii=False, default=str)
-            )
-        except Exception as e:  # noqa: BLE001 死信失败不阻断主路径
-            logger.error(f"无主回流死信写入失败: task_id={task_id}, error={e}")
-        if task_id:
-            await self._fail_task(task_id, reason)
-
-    # ------------------------------------------------------------------
-    # 失败重试延迟扫描（期 3）：ZSET 到期成员重新入主队列
-    # ------------------------------------------------------------------
-    async def _retry_loop(self) -> None:
-        """重试扫描循环：每 tick 扫到期成员，与 dispatch/ingest 并行的独立小节
-
-        入队侧：SpiderTaskService._reenqueue 失败重试时 ZADD（score=到期时间戳）。
-        出队侧：本循环 zrangebyscore 取到期成员 → zrem 原子抢占 → rpush 主队列。
-        """
-        while self._running:
-            try:
-                await self._scan_retry_zset()
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:  # noqa: BLE001 扫描失败只记日志，不中断循环
-                logger.error(f"重试扫描异常: {e}")
-            await asyncio.sleep(self._RETRY_SCAN_INTERVAL)
-
-    async def _scan_retry_zset(self) -> None:
-        """扫描到期成员并重新入主队列（zrem 抢占防多实例重复入队）"""
-        now = time.time()
-        due = await self._redis.zrangebyscore(
-            RETRY_ZSET_KEY, "-inf", now, start=0, num=self._RETRY_BATCH
-        )
-        if not due:
-            return
-        for raw in due:
-            # zrem 原子抢占：多实例部署时同一到期成员只被一个消费者搬走
-            removed = await self._redis.zrem(RETRY_ZSET_KEY, raw)
-            if not removed:
-                continue  # 已被其他实例抢占
-            try:
-                msg = json.loads(raw)
-                queue_key = task_queue(str(msg.get("priority") or "normal"))
-                await self._redis.rpush(queue_key, raw)
-                logger.info(
-                    f"重试任务到期重新入队: task_id={msg.get('task_id')}, queue={queue_key}"
-                )
-            except Exception as e:  # noqa: BLE001
-                # 入队失败回滚 ZSET（延迟 5s 再试），防消息丢失
-                try:
-                    await self._redis.zadd(RETRY_ZSET_KEY, {raw: time.time() + 5})
-                except Exception as rollback_err:  # noqa: BLE001
-                    # 回滚也失败（M-2 评审修复）：消息已被 zrem 移除且无法恢复，
-                    # DB 兜底置 failed（对齐 SpiderTaskService._reenqueue 投递失败
-                    # 置 failed 语义），避免任务永远停留在 running/pending 悬挂
-                    logger.error(
-                        f"重试任务重新入队失败且回滚 ZSET 失败，任务置 failed 兜底: "
-                        f"error={e}, rollback_error={rollback_err}"
-                    )
-                    task_id = None
-                    try:
-                        task_id = json.loads(raw).get("task_id")
-                    except (TypeError, ValueError):
-                        pass
-                    await self._fail_task(task_id, "重试重新入队失败（消息丢失）")
-
-    # ------------------------------------------------------------------
-    # running 任务超时回收（P0-1b）：防爬虫崩溃/webhook 丢失导致任务永久卡 running
-    # ------------------------------------------------------------------
-    _STALE_BATCH = 100  # 单轮回收扫描的候选任务上限
-    # P1-4：同一任务最多对账重投次数（进程内存计数，防止坏消息每轮循环重投）
-    _MAX_REQUEUE_ATTEMPTS = 2
-
-    def __init__(self):
-        self._running = False
-        self._loops: List[asyncio.Task] = []
-        self._redis: Optional[aioredis.Redis] = None
-        self._requeued_counts: dict[int, int] = {}
-
-    async def _recover_loop(self) -> None:
-        """超时回收循环：孤儿 running 置 failed + 积压 pending 对账重投"""
-        interval = float(settings.get("TASKS.STALE_RECOVER_INTERVAL", 300) or 300)
-        while self._running:
-            try:
-                await self._recover_stale_once()
-                await self._requeue_stale_pending()
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:  # noqa: BLE001 回收失败不中断循环
-                logger.error(f"任务超时回收/对账异常: {e}")
-            await asyncio.sleep(max(5.0, interval))
-
-    async def _recover_stale_once(self) -> None:
-        """单轮回收：running 超过 STALE_TASK_HOURS 且不在对应爬虫活跃集合的任务 → failed
-
-        判定依据：dispatch 时写入活跃集合（sadd + TTL）；爬虫进程崩溃后集合成员
-        不被移除（靠 TTL 自然过期），因此"超时 + 集合无此成员"是孤儿任务的有效
-        信号。Redis 异常时保守跳过（member 视为存在，不误杀存活任务）。
-        不做自动重试：坏站点/失效选择器会形成无限失败循环，交由用户重新运行。
-        """
-        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", TASKS_STALE_TASK_HOURS) or 0)
-        if stale_hours <= 0 or self._redis is None:
-            return
-        cutoff = utcnow() - timedelta(hours=stale_hours)
-        async with AsyncSession(self._engine()) as session:
-            candidates = await SpiderTaskRepository(session).find_stale_running(
-                cutoff, limit=self._STALE_BATCH
-            )
-        orphans = []
-        for task in candidates:
-            active_key = ACTIVE_TASK_KEY.format(spider_name=task.spider_name)
-            try:
-                member = bool(await self._redis.sismember(active_key, task.id))
-            except Exception as e:  # noqa: BLE001 Redis 异常：保守视为仍在运行
-                logger.warning(f"活跃集合查询失败（跳过回收）: task_id={task.id}, error={e}")
-                continue
-            if not member:
-                orphans.append(task)
-        for task in orphans:
-            await self._fail_task(
-                task.id,
-                f"任务超时回收：running 超过 {stale_hours:g} 小时且执行器无活跃记录"
-                "（爬虫可能崩溃或回调丢失），请检查日志后重新运行",
-            )
-        if orphans:
-            logger.warning(
-                f"超时回收完成: {len(orphans)} 个孤儿任务置 failed, "
-                f"task_ids={[t.id for t in orphans]}"
-            )
-
-    async def _requeue_stale_pending(self) -> None:
-        """积压 pending 对账重投（P1-4）：blpop 后进程崩溃会丢任务消息，
-        任务永久 pending——超过阈值且从未启动的任务重建消息重新入队；
-        同一任务重投超过 _MAX_REQUEUE_ATTEMPTS 次仍无效则置 failed 闭环。
-        """
-        stale_hours = float(settings.get("TASKS.STALE_TASK_HOURS", TASKS_STALE_TASK_HOURS) or 0)
-        if stale_hours <= 0 or self._redis is None:
-            return
-        cutoff = utcnow() - timedelta(hours=stale_hours)
-        async with AsyncSession(self._engine()) as session:
-            candidates = await SpiderTaskRepository(session).find_stale_pending(
-                cutoff, limit=self._STALE_BATCH
-            )
-        for task in candidates:
-            attempts = self._requeued_counts.get(task.id, 0)
-            if attempts >= self._MAX_REQUEUE_ATTEMPTS:
-                await self._fail_task(
-                    task.id,
-                    f"任务长期 pending 且对账重投 {attempts} 次仍无消费进展，"
-                    "请检查消费者与队列后重新创建任务",
-                )
-                self._requeued_counts.pop(task.id, None)
-                continue
-            message = json.dumps(
-                {
-                    "task_id": task.id,
-                    "spider_name": task.spider_name,
-                    "params": task.params,
-                    "priority": task.priority or "normal",
-                },
-                ensure_ascii=False,
-            )
-            try:
-                await self._redis.rpush(
-                    task_queue(str(task.priority or "normal")), message
-                )
-            except Exception as e:  # noqa: BLE001 重投失败下轮再试
-                logger.error(f"积压任务重投失败: task_id={task.id}, error={e}")
-                continue
-            self._requeued_counts[task.id] = attempts + 1
-            logger.warning(
-                f"积压任务对账重投（第 {attempts + 1} 次）: task_id={task.id}, "
-                f"spider={task.spider_name}"
-            )
-
-    # ------------------------------------------------------------------
-    # 结果回流：批量 accumulate + 定期 flush（高吞吐优化）
-    # ------------------------------------------------------------------
-    _BATCH_SIZE = 50          # 单次 flush 最大条数
-    _FLUSH_INTERVAL = 2.0     # 秒：无新消息时最长等待
-    _POP_COUNT = _INGEST_POP_COUNT   # 单次 lpop 拉取条数（期 3 批量化）
-    _IDLE_SLEEP = _INGEST_IDLE_SLEEP  # 无新消息时休眠秒数
-    _RETRY_SCAN_INTERVAL = _RETRY_SCAN_INTERVAL  # 重试扫描周期（秒）
-    _RETRY_BATCH = _RETRY_BATCH  # 单次扫描到期成员上限
-
-    async def _ingest_loop(self) -> None:
-        """批量结果回流循环 — lpop 批量拉取 + accumulate + 定期 flush
-
-        与旧版逐条 blpop 不同：单次 lpop(count=N) 批量弹出，减少 Redis
-        round-trip；消息先 accumulate 到内存批次，达到 batch_size 或
-        flush_interval 后统一 bulk insert + 单次 commit。
-        """
-        batch: list[dict] = []
-        batch_counts: dict[int, int] = {}  # task_id → count
-        last_flush = asyncio.get_event_loop().time()
-
-        while self._running:
-            try:
-                # 批量弹出（count=N）：一次往返取多条，显著减少逐条 blpop 的往返开销
-                raws = await self._redis.lpop(ITEM_QUEUE, count=self._POP_COUNT)
-                if not raws:
-                    raws = await self._redis.lpop(ITEM_REDO_QUEUE, count=self._POP_COUNT)
-                for raw in raws or []:
-                    try:
-                        message = json.loads(raw)
-                    except (TypeError, ValueError):
-                        logger.warning(f"结果消息 JSON 解析失败，跳过: raw={raw!r}")
-                        continue
-                    if not await self._accept_message(raw, message):
-                        continue
-                    batch.append(message)
-                    tid = message["task_id"]
-                    batch_counts[tid] = batch_counts.get(tid, 0) + 1
-
-                now = asyncio.get_event_loop().time()
-                if batch and (
-                    len(batch) >= self._BATCH_SIZE
-                    or now - last_flush >= self._FLUSH_INTERVAL
-                ):
-                    await self._flush_batch(batch, batch_counts)
-                    batch.clear()
-                    batch_counts.clear()
-                    last_flush = now
-
-                if not raws:
-                    # 无新消息：短暂休眠保持定期 flush 节奏，避免 lpop 空转
-                    await asyncio.sleep(self._IDLE_SLEEP)
-
-            except asyncio.CancelledError:
-                # 关停路径：先尝试 flush 当前批次防丢数据（flush 自身失败仅记日志，
-                # 也要 re-raise CancelledError，保证关停路径不吞取消信号）
-                if batch:
-                    try:
-                        await self._flush_batch(batch, batch_counts)
-                        batch.clear()
-                        batch_counts.clear()
-                    except Exception as e:  # noqa: BLE001 flush 失败不阻断取消传播
-                        logger.error(f"关停 flush 残余批次失败: {e}")
-                raise
-            except Exception as e:  # noqa: BLE001
-                logger.error(f"ingest 循环异常: {type(e).__name__}: {e}")
-                if batch:
-                    await self._recover_failed_batch(list(batch), e)
-                    batch.clear()
-                    batch_counts.clear()
-                await asyncio.sleep(1)
-
-        # 退出前 flush 残余批次
-        if batch:
-            try:
-                await self._flush_batch(batch, batch_counts)
-            except Exception as e:  # noqa: BLE001
-                logger.error(f"退出前 flush 残余批次失败: {e}")
-
-    async def _recover_failed_batch(self, batch: list[dict], error: Exception) -> None:
-        """批次落库失败后的隔离恢复（审计 R2-1）
-
-        - 基础设施故障（库连接/超时）：整批原样进 REDO，不计重放次数，等依赖恢复；
-        - 数据类故障（唯一键冲突、字段超长等）：逐条单独落库，好消息照常入库，
-          仍失败的单条累加重放次数，超过上限进死信留档——一条毒消息不再拖住整批。
-        """
-        if isinstance(error, _TRANSIENT_ERRORS):
-            logger.warning(f"回流批次遇基础设施故障，整批暂存重放: n={len(batch)}")
-            await self._park_messages(ITEM_REDO_QUEUE, batch)
-            return
-        logger.warning(f"回流批次数据异常，转逐条隔离落库: n={len(batch)} error={type(error).__name__}")
-        for msg in batch:
-            try:
-                await self._flush_batch([msg], {})
-            except _TRANSIENT_ERRORS:
-                await self._park_messages(ITEM_REDO_QUEUE, [msg])
-            except Exception as e:  # noqa: BLE001 单条失败只影响自身
-                await self._redo_or_dead(msg, e)
-
-    async def _redo_or_dead(self, msg: dict, error: Exception) -> None:
-        """单条失败：累加重放次数；达到上限进死信（带原因），否则回 REDO"""
-        attempts = int(msg.get(_REDO_ATTEMPTS_KEY) or 0) + 1
-        retry = dict(msg)
-        retry[_REDO_ATTEMPTS_KEY] = attempts
-        if attempts >= _MAX_REDO_ATTEMPTS:
-            retry["_reject_reason"] = f"回流落库连续失败 {attempts} 次: {type(error).__name__}: {str(error)[:200]}"
-            logger.error(
-                f"回流消息进死信: task_id={msg.get('task_id')} attempts={attempts} error={error}"
-            )
-            await self._park_messages(DEAD_ITEM_QUEUE, [retry])
-            return
-        logger.warning(f"回流消息回 REDO: task_id={msg.get('task_id')} attempts={attempts}")
-        await self._park_messages(ITEM_REDO_QUEUE, [retry])
-
-    async def _flush_batch(
-        self, messages: list[dict], counts: dict[int, int]
-    ) -> None:
-        """批量落库：bulk insert + 批量 result_count 累加 + 多存储双写
-
-        单次 session 完成所有操作，最后统一 commit；
-        增量去重（B5）和多存储镜像（4.2）均在此处理。
-
-        counts 入参仅为兼容旧签名保留，实际不使用：flush 入口按本批
-        messages 一次性重算计数（m-5 评审修复），保证 flush 失败重试
-        幂等（去重扣减不跨轮次累计，详见下方注释）。
-        """
-        if not messages:
-            return
-
-        orphans: list[dict] = []
-        instances: list[SpiderResult] = []
-
-        # ── 0. 按本批 messages 一次性重算计数（m-5 评审修复）──
-        # 调用方的 counts 在 flush 失败重试场景下会被上一轮的去重扣减污染
-        # （失败 → 同一批次连同已扣减的 counts 原样重试），继续在其上扣减
-        # 会让重试轮次重复扣减、唯一未去重结果的计数被错误归零；
-        # 本地按 messages 重算是幂等基准，调用方 dict 保持只读。
-        counts = {}
-        for msg in messages:
-            tid = msg["task_id"]
-            counts[tid] = counts.get(tid, 0) + 1
-
-        async with AsyncSession(self._engine()) as session:
-            # ── 1. 加载批次内涉及的 task params（增量去重 + 多存储目标）──
-            task_params_cache: dict[int, dict] = {}
-            task_store_cache: dict[int, list[str]] = {}
-            task_row_cache: dict[int, object] = {}
-            task_owner_cache: dict[int, Optional[int]] = {}
-            for tid in counts:
-                task = await SpiderTaskRepository(session).get_by_id(tid)
-                task_row_cache[tid] = task
-                params = {}
-                if task and task.params:
-                    try:
-                        params = json.loads(task.params)
-                    except (TypeError, ValueError):
-                        pass
-                task_params_cache[tid] = params
-                task_store_cache[tid] = extract_store_targets(
-                    task.params if task else None
-                )
-                task_owner_cache[tid] = self._task_owner_id(task)
-
-            # ── 2. 构建 SpiderResult 实例（跳过批内重复 / 库内已存在项）──
-            result_repo = SpiderResultRepository(session)
-            mirror_msgs: list[tuple[int, dict]] = []  # (task_id, msg)
-            # 唯一键 (tenant_id, spider_name, content_hash) 对全部任务生效（不止 incremental）：
-            # 批内重复与库内已存在都必须在 flush 前剔除，否则整批 IntegrityError（审计 R2-1）
-            seen_keys: set[tuple[int, str, str]] = set()
-            existing_cache: dict[tuple[int, str], set[str]] = {}
-            pending_hashes: dict[tuple[int, str], list[str]] = {}
-            for msg in messages:
-                owner = task_owner_cache.get(msg["task_id"])
-                if owner is None:
-                    continue
-                item0 = msg.get("item") or {}
-                pending_hashes.setdefault((owner, msg.get("spider_name", "")), []).append(
-                    self._content_hash(item0)
-                )
-            for (owner, spider), hashes in pending_hashes.items():
-                existing_cache[(owner, spider)] = await result_repo.existing_hashes(
-                    owner, spider, hashes
-                )
-
-            for msg in messages:
-                task_id = msg["task_id"]
-                owner_id = task_owner_cache.get(task_id)
-                if owner_id is None:
-                    orphans.append(msg)
-                    counts[task_id] = max(0, counts.get(task_id, 0) - 1)
-                    continue
-                spider_name = msg.get("spider_name", "")
-                item = msg.get("item") or {}
-                item_type = msg.get("item_type", "BaseItem")
-                task_row = task_row_cache.get(task_id)
-                _ = task_row  # 保留行缓存：去重/归属仍以 owner_id 为准
-
-                # B1：数据质量评分（与 _ingest 一致，pop 避免进 extra）
-                quality_score = item.pop("_quality_score", None)
-
-                # B5：content_hash = md5(url + title + content)
-                url_val = str(item.get("url") or "")[:500]
-                content_hash = self._content_hash(item)
-
-                # 去重（B5 + R2-1）：批内重复或库内已存在 → 跳过，不计 result_count
-                key = (owner_id, spider_name, content_hash)
-                if key in seen_keys or content_hash in existing_cache.get((owner_id, spider_name), set()):
-                    logger.debug(f"重复内容已跳过: hash={content_hash}, url={url_val}")
-                    counts[task_id] = max(0, counts[task_id] - 1)
-                    continue
-                seen_keys.add(key)
-
-                # 未映射字段进 extra
-                mapped = {"url", "title", "content", "source"}
-                extra = {k: v for k, v in item.items() if k not in mapped}
-
-                instances.append(
-                    SpiderResult(
-                        task_id=task_id,
-                        spider_name=spider_name,
-                        tenant_id=owner_id,
-                        item_type=item_type,
-                        url=url_val or None,
-                        title=item.get("title"),
-                        content=item.get("content"),
-                        source=item.get("source"),
-                        extra=(
-                            json.dumps(extra, ensure_ascii=False, default=str)
-                            if extra
-                            else None
-                        ),
-                        quality_score=quality_score,
-                        content_hash=content_hash,
-                    )
-                )
-                mirror_msgs.append((task_id, msg))
-
-            # ── 3. 配额按租户旁路，禁止单租户超额冻结全平台批次（归属=入队企业）──
-            if instances:
-                from backend.services.quota_service import QuotaExceededException, QuotaService
-
-                quota_ok: set[int] = set()
-                quota_blocked: set[int] = set()
-                kept_instances: list[SpiderResult] = []
-                kept_mirrors: list[tuple[int, dict]] = []
-                held: dict[int, list[dict]] = {}
-                for inst, (tid, msg) in zip(instances, mirror_msgs):
-                    t_id = inst.tenant_id
-                    if isinstance(t_id, int) and t_id in quota_blocked:
-                        held.setdefault(t_id, []).append(msg)
-                        counts[tid] = max(0, counts.get(tid, 1) - 1)
-                        continue
-                    if isinstance(t_id, int) and t_id not in quota_ok:
-                        try:
-                            await QuotaService(session).check_result_storage(t_id)
-                            quota_ok.add(t_id)
-                        except QuotaExceededException:
-                            quota_blocked.add(t_id)
-                            held.setdefault(t_id, []).append(msg)
-                            counts[tid] = max(0, counts.get(tid, 1) - 1)
-                            logger.warning(
-                                f"结果存储配额超限，消息旁路 hold 队列: tenant={t_id}"
-                            )
-                            continue
-                    kept_instances.append(inst)
-                    kept_mirrors.append((tid, msg))
-                instances = kept_instances
-                mirror_msgs = kept_mirrors
-                if instances:
-                    session.add_all(instances)
-                for t_id, parked in held.items():
-                    await self._park_messages(item_hold_queue(t_id), parked)
-
-            # ── 4. 批量累加 result_count ──
-            await SpiderTaskRepository(session).batch_increment_result_counts(counts)
-
-            # ── 5. 单次 commit ──
-            await session.commit()
-
-        # ── 6. 多存储双写（4.2）：只镜像已提交的结果（审计 R2-1：原先先镜像后提交，
-        #    提交失败重放会重复镜像）；镜像失败不回滚已落库数据，只记日志
-        try:
-            await self._mirror_batch(mirror_msgs, task_store_cache)
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"多存储镜像失败（结果已落库）: n={len(mirror_msgs)} error={e}")
-
-        for orphan in orphans:
-            await self._reject_orphan_item(
-                orphan, orphan.get("task_id"), "回流找不到入队企业",
-            )
-
-        logger.debug(
-            f"批量落库完成: {len(messages)} 条消息, "
-            f"{len(instances)} 条入库, {len(counts)} 个任务"
-        )
-
-    async def _park_messages(self, queue: str, messages: list[dict]) -> None:
-        """把已出队消息写入旁路队列，避免配额/flush 失败时内存无界或丢批。"""
-        if not messages or self._redis is None:
-            return
-        payload = [json.dumps(m, ensure_ascii=False, default=str) for m in messages]
-        try:
-            await self._redis.rpush(queue, *payload)
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"旁路入队失败 queue={queue} n={len(payload)}: {e}")
-
-    async def _mirror_batch(
-        self,
-        mirror_msgs: list[tuple[int, dict]],
-        task_store_cache: dict[int, list[str]],
-    ) -> None:
-        """批量多存储双写：按 task_id 分组 rpush 到对应 TASK_RESULTS_KEY"""
-        ttl = int(settings.get("STORAGE.REDIS_RESULT_TTL", 604800))
-        # 按 task_id 聚合，减少 Redis 调用次数
-        grouped: dict[int, list[str]] = {}
-        for task_id, msg in mirror_msgs:
-            targets = task_store_cache.get(task_id, [])
-            if not targets:
-                continue
-            key = TASK_RESULTS_KEY.format(task_id=task_id)
-            grouped.setdefault(task_id, []).append(
-                json.dumps(msg, ensure_ascii=False, default=str)
-            )
-        for task_id, payloads in grouped.items():
-            try:
-                key = TASK_RESULTS_KEY.format(task_id=task_id)
-                await self._redis.rpush(key, *payloads)
-                await self._redis.expire(key, ttl)
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"批量结果缓存双写失败: task_id={task_id}, error={e}")
-
-    # ------------------------------------------------------------------
-    # 单条结果回流（保留供向后兼容 / 直接调用场景）
-    # ------------------------------------------------------------------
-    async def _ingest(self, msg: dict) -> None:
-        task_id = msg.get("task_id")
-        spider_name = msg.get("spider_name", "")
-        item = msg.get("item") or {}
-        if not task_id:
-            logger.warning(f"结果消息缺少 task_id，跳过: spider={spider_name}")
-            return
-
-        item_type = msg.get("item_type", "BaseItem")
-        # 数据质量评分（B1）：由 Scrapy 侧 QualityCheckPipeline 写入 item
-        quality_score = item.pop("_quality_score", None)
-
-        # B5：计算 content_hash（md5 of url+title+content），用于去重
-        url_val = str(item.get("url") or "")[:500]
-        content_hash = self._content_hash(item)
-
-        mapped = {"url", "title", "content", "source"}
-        extra = {k: v for k, v in item.items() if k not in mapped}
-        owner_id: Optional[int] = None
-        async with AsyncSession(self._engine()) as session:
-            # B5：增量模式去重——任务 params.incremental=true 时跳过重复内容
-            task_repo = SpiderTaskRepository(session)
-            task = await task_repo.get_by_id(task_id)
-            owner_id = self._task_owner_id(task)
-            if owner_id is None:
-                pass
-            else:
-                # 唯一键对全部任务生效：重复内容一律跳过（审计 R2-1，不止 incremental）
-                existing = await SpiderResultRepository(session).find_by_content_hash(
-                    content_hash,
-                    tenant_id=owner_id,
-                    spider_name=spider_name or None,
-                )
-                if existing:
-                    logger.debug(f"重复内容已跳过: hash={content_hash}, url={url_val}")
-                    return
-
-                repo = SpiderResultRepository(session)
-                await repo.create_for_task(
-                    task_id=task_id,
-                    spider_name=spider_name,
-                    tenant_id=owner_id,
-                    item_type=item_type,
-                    url=url_val or None,
-                    title=item.get("title"),
-                    content=item.get("content"),
-                    source=item.get("source"),
-                    extra=json.dumps(extra, ensure_ascii=False, default=str) if extra else None,
-                    quality_score=quality_score,
-                    content_hash=content_hash,
-                )
-                await session.commit()
-                # 数据源多存储（4.2）：store_to 命中 redis/csv 时追加任务级结果缓存列表，
-                # redis 目标供直读，csv 目标终态后由 Service 落盘（失败不影响落库主路径）
-                await self._mirror_result(session, task_id, msg)
-        if owner_id is None:
-            await self._reject_orphan_item(msg, task_id, "回流找不到入队企业")
-            return
-        logger.info(
-            f"结果已落库: task_id={task_id}, spider={spider_name}, item={item_type}"
-        )
-
-    async def _mirror_result(self, session, task_id: int, msg: dict) -> None:
-        """数据源多存储双写（4.2）：查任务 store_to，命中则追加任务级结果缓存列表"""
-        logger.debug(f"检查结果缓存双写目标: task_id={task_id}")
-        try:
-            task = await SpiderTaskRepository(session).get_by_id(task_id)
-            targets = extract_store_targets(task.params if task else None)
-            if not targets:
-                return
-            key = TASK_RESULTS_KEY.format(task_id=task_id)
-            await self._redis.rpush(key, json.dumps(msg, ensure_ascii=False, default=str))
-            ttl = int(settings.get("STORAGE.REDIS_RESULT_TTL", 604800))
-            await self._redis.expire(key, ttl)
-        except Exception as e:  # noqa: BLE001 双写失败仅告警，不影响落库主路径
-            logger.warning(f"结果缓存双写失败: task_id={task_id}, error={e}")
-
     @staticmethod
     def _engine():
         return get_manager().async_engines["DEFAULT"]
-
-    @staticmethod
-    def _content_hash(item: dict) -> str:
-        """B5 内容指纹：md5(url[:500] + title + content)，与唯一键 content_hash 同口径"""
-        url_val = str(item.get("url") or "")[:500]
-        title_val = item.get("title") or ""
-        content_val = item.get("content") or ""
-        return hashlib.md5(f"{url_val}{title_val}{content_val}".encode()).hexdigest()
