@@ -74,61 +74,74 @@ class LlmHealthPatrol:
         session_factory 可注入（测试经 db_session）；缺省独立短事务。
         无密钥供应商跳过外呼（避免批量 401 噪音），计入 skipped_nokey。
         """
-        from backend.services.llm_provider_service import LlmProviderService
-
         logger.info("LLM 健康巡检开始")
         summary = {"providers": 0, "models": 0, "skipped_nokey": 0}
 
         if session_factory is None:
-            from platform_core.db import get_manager
-            from sqlalchemy.ext.asyncio import AsyncSession
-
-            def session_factory():  # noqa: E306 与 _consume_loop 同范式
-                manager = get_manager()
-                return AsyncSession(manager.async_engines["DEFAULT"])
-
-        async def _run(session) -> dict:
-            providers = (await session.execute(
-                select(LlmProvider).where(LlmProvider.enabled == True)  # noqa: E712
-            )).scalars().all()
-
-            tested = 0
-            skipped = 0
-            provider_count = 0
-            for provider in providers:
-                if not provider.api_key_encrypted:
-                    skipped += 1
-                    logger.debug(f"巡检跳过（无密钥）| provider={provider.name}")
-                    continue
-                provider_count += 1
-                svc = LlmProviderService(session)
-                models = (await session.execute(
-                    select(LlmProviderModel.model_id).where(
-                        LlmProviderModel.provider_id == provider.id,
-                        LlmProviderModel.enabled == True,  # noqa: E712
-                    )
-                )).scalars().all()
-                for model_id in models:
-                    try:
-                        # ADR-0007 D3：巡检整轮一个事务（外层统一 commit）；
-                        # 中途提交会 expire 循环内 provider 行 → MissingGreenlet
-                        await svc.test_model(provider.id, model_id, commit=False)
-                        tested += 1
-                    except Exception as exc:  # noqa: BLE001 单模型失败不中断整轮
-                        logger.warning(f"巡检单模型失败 | provider={provider.name} model={model_id} err={exc}")
-            return {"providers": provider_count, "models": tested, "skipped_nokey": skipped}
+            session_factory = _default_session_factory
 
         session_ctx = session_factory()
         handled = False
         if hasattr(session_ctx, "__aenter__"):
             async with session_ctx as session:
-                summary = await _run(session)
+                summary = await LlmHealthPatrol._patrol_session(session)
                 await session.commit()
             handled = True
         if not handled:
             # 工厂直接返回会话对象（测试注入形态）
-            summary = await _run(session_ctx)
+            summary = await LlmHealthPatrol._patrol_session(session_ctx)
             await session_ctx.commit()
 
         logger.info(f"LLM 健康巡检完成: {summary}")
         return summary
+
+    @staticmethod
+    async def _patrol_session(session) -> dict:
+        """单会话巡检全部启用供应商（整轮一个事务，由 patrol_once 统一提交）"""
+        providers = (await session.execute(
+            select(LlmProvider).where(LlmProvider.enabled == True)  # noqa: E712
+        )).scalars().all()
+
+        tested = 0
+        skipped = 0
+        provider_count = 0
+        for provider in providers:
+            if not provider.api_key_encrypted:
+                skipped += 1
+                logger.debug(f"巡检跳过（无密钥）| provider={provider.name}")
+                continue
+            provider_count += 1
+            tested += await LlmHealthPatrol._patrol_provider(session, provider)
+        return {"providers": provider_count, "models": tested, "skipped_nokey": skipped}
+
+    @staticmethod
+    async def _patrol_provider(session, provider) -> int:
+        """单供应商：启用模型逐个 test_model(commit=False)，返回成功测试数"""
+        from backend.services.llm_provider_service import LlmProviderService
+
+        svc = LlmProviderService(session)
+        models = (await session.execute(
+            select(LlmProviderModel.model_id).where(
+                LlmProviderModel.provider_id == provider.id,
+                LlmProviderModel.enabled == True,  # noqa: E712
+            )
+        )).scalars().all()
+        tested = 0
+        for model_id in models:
+            try:
+                # ADR-0007 D3：巡检整轮一个事务（外层统一 commit）；
+                # 中途提交会 expire 循环内 provider 行 → MissingGreenlet
+                await svc.test_model(provider.id, model_id, commit=False)
+                tested += 1
+            except Exception as exc:  # noqa: BLE001 单模型失败不中断整轮
+                logger.warning(f"巡检单模型失败 | provider={provider.name} model={model_id} err={exc}")
+        return tested
+
+
+def _default_session_factory():
+    """patrol_once 缺省会话工厂：独立短事务（与 _consume_loop 同范式）"""
+    from platform_core.db import get_manager
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    manager = get_manager()
+    return AsyncSession(manager.async_engines["DEFAULT"])
