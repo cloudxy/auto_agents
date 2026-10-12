@@ -44,6 +44,7 @@ def _seed(db_session, status: str) -> tuple[int, int]:
 def fake_redis(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr("backend.services.spider_task_service.get_async_redis", lambda *a, **k: fake)
+    monkeypatch.setattr("backend.services.spider_task_control.get_async_redis", lambda *a, **k: fake)
     return fake
 
 

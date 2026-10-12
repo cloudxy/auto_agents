@@ -10,6 +10,36 @@ from platform_core.repository import BaseRepository
 from platform_core.timeutil import business_date
 
 
+def _recent_stats_stmt(spider_name: str, limit: int):
+    """recent_stats_by_spider 聚合语句：最近 N 条终态记录上的时长 / 完成数 / 运行数 / 结果数"""
+    # 子查询：取最近 N 条终态记录
+    sub = (
+        select(
+            SpiderTask.status,
+            SpiderTask.started_at,
+            SpiderTask.completed_at,
+            SpiderTask.result_count,
+        )
+        .where(
+            SpiderTask.spider_name == spider_name,
+            SpiderTask.status.in_(["completed", "failed"]),
+        )
+        .order_by(SpiderTask.created_at.desc())
+        .limit(limit)
+        .subquery()
+    )
+    return select(
+        func.avg(
+            func.timestampdiff(text("SECOND"), sub.c.started_at, sub.c.completed_at)
+        ).label("avg_duration"),
+        func.sum(
+            case((sub.c.status == "completed", 1), else_=0)
+        ).label("completed_count"),
+        func.count(sub.c.status).label("run_count"),
+        func.avg(func.coalesce(sub.c.result_count, 0)).label("avg_result_count"),
+    )
+
+
 class SpiderTaskRepository(BaseRepository[SpiderTask]):
     """SpiderTask Repository —— 在 BaseRepository 之上扩展过滤/聚合"""
 
@@ -133,33 +163,7 @@ class SpiderTaskRepository(BaseRepository[SpiderTask]):
         返回 {"avg_duration": float, "success_rate": float,
               "avg_result_count": float, "run_count": int}
         """
-        # 子查询：取最近 N 条终态记录
-        sub = (
-            select(
-                SpiderTask.status,
-                SpiderTask.started_at,
-                SpiderTask.completed_at,
-                SpiderTask.result_count,
-            )
-            .where(
-                SpiderTask.spider_name == spider_name,
-                SpiderTask.status.in_(["completed", "failed"]),
-            )
-            .order_by(SpiderTask.created_at.desc())
-            .limit(limit)
-            .subquery()
-        )
-        stmt = select(
-            func.avg(
-                func.timestampdiff(text("SECOND"), sub.c.started_at, sub.c.completed_at)
-            ).label("avg_duration"),
-            func.sum(
-                case((sub.c.status == "completed", 1), else_=0)
-            ).label("completed_count"),
-            func.count(sub.c.status).label("run_count"),
-            func.avg(func.coalesce(sub.c.result_count, 0)).label("avg_result_count"),
-        )
-        result = await self.session.execute(stmt)
+        result = await self.session.execute(_recent_stats_stmt(spider_name, limit))
         row = result.one()
         run_count = int(row.run_count or 0)
         if run_count == 0:
