@@ -42,15 +42,27 @@ def create_app_for_reload():
     return create_app()
 
 
-def main() -> None:
-    reexec_with_venv()
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Auto Agents Backend API")
     parser.add_argument("--env", choices=["local", "dev", "prod"], default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--reload", action="store_true")
     parser.add_argument("--no-reload", action="store_true")
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def _app_target(reload_mode: bool):
+    """(uvicorn app 参数, factory 模式)：reload 时交工厂路径由子进程重建，否则就地组装"""
+    if reload_mode:
+        return "scripts.runlib.backend:create_app_for_reload", True
+    from backend.app import create_app
+    return create_app(), False
+
+
+def main() -> None:
+    reexec_with_venv()
+    args = _parse_args()
     apply_env(args.env)
 
     from config import APP_ENV, settings
@@ -72,13 +84,7 @@ def main() -> None:
     init_storage()
     _bridge_uvicorn_logging()
 
-    if reload_mode:
-        app_target = "scripts.runlib.backend:create_app_for_reload"
-        factory_mode = True
-    else:
-        from backend.app import create_app
-        app_target = create_app()
-        factory_mode = False
+    app_target, factory_mode = _app_target(reload_mode)
 
     print(f"Backend  {host}:{port}  env={APP_ENV}  reload={reload_mode}")
     import uvicorn
