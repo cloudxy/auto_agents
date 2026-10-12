@@ -3,7 +3,8 @@
  */
 import React, { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Empty, message, Popconfirm, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Empty, Popconfirm, Space, Table, Tag, Typography } from 'antd'
+import { message } from '../feedback'
 
 import {
   approveSkillCandidate, listSkillCandidates, rejectSkillCandidate,

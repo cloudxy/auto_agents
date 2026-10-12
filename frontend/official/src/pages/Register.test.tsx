@@ -4,7 +4,7 @@
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { message } from 'antd'
+import { message } from '../feedback'
 
 jest.mock('../services/signup', () => ({
   tenantSignup: jest.fn(),
@@ -73,8 +73,9 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'onLine', { configurable: true, value: true })
 })
 
-// antd 6.6 起全局 message 提示带 role="alert"（@rc-component/notification 2.x）：上一例的
-// 「企业已创建」提示会留在 body 的全局容器里，被下一例的 findByRole('alert') 先找到
+// antd 6.6 起 message 提示带 role="alert"（@rc-component/notification 2.x）：上一例的
+// 「企业已创建」若残留，会被下一例的 findByRole('alert') 先找到。走 App 实例时提示随 cleanup
+// 卸载；回退静态路径时会留在 body 的全局容器里——两条路径都 destroy 兜底
 afterEach(async () => {
   message.destroy()
   await waitFor(() => expect(screen.queryByText('企业已创建')).toBeNull())

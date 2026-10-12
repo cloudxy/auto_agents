@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConfigProvider, Spin } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import SiteLayout from './components/layout/SiteLayout'
+// antd 反馈（message）走 App 实例，吃到 ConfigProvider 的中文文案与主题
+import { FeedbackProvider } from './feedback'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -28,23 +30,25 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ConfigProvider locale={zhCN}>
-        <BrowserRouter>
-          <Suspense fallback={PageLoading}>
-            <Routes>
-              <Route element={<SiteLayout />}>
-                <Route path="/" element={<Home />} />
-                <Route path="/skills" element={<Capabilities />} />
-                <Route path="/capabilities/:type/:slug" element={<CapabilityDetail />} />
-                <Route path="/capabilities" element={<Capabilities />} />
-                <Route path="/register" element={<Register />} />
-                <Route path="/pricing" element={<Pricing />} />
-                <Route path="/terms" element={<Legal />} />
-                <Route path="/privacy" element={<Legal />} />
-                <Route path="*" element={<NotFound />} />
-              </Route>
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
+        <FeedbackProvider>
+          <BrowserRouter>
+            <Suspense fallback={PageLoading}>
+              <Routes>
+                <Route element={<SiteLayout />}>
+                  <Route path="/" element={<Home />} />
+                  <Route path="/skills" element={<Capabilities />} />
+                  <Route path="/capabilities/:type/:slug" element={<CapabilityDetail />} />
+                  <Route path="/capabilities" element={<Capabilities />} />
+                  <Route path="/register" element={<Register />} />
+                  <Route path="/pricing" element={<Pricing />} />
+                  <Route path="/terms" element={<Legal />} />
+                  <Route path="/privacy" element={<Legal />} />
+                  <Route path="*" element={<NotFound />} />
+                </Route>
+              </Routes>
+            </Suspense>
+          </BrowserRouter>
+        </FeedbackProvider>
       </ConfigProvider>
     </QueryClientProvider>
   )

@@ -6,8 +6,9 @@
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Button, Drawer, InputNumber, message, Radio, Select, Space, Spin, Switch, Table, Tag, Typography,
+  Alert, Button, Drawer, InputNumber, Radio, Select, Space, Spin, Switch, Table, Tag, Typography,
 } from 'antd'
+import { message } from '../../feedback'
 import { CloudDownloadOutlined } from '@ant-design/icons'
 import {
   fetchModelsDiff, getLlmProviderModels, putLlmProviderModels, testLlmProviderModel,

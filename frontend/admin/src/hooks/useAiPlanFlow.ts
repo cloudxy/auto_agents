@@ -8,7 +8,8 @@
  * 轮询模式沿用全局约定：2.5s 间隔，仅 planning/testing（未通过）状态轮询。
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Form, message } from 'antd'
+import { Form } from 'antd'
+import { message } from '../feedback'
 import type { FormInstance } from 'antd'
 import {
   isPlanPolling, isLatestTestPassed,

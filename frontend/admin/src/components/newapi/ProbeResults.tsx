@@ -5,7 +5,8 @@
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Input, message, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { Input, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { message } from '../../feedback'
 import type { ColumnsType } from 'antd/es/table'
 import {
   fetchNewapiOverview, fetchNewapiProbeResults,

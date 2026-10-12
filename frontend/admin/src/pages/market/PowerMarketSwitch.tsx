@@ -3,7 +3,8 @@
  */
 import React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Skeleton, Space, Switch, Typography, message } from 'antd'
+import { Alert, Button, Skeleton, Space, Switch, Typography } from 'antd'
+import { message } from '../../feedback'
 
 import { getPowerMarket, putPowerMarket } from '../../services/capabilities'
 import { apiErrorMessage } from '../../utils/errorMessage'

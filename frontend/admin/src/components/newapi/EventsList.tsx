@@ -4,7 +4,8 @@
  * 既有列表/筛选/分页不动。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Input, message, Space, Table, Tag, Typography } from 'antd'
+import { Input, Space, Table, Tag, Typography } from 'antd'
+import { message } from '../../feedback'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchNewapiEvents, type ChannelEventItem } from '../../services/newapi'
 import { ACTION_TAG, DEFAULT_PAGE_SIZE, fmtQuota, fmtTime, parseChannelId } from './newapiShared'

@@ -14,9 +14,10 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Table, Button, Tag, Space, Switch, Empty, Typography, message,
+  Table, Button, Tag, Space, Switch, Empty, Typography,
   Modal, Form, Input, Select,
 } from 'antd'
+import { message } from '../../feedback'
 import { ReloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'

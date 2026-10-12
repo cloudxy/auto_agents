@@ -6,6 +6,8 @@ import { BRAND_TOKENS } from '@auto-agents/frontend-shared';
 import zhCN from 'antd/locale/zh_CN';
 import './index.css';
 import App from './App';
+// antd 反馈（message / modal）走 App 实例，吃到下方 ConfigProvider 的主题与中文文案
+import { FeedbackProvider } from './feedback';
 // 工单 78：react-query 全局客户端（独立模块：登出时清空缓存）
 import { queryClient } from './queryClient';
 
@@ -43,7 +45,9 @@ root.render(
         },
       }}
     >
-      <App />
+      <FeedbackProvider>
+        <App />
+      </FeedbackProvider>
     </ConfigProvider>
     </QueryClientProvider>
   </React.StrictMode>

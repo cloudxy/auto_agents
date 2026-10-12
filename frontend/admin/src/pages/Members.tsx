@@ -5,8 +5,9 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { Card,
   Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch,
-  Table, Tag, Typography, message,
+  Table, Tag, Typography,
 } from 'antd'
+import { message } from '../feedback'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 

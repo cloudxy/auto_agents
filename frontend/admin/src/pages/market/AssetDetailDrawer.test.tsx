@@ -9,8 +9,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import type { PublicCapabilityCard } from '../../services/capabilities'
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd')
+jest.mock('../../feedback', () => {
+  const actual = jest.requireActual('../../feedback')
   return {
     ...actual,
     message: { error: jest.fn(), success: jest.fn(), warning: jest.fn(), info: jest.fn() },
@@ -21,7 +21,7 @@ jest.mock('../../services/capabilities', () => ({
   fetchPublicCapability: jest.fn(),
 }))
 
-import { message } from 'antd'
+import { message } from '../../feedback'
 import AssetDetailDrawer, {
   DRAWER_DETAIL_FAIL, DRAWER_EMPTY_MD, DRAWER_EMPTY_MD_HINT, DRAWER_GATE_CLOSED,
   EXAMPLES_TITLE,

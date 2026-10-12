@@ -3,8 +3,9 @@
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Table, Button, Tag, Space, Popconfirm, Empty, Typography, message,
+  Table, Button, Tag, Space, Popconfirm, Empty, Typography,
 } from 'antd'
+import { message } from '../../feedback'
 import { ReloadOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import {

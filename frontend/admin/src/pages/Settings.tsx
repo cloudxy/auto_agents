@@ -8,7 +8,8 @@
  * 文案只承诺已实现的能力（审计 B5-2）：设置只落库，不同步官网、后台 Logo 与 SEO。
  */
 import React, { useState } from 'react'
-import { Tag, Form, Input, Button, Card, message, Divider, Spin, Typography } from 'antd'
+import { Tag, Form, Input, Button, Card, Divider, Spin, Typography } from 'antd'
+import { message } from '../feedback'
 import { useQuery } from '@tanstack/react-query'
 import { fetchSiteConfigs, fetchWebhookStatus, updateSiteConfig } from '../services/settings'
 import { fetchNotifyConfig, updateNotifyConfig } from '../services/users'

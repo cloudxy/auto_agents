@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Button, Drawer, Empty, Space, Table, Tag, Typography, message,
+  Alert, Button, Drawer, Empty, Space, Table, Tag, Typography,
 } from 'antd'
+import { message } from '../../feedback'
 import { ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 
 import {

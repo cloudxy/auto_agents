@@ -10,7 +10,8 @@
  * - 定时任务：Cron 调度计划管理（创建/启停/删除）
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, message } from 'antd'
+import { Alert, Button } from 'antd'
+import { message } from '../feedback'
 import { ClockCircleOutlined, AlertOutlined, BookOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import {
