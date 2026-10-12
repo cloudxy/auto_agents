@@ -2,10 +2,10 @@
 #
 # 五阶段质量关卡（对齐 /cicd Skill 与 /verify Skill 的验证约定）：
 # 1. python-lint-test:  ruff lint + pytest（backend/tests）
-#    security-audit:    pip-audit + npm audit --omit=dev（审计 P0-7）
+#    security-audit:    pip-audit + npm audit 全量依赖 high 以上即失败（审计 P0-7）
 # 2. arch-check:        tools/check/arch.sh（R1–R13 + B1–B4 + FR-14 + PL + SZ）
 # 3. db-migration-gate: tools/check/db_ir.sh + db_migrations.sh
-# 4. frontend-build:    npm workspaces：shared dist → admin + official
+# 4. frontend-build:    npm workspaces：shared dist → 门禁 + ESLint → admin + official（tsc + vite build、jest）
 # 5. docker-validate:   Dockerfile 构建 + compose 语法校验
 #
 # 触发：推送任意分支 + 向 main 发起 PR
@@ -163,7 +163,7 @@ jobs:
 
   security-audit:
     # 审计 R6-1 / P0-7：依赖漏洞门禁。Python 全量（工作区自身两包不在 PyPI，pip-audit 会跳过，
-    # 故不加 --strict）；前端只审运行时依赖（--omit=dev），构建链（CRA）残余风险随 Vite 迁移收口
+    # 故不加 --strict）；前端迁 Vite 后构建链也已清零，npm 改审全量依赖（含 devDependencies）
     name: Dependency Security Audit
     runs-on: ubuntu-latest
     steps:
@@ -184,12 +184,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: npm audit (runtime dependencies)
-        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit (all dependencies)
+        run: npm audit --audit-level=high
 
   db-migration-gate:
     name: DB Migration Gate (check-db-ir + check-db-migrations)
@@ -222,7 +222,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           # npm workspaces：lockfile 已收敛到根（D2，npm@10 生成）
           cache-dependency-path: package-lock.json
@@ -248,17 +248,27 @@ jobs:
       - name: Build shared
         run: npm run build -w @auto-agents/frontend-shared
 
-      - name: Frontend gate (F-5/F-6)
+      # F-8（ESLint）由下面逐应用的 lint 步骤承担，门禁里关掉避免跑两遍
+      - name: Frontend gate (F-2~F-7)
         run: bash tools/check/frontend.sh
+        env:
+          CHECK_FRONTEND_LINT: "0"
 
+      - name: Lint admin
+        run: npm run lint -w admin
+
+      - name: Lint official
+        run: npm run lint -w official
+
+      # build = tsc --noEmit（类型检查）+ vite build
       - name: Build admin
-        run: CI= npm run build -w admin
+        run: npm run build -w admin
 
       - name: Test admin
         run: npm test -w admin
 
       - name: Build official
-        run: CI= npm run build -w official
+        run: npm run build -w official
 
       - name: Test official
         run: npm test -w official
