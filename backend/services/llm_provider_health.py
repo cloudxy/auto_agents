@@ -141,6 +141,8 @@ class LlmProviderHealthMixin:
                 row.health_status = "healthy" if result.ok else "down"
                 if result.latency_ms is not None:
                     row.last_latency_ms = result.latency_ms
+                from datetime import datetime, timezone
+
                 row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 await self.session.commit()
         except Exception as e:  # noqa: BLE001 健康态同步失败不影响测试结果返回

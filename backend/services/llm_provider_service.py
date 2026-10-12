@@ -13,7 +13,7 @@
 T6 依赖方向（与 ai_planner 域的环已消除）：
 - 本模块 → llm_common（LlmRuntimeConfig / 兜底解析 / 三段解析实现）单向；
 - 本模块 → ai_planner.llm_client（client 缓存失效）/ ai_planner._cooldown
-  （连通成功清冷却）单向——反向（llm_client → 本模块）已不存在。
+  （连通成功清冷却，经 llm_provider_health）单向——反向（llm_client → 本模块）已不存在。
 """
 from typing import Optional
 

@@ -1,7 +1,8 @@
 """LLM 直连请求构造 / 响应 content 提取 / 三协议 usage 归一化
 
-拆分自 llm_client.py（规模治理，行为零变化）：重试循环之外、不依赖任何
-可 patch 依赖的纯构造/解析步骤。llm_client 原样 re-export 全部名字
+拆分自 llm_client.py（规模治理，行为零变化）：重试循环之外的构造/解析步骤，
+不触及以 llm_client 模块路径为 patch 目标的名字（get_month_used / record_usage /
+chat_completions 等仍留在 llm_client）。llm_client 原样 re-export 全部名字
 （含 _BUSINESS_MAX_TOKENS / _normalize_usage），旧 import 路径不变。
 
 本模块不 import 门面、不 import llm_gateway；settings 经 llm_common.seam() 晚绑定取值。
