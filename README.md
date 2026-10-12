@@ -104,7 +104,7 @@ auto_agents/
 │   ├── app/external_api/v1/      # 外部 API：API Key 数据查询 + Webhook 回调
 │   ├── services/                 # spider / ai_planner / llm / skills / capabilities / tenant ...
 │   ├── repositories/
-│   ├── tasks/consumer.py         # Redis 三循环消费者（分发/回流/重试）
+│   ├── tasks/consumer.py         # Redis 三循环消费者（分发/回流/重试）；consumer_{ingest,store,recovery}.py 为拆出的回流 / 落库 / 僵死回收
 │   ├── alembic/
 │   └── scripts/set_admin_account.py
 ├── scrapy/                       # Scrapy 分布式爬虫（workspace member）

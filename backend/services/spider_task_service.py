@@ -6,7 +6,7 @@
 - update_task：编辑待执行任务并搬迁队列消息（SpiderTaskEditMixin，见 spider_task_edit）
 - control_task：终止任务；暂停先下线（D6），恢复只清旧暂停键（SpiderTaskControlMixin，见 spider_task_control）
 - delete_task：删除任务及级联结果（running 拒绝）
-- list_tasks / get_task：任务查询
+- list_tasks：任务列表（单任务详情 get_task 在 spider_query_service）
 
 设计说明（期 4 Facade 退役后独立化）：
 - 自持 session / repo / result_repo / notifier；模块级直引 settings /

@@ -93,7 +93,7 @@ WATCHDOG_URL=http://127.0.0.1:9111/api/v1/health/deep bash deploy/watchdog.sh   
 | 根不存在 | 同步按零项完成；导入落盘时自动创建；失源清理**拒绝剪除**（返回 `skipped_reason=hub_root_empty`），根配错不会把整个目录判失源 | `backend/services/power_market/agents_hub.py` |
 | 入库路径 | `capability_assets.file_path / origin_ref / logo / background` 写 `agents-hub/<相对根>`，与根的物理位置无关（挪根不改库）；D2 前的 `.agents/...` 只读兼容：先找根下同位置，再回落仓库 `.agents/` | `hub_paths.py` |
 | 许可 | 插件取清单 `license`；其余资产先读自身 frontmatter `license`，插件内资产未声明时继承插件清单；缺失 = NULL（不再默认 MIT），不在默认允许集且无 `public_license_override` 的资产同步时落 `unlisted` | `agents_hub_scan.py`、`agents_hub._license_allows_listing` |
-| 容器 | `.dockerignore` 排除 `runtime/` 与 `.agents/`：容器里的根是空目录，导入内容随容器销毁——要保留就把 `AGENTS_ROOT` 指到挂载卷 | `.dockerignore` |
+| 容器 | `.dockerignore` 排除 `runtime/` 与 `.agents/`，镜像里的根是空目录；`docker-compose.yml` 已把命名卷 `agents_hub` 挂到 `/app/runtime/agents-hub`，其它编排同样要挂卷（或把 `AGENTS_ROOT` 指到已挂载路径），否则导入内容随容器重建丢失 | `.dockerignore`、`docker-compose.yml` |
 
 **一次性迁移**（D2 前导入进 `.agents/` 的产品内容 + 库内 `.agents/` 前缀；先停后端，先备份，见第 3 节）：
 

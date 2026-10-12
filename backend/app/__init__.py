@@ -166,7 +166,8 @@ _SHUTDOWN_ORDER = (
     "proxy_health", "scheduler", "consumer", "llm_usage_flush", "llm_health_patrol",
     "skill_scoring_worker", "retention",
 )
-assert set(_SHUTDOWN_ORDER) == set(_COMPONENT_LABELS), "关闭链须覆盖全部登记的后台组件"
+if sorted(_SHUTDOWN_ORDER) != sorted(_COMPONENT_LABELS):  # 不用 assert：python -O 会跳过
+    raise RuntimeError("关闭链 _SHUTDOWN_ORDER 须恰好覆盖全部登记的后台组件（不重不漏）")
 
 
 async def _start_background_components(run_bg: bool) -> dict:
