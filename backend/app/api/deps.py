@@ -71,6 +71,19 @@ def effective_role(user) -> str:
     return user.role or "viewer"
 
 
+def _decode_bearer(credentials: HTTPAuthorizationCredentials | None) -> tuple[dict, int]:
+    """Bearer 凭据 → (payload, user_id)；缺失/无效/缺用户信息均抛 401"""
+    if credentials is None or not credentials.credentials:
+        raise AuthenticationException(message="未登录或缺少 Token")
+    payload = decode_access_token(credentials.credentials)
+    if not payload:
+        raise AuthenticationException(message="Token 无效或已过期")
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise AuthenticationException(message="Token 缺少用户信息")
+    return payload, user_id
+
+
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -83,14 +96,7 @@ async def get_current_user(
     直接消费——平台态请求每请求一次身份查询，避免中间件/deps 双份。
     """
     logger.debug("校验请求身份")
-    if credentials is None or not credentials.credentials:
-        raise AuthenticationException(message="未登录或缺少 Token")
-    payload = decode_access_token(credentials.credentials)
-    if not payload:
-        raise AuthenticationException(message="Token 无效或已过期")
-    user_id = payload.get("user_id")
-    if not user_id:
-        raise AuthenticationException(message="Token 缺少用户信息")
+    payload, user_id = _decode_bearer(credentials)
     identity = getattr(request.state, "auth_identity", None)
     if identity is None:
         identity = await load_auth_identity(session, user_id)

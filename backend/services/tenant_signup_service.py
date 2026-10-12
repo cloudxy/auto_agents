@@ -39,6 +39,21 @@ def _signup_incomplete() -> None:
     )
 
 
+def _normalized_signup_input(company: str, admin_email: str, admin_password: str) -> tuple[str, str]:
+    """注册入参归一（企业名去空白、邮箱小写）并校验，返回 (company, admin_email)"""
+    company = (company or "").strip()
+    admin_email = (admin_email or "").strip().lower()
+    if not company:
+        raise ValidationException(message="请填写企业名", field="company")
+    if len(company) < 2:
+        raise ValidationException(message="企业名至少 2 个字符", field="company")
+    if "@" not in admin_email:
+        raise ValidationException(message="管理员邮箱不合法", field="admin_email")
+    if len(admin_password or "") < 8:
+        raise ValidationException(message="密码至少 8 位", field="admin_password")
+    return company, admin_email
+
+
 class TenantSignupService:
     """企业自助注册（session 注入；幂等：邮箱查重；从不 UPDATE 已有 Tenant）"""
 
@@ -59,21 +74,32 @@ class TenantSignupService:
         把别人的企业改成新企业）。本方法只 INSERT，不 UPDATE Tenant/User。
         """
         logger.info(f"企业注册 | company={company} email={admin_email}")
-        company = (company or "").strip()
-        admin_email = (admin_email or "").strip().lower()
-        if not company:
-            raise ValidationException(message="请填写企业名", field="company")
-        if len(company) < 2:
-            raise ValidationException(message="企业名至少 2 个字符", field="company")
-        if "@" not in admin_email:
-            raise ValidationException(message="管理员邮箱不合法", field="admin_email")
-        if len(admin_password or "") < 8:
-            raise ValidationException(message="密码至少 8 位", field="admin_password")
-
+        company, admin_email = _normalized_signup_input(company, admin_email, admin_password)
         if actor_tenant_id is not None:
             logger.warning(f"已有企业成员提交注册被拒 | actor_tenant_id={actor_tenant_id}")
             _signup_incomplete()
+        await self._assert_email_unused(admin_email)
 
+        tenant = await self._add_tenant(company)
+        owner = await self._add_owner(tenant, admin_email, admin_password)
+        await self._attach_free_plan(tenant)
+        snapshot = {
+            "tenant": {"id": tenant.id, "slug": tenant.slug, "name": tenant.name},
+            "owner": {"id": owner.id, "username": owner.username, "email": owner.email},
+        }  # 先固化再提交（ADR-0007 D2）
+        logger.success(f"企业注册完成 | tenant={tenant.slug} owner={owner.username}")
+        # 审计 B5-12：此处原有第二次、且没有异常保护的 attach_free_plan——第一次被吞掉的失败
+        # 会在这里原样抛出让注册失败，一切正常时又重复申请网关虚拟键。已删除（上面已挂接一次）。
+        self._add_sample_template(tenant, owner)
+        await self.session.commit()
+        await self._emit_signup(snapshot, anonymous_id)
+        from backend.services.email_verification_service import send_verification
+
+        await send_verification(int(snapshot["owner"]["id"]), str(snapshot["owner"]["email"]))
+        return snapshot
+
+    async def _assert_email_unused(self, admin_email: str) -> None:
+        """邮箱已占用 → 通用失败（GWT-04.4：不回写占用细节）"""
         existing = (await self.session.execute(
             select(User.id).where(User.email == admin_email)
         )).scalar_one_or_none()
@@ -81,11 +107,16 @@ class TenantSignupService:
             logger.warning("注册邮箱占用（不回写占用细节）")
             _signup_incomplete()
 
+    async def _add_tenant(self, company: str) -> Tenant:
+        """新建企业（slug 去重；免费档 = 默认配额）并 flush 取 id"""
         slug = await self._unique_slug(_slugify(company))
         tenant = Tenant(slug=slug, name=company, status="active", quota=None)  # 免费档=默认配额
         self.session.add(tenant)
         await self.session.flush()
+        return tenant
 
+    async def _add_owner(self, tenant: Tenant, admin_email: str, admin_password: str) -> User:
+        """新建企业负责人（owner）并 flush 取 id"""
         owner = User(
             username=admin_email.split("@")[0][:48] or f"owner-{tenant.id}",
             email=admin_email,
@@ -97,19 +128,19 @@ class TenantSignupService:
         )
         self.session.add(owner)
         await self.session.flush()
+        return owner
+
+    async def _attach_free_plan(self, tenant: Tenant) -> None:
+        """挂接免费档（价目未种子时仅告警，不阻断注册）"""
         try:
             from backend.services.billing_service import BillingService
 
             await BillingService(self.session).attach_free_plan(int(tenant.id))
         except Exception as exc:  # noqa: BLE001 价目未种子时不阻断注册
             logger.warning(f"挂接免费档失败（忽略）| tenant={tenant.id} err={exc}")
-        snapshot = {
-            "tenant": {"id": tenant.id, "slug": tenant.slug, "name": tenant.name},
-            "owner": {"id": owner.id, "username": owner.username, "email": owner.email},
-        }  # 先固化再提交（ADR-0007 D2）
-        logger.success(f"企业注册完成 | tenant={slug} owner={owner.username}")
-        # 审计 B5-12：此处原有第二次、且没有异常保护的 attach_free_plan——第一次被吞掉的失败
-        # 会在这里原样抛出让注册失败，一切正常时又重复申请网关虚拟键。已删除（上面已挂接一次）。
+
+    def _add_sample_template(self, tenant: Tenant, owner: User) -> None:
+        """示例采集模板（注册后即可创建第一个采集任务）"""
         from platform_core.models.task_template import TaskTemplate
 
         self.session.add(TaskTemplate(
@@ -120,12 +151,6 @@ class TenantSignupService:
             priority="normal",
             created_by=owner.username,
         ))
-        await self.session.commit()
-        await self._emit_signup(snapshot, anonymous_id)
-        from backend.services.email_verification_service import send_verification
-
-        await send_verification(int(snapshot["owner"]["id"]), str(snapshot["owner"]["email"]))
-        return snapshot
 
     async def _emit_signup(self, snapshot: dict, anonymous_id: str | None) -> None:
         logger.info(f"注册成功事件 | tenant={snapshot['tenant']['id']}")

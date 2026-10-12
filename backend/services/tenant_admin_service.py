@@ -56,6 +56,20 @@ async def _assert_name_available(session: AsyncSession, row: Tenant, new_name: s
         raise BusinessException(f"企业名称不可用: {new_name}")
 
 
+def _guard_protected_tenant(row: Tenant, body: dict, tenant_id: int) -> None:
+    """受保护租户：platform 不可改名/停用（三名保护 FR-94）；default 不可停用（P0-11a）"""
+    if row.slug == PLATFORM_TENANT_SLUG:
+        if "name" in body and str(body.get("name") or "").strip() != row.name:
+            raise BusinessException("平台租户不可修改名称。")
+        if ("status" in body and str(body["status"]) != row.status
+                and str(body["status"]) in ("active", "expired", "disabled")):
+            raise BusinessException("平台租户不可停用。")
+    elif (row.slug == DEFAULT_TENANT_SLUG and "status" in body
+          and str(body["status"]) in ("expired", "disabled") and str(body["status"]) != row.status):
+        logger.warning(f"拒绝停用 default 租户 | tenant={tenant_id}")
+        raise BusinessException("默认租户承载个人注册账号，不可停用。")
+
+
 class TenantAdminService:
     """租户运营编排（session 注入；调用方保证平台超管权限）"""
 
@@ -112,16 +126,7 @@ class TenantAdminService:
             select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
         if row is None:
             raise NotFoundException(resource=f"租户 {tenant_id}")
-        if row.slug == PLATFORM_TENANT_SLUG:
-            if "name" in body and str(body.get("name") or "").strip() != row.name:
-                raise BusinessException("平台租户不可修改名称。")
-            if ("status" in body and str(body["status"]) != row.status
-                    and str(body["status"]) in ("active", "expired", "disabled")):
-                raise BusinessException("平台租户不可停用。")
-        elif (row.slug == DEFAULT_TENANT_SLUG and "status" in body
-              and str(body["status"]) in ("expired", "disabled") and str(body["status"]) != row.status):
-            logger.warning(f"拒绝停用 default 租户 | tenant={tenant_id}")
-            raise BusinessException("默认租户承载个人注册账号，不可停用。")
+        _guard_protected_tenant(row, body, tenant_id)
         if row.slug != PLATFORM_TENANT_SLUG and "name" in body:  # 常规企业改名（T-27 / GWT-95.1；同名提交=no-op 放行）
             new_name = str(body.get("name") or "").strip()
             if new_name != row.name:
