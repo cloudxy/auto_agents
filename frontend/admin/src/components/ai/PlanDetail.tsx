@@ -142,6 +142,9 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({ flow, canOperate, onOpen
             style={{ marginBottom: 16 }}
             items={[{
               key: 'edit',
+              // 折叠时也挂载 Form：useAiPlanFlow 在服务端 flow 变化时 setFieldsValue，表单未挂载会
+              // 落在未连接的 useForm 实例上（rc-form 告警 "not connected to any Form element"）
+              forceRender: true,
               label: '微调方案（本地预览，可直跑验证）',
               children: (
                 <Form form={flowForm} layout="vertical">

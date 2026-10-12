@@ -1,5 +1,5 @@
 /**
- * T-02（FR-01 / GWT-01.6 治理面入口）：PluginTab「同步 .agents」四态——
+ * T-02（FR-01 / GWT-01.6 治理面入口）：PluginTab「同步能力库」四态——
  * 成功 toast 对账三元组 + 列表刷新；失败 toast 带非破坏承诺句；旧扫描入口不存在。
  */
 import React from 'react'
@@ -61,7 +61,7 @@ beforeEach(() => {
   ;(message.error as jest.Mock).mockClear()
 })
 
-test('GWT-01.6 同步 .agents 成功：toast 对账三元组 + 列表刷新，旧「扫描插件目录」入口不存在', async () => {
+test('GWT-01.6 同步能力库成功：toast 对账三元组 + 列表刷新，旧「扫描插件目录」入口不存在', async () => {
   sync.mockResolvedValue({ inserted: 2, updated: 1, unchanged: 3, failed: 0, total: 6 })
   render(<PluginTab onSubscribe={noop} onOpenCatalog={noop} />)
   expect((await screen.findAllByText('dev-team')).length).toBeGreaterThan(0)

@@ -7,9 +7,10 @@
 # 退出码：0 = 全部通过；非 0 = 违规总数（上限 255）
 # 与 /check-arch Skill 的检查命令保持一致，供 pre-commit 与 CI 复用。
 #
-# 规则分两组：
+# 规则分组：
 #   R1-R13  架构红线（配置/安全/反爬/模型/日志/异步 Redis/门面白名单/租户）
 #   B1-B4   核心代码边界（模块依赖方向 + 四柱域 import）
+#   FR-14   发布物密钥；PL 插件只能引用；SZ 规模约定（tools/check/size.py）
 
 set -uo pipefail
 # shellcheck source=common.sh
@@ -361,10 +362,16 @@ echo "--- 插件引用（PL）---"
 python3 -B tools/check/plugin_refs.py
 VIOLATIONS=$((VIOLATIONS + $?))
 
+# --- 规模约定（SZ：AGENTS.md「单文件 ≤ 500 行、单函数 ≤ 40 行」的机械化，口径见脚本头）---
+echo ""
+echo "--- 规模约定（SZ）---"
+python3 -B tools/check/size.py
+VIOLATIONS=$((VIOLATIONS + $?))
+
 # --- 汇总 ---
 echo ""
 if [ "$VIOLATIONS" -eq 0 ]; then
-    echo "✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥 + PL 插件引用，全部通过）"
+    echo "✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥 + PL 插件引用 + SZ 规模约定，全部通过）"
     exit 0
 else
     echo "共 $VIOLATIONS 处违规，请按 /check-arch Step 3 路由修复"

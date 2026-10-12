@@ -69,11 +69,11 @@ const TREE = ['up/alpha/SKILL.md', 'up/beta/SKILL.md', 'up/myplug/plugin.json']
 
 const previewPayload = (over: Record<string, unknown> = {}) => ({
   assets: [
-    { asset_type: 'skill', name: 'alpha', action: 'create', origin_path: '.agents/skills/alpha' },
-    { asset_type: 'skill', name: 'beta', action: 'update', origin_path: '.agents/skills/beta' },
+    { asset_type: 'skill', name: 'alpha', action: 'create', origin_path: 'agents-hub/skills/alpha' },
+    { asset_type: 'skill', name: 'beta', action: 'update', origin_path: 'agents-hub/skills/beta' },
     {
       asset_type: 'plugin', name: 'myplug', action: 'create',
-      origin_path: '.agents/plugins/myplug',
+      origin_path: 'agents-hub/plugins/myplug',
       bundled: [{ asset_type: 'skill', name: 'myplug__s1', action: 'create' }],
     },
   ],

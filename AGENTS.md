@@ -52,7 +52,7 @@
 - `platform_core/` 是源码包，经 `sys.path` 引入，不打包、不进 workspace
 - 前端用仓库根 `package.json` workspaces + 根 `package-lock.json`；先 `npm ci`，再 `npm run build:shared`
 
-## 架构红线 + 核心边界（R1–R13 + B1–B4，机械可检查）
+## 架构红线 + 核心边界（R1–R13 + B1–B4 + SZ，机械可检查）
 
 权威清单是 `tools/check/arch.sh`（以脚本输出为准，不要靠记忆数条数）。提交前 pre-commit + CI 会跑。核心约束：
 
@@ -82,7 +82,7 @@
 
 **日志** — `from platform_core.logger import get_logger`；`get_logger("api"|"spider"|"admin"|"official")` 必须对上 `LOGGERS`。进程 stdout 在 `runtime/run/`。落盘 `logs/{global,api,admin,official,spider,error}/`。`backend/services/*.py` 公开方法入口要有 `logger.`（R10）。密码/Token 不入日志。
 
-**编码** — Python：`uv run ruff check .`（全仓，E9 + 全部 pyflakes F）。模块/函数下划线，类大驼峰。单函数 ≤ 40 行，单文件 ≤ 500 行。API 用 `backend.app.responses.ok/created`（health 探活除外）。前端：ESLint（各应用 `eslint.config.mjs`，`npm run lint -w <app>`）；业务 `.tsx` ≤ 400 行（F-7）；admin 用 Zustand + React Query；共享进 `frontend/shared` 经 dist。爬虫：`DOWNLOAD_DELAY` + `UserAgentMiddleware`；出口 `StorePipeline`。
+**编码** — Python：`uv run ruff check .`（全仓，E9 + 全部 pyflakes F）。模块/函数下划线，类大驼峰。单函数 ≤ 40 行，单文件 ≤ 500 行（`tools/check/size.py`，arch.sh SZ 段机械检查；测试与迁移不计）。API 用 `backend.app.responses.ok/created`（health 探活除外）。前端：ESLint（各应用 `eslint.config.mjs`，`npm run lint -w <app>`）；业务 `.tsx` ≤ 400 行（F-7）；admin 用 Zustand + React Query；共享进 `frontend/shared` 经 dist。爬虫：`DOWNLOAD_DELAY` + `UserAgentMiddleware`；出口 `StorePipeline`。
 
 ## 关键文件索引
 
