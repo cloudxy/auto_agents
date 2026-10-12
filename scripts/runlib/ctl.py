@@ -16,7 +16,7 @@ def parse_argv(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Auto Agents 统一启停",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="默认 start 全部。setup 一键初始化。sync-agents 同步 .agents 到能力市场。已运行则跳过；restart/reload 强制重启。",
+        epilog="默认 start 全部。setup 一键初始化。sync-agents 同步产品 hub 根（SKILLS.AGENTS_ROOT）到能力市场。已运行则跳过；restart/reload 强制重启。",
     )
     parser.add_argument("--env", choices=["local", "dev", "prod"], default=None)
     parser.add_argument("--list", action="store_true", help="列出爬虫后退出")
@@ -62,7 +62,7 @@ def _prepare_frontend(targets: list[str]) -> None:
 
 
 def cmd_sync_agents(env: str | None) -> int:
-    """同步 .agents → 能力市场。DB 未就绪时打印失败但不阻断调用方。"""
+    """同步产品 hub 根（SKILLS.AGENTS_ROOT）→ 能力市场。DB 未就绪时打印失败但不阻断调用方。"""
     cmd = [sys.executable, str(ROOT / "scripts" / "sync_agents_hub.py")]
     if env:
         cmd += ["--env", env]

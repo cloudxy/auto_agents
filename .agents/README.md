@@ -1,6 +1,6 @@
 # `.agents/` — 本仓库开发协作中枢
 
-本目录是技能、规则、插件指针的**唯一仓库内真相源**，随仓库入库（插件链接除外，由 `scripts/agents_plugins.py sync` 生成）。Codex、Grok、Gemini 原生读取 `skills/`；Claude Code 经 `.claude/skills`、`.claude/rules` 两个目录链接来取。不要在 `.grok/`、`.claude/`、`.codex/`、`capability-library/plugins/` 再放一份内容。
+本目录是技能、规则、插件指针的**唯一仓库内真相源**，随仓库入库（插件链接除外，由 `scripts/agents_plugins.py sync` 生成）。它**不是**能力市场的内容根（D2「分离」）：产品运行时 hub 根是 `SKILLS.AGENTS_ROOT`（默认 `runtime/agents-hub/`，不入库），能力市场同步 / 目录导入 / 失源清理不扫描、不写入本目录，除非运维显式把根指过来。Codex、Grok、Gemini 原生读取 `skills/`；Claude Code 经 `.claude/skills`、`.claude/rules` 两个目录链接来取。不要在 `.grok/`、`.claude/`、`.codex/`、`capability-library/plugins/` 再放一份内容。
 
 **所有 AI 工具只能以引用方式使用插件**：符号链接，或宿主原地读取源目录；禁止任何复制。会复制插件的命令一律不用——`claude plugin install`（写缓存副本）、`grok plugin install`（留哈希副本）、`codex plugin add`（装副本且丢弃符号链接）、`cp -R`。副本会和 `~/.zcode/local-plugins` 的源头悄悄分叉。`bash tools/check/arch.sh` 的 PL 段检查仓库内适配器（CI 同跑）；`python3 tools/check/plugin_refs.py --local` 另查本机各工具缓存里有没有副本、用户级链接是否悬空。
 
@@ -9,7 +9,7 @@
 | `skills/` | 本仓库 SOP skill（有清单、死命令、完成条件） | 常驻约定（编码/日志/配置在根 `AGENTS.md`）；第三方插件 skill |
 | `rules/` | 所有工具共用的规则（`AGENTS.md`「规则」一节列出何时读）；`.claude/rules` 链到这里 | 能机械检查的红线正文（以 `tools/check/arch.sh` 为准） |
 | `plugins/` | 指向本机正文的符号链接，按根 `plugins-lock.json` 由 `sync` 生成（不入库，`README.md` 除外） | 插件正文、手建链接 |
-| `agents/` | 暂不启用：能力市场同步会把这里的文件当成产品资产上架，等 D2（中枢与产品内容源解耦）后再用 | 开发用子代理（现留 `.claude/agents/`） |
+| `agents/` | 所有工具共用的开发用子代理（D2 已完成，能力市场不再扫描本目录；现有子代理仍在 `.claude/agents/`，可迁入） | 产品资产（能力市场内容在产品 hub 根 `runtime/agents-hub/`） |
 
 宿主适配器（发现路径各工具自己认）：
 

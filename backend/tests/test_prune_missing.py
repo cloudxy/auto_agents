@@ -1,10 +1,10 @@
 """feat-agents-market T-03：失源行清理（FR-02 全部 GWT 02.1–02.6）。
 
 夹具口径（contract AD-3 + QA-7R 裁定）：
-- legacy 形态行 = file_path 非 `.agents/` 前缀 + 有 capability_experts 侧行 +
-  无磁盘源 → **负向断言：prune 后仍 live**（persona_md 正文存侧行，剪除即丢）。
-- hub 来源 agent 孤儿 = file_path `.agents/` 前缀 + 有侧行 + 无磁盘源 →
-  **正向断言：被 prune**（失磁盘源属正常失源）。
+- legacy 形态行 = file_path 非 hub 前缀（`agents-hub/` 或 D2 前的 `.agents/`）+ 有
+  capability_experts 侧行 + 无磁盘源 → **负向断言：prune 后仍 live**（persona_md 正文存侧行，剪除即丢）。
+- hub 来源 agent 孤儿 = file_path `.agents/` 前缀 + 有侧行 + 无磁盘源（hub 根与仓库
+  `.agents/` 都没有）→ **正向断言：被 prune**（失磁盘源属正常失源）。D2 新增口径见 test_d2_hub_root.py。
 - NULL file_path 行 → 视为可清（QA-14 manager 裁定，夹具补断言）。
 - dry_run=true → 同构 pruned 预览且 deleted_at 不变（QA-9）。
 """

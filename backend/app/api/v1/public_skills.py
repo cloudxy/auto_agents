@@ -29,6 +29,7 @@ from backend.services.power_market import (
     STORE_NOT_FOUND_HTML,
     PowerMarketService,
 )
+from backend.services.power_market.hub_paths import _is_hub_path, _resolve_hub_path
 from backend.services.power_market.types import SubscribeRequest
 from platform_core.db import get_async_db
 from platform_core.exceptions import RateLimitException
@@ -127,15 +128,15 @@ async def public_list_capabilities(
 
 _MEDIA_KIND = {"logo": "logo", "icon": "logo", "background": "background"}
 _MEDIA_EXT = {".png", ".webp", ".svg", ".jpg", ".jpeg", ".gif"}
-_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def _safe_media_file(stored: str | None) -> Path | None:
+    """只认 hub 来源路径（`agents-hub/` 或 D2 前的 `.agents/`，经 hub_paths 解析）。"""
     rel = (stored or "").replace("\\", "/").lstrip("/")
-    if not rel.startswith(".agents/") or ".." in rel.split("/"):
+    if not _is_hub_path(rel) or ".." in rel.split("/"):
         return None
-    path = _REPO_ROOT / rel
-    if path.suffix.lower() not in _MEDIA_EXT or not path.is_file():
+    path = _resolve_hub_path(rel)
+    if path is None or path.suffix.lower() not in _MEDIA_EXT or not path.is_file():
         return None
     return path
 
@@ -149,7 +150,7 @@ async def public_capability_media(
     market: PowerMarketService = Depends(_market),
     user: CurrentUser | None = Depends(optional_current_user),
 ):
-    """货架卡片图：只吐 .agents 下已入库的 icon/background。
+    """货架卡片图：只吐产品 hub 根下已入库的 icon/background。
 
     AD-5c：管理员 preview=true 豁免闸与 listed 分量；租户/匿名不变。
     """

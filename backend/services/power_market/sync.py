@@ -115,7 +115,9 @@ class SourceSync:
         manifest = _read_manifest(pkg)
         plugin_name = pkg.name
         await self._upsert_plugin(source, pkg, plugin_name, manifest)
-        skill_keep = await self._upsert_skills(source, pkg, plugin_name)
+        skill_keep = await self._upsert_skills(
+            source, pkg, plugin_name, str(manifest.get("license") or "").strip(),
+        )
         command_keep = await self._upsert_commands(source, pkg, plugin_name, manifest)
         return {"skill": skill_keep, "command": command_keep}
 
@@ -193,7 +195,7 @@ class SourceSync:
         await self.session.flush()
 
     async def _upsert_skills(
-        self, source: CapabilitySource, pkg: Path, plugin_name: str,
+        self, source: CapabilitySource, pkg: Path, plugin_name: str, license_id: str,
     ) -> set[str]:
         seen_locals: dict[str, str] = {}
         keep: set[str] = set()
@@ -205,12 +207,14 @@ class SourceSync:
                 name = _bundled_slug(plugin_name, local)
                 seen_locals[local] = item["content_hash"]
             keep.add(name)
-            await self._upsert_skill_row(source, plugin_name, name, item)
+            await self._upsert_skill_row(source, plugin_name, name, item, license_id)
         return keep
 
     async def _upsert_skill_row(
         self, source: CapabilitySource, plugin_name: str, name: str, item: dict,
+        license_id: str,
     ) -> None:
+        """包内技能行；新建行许可继承所属包清单 license（D2：缺失 = NULL 未声明，不再假定 MIT）。"""
         row = await self._load_named("skill", name)
         if row is not None and row.source_id not in (None, source.id):
             raise BusinessException(message=MSG_PLUGIN_COLLISION, code="PLUGIN_NAME_COLLISION")
@@ -220,7 +224,7 @@ class SourceSync:
                 asset_type="skill", name=name, title=title,
                 category="uncategorized", status="experimental",
                 source_type=SOURCE_INDEXED, listing_state="unlisted",
-                writable=0, tenant_id=None, sync_state="ok", license="MIT",
+                writable=0, tenant_id=None, sync_state="ok", license=license_id[:64] or None,
             )
             self.session.add(row)
             await self.session.flush()
@@ -255,6 +259,17 @@ class SourceSync:
         """
         counts = {"plugin": 0, "skill": 0, "command": 0}
         now = _utcnow()
+        await self._retract_plugins(source, package_names, now, counts)
+        await self._retract_children(source, package_names, keeps, now, counts)
+        if any(counts.values()):
+            logger.info(f"src_sync 收回缺失行: source={source.name} counts={counts}")
+        return counts
+
+    async def _retract_plugins(
+        self, source: CapabilitySource, package_names: set[str],
+        now: datetime, counts: dict[str, int],
+    ) -> None:
+        """插件行：包目录已不在源里 → 软删（sync_state=gone）。"""
         plugin_rows = (await self.session.execute(
             select(CapabilityAsset).where(
                 CapabilityAsset.asset_type == "plugin",
@@ -268,6 +283,12 @@ class SourceSync:
             row.deleted_at = now
             row.sync_state = "gone"
             counts["plugin"] += 1
+
+    async def _retract_children(
+        self, source: CapabilitySource, package_names: set[str],
+        keeps: dict[str, dict[str, set[str]]], now: datetime, counts: dict[str, int],
+    ) -> None:
+        """包内技能/命令：包同步成功但本轮未见 → 收回；包整体删除 → 随包收回。"""
         child_rows = (await self.session.execute(
             select(CapabilityAsset).where(
                 CapabilityAsset.asset_type.in_(("skill", "command")),
@@ -287,9 +308,6 @@ class SourceSync:
             row.deleted_at = now
             row.sync_state = "gone"
             counts[row.asset_type] += 1
-        if any(counts.values()):
-            logger.info(f"src_sync 收回缺失行: source={source.name} counts={counts}")
-        return counts
 
     async def _upsert_command_row(
         self, source: CapabilitySource, plugin_name: str, name: str, item: dict,

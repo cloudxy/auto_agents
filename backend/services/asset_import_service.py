@@ -41,6 +41,7 @@ from backend.services.asset_import_sandbox import (
     _read_capped,
     _sandbox_dest,
 )
+from backend.services.power_market.hub_paths import HUB_PATH_PREFIX
 from backend.services.product_event_service import emit_product_event
 from platform_core.exceptions import ValidationException
 from platform_core.fs_guard import LandingJournal, PathEscapeError, assert_contained
@@ -56,7 +57,7 @@ _NAME_MAX = 128
 _DESC_MAX = 1024
 _ZIP_MAGIC = b"PK\x03\x04"
 
-# 四类 → capability-library 落盘子目录（skill/plugin 与既有扫描器布局一致）
+# 四类 → hub 根落盘子目录（skill/plugin 与既有扫描器布局一致）
 _TYPE_DIRS = {"skill": "skills", "agent": "agents", "command": "commands", "plugin": "plugins"}
 _CATEGORY = {"skill": "uncategorized", "agent": "agent", "command": "command", "plugin": "plugin"}
 
@@ -83,10 +84,12 @@ def _library_root() -> Path:
 
 
 def _landing_root() -> Path:
-    """legacy 导入落盘根（AD-4c / OQ-2「执行统一」）：capability-library → .agents。
+    """legacy 导入落盘根（AD-4c / OQ-2「执行统一」）：capability-library → 产品 hub 根。
 
     单通道北极星：所有导入通道落到同一真相源，同步/对账/详情正文读取才有
     唯一口径。沙箱与限额逻辑完全不动——本改动只换落盘根（GWT-07.8 能力不回退）。
+    D2：hub 根 = SKILLS.AGENTS_ROOT（默认 runtime/agents-hub），不再写进开发中枢 `.agents/`；
+    根不存在时由落盘日志逐级创建。
     """
     from backend.services.power_market.agents_hub import agents_root
 
@@ -127,6 +130,24 @@ def _contained_write(dest: Path, data: bytes, journal: LandingJournal) -> None:
     except PathEscapeError as exc:
         raise OSError(f"越界写入拒绝: {dest}") from exc
     journal.write_bytes(dest, data)
+
+
+def _batch_payload(batch_id: int, origin: str, items: list["_ItemResult"], counts: dict) -> dict:
+    """批次回执（部分成功常态语义）：0 可导入时带中性说明 EMPTY_MESSAGE。"""
+    payload = {
+        "batch_id": batch_id, "origin": origin, "status": "completed",
+        "total": len(items), "succeeded": counts["succeeded"],
+        "failed": counts["failed"], "skipped": counts["skipped"],
+        "items": [
+            {"asset_type": i.asset_type, "name": i.name, "status": i.status,
+             **({"reason": i.reason} if i.reason else {}),
+             **({"asset_id": i.asset_id} if i.asset_id else {})}
+            for i in items
+        ],
+    }
+    if not items:
+        payload["message"] = EMPTY_MESSAGE
+    return payload
 
 
 class AssetImportService:
@@ -281,6 +302,24 @@ class AssetImportService:
         ]
         counts = {s: sum(1 for i in items if i.status == s)
                   for s in ("succeeded", "failed", "skipped")}
+        self._close_batch(batch, batch_id, items, counts)
+        try:
+            await self.session.commit()
+        except Exception:
+            journal.rollback_to(0)
+            logger.error(f"asset_import 提交失败，已撤回本次落盘 | batch={batch_id}")
+            raise
+        await self._emit_event(batch_id, origin, items, counts, actor_id=actor_id)
+        payload = _batch_payload(batch_id, origin, items, counts)
+        logger.info(
+            f"asset_import.done | batch={batch_id} total={len(items)} "
+            f"succeeded={counts['succeeded']} failed={counts['failed']} skipped={counts['skipped']}")
+        return payload
+
+    def _close_batch(
+        self, batch: AssetImportBatch, batch_id: int, items: list[_ItemResult], counts: dict,
+    ) -> None:
+        """批次收口：计数 + completed 终态 + 逐项明细行（随同一次 commit 落库）。"""
         batch.total_count = len(items)
         batch.succeeded_count = counts["succeeded"]
         batch.failed_count = counts["failed"]
@@ -292,30 +331,6 @@ class AssetImportService:
                 batch_id=batch_id, asset_type=i.asset_type, name=i.name,
                 status=i.status, reason=i.reason, asset_id=i.asset_id,
             ))
-        try:
-            await self.session.commit()
-        except Exception:
-            journal.rollback_to(0)
-            logger.error(f"asset_import 提交失败，已撤回本次落盘 | batch={batch_id}")
-            raise
-        await self._emit_event(batch_id, origin, items, counts, actor_id=actor_id)
-        payload = {
-            "batch_id": batch_id, "origin": origin, "status": "completed",
-            "total": len(items), "succeeded": counts["succeeded"],
-            "failed": counts["failed"], "skipped": counts["skipped"],
-            "items": [
-                {"asset_type": i.asset_type, "name": i.name, "status": i.status,
-                 **({"reason": i.reason} if i.reason else {}),
-                 **({"asset_id": i.asset_id} if i.asset_id else {})}
-                for i in items
-            ],
-        }
-        if not items:
-            payload["message"] = EMPTY_MESSAGE
-        logger.info(
-            f"asset_import.done | batch={batch_id} total={len(items)} "
-            f"succeeded={counts['succeeded']} failed={counts['failed']} skipped={counts['skipped']}")
-        return payload
 
     async def _dispatch(
         self, p: PendingAsset, entry_failure: "str | None", journal: LandingJournal,
@@ -356,7 +371,7 @@ class AssetImportService:
         return _ItemResult(p.asset_type, p.name, "succeeded", asset_id=asset_id)
 
     def _land(self, p: PendingAsset, journal: LandingJournal) -> None:
-        """落盘资产目录（限定 capability-library 对应子目录，NFR-04）"""
+        """落盘资产目录（限定 hub 根对应子目录，NFR-04）"""
         root = _landing_root()
         if p.single_file:
             _contained_write(root / _TYPE_DIRS[p.asset_type] / f"{p.name}.md",
@@ -374,12 +389,12 @@ class AssetImportService:
 
     @staticmethod
     def _file_path(p: PendingAsset) -> str:
-        """AD-4c：落盘根切 .agents 后，file_path 同步带 `.agents/` 前缀——
+        """AD-4c：落盘根切 hub 根后，file_path 同步带 hub 前缀（hub_paths.HUB_PATH_PREFIX）——
 
         详情正文分流（AD-5a）与 prune 判别式（AD-3/QA-7R）都以该前缀识别
         「hub 来源行」，前缀不带会让导入行被当成 legacy 行。
         """
-        rel = f".agents/{_TYPE_DIRS[p.asset_type]}/{p.name}"
+        rel = f"{HUB_PATH_PREFIX}{_TYPE_DIRS[p.asset_type]}/{p.name}"
         return f"{rel}.md" if p.single_file else rel
 
     async def _open_batch(self, origin: str, actor: str) -> AssetImportBatch:

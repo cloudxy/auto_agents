@@ -2,8 +2,13 @@
 SKILLS:
   # 能力资产库根目录（P6 泛化：下分 skills/plugins/experts/teams/）；相对仓库根或绝对路径
   LIBRARY_ROOT: "capability-library"
-  # .agents 真相源根（feat-agents-market：同步/目录导入落盘/失源清理的统一根）；相对仓库根或绝对路径
-  AGENTS_ROOT: ".agents"
+  # 能力市场产品运行时 hub 根（D2「分离」：同步 / 目录导入 / legacy 导入落盘 / 失源清理的统一根）。
+  # 键名沿用 AGENTS_ROOT（兼容既有 AUTO_AGENTS_SKILLS__AGENTS_ROOT 覆盖），但它**不是**开发协作
+  # 中枢 `.agents/`——默认落 gitignored 的 runtime/agents-hub；只有显式指过去才会扫描 `.agents/`。
+  # 相对路径按进程 cwd（仓库根）解析，也可写绝对路径；目录不存在 = 空（导入时自动创建）。
+  # 入库 file_path 写 `agents-hub/<相对本根>`；D2 前的 `.agents/...` 行只读兼容，
+  # 迁移见 scripts/db/migrate_agents_hub_root.py 与 docs/ops/runbook.md。
+  AGENTS_ROOT: "runtime/agents-hub"
   # lifespan 启动时是否增量扫描一次（本地单机语义）
   SCAN_ON_STARTUP: false
   SCORING:

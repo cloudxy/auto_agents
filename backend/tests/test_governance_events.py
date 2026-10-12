@@ -50,7 +50,7 @@ def _rate(monkeypatch):
 
 @pytest.fixture
 def agents_root(tmp_path):
-    """同步/导入都要落到临时根——绝不碰仓库真 .agents。"""
+    """同步/导入都要落到临时根——绝不碰仓库下的默认 hub 根（D2 后 runtime/agents-hub）。"""
     from config import settings
 
     root = tmp_path / "hub" / ".agents"
