@@ -118,34 +118,73 @@ async def fetch_export_rows(
         by_provider.setdefault(int(row.provider_id), []).append(row)
     if decrypt is None:
         decrypt = LlmSecretVault.decrypt_api_key
-    rows: list[ProviderExportRow] = []
-    for p in providers:
-        models = tuple(
-            ModelExportRow(
-                model_id=str(r.model_id),
-                tier=str(r.model_tier or "basic"),
-                priority=int(r.priority or 100),
-                is_default=bool(r.is_default),
-            )
-            for r in sorted(
-                by_provider.get(int(p.id), []),
-                key=lambda r: (not r.is_default, r.priority, r.id),
-            )
-        )
-        rows.append(ProviderExportRow(
-            provider_id=int(p.id),
-            name=str(p.name),
-            base_url=str(p.base_url or "").rstrip("/"),
-            api_key=str(decrypt(getattr(p, "api_key_encrypted", None)) or ""),
-            protocol=str(p.provider_type or "openai_compatible"),
-            fallback_model=str(p.model or ""),
-            models=models,
-        ))
+    rows = [_to_export_row(p, by_provider.get(int(p.id), []), decrypt) for p in providers]
     logger.info(
         f"导出器读库完成: providers={len(rows)} "
         f"models={sum(len(r.models) for r in rows)}"
     )
     return rows
+
+
+def _to_export_row(p: LlmProvider, model_rows: list[LlmProviderModel], decrypt) -> ProviderExportRow:
+    """供应商 ORM 行 + 其可用子表行 → 导出行（默认模型首位，其余 priority / id 升序）"""
+    models = tuple(
+        ModelExportRow(
+            model_id=str(r.model_id),
+            tier=str(r.model_tier or "basic"),
+            priority=int(r.priority or 100),
+            is_default=bool(r.is_default),
+        )
+        for r in sorted(
+            model_rows,
+            key=lambda r: (not r.is_default, r.priority, r.id),
+        )
+    )
+    return ProviderExportRow(
+        provider_id=int(p.id),
+        name=str(p.name),
+        base_url=str(p.base_url or "").rstrip("/"),
+        api_key=str(decrypt(getattr(p, "api_key_encrypted", None)) or ""),
+        protocol=str(p.provider_type or "openai_compatible"),
+        fallback_model=str(p.model or ""),
+        models=models,
+    )
+
+
+def _provider_entries(row: ProviderExportRow) -> list[tuple[str, dict]]:
+    """单供应商 → [(model_id, litellm_params)]；不可导出（跳过并警告）时返回空列表"""
+    prefix = _MODEL_PREFIX_BY_PROTOCOL.get(row.protocol)
+    if prefix is None:
+        logger.warning(
+            f"跳过供应商（协议暂不支持导出）: id={row.provider_id} "
+            f"name={row.name} protocol={row.protocol}"
+        )
+        return []
+    if not row.base_url or not row.api_key:
+        logger.warning(
+            f"跳过供应商（base_url/api_key 缺失）: id={row.provider_id} name={row.name}"
+        )
+        return []
+    if row.models:
+        return [
+            (m.model_id, {
+                "model": f"{prefix}{m.model_id}",
+                "api_base": row.base_url,
+                "api_key": row.api_key,
+            })
+            for m in row.models
+        ]
+    if row.fallback_model:
+        # 子表空：父表 model 默认模型快照兜底（与自研消费路径第一阶段一致）
+        return [(row.fallback_model, {
+            "model": f"{prefix}{row.fallback_model}",
+            "api_base": row.base_url,
+            "api_key": row.api_key,
+        })]
+    logger.warning(
+        f"跳过供应商（无可用模型）: id={row.provider_id} name={row.name}"
+    )
+    return []
 
 
 def build_litellm_config(rows: list[ProviderExportRow]) -> dict:
@@ -157,39 +196,8 @@ def build_litellm_config(rows: list[ProviderExportRow]) -> dict:
     logger.debug("构建 LiteLLM config dict")
     model_list: list[dict] = []
     for row in rows:
-        prefix = _MODEL_PREFIX_BY_PROTOCOL.get(row.protocol)
-        if prefix is None:
-            logger.warning(
-                f"跳过供应商（协议暂不支持导出）: id={row.provider_id} "
-                f"name={row.name} protocol={row.protocol}"
-            )
-            continue
-        if not row.base_url or not row.api_key:
-            logger.warning(
-                f"跳过供应商（base_url/api_key 缺失）: id={row.provider_id} name={row.name}"
-            )
-            continue
-        entries: list[tuple[str, dict]] = []
-        if row.models:
-            entries = [
-                (m.model_id, {
-                    "model": f"{prefix}{m.model_id}",
-                    "api_base": row.base_url,
-                    "api_key": row.api_key,
-                })
-                for m in row.models
-            ]
-        elif row.fallback_model:
-            # 子表空：父表 model 默认模型快照兜底（与自研消费路径第一阶段一致）
-            entries = [(row.fallback_model, {
-                "model": f"{prefix}{row.fallback_model}",
-                "api_base": row.base_url,
-                "api_key": row.api_key,
-            })]
-        else:
-            logger.warning(
-                f"跳过供应商（无可用模型）: id={row.provider_id} name={row.name}"
-            )
+        entries = _provider_entries(row)
+        if not entries:
             continue
         slug = _slug(row.name)
         for model_id, litellm_params in entries:

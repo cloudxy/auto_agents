@@ -113,6 +113,83 @@ def load_deployments_from_config(config: dict) -> list[LitellmDeployment]:
     return deployments
 
 
+def _index_deployments(
+    deployments: list[LitellmDeployment],
+) -> tuple[dict[str, tuple[str, ...]], dict[str, bool]]:
+    """按 model_id 聚合 LiteLLM 侧：去重保序的 api_base 集合 + 任一 deployment 冷却即冷却"""
+    bases_by_model: dict[str, tuple[str, ...]] = {}
+    cooled_by_model: dict[str, bool] = {}
+    for d in deployments:
+        bases_by_model.setdefault(d.model_id, ())
+        if d.api_base and d.api_base not in bases_by_model[d.model_id]:
+            bases_by_model[d.model_id] = (*bases_by_model[d.model_id], d.api_base)
+        cooled_by_model[d.model_id] = cooled_by_model.get(d.model_id, False) or d.cooled
+    return bases_by_model, cooled_by_model
+
+
+def _self_side_row(
+    model_id: str,
+    choice: SelfSideChoice,
+    self_base: str,
+    bases_by_model: dict[str, tuple[str, ...]],
+    cooled_by_model: dict[str, bool],
+) -> ShadowDiffRow:
+    """自研链上一个模型的对照行：LiteLLM 无此模型 → missing_in_litellm，否则按 base_url 覆盖判定"""
+    litellm_bases = bases_by_model.get(model_id)
+    if litellm_bases is None:
+        return ShadowDiffRow(
+            model_id=model_id, status=STATUS_MISSING_IN_LITELLM,
+            self_base_url=self_base or None, litellm_api_bases=(),
+            self_cooled=model_id in choice.cooled_models, litellm_cooled=False,
+            cooldown_divergent=model_id in choice.cooled_models,
+            known_layering=model_id in choice.cooled_models,
+        )
+    self_cooled = model_id in choice.cooled_models
+    litellm_cooled = cooled_by_model.get(model_id, False)
+    covered = bool(self_base) and self_base in litellm_bases
+    return ShadowDiffRow(
+        model_id=model_id,
+        status=STATUS_MATCH if covered else STATUS_MISMATCH,
+        self_base_url=self_base or None,
+        litellm_api_bases=litellm_bases,
+        self_cooled=self_cooled,
+        litellm_cooled=litellm_cooled,
+        cooldown_divergent=self_cooled != litellm_cooled,
+        known_layering=self_cooled and not litellm_cooled,
+    )
+
+
+def _missing_in_self_rows(
+    bases_by_model: dict[str, tuple[str, ...]],
+    cooled_by_model: dict[str, bool],
+    seen: set[str],
+) -> list[ShadowDiffRow]:
+    """LiteLLM 侧有、自研链未覆盖的模型 → missing_in_self 行（保持 deployment 首现顺序）"""
+    rows: list[ShadowDiffRow] = []
+    for model_id, litellm_bases in bases_by_model.items():
+        if model_id not in seen:
+            rows.append(ShadowDiffRow(
+                model_id=model_id, status=STATUS_MISSING_IN_SELF,
+                self_base_url=None, litellm_api_bases=litellm_bases,
+                self_cooled=False,
+                litellm_cooled=cooled_by_model.get(model_id, False),
+                cooldown_divergent=cooled_by_model.get(model_id, False),
+                known_layering=False,
+            ))
+    return rows
+
+
+def _summarize(rows: list[ShadowDiffRow]) -> ShadowSummary:
+    """对照行 → 四态计数 + 冷却分歧计数"""
+    return ShadowSummary(
+        match=sum(1 for r in rows if r.status == STATUS_MATCH),
+        mismatch=sum(1 for r in rows if r.status == STATUS_MISMATCH),
+        missing_in_litellm=sum(1 for r in rows if r.status == STATUS_MISSING_IN_LITELLM),
+        missing_in_self=sum(1 for r in rows if r.status == STATUS_MISSING_IN_SELF),
+        cooldown_divergent=sum(1 for r in rows if r.cooldown_divergent),
+    )
+
+
 def compare_routing(
     choice: SelfSideChoice,
     deployments: list[LitellmDeployment],
@@ -130,14 +207,7 @@ def compare_routing(
         f"chain={len(choice.chain)} cooled={sorted(choice.cooled_models)} "
         f"litellm_deployments={len(deployments)}"
     )
-    bases_by_model: dict[str, tuple[str, ...]] = {}
-    cooled_by_model: dict[str, bool] = {}
-    for d in deployments:
-        bases_by_model.setdefault(d.model_id, ())
-        if d.api_base and d.api_base not in bases_by_model[d.model_id]:
-            bases_by_model[d.model_id] = (*bases_by_model[d.model_id], d.api_base)
-        cooled_by_model[d.model_id] = cooled_by_model.get(d.model_id, False) or d.cooled
-
+    bases_by_model, cooled_by_model = _index_deployments(deployments)
     self_models = [m for m, _tier in choice.chain] or (
         [choice.primary_model] if choice.primary_model else []
     )
@@ -148,46 +218,9 @@ def compare_routing(
         if model_id in seen:
             continue
         seen.add(model_id)
-        litellm_bases = bases_by_model.get(model_id)
-        if litellm_bases is None:
-            rows.append(ShadowDiffRow(
-                model_id=model_id, status=STATUS_MISSING_IN_LITELLM,
-                self_base_url=self_base or None, litellm_api_bases=(),
-                self_cooled=model_id in choice.cooled_models, litellm_cooled=False,
-                cooldown_divergent=model_id in choice.cooled_models,
-                known_layering=model_id in choice.cooled_models,
-            ))
-            continue
-        self_cooled = model_id in choice.cooled_models
-        litellm_cooled = cooled_by_model.get(model_id, False)
-        covered = bool(self_base) and self_base in litellm_bases
-        rows.append(ShadowDiffRow(
-            model_id=model_id,
-            status=STATUS_MATCH if covered else STATUS_MISMATCH,
-            self_base_url=self_base or None,
-            litellm_api_bases=litellm_bases,
-            self_cooled=self_cooled,
-            litellm_cooled=litellm_cooled,
-            cooldown_divergent=self_cooled != litellm_cooled,
-            known_layering=self_cooled and not litellm_cooled,
-        ))
-    for model_id, litellm_bases in bases_by_model.items():
-        if model_id not in seen:
-            rows.append(ShadowDiffRow(
-                model_id=model_id, status=STATUS_MISSING_IN_SELF,
-                self_base_url=None, litellm_api_bases=litellm_bases,
-                self_cooled=False,
-                litellm_cooled=cooled_by_model.get(model_id, False),
-                cooldown_divergent=cooled_by_model.get(model_id, False),
-                known_layering=False,
-            ))
-    summary = ShadowSummary(
-        match=sum(1 for r in rows if r.status == STATUS_MATCH),
-        mismatch=sum(1 for r in rows if r.status == STATUS_MISMATCH),
-        missing_in_litellm=sum(1 for r in rows if r.status == STATUS_MISSING_IN_LITELLM),
-        missing_in_self=sum(1 for r in rows if r.status == STATUS_MISSING_IN_SELF),
-        cooldown_divergent=sum(1 for r in rows if r.cooldown_divergent),
-    )
+        rows.append(_self_side_row(model_id, choice, self_base, bases_by_model, cooled_by_model))
+    rows.extend(_missing_in_self_rows(bases_by_model, cooled_by_model, seen))
+    summary = _summarize(rows)
     consistent = (
         summary.mismatch == 0 and summary.missing_in_litellm == 0
         and summary.missing_in_self == 0
@@ -207,17 +240,11 @@ async def capture_self_side_choice(
 
     缺省链路：llm_common.resolve_runtime_config（激活供应商三段解析）+
     ai_planner._candidate_chain（enabled/health 过滤 + priority 排序）+
-    ai_planner._cooldown.is_cooled_down。三依赖均可注入（测试 stub 零 DB/Redis）；
-    ai_planner 延迟 import——本模块加载不拉动业务编排域（子包边界，见 __init__）。
+    ai_planner._cooldown.is_cooled_down。三依赖均可注入（测试 stub 零 DB/Redis），缺省延迟 import。
     兜底路径（provider_id=None，yml/env）返回 source="config" 的空链快照。
     """
     logger.debug("采集自研侧 LLM 路由快照")
-    if resolve is None:
-        from backend.services.llm_common import resolve_runtime_config as resolve
-    if chain is None:
-        from backend.services.ai_planner.llm_client import _candidate_chain as chain
-    if cooled is None:
-        from backend.services.ai_planner._cooldown import is_cooled_down as cooled
+    resolve, chain, cooled = _default_capture_deps(resolve, chain, cooled)
 
     logger.info("影子采集自研侧决策: resolve_runtime_config + _candidate_chain + cooldown")
     cfg = await resolve(session)
@@ -228,11 +255,7 @@ async def capture_self_side_choice(
             chain=(), cooled_models=frozenset(), source="config",
         )
     chain_pairs = tuple((m, t) for m, t in await chain(cfg.provider_id, session))
-    cooled_hits = []
-    for model_id, _tier in chain_pairs:
-        if await cooled(cfg.provider_id, model_id):
-            cooled_hits.append(model_id)
-    cooled_models = frozenset(cooled_hits)
+    cooled_models = await _cooled_models(cooled, cfg.provider_id, chain_pairs)
     logger.info(
         f"影子采集完成: provider_id={cfg.provider_id} chain={len(chain_pairs)} "
         f"cooled={sorted(cooled_models)}"
@@ -246,3 +269,24 @@ async def capture_self_side_choice(
         cooled_models=cooled_models,
         source=cfg.source,
     )
+
+
+def _default_capture_deps(resolve, chain, cooled):
+    """未注入的采集依赖取既有实现（ai_planner 延迟 import——本模块加载不拉动业务编排域，
+    子包边界见 __init__）"""
+    if resolve is None:
+        from backend.services.llm_common import resolve_runtime_config as resolve
+    if chain is None:
+        from backend.services.ai_planner.llm_client import _candidate_chain as chain
+    if cooled is None:
+        from backend.services.ai_planner._cooldown import is_cooled_down as cooled
+    return resolve, chain, cooled
+
+
+async def _cooled_models(cooled, provider_id: int, chain_pairs) -> frozenset[str]:
+    """按链序逐个查自研 cooldown，返回命中集合"""
+    cooled_hits = []
+    for model_id, _tier in chain_pairs:
+        if await cooled(provider_id, model_id):
+            cooled_hits.append(model_id)
+    return frozenset(cooled_hits)

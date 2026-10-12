@@ -128,6 +128,38 @@ def _score_probe_batch(
         return "offline", {"total_calls": len(calls), "ok_calls": len(ok_calls)}
     scores: dict = {}
     family = _model_family(requested_model)
+    zh_q, zh_ident, other, en_other = _score_identity(scores, questions, results, family)
+    cutoff_q = _first_by_category(questions, "knowledge_cutoff")
+    cutoff_content = _answer_content(results, cutoff_q)
+    scores["knowledge_cutoff"] = 1.0 if _is_substantive(cutoff_content) else 0.0
+    _score_math(scores, questions, results)
+    inst_q = _first_by_category(questions, "instruction_following")
+    inst_content = _answer_content(results, inst_q)
+    expected_lines = (inst_q or {}).get("expected_lines") or []
+    lines = [ln.strip() for ln in inst_content.strip().splitlines() if ln.strip()]
+    scores["instruction_following"] = 1.0 if expected_lines and lines == expected_lines else 0.0
+    _fill_latency_price(scores, requested_model, zh_ident, family, ref_results, zh_q)
+    _score_repeat_stability(scores, results, cutoff_q, cutoff_content, inst_q, inst_content)
+    ref_sim = _ref_similarity(results, questions, ref_results, scores)
+    identity_contradiction = family is not None and (other or en_other)
+    if (
+        identity_contradiction
+        or scores.get("verbatim_repeat") == 0.0
+        or (ref_sim is not None and ref_sim < _REF_SIMILARITY_SPOOF_THRESHOLD)
+    ):
+        return "spoofed", scores
+    return "original", scores
+
+
+def _answer_content(results: dict, question: dict | None) -> str:
+    """某题的响应文本（题不存在 / 无响应 / 无 content 均为空串）"""
+    return ((results.get(question["id"]) or {}).get("content") or "") if question else ""
+
+
+def _score_identity(
+    scores: dict, questions: list[dict], results: dict, family: str | None,
+) -> tuple[dict | None, dict, bool, bool]:
+    """identity / zh_en_consistency 两维；返回 (中文身份题, 其响应, 中文提及他家, 英文提及他家)"""
     zh_q = _first_by_category(questions, "identity", lang="zh") or _first_by_category(
         questions, "identity",
     )
@@ -138,20 +170,23 @@ def _score_probe_batch(
     scores["identity"] = 1.0 if own else 0.0
     en_own, en_other = _identity_mentions(en_ident.get("content"), family)
     scores["zh_en_consistency"] = 1.0 if (own and en_own) else (0.5 if (own or en_own) else 0.0)
-    cutoff_q = _first_by_category(questions, "knowledge_cutoff")
-    cutoff_content = ((results.get(cutoff_q["id"]) or {}).get("content") or "") if cutoff_q else ""
-    scores["knowledge_cutoff"] = 1.0 if _is_substantive(cutoff_content) else 0.0
+    return zh_q, zh_ident, other, en_other
+
+
+def _score_math(scores: dict, questions: list[dict], results: dict) -> None:
+    """math_reasoning：期望答案出现在响应的整数序列中（千分位逗号先剔除）"""
     math_q = _first_by_category(questions, "math_reasoning")
-    math_content = ((results.get(math_q["id"]) or {}).get("content") or "") if math_q else ""
+    math_content = _answer_content(results, math_q)
     expected = (math_q or {}).get("expected")
     digits = re.findall(r"-?\d+", str(math_content).replace(",", ""))
     scores["math_reasoning"] = 1.0 if expected is not None and str(expected) in digits else 0.0
-    inst_q = _first_by_category(questions, "instruction_following")
-    inst_content = ((results.get(inst_q["id"]) or {}).get("content") or "") if inst_q else ""
-    expected_lines = (inst_q or {}).get("expected_lines") or []
-    lines = [ln.strip() for ln in inst_content.strip().splitlines() if ln.strip()]
-    scores["instruction_following"] = 1.0 if expected_lines and lines == expected_lines else 0.0
-    _fill_latency_price(scores, requested_model, zh_ident, family, ref_results, zh_q)
+
+
+def _score_repeat_stability(
+    scores: dict, results: dict, cutoff_q: dict | None, cutoff_content: str,
+    inst_q: dict | None, inst_content: str,
+) -> None:
+    """verbatim_repeat（重问逐字相同）+ format_stability（三次指令答案两两相似度 ≥ 0.6）"""
     if cutoff_q:
         repeat = results.get(f"{cutoff_q['id']}:repeat") or {}
         verbatim = bool(cutoff_content) and cutoff_content == (repeat.get("content") or "")
@@ -161,15 +196,6 @@ def _score_probe_batch(
         r2 = (results.get(f"{inst_q['id']}:repeat2") or {}).get("content") or ""
         sims = [_text_sim(inst_content, r1), _text_sim(inst_content, r2), _text_sim(r1, r2)]
         scores["format_stability"] = 1.0 if all(s >= 0.6 for s in sims) else 0.5
-    ref_sim = _ref_similarity(results, questions, ref_results, scores)
-    identity_contradiction = family is not None and (other or en_other)
-    if (
-        identity_contradiction
-        or scores.get("verbatim_repeat") == 0.0
-        or (ref_sim is not None and ref_sim < _REF_SIMILARITY_SPOOF_THRESHOLD)
-    ):
-        return "spoofed", scores
-    return "original", scores
 
 
 def _fill_latency_price(
