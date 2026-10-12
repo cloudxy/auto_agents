@@ -107,10 +107,12 @@ class LlmProviderService(LlmProviderHealthMixin):
 
     @staticmethod
     def encrypt_api_key(plain: Optional[str]) -> str:
+        logger.debug("加密 LLM 供应商密钥")
         return LlmSecretVault.encrypt_api_key(plain)
 
     @staticmethod
     def decrypt_api_key(encrypted: Optional[str]) -> str:
+        logger.debug("解密 LLM 供应商密钥")
         return LlmSecretVault.decrypt_api_key(encrypted)
 
     # ------------------------------------------------------------------
@@ -129,11 +131,13 @@ class LlmProviderService(LlmProviderHealthMixin):
     # ------------------------------------------------------------------
     async def list_providers(self) -> list[LlmProviderResponse]:
         """全量列表（api_key 全部掩码；量级小，无分页）"""
+        logger.debug("查询 LLM 供应商列表")
         items = await self.repo.list_providers()
         return [await self._to_response(i) for i in items]
 
     async def get_provider(self, provider_id: int) -> LlmProviderResponse:
         """单条快照（api_key 掩码）"""
+        logger.debug(f"查询 LLM 供应商 | id={provider_id}")
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
@@ -141,6 +145,7 @@ class LlmProviderService(LlmProviderHealthMixin):
 
     async def get_active_provider(self) -> LlmProviderResponse:
         """当前激活供应商（无激活行 404，前端可提示走 yml/env 兜底）"""
+        logger.debug("查询激活的 LLM 供应商")
         item = await self.repo.get_active()
         if item is None:
             raise NotFoundException("激活的 LLM 供应商")
@@ -148,6 +153,7 @@ class LlmProviderService(LlmProviderHealthMixin):
 
     async def create_provider(self, payload: LlmProviderCreate) -> LlmProviderResponse:
         """创建供应商（名称唯一；api_key 可选，配置了则必须可加密落库）"""
+        logger.info(f"创建 LLM 供应商 | name={payload.name} type={payload.provider_type}")
         existing = await self.repo.get_by_name(payload.name)
         if existing is not None:
             raise BusinessException(f"LLM 供应商 '{payload.name}' 已存在")
@@ -206,6 +212,7 @@ class LlmProviderService(LlmProviderHealthMixin):
         actor_id: int | None = None, actor_name: str = "",
     ) -> LlmProviderResponse:
         """更新供应商（PATCH 语义；api_key：未提交/空串均不修改，非空重新加密落库）"""
+        logger.info(f"更新 LLM 供应商 | id={provider_id} actor={actor_id}")
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
@@ -243,6 +250,7 @@ class LlmProviderService(LlmProviderHealthMixin):
         actor_id: int | None = None, actor_name: str = "",
     ) -> dict:
         """删除供应商（激活位随行删除；无激活行时 resolve_runtime_config 自动走兜底）"""
+        logger.info(f"删除 LLM 供应商 | id={provider_id} actor={actor_id}")
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
@@ -265,6 +273,7 @@ class LlmProviderService(LlmProviderHealthMixin):
         actor_id: int | None = None, actor_name: str = "",
     ) -> LlmProviderResponse:
         """单激活热切换（activate_exclusive 单语句互斥；旧激活行的共享连接全清失效）"""
+        logger.info(f"激活 LLM 供应商 | id={provider_id} actor={actor_id}")
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
@@ -284,6 +293,7 @@ class LlmProviderService(LlmProviderHealthMixin):
         actor_id: int | None = None, actor_name: str = "",
     ) -> LlmProviderResponse:
         """取消激活（全部下线：运行时解析回退 yml/env 兜底；行保留可再激活）"""
+        logger.info(f"取消激活 LLM 供应商 | id={provider_id} actor={actor_id}")
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
@@ -306,6 +316,7 @@ class LlmProviderService(LlmProviderHealthMixin):
 
     async def get_models(self, provider_id: int) -> list[dict]:
         """列供应商全部模型（含健康态）"""
+        logger.debug(f"查询供应商模型列表 | provider={provider_id}")
         rows = (
             await self.session.execute(
                 select(LlmProviderModel)
@@ -378,10 +389,12 @@ class LlmProviderService(LlmProviderHealthMixin):
     # 探测 → llm_probe_engine（B2）；同名薄委托兼容存量调用面
     @staticmethod
     async def probe_models(provider_type: str, base_url: str, api_key: str) -> dict:
+        logger.debug(f"委托模型列表探测 | type={provider_type}")
         return await LlmProbeEngine.probe_models(provider_type, base_url, api_key)
 
     @staticmethod
     async def probe_test(provider_type: str, base_url: str, api_key: str, model: str) -> dict:
+        logger.debug(f"委托模型连通探测 | type={provider_type} model={model}")
         return await LlmProbeEngine.probe_test(provider_type, base_url, api_key, model)
 
     # ------------------------------------------------------------------
@@ -394,6 +407,7 @@ class LlmProviderService(LlmProviderHealthMixin):
         repo/decrypt——存量单测对 svc.repo / svc.decrypt_api_key 的实例级
         patch 语义不变。无租户上下文（legacy/后台）保持原语义：任一激活行优先。
         """
+        logger.debug("解析 LLM 运行时配置")
         return await llm_common.resolve_runtime_config(
             self.session, repo=self.repo, decrypt=self.decrypt_api_key
         )

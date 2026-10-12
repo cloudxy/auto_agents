@@ -94,13 +94,75 @@ else
 fi
 
 # --- 日志即证据 ---
-# R10: 扫描 backend/services/**/*.py（含子包）。模块级公开函数（非 _ 前缀）
-# 的第一条语句（跳过 docstring）必须含 logger.。签名跨行与嵌套包一并覆盖。
+# R10: 扫描 backend/services/**/*.py（含子包），两类入口：
+#   1) 模块级公开函数（非 _ 前缀、小写开头）；
+#   2) 顶层类名以 Service / Mixin 结尾的类的公开方法（含 @staticmethod / @classmethod）。
+#      豁免：@property / @cached_property / @x.setter|getter|deleter 访问器；
+#      体内只有 docstring + `...` / `pass` 的抽象桩；继承 Protocol 的类（结构契约无实现）。
+# 判定：第一条语句（跳过 docstring）必须含 logger.（复合语句按其整段源码判定，与模块级同口径）。
+# 输出 path:line: def name / def Class.method。签名跨行与嵌套包一并覆盖。
 R10_OUTPUT="$(uv run python - <<'PYEOF' 2>/dev/null || echo "R10 递归扫描执行失败（uv/python 环境）"
 from __future__ import annotations
 
 import ast
 from pathlib import Path
+
+FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
+CLASS_SUFFIXES = ("Service", "Mixin")
+PROPERTY_DECORATORS = {"property", "cached_property"}
+ACCESSOR_ATTRS = {"setter", "getter", "deleter"}
+
+
+def is_public(name: str) -> bool:
+    return bool(name) and name[0] != "_" and name[0].islower()
+
+
+def strip_docstring(body: list) -> list:
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(getattr(body[0], "value", None), ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        return body[1:]
+    return body
+
+
+def is_stub(body: list) -> bool:
+    return all(
+        isinstance(s, ast.Pass)
+        or (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) and s.value.value is Ellipsis)
+        for s in body
+    )
+
+
+def is_accessor(fn) -> bool:
+    for dec in fn.decorator_list:
+        if isinstance(dec, ast.Name) and dec.id in PROPERTY_DECORATORS:
+            return True
+        if isinstance(dec, ast.Attribute) and (dec.attr in ACCESSOR_ATTRS or dec.attr in PROPERTY_DECORATORS):
+            return True
+    return False
+
+
+def is_protocol(cls: ast.ClassDef) -> bool:
+    for base in cls.bases:
+        target = base.value if isinstance(base, ast.Subscript) else base
+        if isinstance(target, ast.Name) and target.id == "Protocol":
+            return True
+        if isinstance(target, ast.Attribute) and target.attr == "Protocol":
+            return True
+    return False
+
+
+def lacks_entry_log(src: str, fn, *, allow_stub: bool) -> bool:
+    body = strip_docstring(list(fn.body))
+    if allow_stub and is_stub(body):
+        return False
+    if not body:
+        return True
+    return "logger." not in (ast.get_source_segment(src, body[0]) or "")
+
 
 hits: list[str] = []
 for path in sorted(Path("backend/services").rglob("*.py")):
@@ -113,25 +175,17 @@ for path in sorted(Path("backend/services").rglob("*.py")):
         hits.append(f"{path}:1: syntax error {exc}")
         continue
     for node in tree.body:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(node, FUNC_TYPES):
+            if is_public(node.name) and lacks_entry_log(src, node, allow_stub=False):
+                hits.append(f"{path}:{node.lineno}: def {node.name}")
             continue
-        name = node.name
-        if not name or name[0] == "_" or not name[0].islower():
+        if not isinstance(node, ast.ClassDef) or not node.name.endswith(CLASS_SUFFIXES) or is_protocol(node):
             continue
-        body = list(node.body)
-        if (
-            body
-            and isinstance(body[0], ast.Expr)
-            and isinstance(getattr(body[0], "value", None), ast.Constant)
-            and isinstance(body[0].value.value, str)
-        ):
-            body = body[1:]
-        if not body:
-            hits.append(f"{path}:{node.lineno}: def {name}")
-            continue
-        seg = ast.get_source_segment(src, body[0]) or ""
-        if "logger." not in seg:
-            hits.append(f"{path}:{node.lineno}: def {name}")
+        for item in node.body:
+            if not isinstance(item, FUNC_TYPES) or not is_public(item.name) or is_accessor(item):
+                continue
+            if lacks_entry_log(src, item, allow_stub=True):
+                hits.append(f"{path}:{item.lineno}: def {node.name}.{item.name}")
 print("\n".join(hits), end="")
 PYEOF
 )"

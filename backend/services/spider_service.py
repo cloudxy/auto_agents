@@ -43,6 +43,9 @@ from backend.services.spider_common import (
 from backend.services.spider_query_service import SpiderQueryService
 from backend.services.spider_registry_service import SpiderRegistryService
 from backend.services.spider_task_service import SpiderTaskService
+from platform_core.logger import get_logger
+
+logger = get_logger("api")
 
 __all__ = [
     "SpiderService",
@@ -79,25 +82,31 @@ class SpiderService:
         self, spider_name, params: Optional[str] = None, priority: str = "normal",
         tenant_id: int | None = None,
     ):
+        logger.debug(f"门面委托入队 | spider={spider_name} tenant={tenant_id}")
         return await self._task_svc.enqueue(
             spider_name=spider_name, params=params, priority=priority, tenant_id=tenant_id,
         )
 
     async def finish_task(self, task_id, status, error_message=None, item_count=None):
+        logger.debug(f"门面委托任务终态 | task_id={task_id} status={status}")
         return await self._task_svc.finish_task(
             task_id, status, error_message=error_message, item_count=item_count
         )
 
     # 结果查询 → SpiderQueryService
     async def list_results(self, task_id, skip: int = 0, limit: int = 50):
+        logger.debug(f"门面委托结果查询 | task_id={task_id}")
         return await self._query_svc.list_results(task_id=task_id, skip=skip, limit=limit)
 
     async def get_task_quality(self, task_id):
+        logger.debug(f"门面委托质量报告 | task_id={task_id}")
         return await self._query_svc.get_task_quality(task_id)
 
     async def stats(self):
+        logger.debug("门面委托统计")
         return await self._query_svc.stats()
 
     # 注册表 → SpiderRegistryService
     async def create_definition(self, payload, source: str = "manual", params=None):
+        logger.debug(f"门面委托创建爬虫定义 | source={source}")
         return await self._registry_svc.create_definition(payload, source=source, params=params)

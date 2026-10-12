@@ -161,6 +161,7 @@ class UserService:
         平台超管账户显式挂 platform 租户（不再产 NULL 行）；username 查重按
         (目标租户, username) 口径（跨租户同名是产品既定能力）。
         """
+        logger.info(f"新建账户 | username={payload.username}")
         from sqlalchemy import select
         from sqlalchemy.exc import IntegrityError
 
@@ -252,6 +253,7 @@ class UserService:
 
     async def update_user(self, user_id: int, payload, actor_id: int) -> UserResponse:
         """编辑账户：角色分配（role 单源）/启停/归属调整"""
+        logger.info(f"编辑账户 | id={user_id} actor={actor_id}")
         from sqlalchemy import select
 
         from platform_core.exceptions import BusinessException
@@ -345,15 +347,14 @@ class UserService:
 
     async def delete_user(self, user_id: int, actor_id: int) -> None:
         """软删除账户（种子 admin 不可删；防删自己；防删最后一个平台超管）"""
+        logger.info(f"删除账户 | id={user_id} actor={actor_id}")
         from sqlalchemy import func, select
 
         from platform_core.exceptions import BusinessException
         from platform_core.models.tenant import Tenant
         from platform_core.models.user import User
 
-        user = (await self.session.execute(
-            select(User).where(User.id == user_id)
-        )).scalar_one_or_none()
+        user = (await self.session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
         if user is None:
             raise BusinessException(f"用户不存在: {user_id}")
         # 种子 admin 守卫（T-26 / GWT-94.1，判定在既有两守卫之前）：身份=

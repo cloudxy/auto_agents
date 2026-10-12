@@ -289,6 +289,7 @@ class SpiderQueryService:
 
     async def get_task_quality(self, task_id: int) -> TaskQualityReportResponse:
         """查询任务的质量报告：平均分/最低分/最高分/四档分布"""
+        logger.debug(f"查询任务质量报告 | task_id={task_id}")
         task = await self.repo.get_by_id(task_id)
         if task is None:
             raise NotFoundException("爬虫任务")
@@ -320,6 +321,7 @@ class SpiderQueryService:
 
         only_task_lines=True（租户视角）：只返回带本任务标记的行（审计 BUG-16）。
         """
+        logger.debug(f"读取任务日志 | task_id={task_id} lines={lines}")
         task = await self.repo.get_by_id(task_id)
         if task is None:
             raise NotFoundException("爬虫任务")

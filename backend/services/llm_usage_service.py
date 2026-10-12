@@ -221,6 +221,7 @@ class LlmUsageFlushService:
         logger.info(f"LLM 用量聚合任务已启动: interval={interval}s")
 
     async def stop(self) -> None:
+        logger.info("停止 LLM 用量聚合任务")
         self._running = False
         if self._loop_task is not None:
             self._loop_task.cancel()
@@ -254,6 +255,7 @@ class LlmUsageFlushService:
            新建的日键（不丢），本轮值冻结；落库成功后删除认领键。
            崩溃残留的 #claim 键下一轮仍被扫描（匹配同一前缀），at-least-once。
         """
+        logger.debug("LLM 用量聚合一轮")
         if self._redis is None:
             return 0
         keys = [k async for k in self._redis.scan_iter(match=f"{_DAILY_KEY_PREFIX}*")]

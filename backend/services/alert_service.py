@@ -44,11 +44,13 @@ class AlertService:
     # --- CRUD ---
     async def list_rules(self) -> List[dict]:
         """获取所有告警规则"""
+        logger.debug("查询告警规则列表")
         rules = await self.repo.list_all()
         return [self._rule_to_dict(r) for r in rules]
 
     async def create_rule(self, payload: dict) -> dict:
         """创建告警规则"""
+        logger.info(f"创建告警规则 | name={payload.get('name')} type={payload.get('rule_type')}")
         # channels 序列化为 JSON 字符串存储
         channels = payload.pop("channels", None)
         if channels is not None:
@@ -60,6 +62,7 @@ class AlertService:
 
     async def update_rule(self, rule_id: int, payload: dict) -> dict:
         """更新告警规则"""
+        logger.info(f"更新告警规则 | rule_id={rule_id} fields={sorted(payload)}")
         # channels 序列化为 JSON 字符串存储
         if "channels" in payload:
             channels = payload.pop("channels")
@@ -74,6 +77,7 @@ class AlertService:
 
     async def delete_rule(self, rule_id: int) -> dict:
         """删除告警规则"""
+        logger.info(f"删除告警规则 | rule_id={rule_id}")
         deleted = await self.repo.delete(rule_id)
         if not deleted:
             raise NotFoundException(f"告警规则 {rule_id}")
@@ -137,6 +141,7 @@ class AlertService:
         _trigger_queue_depth_rule）；命中记录写面仅本调度器路径。任何失败只记
         日志不挡调度循环，返回本轮触发条数。
         """
+        logger.debug("周期评估 queue_depth 告警规则")
         triggered = 0
         try:
             rules = await self.repo.list_queue_depth_rules()

@@ -16,6 +16,7 @@ class ConfigService:
 
     async def get_config(self, key: str) -> str:
         """获取单个配置项"""
+        logger.debug(f"读取系统配置 | key={key}")
         from sqlalchemy import select
         result = await self.session.execute(
             select(SystemConfig).filter_by(config_key=key)
@@ -25,6 +26,7 @@ class ConfigService:
 
     async def set_config(self, key: str, value: str, description: str = ""):
         """设置配置项（不存在则创建）"""
+        logger.info(f"设置系统配置 | key={key}")
         from sqlalchemy import select
         result = await self.session.execute(
             select(SystemConfig).filter_by(config_key=key)
@@ -42,6 +44,7 @@ class ConfigService:
 
     async def get_all_configs(self) -> dict:
         """获取所有配置并转为字典"""
+        logger.debug("读取全部系统配置")
         result = await self.repo.get_all(limit=1000)
         return {c.config_key: c.config_value for c in result}
 
@@ -51,9 +54,9 @@ class ConfigService:
         T1 收口（R7）：backend/app/api/v1/admin.py 此前函数内延迟 import
         SystemConfig 直查；通知渠道配置读取收口至本方法。
         """
+        logger.info(f"批量读取配置 | keys={keys}")
         from sqlalchemy import select
 
-        logger.info(f"批量读取配置 | keys={keys}")
         rows = (await self.session.execute(
             select(SystemConfig.config_key, SystemConfig.config_value)
             .where(SystemConfig.config_key.in_(keys))
@@ -62,9 +65,9 @@ class ConfigService:
 
     async def upsert_configs(self, updates: dict[str, str], description: str = "") -> None:
         """批量写入配置项（存在则改、缺省则建；ADR-0007：service 自持事务提交）"""
+        logger.info(f"批量写入配置 | keys={sorted(updates.keys())}")
         from sqlalchemy import select
 
-        logger.info(f"批量写入配置 | keys={sorted(updates.keys())}")
         for key, value in updates.items():
             row = (await self.session.execute(
                 select(SystemConfig).where(SystemConfig.config_key == key)

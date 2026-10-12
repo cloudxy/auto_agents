@@ -65,6 +65,7 @@ class ProxyHealthService:
 
     async def stop(self):
         """优雅停止"""
+        logger.info("停止代理健康管理")
         self._running = False
         if self._loop_task is not None:
             self._loop_task.cancel()
@@ -204,6 +205,7 @@ class ProxyHealthService:
             ...
         ]
         """
+        logger.debug("查询代理健康评分排行")
         # 读接口统一走异步门面（P2-16/17 修复：不再每请求新建连接再关闭；
         # 门面实例由门面管理生命周期，调用方禁止 close）
         redis = get_async_redis()

@@ -30,6 +30,7 @@ class _SkillLibraryMixin:
 
     async def list_manifests(self) -> dict[str, list[str]]:
         """读全部 manifests/<tool>.yaml（每行一个 `- <name>` 的纯文本约定）"""
+        logger.debug("读取技能 manifests")
         manifests_dir = self._library_root() / "manifests"
         result: dict[str, list[str]] = {}
         if not manifests_dir.is_dir():
@@ -45,6 +46,7 @@ class _SkillLibraryMixin:
 
     async def update_manifest(self, tool: str, names: list[str]) -> dict:
         """写 manifests/<tool>.yaml：保留注释头，`- <name>` 行格式不变（adapters 零改动）"""
+        logger.info(f"写入技能 manifest | tool={tool} count={len(names)}")
         import re as _re
 
         if not _re.fullmatch(r"[a-z0-9][a-z0-9\-]+", tool):
@@ -64,6 +66,7 @@ class _SkillLibraryMixin:
 
     async def sync_adapters(self) -> dict:
         """触发 sync.sh（subprocess，cwd=LIBRARY_ROOT；受 SKILLS.ADAPTER_SYNC.ENABLED 约束）"""
+        logger.info("触发技能适配器同步（sync.sh）")
         from config import settings
 
         if not settings.get("SKILLS.ADAPTER_SYNC.ENABLED", False):
