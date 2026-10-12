@@ -36,6 +36,7 @@ class LlmProviderHealthMixin:
 
     async def fetch_models_diff(self, provider_id: int) -> dict:
         """远端列表 vs 本地子表三分类（new/existing/vanished）——不直写"""
+        logger.info(f"拉取远端模型列表比对 | provider={provider_id}")
         provider = await self.repo.get_by_id(provider_id)
         if provider is None:
             raise NotFoundException(resource=f"LLM 供应商 {provider_id}")

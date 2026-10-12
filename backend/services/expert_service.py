@@ -33,6 +33,7 @@ class ExpertService:
 
     async def scan_experts(self, root: Optional[Path] = None) -> dict:
         """扫描 capability-library/experts/：解析 AGENT.md（subagent 格式）"""
+        logger.info(f"扫描专家目录 | root={root}")
         from config import settings
 
         if root is None:
@@ -135,9 +136,9 @@ class ExpertService:
         raise ValidationException(message="frontmatter 未闭合", field="url")
 
     async def get_expert_detail(self, name: str) -> dict:
+        logger.info(f"查询专家详情 | name={name}")
         from backend.services.capability_lookup import find_named_asset
 
-        logger.info(f"查询专家详情 | name={name}")
         asset = await find_named_asset(self.session, "expert", name)
         if asset is None:
             raise NotFoundException(resource=f"专家 {name}")
@@ -155,6 +156,7 @@ class ExpertService:
 
     async def validate_skill_bundles(self, name: str) -> dict:
         """捆绑技能存在性校验（悬空引用标记）"""
+        logger.info(f"校验专家捆绑技能 | name={name}")
         detail_dict = await self.get_expert_detail(name)
         missing = []
         for skill_name in detail_dict["bundled_skills"]:
@@ -271,9 +273,9 @@ class TeamService:
         return snapshot
 
     async def get_team_detail(self, name: str) -> dict:
+        logger.info(f"查询专家团详情 | name={name}")
         from backend.services.capability_lookup import find_named_asset
 
-        logger.info(f"查询专家团详情 | name={name}")
         asset = await find_named_asset(self.session, "expert_team", name)
         if asset is None:
             raise NotFoundException(resource=f"专家团 {name}")
@@ -289,6 +291,7 @@ class TeamService:
 
     async def export_team_md(self, name: str) -> str:
         """导出为 TEAM.md（workbuddy 风格 markdown 文档；成员行带类型标注，GWT-101.4）"""
+        logger.info(f"导出专家团 TEAM.md | name={name}")
         d = await self.get_team_detail(name)
         member_labels = ", ".join(
             f"{m.get('name')}（{_MEMBER_TYPE_LABELS.get(str(m.get('type')), '成员')}）"

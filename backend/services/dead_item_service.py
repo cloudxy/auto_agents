@@ -21,6 +21,7 @@ class DeadItemService:
 
     async def list_items(self, limit: int = 100) -> dict:
         """最新死信倒序列表（lrange 尾窗 + 反转，最新在前）+ 队列总量"""
+        logger.debug(f"查询死信列表 | limit={limit}")
         redis = get_async_redis()
         total = int(await redis.llen(DEAD_ITEM_QUEUE))
         window = min(max(1, min(limit, _MAX_LIST_WINDOW)), total) if total else 0
@@ -47,6 +48,7 @@ class DeadItemService:
 
     async def discard(self, index: int) -> bool:
         """按队列 index 丢弃一条死信（lrem 按值删除，值重复时删最早一条）"""
+        logger.info(f"丢弃死信 | index={index}")
         redis = get_async_redis()
         raw = await redis.lindex(DEAD_ITEM_QUEUE, index)
         if raw is None:
@@ -57,6 +59,7 @@ class DeadItemService:
 
     async def clear(self) -> int:
         """清空死信队列（排障终态动作，返回清除量）"""
+        logger.info("清空死信队列")
         redis = get_async_redis()
         total = int(await redis.llen(DEAD_ITEM_QUEUE))
         await redis.delete(DEAD_ITEM_QUEUE)

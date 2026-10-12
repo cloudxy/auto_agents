@@ -223,6 +223,7 @@ class QuotaService:
 
     async def check_task_concurrency(self, tenant_id: int) -> None:
         """任务入队前：本租户 running/pending 任务数 < task_concurrency"""
+        logger.info(f"配额检查·任务并发 | tenant={tenant_id}")
         tenant = await self._tenant(tenant_id)
         limit = int(quota_of(tenant)["task_concurrency"])
         async def _count_active() -> int:
@@ -264,6 +265,7 @@ class QuotaService:
 
     async def check_llm_tokens_month(self, tenant_id: int, year_month: str) -> None:
         """LLM 调用前：本租户当月 total_tokens 合计 < llm_tokens_month"""
+        logger.debug(f"配额检查·LLM 月度 | tenant={tenant_id} month={year_month}")
         tenant = await self._tenant(tenant_id)
         limit = int(quota_of(tenant)["llm_tokens_month"])
         from backend.services.llm_usage_service import get_tenant_month_used
@@ -342,6 +344,7 @@ class QuotaService:
 
     async def usage_overview(self, tenant_id: int, year_month: str) -> dict:
         """用量看板数据（S3-2 消费）：三指标当前值 vs 配额 + 成员分摊"""
+        logger.debug(f"用量看板 | tenant={tenant_id} month={year_month}")
         tenant = await self._tenant(tenant_id)
         quota = quota_of(tenant)
         active_tasks = (await self.session.execute(

@@ -91,9 +91,9 @@ class PluginService:
 
     async def get_plugin_detail(self, name: str) -> dict:
         """插件详情（asset + detail 投影；mcp_servers 的 env/headers 值一律脱敏，审计 BUG-45）"""
+        logger.info(f"查询插件详情 | name={name}")
         from backend.services.capability_lookup import find_named_asset
 
-        logger.info(f"查询插件详情 | name={name}")
         asset = await find_named_asset(self.session, "plugin", name)
         if asset is None:
             raise NotFoundException(resource=f"插件 {name}")
@@ -121,9 +121,9 @@ class PluginService:
 
     async def verify_plugin(self, name: str) -> dict:
         """插件验证管线（ADR-0001）：MCP 连接→list→抽样 call→健康落库"""
+        logger.info(f"插件验证 | plugin={name}")
         from backend.services.mcp_bridge import verify_plugin_server
 
-        logger.info(f"插件验证 | plugin={name}")
         detail = await self._require_plugin_detail(name)
 
         servers = detail.mcp_servers or {}

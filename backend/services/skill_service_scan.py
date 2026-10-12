@@ -92,6 +92,7 @@ class _SkillScanMixin:
         （skill_import_service._ingest_and_enqueue）时传 commit=False，由外层
         统一提交（导入 = 落盘 + 扫描入库 + 任务记录的不可分割整体）。
         """
+        logger.info(f"扫描技能库 | root={root} commit={commit}")
         root = self._scan_root(root)
         job = SkillJob(job_type="scan", status="running", total=0, succeeded=0, failed=0)
         self.session.add(job)

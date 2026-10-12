@@ -65,6 +65,7 @@ class PaymentNotifyService:
         统一处理入口：订单查找 + 四要素核对 + CAS 状态机，两条验真前门共用
         同一套状态转移逻辑，避免真实网关接入时把状态机重写一遍带出新缺陷。
         """
+        logger.info(f"处理已验签通道通知 | channel={channel} order_no={order_no} status={trade_status}")
         order = await self.orders.get_by_order_no(order_no)
         if order is None:
             logger.info("通道通知订单号无对应待支付，保持未开通")

@@ -92,6 +92,7 @@ class ChannelProbeService:
 
     async def start(self) -> None:
         """启动探针循环（幂等；无 DSN / 无 new-api 客户端）。"""
+        logger.info("启动渠道真伪探针")
         if self._running:
             return
         if not settings.get("RELAY.PROBE_ENABLED", RELAY_PROBE_ENABLED):
@@ -112,6 +113,7 @@ class ChannelProbeService:
 
     async def stop(self) -> None:
         """优雅停止（不关闭共享 Redis）。"""
+        logger.info("停止渠道真伪探针")
         self._running = False
         if self._loop_task is not None:
             self._loop_task.cancel()
@@ -129,8 +131,8 @@ class ChannelProbeService:
         触发即返回 (accepted, batch_id, reason)：同渠道在飞 → 复用原批次；
         网关列表不可达/无该引用 → accepted=False（中文原因，不向上抛）。
         """
+        logger.info(f"手动探针触发: gateway_ref={gateway_ref}")
         ref = str(gateway_ref or "").strip()
-        logger.info(f"手动探针触发: gateway_ref={ref}")
         if not ref:
             return False, "", "gateway_ref 不能为空"
         inflight = _MANUAL_INFLIGHT.get(ref)

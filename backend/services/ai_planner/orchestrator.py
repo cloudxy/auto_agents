@@ -111,6 +111,7 @@ class AiPlannerService:
         self, skip: int = 0, limit: int = 20, status: Optional[str] = None
     ) -> AiPlanListResponse:
         """分页列表（可按状态过滤）"""
+        logger.debug(f"查询 AI 采集计划列表 | skip={skip} limit={limit} status={status}")
         items = await self.repo.list_plans(skip=skip, limit=limit, status=status)
         total = await self.repo.count(status=status)
         return AiPlanListResponse(
@@ -119,6 +120,7 @@ class AiPlannerService:
 
     async def get_plan(self, plan_id: int) -> AiPlanResponse:
         """单条计划快照"""
+        logger.debug(f"查询 AI 采集计划 | plan_id={plan_id}")
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")
@@ -126,6 +128,7 @@ class AiPlannerService:
 
     async def delete_plan(self, plan_id: int) -> dict:
         """删除计划（规划/试采进行中拒绝，防后台任务写空）"""
+        logger.info(f"删除 AI 采集计划 | plan_id={plan_id}")
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")
@@ -174,6 +177,7 @@ class AiPlannerService:
 
     async def launch_plan(self, plan_id: int) -> AiPlanResponse:
         """触发后台规划：原子抢断置 planning → asyncio.create_task 执行，立即返回快照"""
+        logger.info(f"触发 AI 后台规划 | plan_id={plan_id}")
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")
@@ -196,6 +200,7 @@ class AiPlannerService:
 
     async def launch_test(self, plan_id: int) -> AiPlanResponse:
         """触发后台试采：spawn 前原子抢断置 testing，立即返回快照"""
+        logger.info(f"触发 AI 后台试采 | plan_id={plan_id}")
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")
@@ -416,6 +421,7 @@ class AiPlannerService:
     # 注册（同步执行：校验最近试采通过 → create_definition(source=ai_generated)）
     # ------------------------------------------------------------------
     async def register(self, plan_id: int) -> AiPlanResponse:
+        logger.info(f"注册 AI 计划为爬虫定义 | plan_id={plan_id}")
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")

@@ -430,6 +430,7 @@ class SpiderTaskService(
 
     async def delete_task(self, task_id: int) -> dict:
         """删除任务及其采集结果（级联）"""
+        logger.info(f"删除爬虫任务 | task_id={task_id}")
         task = await self.repo.get_by_id(task_id)
         if task is None:
             raise NotFoundException("爬虫任务")

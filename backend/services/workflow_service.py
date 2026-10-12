@@ -52,6 +52,7 @@ class WorkflowService:
     # ---------- 定义 ----------
     async def create_definition(self, payload: Dict[str, Any]) -> WorkflowDefinition:
         """创建流程定义（steps_config 必须为非空 key/type 列表）"""
+        logger.info(f"创建工作流定义 | name={payload.get('name')}")
         steps = payload.get("steps_config") or []
         if not steps:
             raise WorkflowError("steps_config 不能为空")
@@ -73,6 +74,7 @@ class WorkflowService:
     async def start_instance(self, definition_id: int, context: Optional[Dict] = None,
                              created_by: Optional[str] = None) -> WorkflowInstance:
         """发起实例：展开步骤行 + pending → running + 指向首步"""
+        logger.info(f"发起工作流实例 | definition_id={definition_id} by={created_by}")
         definition = await self.def_repo.get_by_id(definition_id)
         if definition is None:
             raise WorkflowError(f"工作流定义不存在: {definition_id}")
@@ -98,6 +100,7 @@ class WorkflowService:
     async def complete_step(self, instance_id: int, step_key: str, output: Optional[Dict] = None,
                             operator: Optional[str] = None) -> WorkflowInstance:
         """完成当前步骤并推进（末步完成 → 实例 completed）"""
+        logger.info(f"完成工作流步骤 | instance={instance_id} step={step_key} operator={operator}")
         instance = await self._get_instance(instance_id)
         if instance.status not in ("running", "waiting"):
             raise WorkflowError(f"实例 #{instance_id} 状态 {instance.status} 不可推进")
@@ -125,6 +128,7 @@ class WorkflowService:
     async def cancel_instance(self, instance_id: int, reason: str,
                               operator: Optional[str] = None) -> WorkflowInstance:
         """取消实例：未完成步骤置 skipped，实例 → cancelled"""
+        logger.info(f"取消工作流实例 | instance={instance_id} operator={operator}")
         instance = await self._get_instance(instance_id)
         reason_recorded = False
         for s in await self._instance_steps(instance_id):

@@ -53,9 +53,9 @@ class BillingOrderOpsMixin:
 
         审计 BUG-25：已付款待开通（履约失败）与迟到到账的单原先超管看不到，钱收了权益没开。
         """
+        logger.info("列出待处理订单")
         from sqlalchemy import and_, or_
 
-        logger.info("列出待处理订单")
         await self._expire_stale_open_orders()
         rows = (await self.session.execute(
             select(Order, Plan.name, Tenant.name)
@@ -220,9 +220,9 @@ class BillingOrderOpsMixin:
 
     async def retry_fulfillment(self, order_id: int) -> OrderOut:
         """超管补偿：已付款待开通的单重新履约（审计 BUG-25）"""
+        logger.info(f"补偿履约 | order={order_id}")
         from backend.services.payment_notify_service import PaymentNotifyService
 
-        logger.info(f"补偿履约 | order={order_id}")
         order = await OrderRepository(self.session).get_fresh(order_id)
         if order is None:
             raise NotFoundException("订单")

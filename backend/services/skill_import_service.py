@@ -356,6 +356,7 @@ class SkillImportService:
 
     async def check_update(self, name: str) -> dict:
         """只读拉取 source.url → 与本地 SKILL.md 哈希比对 → 返回是否有更新（不写盘）"""
+        logger.info(f"检查技能来源更新 | name={name}")
         row = (await self.session.execute(select(Skill).where(Skill.name == name))).scalar_one_or_none()
         if row is None:
             from platform_core.exceptions import NotFoundException

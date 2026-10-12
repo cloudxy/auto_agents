@@ -265,9 +265,9 @@ class SkillService(_SkillScanMixin, _SkillLibraryMixin):
         T1 收口（R7）：backend/app/api/v1/skills.py 此前模块级 import SkillJob
         ORM 模型直查；查询与投影收口至本方法。
         """
+        logger.info(f"查询技能任务记录 | page={page} page_size={page_size}")
         from sqlalchemy import func
 
-        logger.info(f"查询技能任务记录 | page={page} page_size={page_size}")
         total = (await self.session.execute(
             select(func.count()).select_from(SkillJob))).scalar_one()
         rows = (
@@ -311,17 +311,17 @@ class SkillService(_SkillScanMixin, _SkillLibraryMixin):
     async def list_skills(self, **filters) -> tuple[list, int]:
         """技能库列表（筛选/排序/分页）；参数与 SkillRepository.list_skills 对齐，
         返回 (行列表, 总数)——投影与响应组装归 API 协议层。"""
+        logger.info(f"查询技能列表 | filters={sorted(filters)}")
         from backend.repositories.skill_repository import SkillRepository
 
-        logger.info(f"查询技能列表 | filters={sorted(filters)}")
         return await SkillRepository(self.session).list_skills(**filters)
 
     async def get_by_name(self, name: str):
         """按名称取技能行（miss 返回 None；404 语义由调用方决定——管理端与
         公开端点的资源命名不同，见各路由）"""
+        logger.info(f"查询技能 | name={name}")
         from backend.repositories.skill_repository import SkillRepository
 
-        logger.info(f"查询技能 | name={name}")
         return await SkillRepository(self.session).get_by_name(name)
 
     async def record_public_view(self, name: str) -> None:
@@ -334,9 +334,9 @@ class SkillService(_SkillScanMixin, _SkillLibraryMixin):
 
     async def list_reviews(self, skill_id: int, limit: int = 20) -> list:
         """技能最近评分历史（id 倒序）"""
+        logger.info(f"查询技能评分历史 | skill={skill_id} limit={limit}")
         from backend.repositories.skill_repository import SkillReviewRepository
 
-        logger.info(f"查询技能评分历史 | skill={skill_id} limit={limit}")
         return await SkillReviewRepository(self.session).list_by_skill(skill_id, limit=limit)
 
     async def approve_candidate(
@@ -350,6 +350,7 @@ class SkillService(_SkillScanMixin, _SkillLibraryMixin):
         skill_import_service 模块属性取值，保持 monkeypatch 该模块类的
         存量测试语义）。
         """
+        logger.info(f"候选技能转正 | result_id={result_id}")
         from platform_core.exceptions import NotFoundException
         from platform_core.models.spider_result import SpiderResult
 
@@ -368,6 +369,7 @@ class SkillService(_SkillScanMixin, _SkillLibraryMixin):
 
     async def reject_candidate(self, result_id: int) -> dict:
         """拒绝：标记已审；若同名/同源技能已入库则置 blacklist 防重复采集提示"""
+        logger.info(f"拒绝候选技能 | result_id={result_id}")
         from platform_core.exceptions import NotFoundException
         from platform_core.models.spider_result import SpiderResult
 

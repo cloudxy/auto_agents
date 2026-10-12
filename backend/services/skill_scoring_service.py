@@ -99,6 +99,7 @@ class SkillScoringService:
 
     async def consume_once(self) -> dict:
         """消费一条评分任务（rpop 一条；空队列返回 idle）"""
+        logger.debug("消费一条技能评分任务")
         redis = await get_async_redis()
         raw = await redis.rpop(SKILL_SCORE_QUEUE)
         if not raw:
@@ -118,6 +119,7 @@ class SkillScoringService:
 
     async def score_skill(self, name: str) -> dict:
         """单个技能评分：LLM → 校验（失败重试 1 次）→ 落库（AI 字段与 reviews(ai)）"""
+        logger.info(f"技能评分 | name={name}")
         row = (await self.session.execute(select(Skill).where(Skill.name == name))).scalar_one_or_none()
         if row is None:
             self._record_failure(name, "技能不存在")

@@ -273,6 +273,7 @@ class RelayEnforcementService:
         logger.info("中转执法巡检已启动")
 
     async def stop(self) -> None:
+        logger.info("停止中转执法巡检")
         self._running = False
         if self._task is not None:
             self._task.cancel()

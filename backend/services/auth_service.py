@@ -193,15 +193,14 @@ class AuthService:
 
     async def create_token(self, user_data: dict) -> TokenResponse:
         """创建访问令牌"""
+        logger.info(f"生成 Token | user={user_data['username']}")
         # S1-3：claims 只承身份——tenant_id/tenant_role/is_platform_admin 随行携带；
         # role 仅为兼容存量消费方保留，权限判定一律 DB 快照重算
         from backend.services.session_service import access_claims
 
         # 与登录签发（session_service.issue_session）同一份 claims；tv = 会话版本（QA-B1-12）
         access_token = create_access_token(data=access_claims(user_data))
-        
-        logger.info(f"生成 Token | user={user_data['username']}")
-        
+
         return TokenResponse(
             access_token=access_token,
             token_type="bearer",

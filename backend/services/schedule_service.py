@@ -71,6 +71,7 @@ class ScheduleService:
 
     async def list_schedules(self) -> SpiderScheduleListResponse:
         """调度计划列表"""
+        logger.debug("查询调度计划列表")
         items = await self.repo.list_all()
         total = await self.repo.count()
         return SpiderScheduleListResponse(
@@ -102,6 +103,7 @@ class ScheduleService:
         self, payload: ScheduleRequest, tenant_id: int | None = None,
     ) -> SpiderScheduleResponse:
         """创建调度计划（校验：爬虫注册表存在 / cron 合法 / 同爬虫唯一）"""
+        logger.info(f"创建调度计划 | spider={payload.spider_name} cron={payload.cron_expr} tenant={tenant_id}")
         await self._ensure_spider_registered(payload.spider_name)
         if not validate_cron(payload.cron_expr):
             raise BusinessException(f"非法的 cron 表达式: {payload.cron_expr}")
@@ -130,6 +132,7 @@ class ScheduleService:
         self, schedule_id: int, payload: ScheduleUpdateRequest
     ) -> SpiderScheduleResponse:
         """局部更新：启停 / 改表达式 / 改参数（任一变更都重算触发时刻）"""
+        logger.info(f"更新调度计划 | id={schedule_id}")
         schedule = await self.repo.get_by_id(schedule_id)
         if schedule is None:
             raise NotFoundException("调度计划")
@@ -157,6 +160,7 @@ class ScheduleService:
 
     async def delete_schedule(self, schedule_id: int) -> dict:
         """删除调度计划"""
+        logger.info(f"删除调度计划 | id={schedule_id}")
         schedule = await self.repo.get_by_id(schedule_id)
         if schedule is None:
             raise NotFoundException("调度计划")

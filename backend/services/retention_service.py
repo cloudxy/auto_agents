@@ -38,6 +38,7 @@ class RetentionService:
         logger.info("retention 执行器已启动")
 
     async def stop(self) -> None:
+        logger.info("停止 retention 执行器")
         self._running = False
         if self._task is not None:
             self._task.cancel()

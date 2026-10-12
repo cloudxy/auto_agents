@@ -75,6 +75,7 @@ class NotifyService:
         error_message: Optional[str] = None,
     ) -> None:
         """任务终态通知入口（吞掉所有异常）"""
+        logger.info(f"任务终态通知 | task_id={task_id} spider={spider_name} status={status}")
         if not self._enabled:
             return
         payload = {
@@ -169,6 +170,7 @@ class NotifyService:
         与 notify_task_finished 共享渠道配置（NOTIFY.CHANNELS/WEBHOOK_URL/EMAIL/DINGTALK/
         WECHAT_WORK），但载荷为通用 {event, text}，不复用任务终态文案渲染。
         """
+        logger.info(f"文本通知 | event={event}")
         if not self._enabled:
             return
         full = f"[{event}] {text}"
