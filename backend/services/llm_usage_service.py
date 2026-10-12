@@ -47,6 +47,14 @@ _MONTHLY_TTL = 93 * 86400
 _DAILY_TTL = 30 * 86400
 # hash field 指标名（写入与聚合解析共用）
 _METRICS = ("prompt", "completion", "total", "requests", "failed")
+# 聚合解析：hash field 指标名 → llm_token_usage 行计数列
+_METRIC_COLUMNS = {
+    "prompt": "prompt_tokens",
+    "completion": "completion_tokens",
+    "total": "total_tokens",
+    "requests": "request_count",
+    "failed": "failed_count",
+}
 
 
 def _today() -> date:
@@ -74,6 +82,23 @@ def _parse_provider_id(dim: str) -> Optional[int]:
         except ValueError:
             return None
     return None
+
+
+def _empty_usage_row(tenant_key: str, dim: str, model: str, stat_date: date) -> dict:
+    """聚合行初值（各计数列与成本归零；租户/供应商归属由 flush 侧补齐）"""
+    return {
+        "tenant_key": tenant_key,
+        "provider_id": _parse_provider_id(dim),
+        "provider_name": dim,
+        "model": model,
+        "stat_date": stat_date,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "request_count": 0,
+        "failed_count": 0,
+        "cost_cents": 0,
+    }
 
 
 # 记录一次 LLM 调用用量（实时 INCRBY；任何失败仅记日志，不影响主调用路径）。
@@ -268,30 +293,32 @@ class LlmUsageFlushService:
             return 0
 
         rows = self._build_rows(fields, stat_date)
-        row_count = 0
-        if rows:
-            from backend.services.background_session import default_tenant_id
-
-            async with AsyncSession(self._engine()) as session:
-                # tenant_key（数字串/default）→ tenant_id；default 按需查建
-                default_tid = None
-                for row in rows:
-                    if row.get("tenant_key") in (None, "default", "legacy"):
-                        default_tid = default_tid or await default_tenant_id(session)
-                        row["tenant_id"] = default_tid
-                    else:
-                        try:
-                            row["tenant_id"] = int(row["tenant_key"])
-                        except (TypeError, ValueError):
-                            row["tenant_id"] = default_tid or await default_tenant_id(session)
-                await self._attach_cost(session, rows)
-                await LlmTokenUsageRepository(session).upsert_daily(rows)
-                await session.commit()
-            row_count = len(rows)
+        row_count = await self._persist_rows(rows) if rows else 0
         await self._redis.delete(claimed)
         if row_count:
             logger.info(f"LLM 用量聚合落库: date={stat_date}, rows={row_count}")
         return row_count
+
+    async def _persist_rows(self, rows: list[dict]) -> int:
+        """tenant_key 归属解析 → 计费 → upsert 落库（独立 session 提交），返回行数"""
+        from backend.services.background_session import default_tenant_id
+
+        async with AsyncSession(self._engine()) as session:
+            # tenant_key（数字串/default）→ tenant_id；default 按需查建
+            default_tid = None
+            for row in rows:
+                if row.get("tenant_key") in (None, "default", "legacy"):
+                    default_tid = default_tid or await default_tenant_id(session)
+                    row["tenant_id"] = default_tid
+                else:
+                    try:
+                        row["tenant_id"] = int(row["tenant_key"])
+                    except (TypeError, ValueError):
+                        row["tenant_id"] = default_tid or await default_tenant_id(session)
+            await self._attach_cost(session, rows)
+            await LlmTokenUsageRepository(session).upsert_daily(rows)
+            await session.commit()
+        return len(rows)
 
     @staticmethod
     def _build_rows(fields: dict, stat_date: date) -> list[dict]:
@@ -308,35 +335,13 @@ class LlmUsageFlushService:
             if metric not in _METRICS:
                 continue
             row = grouped.setdefault(
-                (_tkey, dim, model),
-                {
-                    "tenant_key": _tkey,
-                    "provider_id": _parse_provider_id(dim),
-                    "provider_name": dim,
-                    "model": model,
-                    "stat_date": stat_date,
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                    "request_count": 0,
-                    "failed_count": 0,
-                    "cost_cents": 0,
-                },
+                (_tkey, dim, model), _empty_usage_row(_tkey, dim, model, stat_date),
             )
             try:
                 amount = int(value)
             except (TypeError, ValueError):
                 continue
-            if metric == "prompt":
-                row["prompt_tokens"] += amount
-            elif metric == "completion":
-                row["completion_tokens"] += amount
-            elif metric == "total":
-                row["total_tokens"] += amount
-            elif metric == "requests":
-                row["request_count"] += amount
-            elif metric == "failed":
-                row["failed_count"] += amount
+            row[_METRIC_COLUMNS[metric]] += amount
         return list(grouped.values())
 
     @staticmethod

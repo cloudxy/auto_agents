@@ -76,15 +76,7 @@ class LlmProbeEngine:
         base_url = str(item.base_url or "").rstrip("/")
         model = str(item.model or "")
         api_key = LlmSecretVault.decrypt_api_key(getattr(item, "api_key_encrypted", None))
-
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": _PROBE_MAX_TOKENS,
-        }
+        headers, payload = LlmProbeEngine._ping_request(model, api_key)
 
         start = time.perf_counter()
         try:
@@ -111,3 +103,16 @@ class LlmProbeEngine:
             return LlmProviderTestResponse(
                 ok=False, latency_ms=latency_ms, model=model, error=str(e)[:500]
             )
+
+    @staticmethod
+    def _ping_request(model: str, api_key: str) -> tuple[dict, dict]:
+        """入库连通测试的 openai 兼容 1-token 请求 (headers, payload)；无密钥不带 Authorization"""
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": _PROBE_MAX_TOKENS,
+        }
+        return headers, payload

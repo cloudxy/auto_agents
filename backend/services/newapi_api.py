@@ -195,22 +195,7 @@ class NewapiApiClient:
             latency_ms = int((time.monotonic() - started) * 1000)
             if resp.status_code >= 400:
                 return _failed_chat(model, latency_ms, f"http {resp.status_code}: {resp.text[:200]}")
-            data = resp.json()
-            choice = (data.get("choices") or [{}])[0]
-            content = str(((choice.get("message") or {}).get("content") or "")).strip()
-            usage = data.get("usage") or {}
-            reasoning = int(
-                (usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0
-            )
-            return {
-                "ok": bool(content),
-                "content": content,
-                "latency_ms": latency_ms,
-                "usage": usage,
-                "model": str(data.get("model") or model),
-                "reasoning_tokens": reasoning,
-                "error": None if content else "empty content",
-            }
+            return _parsed_chat(resp.json(), model, latency_ms)
         except Exception as e:  # noqa: BLE001
             latency_ms = int((time.monotonic() - started) * 1000)
             return _failed_chat(model, latency_ms, str(e))
@@ -371,4 +356,23 @@ def _failed_chat(model: str, latency_ms: int, error: str) -> dict:
         "model": model,
         "reasoning_tokens": 0,
         "error": error,
+    }
+
+
+def _parsed_chat(data: dict, model: str, latency_ms: int) -> dict:
+    """chat_completion 2xx 响应体 → 统一返回结构（content 为空记 ok=False / empty content）"""
+    choice = (data.get("choices") or [{}])[0]
+    content = str(((choice.get("message") or {}).get("content") or "")).strip()
+    usage = data.get("usage") or {}
+    reasoning = int(
+        (usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0
+    )
+    return {
+        "ok": bool(content),
+        "content": content,
+        "latency_ms": latency_ms,
+        "usage": usage,
+        "model": str(data.get("model") or model),
+        "reasoning_tokens": reasoning,
+        "error": None if content else "empty content",
     }
