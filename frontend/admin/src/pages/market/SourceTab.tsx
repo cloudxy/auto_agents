@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Form, Input, Modal, Select, Space, Table, Typography, message } from 'antd'
+import { Alert, Button, Empty, Form, Input, Modal, Select, Space, Table, Typography } from 'antd'
+import { message } from '../../feedback'
 
 import { listSources, registerSource, syncSource, type SourceRow } from '../../services/capabilities'
 import { usePermission } from '../../hooks/usePermission'

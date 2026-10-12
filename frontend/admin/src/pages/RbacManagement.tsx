@@ -8,9 +8,10 @@
 import React, { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Select, Switch,
-  Alert, Button, Card, Checkbox, Form, Input, message, Modal, Popconfirm,
+  Alert, Button, Card, Checkbox, Form, Input, Modal, Popconfirm,
   Space, Spin, Table, Tabs, Tag, Typography,
 } from 'antd'
+import { message } from '../feedback'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
   createMenu, createPermissionResource, deleteMenu, deletePermissionResource,

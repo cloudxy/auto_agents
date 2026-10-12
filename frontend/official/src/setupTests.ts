@@ -79,6 +79,23 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => undefined;
 }
 
+// antd 弃用 API 与「静态方法读不到 ConfigProvider 上下文」告警记为用例失败，防回潮：
+// 反馈 API 统一走 src/feedback（App 实例），弃用属性改 antd 6 写法。antd 告警按文案去重，
+// 一个文件只报一次，记在首个触发的用例上。
+const ANTD_BLOCKING_WARNING = /\[antd: [^\]]+\] .*(is deprecated|Static function can not consume context)/
+const consoleError = console.error.bind(console)
+let antdWarnings: string[] = []
+console.error = (...args: unknown[]) => {
+  const text = args.map(String).join(' ')
+  if (ANTD_BLOCKING_WARNING.test(text)) antdWarnings.push(text)
+  consoleError(...args)
+}
+afterEach(() => {
+  const found = antdWarnings
+  antdWarnings = []
+  if (found.length) throw new Error(`antd 弃用 / 静态上下文告警：\n${found.join('\n')}`)
+})
+
 // jest-dom adds custom jest matchers for asserting on DOM nodes.
 // allows you to do things like:
 // expect(element).toHaveTextContent(/react/i)

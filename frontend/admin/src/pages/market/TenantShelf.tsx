@@ -6,7 +6,8 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Alert, Button, Input, Segmented, Select, Skeleton, Tabs, message } from 'antd'
+import { Alert, Button, Input, Segmented, Select, Skeleton, Tabs } from 'antd'
+import { message } from '../../feedback'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { listPublicAssets, syncAgentsHub, type PublicShelfItem } from '../../services/capabilities'

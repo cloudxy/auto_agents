@@ -8,8 +8,9 @@
  */
 import React, { useRef, useState } from 'react'
 import {
-  Alert, Button, Empty, Modal, Progress, Skeleton, Space, Steps, Tag, Typography, message,
+  Alert, Button, Empty, Modal, Progress, Skeleton, Space, Steps, Tag, Typography,
 } from 'antd'
+import { message } from '../../feedback'
 import type { AxiosProgressEvent } from 'axios'
 
 import {

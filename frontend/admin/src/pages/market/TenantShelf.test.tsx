@@ -25,8 +25,8 @@ const perm = {
   filteredMenus: [] as unknown[],
 }
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd')
+jest.mock('../../feedback', () => {
+  const actual = jest.requireActual('../../feedback')
   return {
     ...actual,
     message: { error: jest.fn(), success: jest.fn(), warning: jest.fn(), info: jest.fn() },
@@ -58,7 +58,7 @@ jest.mock('../../hooks/usePermission', () => ({
   usePermission: () => perm,
 }))
 
-import { message } from 'antd'
+import { message } from '../../feedback'
 import Capabilities from '../Capabilities'
 import MyInstalls from '../MyInstalls'
 import TenantShelf from './TenantShelf'

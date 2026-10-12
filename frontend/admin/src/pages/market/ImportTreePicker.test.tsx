@@ -12,8 +12,8 @@ import React from 'react'
 import { ConfigProvider } from 'antd'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd')
+jest.mock('../../feedback', () => {
+  const actual = jest.requireActual('../../feedback')
   return {
     ...actual,
     message: { error: jest.fn(), success: jest.fn(), warning: jest.fn(), info: jest.fn() },
@@ -25,7 +25,7 @@ jest.mock('../../services/capabilities', () => ({
   confirmTreeImport: jest.fn(),
 }))
 
-import { message } from 'antd'
+import { message } from '../../feedback'
 import ImportTreePicker, {
   TREE_CANCEL_TOAST, TREE_EMPTY_TITLE, TREE_OVER_LIMIT, TREE_SELECT_DIR, TREE_START_PARSE,
   TREE_USE_SERVER,

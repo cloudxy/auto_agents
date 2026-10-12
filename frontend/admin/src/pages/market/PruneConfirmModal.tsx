@@ -5,7 +5,8 @@
  * 三元组。取消零写入；失败可重试不自动重试；执行中禁 ×/取消/Esc。
  */
 import React, { useEffect, useState } from 'react'
-import { Alert, Button, Modal, Skeleton, Tag, Typography, message } from 'antd'
+import { Alert, Button, Modal, Skeleton, Tag, Typography } from 'antd'
+import { message } from '../../feedback'
 
 import { pruneMissingAssets, type PruneMissingResult } from '../../services/capabilities'
 import { apiErrorMessage } from '../../utils/errorMessage'

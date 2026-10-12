@@ -52,7 +52,7 @@ export const LogDrawer: React.FC<LogDrawerProps> = ({ task, spiderMap, onClose }
       }
       open={!!task}
       onClose={handleClose}
-      width={720}
+      size={720}
     >
       <Space style={{ marginBottom: 12 }} wrap>
         <Input.Search

@@ -23,8 +23,8 @@ export const SelectorTable: React.FC<{ rows: FlowSelector[]; title: string }> = 
     <Text type="secondary" style={{ display: 'block', marginBottom: 6 }}>{title}</Text>
     <Table
       size="small"
-      dataSource={rows}
-      rowKey={(_, index) => String(index)}
+      // 规则行无稳定 id，按下标写进 key（antd 6 弃用 rowKey 函数的 index 参数）
+      dataSource={rows.map((row, index) => ({ ...row, key: String(index) }))}
       pagination={false}
       columns={[
         { title: '字段名', dataIndex: 'name', width: 140, render: (v: string) => <Text code>{v}</Text> },

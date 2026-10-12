@@ -9,9 +9,10 @@
  */
 import React, { useEffect, useRef, useState } from 'react'
 import {
-  Alert, Avatar, Button, Empty, Form, Input, message, Modal, Popconfirm, Select,
+  Alert, Avatar, Button, Empty, Form, Input, Modal, Popconfirm, Select,
   Space, Switch, Table, Tag,
 } from 'antd'
+import { message } from '../feedback'
 import { UserOutlined } from '@ant-design/icons'
 import { fetchUsersPage, type UsersPageQuery } from '../services/admin'
 import {

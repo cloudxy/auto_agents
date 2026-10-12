@@ -9,8 +9,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 
 import type { AssetRow } from '../../services/capabilities'
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd')
+jest.mock('../../feedback', () => {
+  const actual = jest.requireActual('../../feedback')
   return {
     ...actual,
     message: { error: jest.fn(), success: jest.fn(), warning: jest.fn(), info: jest.fn() },
@@ -32,7 +32,8 @@ jest.mock('../../hooks/usePermission', () => ({
   usePermission: () => perm,
 }))
 
-import { ConfigProvider, message } from 'antd'
+import { ConfigProvider } from 'antd'
+import { message } from '../../feedback'
 import CatalogTab from './CatalogTab'
 import {
   EXAMPLES_LIMIT_COPY, EXAMPLES_EMPTY, EXAMPLES_LOAD_FAIL,

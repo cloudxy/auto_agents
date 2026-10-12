@@ -2,7 +2,8 @@
  * 登录页：成功后来源回跳；页脚回官网企业注册（GWT-04.3）。
  */
 import React, { useEffect, useState } from 'react'
-import { Form, Input, Button, message, Typography, Checkbox, Alert } from 'antd'
+import { Form, Input, Button, Typography, Checkbox, Alert } from 'antd'
+import { message } from '../feedback'
 import { UserOutlined, LockOutlined, RocketOutlined, CheckCircleFilled } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'

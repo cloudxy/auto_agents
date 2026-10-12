@@ -3,7 +3,7 @@
  */
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { message } from 'antd'
+import { message } from '../../feedback'
 import type { Task } from './types'
 
 jest.mock('../../services/spiders', () => ({

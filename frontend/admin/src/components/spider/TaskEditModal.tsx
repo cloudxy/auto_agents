@@ -6,7 +6,8 @@
  * 基底 merge 保留。后端 PATCH /spiders/tasks/{id} 校验非 pending 拒绝。
  */
 import React, { useEffect, useState } from 'react'
-import { Modal, Form, Select, Alert, message } from 'antd'
+import { Modal, Form, Select, Alert } from 'antd'
+import { message } from '../../feedback'
 import { updateTask } from '../../services/spiders'
 import type { Task, SpiderRegistry } from './types'
 import { renderParamFields, collectParams, paramsToFormValues, parseParamsJson } from './formUtils'

@@ -33,8 +33,8 @@ jest.mock('../hooks/usePermission', () => ({
   usePermission: jest.fn(),
 }))
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd')
+jest.mock('../feedback', () => {
+  const actual = jest.requireActual('../feedback')
   return {
     ...actual,
     message: {

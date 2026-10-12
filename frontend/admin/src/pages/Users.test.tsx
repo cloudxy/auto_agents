@@ -17,15 +17,15 @@ jest.mock('../services/users', () => ({
   restoreUser: jest.fn(),
 }));
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd');
+jest.mock('../feedback', () => {
+  const actual = jest.requireActual('../feedback');
   return {
     ...actual,
     message: { error: jest.fn(), success: jest.fn(), warning: jest.fn(), info: jest.fn() },
   };
 });
 
-import { message } from 'antd';
+import { message } from '../feedback';
 import { fetchUsersPage } from '../services/admin';
 import { restoreUser } from '../services/users';
 import Users from './Users';

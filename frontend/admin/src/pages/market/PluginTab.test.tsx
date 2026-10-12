@@ -7,8 +7,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import type { AssetRow } from '../../services/capabilities'
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd')
+jest.mock('../../feedback', () => {
+  const actual = jest.requireActual('../../feedback')
   return {
     ...actual,
     message: { error: jest.fn(), success: jest.fn(), warning: jest.fn(), info: jest.fn() },
@@ -29,7 +29,7 @@ jest.mock('../../hooks/usePermission', () => ({
   usePermission: () => perm,
 }))
 
-import { message } from 'antd'
+import { message } from '../../feedback'
 import PluginTab from './PluginTab'
 import { listAssets, syncAgentsHub } from '../../services/capabilities'
 import { SYNC_AGENTS, syncDoneCopy, syncFailCopy } from './marketCopy'

@@ -9,8 +9,9 @@
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Alert, Button, Card, Descriptions, Form, Input, Modal, Space, Tag, Typography, message,
+  Alert, Button, Card, Descriptions, Form, Input, Modal, Space, Tag, Typography,
 } from 'antd'
+import { message } from '../feedback'
 import { CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 
 import { apiErrorMessage, isFormValidateError } from '../utils/errorMessage'

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { Button, Form, Input, Modal, Select, Space, Tag, message } from 'antd'
+import { Button, Form, Input, Modal, Select, Space, Tag } from 'antd'
+import { message } from '../../feedback'
 
 import {
   createTeam,

@@ -12,9 +12,10 @@
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Button, Card, Empty, Form, Input, message, Modal, Popconfirm, Space,
+  Button, Card, Empty, Form, Input, Modal, Popconfirm, Space,
   Table, Tabs, Tag, Typography,
 } from 'antd'
+import { message } from '../feedback'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
   createDepartment, deleteDepartment, listDepartments,

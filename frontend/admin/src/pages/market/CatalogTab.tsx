@@ -4,7 +4,8 @@
  * 工具栏「清理失源资产」（仅超管）→ PruneConfirmModal 二段式确认。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Input, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Empty, Input, Select, Space, Table, Tag, Typography } from 'antd'
+import { message } from '../../feedback'
 import { DeleteOutlined, ReloadOutlined, StarFilled, StarOutlined } from '@ant-design/icons'
 
 import {

@@ -11,7 +11,8 @@
  * - 其他失败：FR-84 族失败句，弹窗不关
  */
 import React, { useEffect, useState } from 'react'
-import { message, Modal, Typography } from 'antd'
+import { Modal, Typography } from 'antd'
+import { message } from '../feedback'
 import { restoreUser, type UserItem } from '../services/users'
 import { apiErrorMessage } from '../utils/errorMessage'
 

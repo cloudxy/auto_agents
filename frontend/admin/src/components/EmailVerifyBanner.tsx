@@ -3,7 +3,8 @@
  * 负责人可重新发送（60 秒一次）；成员提示请负责人验证。
  */
 import React, { useState } from 'react'
-import { Alert, Button, message } from 'antd'
+import { Alert, Button } from 'antd'
+import { message } from '../feedback'
 import { resendVerification } from '../services/auth'
 import { apiErrorMessage } from '../utils/errorMessage'
 import { useAuthStore } from '../store/useAuthStore'
