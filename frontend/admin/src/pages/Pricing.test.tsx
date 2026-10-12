@@ -6,7 +6,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom'
 
 import Pricing from './Pricing'
-import { CHECKOUT_PATH_ENTERPRISE, CHECKOUT_PATH_PRO, CONTACT_ADMIN_COPY } from '../constants/collectCopy'
+import { CHECKOUT_PATH_PRO, CONTACT_ADMIN_COPY } from '../constants/collectCopy'
 import { withQuery } from '../testUtils'
 import { listPlans } from '../services/billing'
 

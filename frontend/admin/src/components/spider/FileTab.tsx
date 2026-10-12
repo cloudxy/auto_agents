@@ -187,7 +187,7 @@ export const FileTab: React.FC<FileTabProps> = ({ isAdmin }) => {
     },
     {
       title: '文件', dataIndex: 'file', key: 'file',
-      render: (v: string | null, record: DefinitionRow) => (
+      render: (v: string | null) => (
         v ? <Text code>{v}</Text> : <Text type="secondary">无代码文件（注册表登记）</Text>
       ),
     },

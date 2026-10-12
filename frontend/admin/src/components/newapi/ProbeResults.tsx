@@ -52,7 +52,7 @@ const ProbeResults: React.FC<{ refreshSignal?: number }> = ({ refreshSignal = 0 
     }
   }, [probesPage, probesPageSize, probesChannelId])
 
-  useEffect(() => { loadProbes() }, [loadProbes, refreshSignal])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadProbes() }, [loadProbes, refreshSignal])
 
   const probeColumns: ColumnsType<ChannelProbeResultItem> = [
     {

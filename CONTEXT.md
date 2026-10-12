@@ -56,7 +56,7 @@
 | 术语 | 含义 |
 |---|---|
 | **OpenAPI golden** | `backend/tests/openapi_routes_golden.txt`。增删 HTTP 路由必须改此文件，否则 `test_openapi_routes_golden.py` 红。 |
-| **admin Playwright 冒烟** | 登录 → 仪表盘 → 用量 → 成员。先 `CI= npm run build -w admin`，再 `CI=1 npm run e2e -w admin`。端口 / `NO_PROXY` / 记住我见 `.claude/memory/playwright-admin-e2e.md`。 |
+| **admin Playwright 冒烟** | 登录 → 仪表盘 → 用量 → 成员。先 `npm run build -w admin`，再 `CI=1 npm run e2e -w admin`。端口 / `NO_PROXY` / 记住我见 `.claude/memory/playwright-admin-e2e.md`。 |
 
 ## 既有域（速览）
 

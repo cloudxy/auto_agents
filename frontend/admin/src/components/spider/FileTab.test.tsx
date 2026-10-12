@@ -26,7 +26,6 @@ jest.mock('../../store/useAuthStore', () => ({
 }))
 
 // jest.mock 提升后此 import 才能拿到 mock 实现（仓库既有测试同型；import/first 例外）
-// eslint-disable-next-line import/first
 import {
   fetchSpiderFiles, fetchRegistry, updateDefinitionMeta, deleteDefinition,
 } from '../../services/spiders'
@@ -71,7 +70,7 @@ function renderTab() {
 
 /** 定位表格行（次行 name 文本）→ 点行内编辑 → 等弹窗标题 */
 async function openEdit(name: string) {
-  // eslint-disable-next-line testing-library/no-node-access -- antd Table 行定位（仓库既有手法）
+  // antd Table 行定位：按 DOM 找所在行（仓库既有手法）
   const row = (await screen.findByText(name)).closest('tr')
   expect(row).not.toBeNull()
   fireEvent.click(within(row as HTMLElement).getByRole('button', { name: EDIT_BTN }))
@@ -145,20 +144,20 @@ test('删除被引用：确认弹窗原样展示后端拒绝句（含 #任务号
     },
   })
   renderTab()
-  // eslint-disable-next-line testing-library/no-node-access -- antd Table 行定位（仓库既有手法）
+  // antd Table 行定位：按 DOM 找所在行（仓库既有手法）
   const row = (await screen.findByText('news_api')).closest('tr')
   expect(row).not.toBeNull()
   fireEvent.click(within(row as HTMLElement).getByRole('button', { name: DELETE_BTN }))
   expect(await screen.findByText('确认删除定义：news_api')).toBeInTheDocument()
   // 确认弹窗内的删除按钮（圈定 .ant-modal，避开行内同名按钮）
-  // eslint-disable-next-line testing-library/no-node-access -- 弹层圈定（仓库既有手法）
+  // 弹层圈定：按 DOM 找弹窗容器（仓库既有手法）
   const modal = document.querySelector('.ant-modal') as HTMLElement
   expect(modal).not.toBeNull()
   fireEvent.click(within(modal).getByRole('button', { name: DELETE_BTN }))
   expect(await screen.findByTestId('delete-reject-reason'))
     .toHaveTextContent('定义被历史任务引用：#101 #102 #103，删除前请先处理相关任务')
   // 弹窗保持打开、无假成功
-  // eslint-disable-next-line testing-library/no-node-access -- 弹层断言（仓库既有手法）
+  // 弹层断言：按 DOM 查弹窗内容（仓库既有手法）
   expect(document.querySelector('.ant-modal-title')?.textContent).toContain('确认删除定义')
   expect(screen.queryByText(/已删除/)).not.toBeInTheDocument()
 })

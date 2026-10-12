@@ -43,7 +43,7 @@ const EventsList: React.FC<{
     }
   }, [eventsPage, eventsPageSize, eventsChannelId])
 
-  useEffect(() => { loadEvents() }, [loadEvents, refreshSignal, configSaved])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadEvents() }, [loadEvents, refreshSignal, configSaved])
 
   const eventColumns: ColumnsType<ChannelEventItem> = [
     {

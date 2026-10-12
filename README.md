@@ -136,7 +136,7 @@ auto_agents/
 | 工具 | 版本 | 用途 |
 |------|------|------|
 | Python | 3.13+ | 后端 / 爬虫 |
-| Node.js | 20 | 前端（CI 与 Dockerfile 均为 20；根 npm workspaces） |
+| Node.js | 24 LTS（≥ 22.13） | 前端（根 `.nvmrc`、CI 与 Dockerfile 均为 24；根 npm workspaces） |
 | MySQL | 8.0+ | 主数据存储 |
 | Redis | 6+ | 队列调度 / 缓存 / 分布式锁（compose 用 Redis 7） |
 | uv | 最新 | Python 依赖管理 |
@@ -384,6 +384,15 @@ bash tools/check/arch.sh          # 数据契约改动必跑
 uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type post-checkout
 ```
 
+前端（Vite 构建 / Jest 单测 / ESLint，仓库根执行）：
+
+```bash
+bash tools/check/frontend.sh                 # 前端门禁 F-2~F-8（含两应用 ESLint）
+npm run build -w admin                       # tsc --noEmit + vite build → frontend/admin/build/（official 同理）
+npm test -w admin && npm test -w official    # Jest
+npm run lint -w admin                        # 单独跑 ESLint
+```
+
 CI 五阶段：Python lint+test → 架构红线 → DB 迁移门禁 → 前端构建 → Docker 校验。
 
 ---
@@ -425,7 +434,7 @@ CI 五阶段：Python lint+test → 架构红线 → DB 迁移门禁 → 前端�
 |------|------|
 | 后端 | FastAPI ≥0.135 / SQLAlchemy 2 / PyMySQL + aiomysql / redis-py(async) / Pydantic 2 / PyJWT / Loguru / Alembic |
 | 爬虫 | Scrapy ≥2.15 / scrapy-redis / DrissionPage / Selenium / httpx |
-| 前端 | React 19 / TypeScript / Ant Design 6 / React Router v7 / Zustand / axios / React Query / Framer Motion(official) / `frontend/shared` |
+| 前端 | React 19 / TypeScript 6 / Vite 8 / Ant Design 6 / React Router v7 / Zustand / axios / React Query / Framer Motion(official) / `frontend/shared`；Jest 30 + ESLint 10 |
 | 配置 | Dynaconf ≥3.2 |
 | 数据 | MySQL 8 / Redis 6+（compose：Redis 7） |
 | 包管理 | uv（Python workspace）/ npm workspaces |
