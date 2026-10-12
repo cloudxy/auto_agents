@@ -44,9 +44,9 @@ async def test_flush_quota_exceeded_parks_only_that_tenant():
         if tenant_id == 9:
             raise QuotaExceededException("full")
 
-    with patch("backend.tasks.consumer.AsyncSession", return_value=ctx), \
-         patch("backend.tasks.consumer.SpiderTaskRepository", return_value=repo), \
-         patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo), \
+    with patch("backend.tasks.consumer_store.AsyncSession", return_value=ctx), \
+         patch("backend.tasks.consumer_store.SpiderTaskRepository", return_value=repo), \
+         patch("backend.tasks.consumer_store.SpiderResultRepository", return_value=repo), \
          patch("backend.tasks.consumer.SpiderTaskConsumer._engine", staticmethod(lambda: object())), \
          patch("backend.services.quota_service.QuotaService.check_result_storage", _quota):
         await consumer._flush_batch(messages, {1: 1, 2: 1})

@@ -253,28 +253,14 @@ class SpiderScheduler:
         （间隔 lock_ttl/3，须小于 ttl），并在轮次循环内检查 lock.lost
         ——续期失败（锁易主 / Redis 故障）主动退出本轮，宁可少跑不可双跑。
         """
-        tick = float(settings.get("SCHEDULER.TICK_SECONDS", 30))
-        min_ttl = int(tick * 2)
-        lock_ttl = max(
-            int(settings.get("SCHEDULER.LOCK_TTL_SECONDS", min_ttl) or 0), min_ttl
-        )
+        lock_ttl = self._lock_ttl()
         async with distributed_lock(
             self._redis, SCHEDULER_LOCK_KEY, ttl=lock_ttl, renewal=lock_ttl / 3
         ) as lock:
             if lock is None:
                 return  # 其他实例已在执行本轮
             now = utcnow()
-            async with AsyncSession(self._engine()) as session:
-                # T-42（FR-105）：queue_depth 告警规则评估随每 tick 运行
-                # （不依赖到期计划；GWT-105.1「一个调度检查周期」），
-                # 持锁内单实例执行防多实例重复通知
-                await self._evaluate_queue_depth(session)
-                repo = SpiderScheduleRepository(session)
-                # 审计 B3-1：先把到期计划固化为标量快照。入队会 commit，默认
-                # expire_on_commit 会让同会话内所有 ORM 实例过期，随后再读
-                # schedule.id / cron_expr 触发异步惰性加载（MissingGreenlet）被吞掉，
-                # next_run_at 永不推进、首个之后的计划整轮失败
-                due_list = [_snapshot(s) for s in await repo.list_due(now)]
+            due_list = await self._load_due(now)
             for schedule in due_list:
                 # 续期失败（锁易主/Redis 故障）：主动退出本轮，防多实例双跑
                 if lock.lost:
@@ -287,6 +273,29 @@ class SpiderScheduler:
                     await self._fire(
                         fire_session, SpiderScheduleRepository(fire_session), schedule, now,
                     )
+
+    @staticmethod
+    def _lock_ttl() -> int:
+        """调度锁 TTL：按 2×tick 钳制下限（配置显式写更小值也保证 TTL > tick）"""
+        tick = float(settings.get("SCHEDULER.TICK_SECONDS", 30))
+        min_ttl = int(tick * 2)
+        return max(
+            int(settings.get("SCHEDULER.LOCK_TTL_SECONDS", min_ttl) or 0), min_ttl
+        )
+
+    async def _load_due(self, now: datetime) -> list[SimpleNamespace]:
+        """持锁内单会话：评估 queue_depth 告警规则 → 到期计划固化为标量快照"""
+        async with AsyncSession(self._engine()) as session:
+            # T-42（FR-105）：queue_depth 告警规则评估随每 tick 运行
+            # （不依赖到期计划；GWT-105.1「一个调度检查周期」），
+            # 持锁内单实例执行防多实例重复通知
+            await self._evaluate_queue_depth(session)
+            repo = SpiderScheduleRepository(session)
+            # 审计 B3-1：先把到期计划固化为标量快照。入队会 commit，默认
+            # expire_on_commit 会让同会话内所有 ORM 实例过期，随后再读
+            # schedule.id / cron_expr 触发异步惰性加载（MissingGreenlet）被吞掉，
+            # next_run_at 永不推进、首个之后的计划整轮失败
+            return [_snapshot(s) for s in await repo.list_due(now)]
 
     async def _evaluate_queue_depth(self, session: AsyncSession) -> None:
         """评估 queue_depth 告警规则（每 tick；SCHEDULER.QUEUE_DEPTH_WARN
@@ -329,6 +338,14 @@ class SpiderScheduler:
             return
 
         # ── 4. 入队（使用计算出的优先级；归属=计划入队企业，工人不带企业） ──
+        triggered = await self._enqueue_due(session, schedule, priority, strategy)
+        await self._advance_schedule(repo, schedule, now)
+        if triggered:
+            logger.info(f"调度触发完成: schedule_id={schedule.id}, spider={spider_name}")
+
+    async def _enqueue_due(self, session, schedule, priority: str, strategy: str) -> bool:
+        """到期计划入队；被活跃键守卫拒绝 / 其他失败均回滚会话（调用方照常推进触发时刻）"""
+        spider_name = schedule.spider_name
         triggered = False
         try:
             service = SpiderService(session)
@@ -352,9 +369,7 @@ class SpiderScheduler:
                 f"调度触发失败: schedule_id={schedule.id}, spider={spider_name}, error={e}"
             )
             await _safe_rollback(session)
-        await self._advance_schedule(repo, schedule, now)
-        if triggered:
-            logger.info(f"调度触发完成: schedule_id={schedule.id}, spider={spider_name}")
+        return triggered
 
     @staticmethod
     def _parse_strategy(params_json: Optional[str]) -> str:

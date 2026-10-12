@@ -17,7 +17,8 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 
-from backend.tasks.consumer import _MAX_REDO_ATTEMPTS, SpiderTaskConsumer
+from backend.tasks.consumer import SpiderTaskConsumer
+from backend.tasks.consumer_ingest import _MAX_REDO_ATTEMPTS
 from platform_core.models.spider_result import SpiderResult
 from platform_core.models.spider_task import SpiderTask
 from platform_core.models.tenant import Tenant

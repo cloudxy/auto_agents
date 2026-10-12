@@ -90,38 +90,45 @@ class AlertService:
         try:
             rules = await self.repo.list_active()
             for rule in rules:
-                # 跳过不匹配的规则（spider_name 为 NULL 表示全局规则）
-                if rule.spider_name and rule.spider_name != task_info.get("spider_name"):
-                    continue
-                # 跳过 queue_depth 类型（非任务终态口径；由调度器周期评估
-                # —— evaluate_queue_depth，GWT-105.1 触发路径）
-                if rule.rule_type == "queue_depth":
-                    continue
-                # 检查静默窗口
-                if await self._is_in_silence(rule):
-                    continue
-                # 根据规则类型检查是否触发
-                triggered = False
-                message = ""
-                if rule.rule_type == "consecutive_failures":
-                    triggered = await self._check_consecutive_failures(rule, task_info)
-                    if triggered:
-                        message = f"连续失败次数达到 {int(rule.threshold)}"
-                elif rule.rule_type == "result_drop":
-                    triggered = await self._check_result_drop(rule, task_info)
-                    if triggered:
-                        message = f"结果数下降超过 {rule.threshold}%"
-                elif rule.rule_type == "task_timeout":
-                    triggered = await self._check_task_timeout(rule, task_info)
-                    if triggered:
-                        message = f"任务时长超过 {rule.threshold} 分钟"
-                if triggered:
-                    await self._send_alert(rule, task_info, message)
-                    # 更新 last_triggered_at
-                    rule.last_triggered_at = utcnow()
-                    await self.session.commit()
+                await self._evaluate_rule(rule, task_info)
         except Exception as e:  # noqa: BLE001 告警评估失败不影响主流程
             logger.warning(f"告警评估失败（不影响主流程）: {e}")
+
+    async def _evaluate_rule(self, rule: AlertRule, task_info: dict) -> None:
+        """单条规则评估（任务终态路径）：匹配 → 静默窗 → 按类型检查 → 触发并推进 last_triggered_at
+
+        异常不在此吞掉：交由 evaluate 统一兜底（与逐条内联时一致，异常即结束本轮评估）。
+        """
+        # 跳过不匹配的规则（spider_name 为 NULL 表示全局规则）
+        if rule.spider_name and rule.spider_name != task_info.get("spider_name"):
+            return
+        # 跳过 queue_depth 类型（非任务终态口径；由调度器周期评估
+        # —— evaluate_queue_depth，GWT-105.1 触发路径）
+        if rule.rule_type == "queue_depth":
+            return
+        # 检查静默窗口
+        if await self._is_in_silence(rule):
+            return
+        # 根据规则类型检查是否触发
+        triggered = False
+        message = ""
+        if rule.rule_type == "consecutive_failures":
+            triggered = await self._check_consecutive_failures(rule, task_info)
+            if triggered:
+                message = f"连续失败次数达到 {int(rule.threshold)}"
+        elif rule.rule_type == "result_drop":
+            triggered = await self._check_result_drop(rule, task_info)
+            if triggered:
+                message = f"结果数下降超过 {rule.threshold}%"
+        elif rule.rule_type == "task_timeout":
+            triggered = await self._check_task_timeout(rule, task_info)
+            if triggered:
+                message = f"任务时长超过 {rule.threshold} 分钟"
+        if triggered:
+            await self._send_alert(rule, task_info, message)
+            # 更新 last_triggered_at
+            rule.last_triggered_at = utcnow()
+            await self.session.commit()
 
     async def evaluate_queue_depth(self) -> int:
         """调度器周期评估 queue_depth 规则（FR-105 接通，GWT-105.1/105.3；db-spec §16.6）
@@ -164,6 +171,11 @@ class AlertService:
                 f"created_by={rule.created_by}, depth={depth}"
             )
             return False
+        await self._fire_queue_depth_alert(rule, depth, recipient_id)
+        return True
+
+    async def _fire_queue_depth_alert(self, rule: AlertRule, depth: int, recipient_id: int) -> None:
+        """queue_depth 命中落地：渠道发送 → notifications 命中行 → 推进 last_triggered_at（同事务提交）"""
         severity = rule.severity or "warning"
         message = f"本企业排队任务数 {depth} 已超过阈值 {int(rule.threshold)}"
         # 渠道发送：NotifyService 内部逐渠道吞异常，失败不挡命中记录
@@ -190,7 +202,6 @@ class AlertService:
             f"tenant_id={rule.tenant_id}, depth={depth}, "
             f"threshold={rule.threshold}, recipient={recipient_id}"
         )
-        return True
 
     async def _check_consecutive_failures(self, rule: AlertRule, task_info: dict) -> bool:
         """查询该 spider 最近 N 条任务，连续失败次数 >= threshold 则触发"""

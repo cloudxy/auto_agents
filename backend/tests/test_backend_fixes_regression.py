@@ -333,7 +333,7 @@ class TestIngestLoopShutdownFlush:
 
         consumer._flush_batch = AsyncMock(side_effect=_capture_flush)
 
-        with patch("backend.tasks.consumer.asyncio.get_event_loop") as mock_loop:
+        with patch("backend.tasks.consumer_ingest.asyncio.get_event_loop") as mock_loop:
             mock_loop.return_value.time.return_value = 100.0
             task = asyncio.create_task(consumer._ingest_loop())
             with pytest.raises(asyncio.CancelledError):
@@ -350,7 +350,7 @@ class TestIngestLoopShutdownFlush:
         consumer, _ = self._consumer_with_pending_batch()
         consumer._flush_batch = AsyncMock(side_effect=RuntimeError("db down"))
 
-        with patch("backend.tasks.consumer.asyncio.get_event_loop") as mock_loop:
+        with patch("backend.tasks.consumer_ingest.asyncio.get_event_loop") as mock_loop:
             mock_loop.return_value.time.return_value = 100.0
             task = asyncio.create_task(consumer._ingest_loop())
             with pytest.raises(asyncio.CancelledError):
@@ -452,9 +452,9 @@ class TestFlushBatchCountsRecompute:
 
         qs = MagicMock()
         qs.check_result_storage = AsyncMock()
-        with patch("backend.tasks.consumer.AsyncSession", return_value=ctx), \
-             patch("backend.tasks.consumer.SpiderTaskRepository", return_value=repo), \
-             patch("backend.tasks.consumer.SpiderResultRepository", return_value=repo), \
+        with patch("backend.tasks.consumer_store.AsyncSession", return_value=ctx), \
+             patch("backend.tasks.consumer_store.SpiderTaskRepository", return_value=repo), \
+             patch("backend.tasks.consumer_store.SpiderResultRepository", return_value=repo), \
              patch("backend.tasks.consumer.SpiderTaskConsumer._engine",
                    staticmethod(lambda: object())), \
              patch("backend.services.quota_service.QuotaService", return_value=qs):
@@ -543,7 +543,7 @@ class TestIngestBatchLpop:
 
         # time 恒定：不满足 flush_interval，20 条 < BATCH_SIZE(50)，
         # 仅在 CancelledError 关停时 flush 残余批次
-        with patch("backend.tasks.consumer.asyncio.get_event_loop") as mock_loop:
+        with patch("backend.tasks.consumer_ingest.asyncio.get_event_loop") as mock_loop:
             mock_loop.return_value.time.return_value = 100.0
             task = asyncio.create_task(consumer._ingest_loop())
             with pytest.raises(asyncio.CancelledError):
@@ -570,8 +570,8 @@ class TestIngestBatchLpop:
         fake_sleep = AsyncMock()
 
         with (
-            patch("backend.tasks.consumer.asyncio.get_event_loop") as mock_loop,
-            patch("backend.tasks.consumer.asyncio.sleep", fake_sleep),
+            patch("backend.tasks.consumer_ingest.asyncio.get_event_loop") as mock_loop,
+            patch("backend.tasks.consumer_ingest.asyncio.sleep", fake_sleep),
         ):
             mock_loop.return_value.time.return_value = 100.0
             task = asyncio.create_task(consumer._ingest_loop())
