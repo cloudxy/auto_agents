@@ -47,13 +47,8 @@ def _quota_dict(raw) -> Optional[dict]:
 
 
 async def apply_plan_quota(
-    session: AsyncSession,
-    tenant_id: int | None,
-    plan: Plan,
-    now: datetime,
-    *,
-    quota_override: Optional[dict] = None,
-    period_days: int | None = None,
+    session: AsyncSession, tenant_id: int | None, plan: Plan, now: datetime, *,
+    quota_override: Optional[dict] = None, period_days: int | None = None,
 ) -> None:
     """把套餐配额写入 tenants.quota + 订阅行。quota_override 优先于价目 JSON。
 
@@ -69,11 +64,7 @@ async def apply_plan_quota(
     tenant = await session.get(Tenant, tenant_id)
     if tenant is None:
         raise NotFoundException("租户")
-    blob = quota_override if quota_override is not None else _quota_dict(plan.quota_json)
-    if blob:
-        merged = dict(tenant.quota or {}) if isinstance(tenant.quota, dict) else {}
-        merged.update(blob)
-        tenant.quota = merged
+    _merge_quota(tenant, quota_override if quota_override is not None else _quota_dict(plan.quota_json))
     days = period_days if period_days else _PERIOD_DAYS.get(plan.period, 30)
     sub = (await session.execute(
         select(TenantSubscription).where(TenantSubscription.tenant_id == tenant_id)
@@ -82,16 +73,7 @@ async def apply_plan_quota(
         tenant.expires_at = None
         end = None
     else:
-        start = _naive(now)
-        current_end = _naive(getattr(sub, "current_period_end", None)) if sub is not None else None
-        credit = timedelta(0)
-        if sub is not None and sub.status == "active" and current_end is not None and current_end > start:
-            if sub.plan_id == plan.id:
-                start = current_end  # 同档续费：从原到期日顺延
-            else:
-                # 决策 D22：换档立即生效，旧档剩余天数按日价折算成新档天数（不丢钱）
-                credit = await _conversion_credit(session, sub.plan_id, current_end - start, plan, days)
-        end = start + timedelta(days=days) + credit
+        end = await _paid_period_end(session, sub, plan, now, days)
         tenant.expires_at = end
     if sub is None:
         sub = TenantSubscription(tenant_id=tenant_id, plan_id=plan.id, status="active")
@@ -99,6 +81,30 @@ async def apply_plan_quota(
     sub.plan_id = plan.id
     sub.status = "active"
     sub.current_period_end = end
+
+
+def _merge_quota(tenant: Tenant, blob: Optional[dict]) -> None:
+    """配额按键合并：只覆盖套餐定义的键，租户上的其它设置保留"""
+    if blob:
+        merged = dict(tenant.quota or {}) if isinstance(tenant.quota, dict) else {}
+        merged.update(blob)
+        tenant.quota = merged
+
+
+async def _paid_period_end(
+    session: AsyncSession, sub: Optional[TenantSubscription], plan: Plan, now: datetime, days: int,
+) -> datetime:
+    """付费档账期末：同档续费从原到期日顺延；换档按日价折算旧档剩余天数"""
+    start = _naive(now)
+    current_end = _naive(getattr(sub, "current_period_end", None)) if sub is not None else None
+    credit = timedelta(0)
+    if sub is not None and sub.status == "active" and current_end is not None and current_end > start:
+        if sub.plan_id == plan.id:
+            start = current_end  # 同档续费：从原到期日顺延
+        else:
+            # 决策 D22：换档立即生效，旧档剩余天数按日价折算成新档天数（不丢钱）
+            credit = await _conversion_credit(session, sub.plan_id, current_end - start, plan, days)
+    return start + timedelta(days=days) + credit
 
 
 async def _conversion_credit(

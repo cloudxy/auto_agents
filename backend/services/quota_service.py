@@ -324,6 +324,22 @@ class QuotaService:
             "limit_tokens": tenant_relay_limit(tenant),
         }
 
+    async def _llm_month_by_provider(self, tenant_id: int, year_month: str) -> list:
+        """当月 LLM 用量按 provider 聚合（tokens / cost 两列）"""
+        month_prefix = f"{year_month}-"
+        return (await self.session.execute(
+            select(
+                LlmTokenUsage.provider_name,
+                func.sum(LlmTokenUsage.total_tokens).label("tokens"),
+                func.sum(LlmTokenUsage.cost_cents).label("cost"),
+            )
+            .where(
+                LlmTokenUsage.tenant_id == tenant_id,
+                func.cast(LlmTokenUsage.stat_date, String).like(month_prefix + "%"),
+            )
+            .group_by(LlmTokenUsage.provider_name)
+        )).all()
+
     async def usage_overview(self, tenant_id: int, year_month: str) -> dict:
         """用量看板数据（S3-2 消费）：三指标当前值 vs 配额 + 成员分摊"""
         tenant = await self._tenant(tenant_id)
@@ -337,19 +353,7 @@ class QuotaService:
         stored_results = await SpiderResultRepository(self.session).count_owned_by_tenant(
             tenant_id
         )
-        month_prefix = f"{year_month}-"
-        tokens_row = (await self.session.execute(
-            select(
-                LlmTokenUsage.provider_name,
-                func.sum(LlmTokenUsage.total_tokens).label("tokens"),
-                func.sum(LlmTokenUsage.cost_cents).label("cost"),
-            )
-            .where(
-                LlmTokenUsage.tenant_id == tenant_id,
-                func.cast(LlmTokenUsage.stat_date, String).like(month_prefix + "%"),
-            )
-            .group_by(LlmTokenUsage.provider_name)
-        )).all()
+        tokens_row = await self._llm_month_by_provider(tenant_id, year_month)
         tokens_total = sum(int(r.tokens or 0) for r in tokens_row)
         cost_by_provider = {r.provider_name: int(r.cost or 0) for r in tokens_row}
         usage = {
