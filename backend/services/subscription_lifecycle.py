@@ -85,6 +85,7 @@ class SubscriptionLifecycleService:
         self._task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
+        logger.info("启动账期巡检")
         if "pytest" in sys.modules:
             logger.info("账期巡检测试态不启动")
             return

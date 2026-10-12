@@ -208,6 +208,7 @@ class LlmUsageFlushService:
         self._redis: Optional[aioredis.Redis] = None
 
     async def start(self) -> None:
+        logger.info("启动 LLM 用量聚合任务")
         if not settings.get("LLM.USAGE_PERSIST_ENABLED", True):
             logger.info("LLM 用量落库已禁用（LLM.USAGE_PERSIST_ENABLED=false）")
             return

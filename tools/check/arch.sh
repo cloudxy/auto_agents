@@ -99,7 +99,8 @@ fi
 #   2) 顶层类名以 Service / Mixin 结尾的类的公开方法（含 @staticmethod / @classmethod）。
 #      豁免：@property / @cached_property / @x.setter|getter|deleter 访问器；
 #      体内只有 docstring + `...` / `pass` 的抽象桩；继承 Protocol 的类（结构契约无实现）。
-# 判定：第一条语句（跳过 docstring）必须含 logger.（复合语句按其整段源码判定，与模块级同口径）。
+# 判定：第一条语句（跳过 docstring）必须是含 logger. 的表达式语句——if / try / with 等复合语句
+#   不算（曾有 7 个方法只在 if 的禁用分支或 except 里打日志，正常路径没有入口日志也能过）。
 # 输出 path:line: def name / def Class.method。签名跨行与嵌套包一并覆盖。
 R10_OUTPUT="$(uv run python - <<'PYEOF' 2>/dev/null || echo "R10 递归扫描执行失败（uv/python 环境）"
 from __future__ import annotations
@@ -159,7 +160,7 @@ def lacks_entry_log(src: str, fn, *, allow_stub: bool) -> bool:
     body = strip_docstring(list(fn.body))
     if allow_stub and is_stub(body):
         return False
-    if not body:
+    if not body or not isinstance(body[0], ast.Expr):
         return True
     return "logger." not in (ast.get_source_segment(src, body[0]) or "")
 

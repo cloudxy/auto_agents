@@ -262,6 +262,7 @@ class RelayEnforcementService:
         self._task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
+        logger.info("启动中转执法巡检")
         if "pytest" in sys.modules:
             logger.info("中转执法巡检测试态不启动")
             return

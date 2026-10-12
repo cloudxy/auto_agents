@@ -2,7 +2,7 @@
 
 覆盖口径：模块级公开函数 + 顶层 *Service / *Mixin 类公开方法（含 staticmethod /
 classmethod）；豁免 property 访问器、抽象桩（docstring + ... / pass）、Protocol 类、
-非 Service/Mixin 类与私有方法。
+非 Service/Mixin 类与私有方法。首条语句须是 logger 表达式：if / try 分支里的日志不算入口日志。
 """
 import subprocess
 import sys
@@ -64,6 +64,18 @@ SAMPLE = textwrap.dedent('''
         def _private(self):
             return 4
 
+        async def start(self):
+            if not enabled:
+                logger.info("只在禁用分支打日志")
+                return
+            run()
+
+        def guarded(self):
+            try:
+                return work()
+            except Exception:
+                logger.warning("只在 except 里打日志")
+
     class BarMixin:
         def mixin_missing(self):
             return 5
@@ -104,6 +116,8 @@ def test_r10_flags_class_methods_and_module_functions(tmp_path):
         "FooService.missing",
         "FooService.import_first",
         "FooService.static_missing",
+        "FooService.start",
+        "FooService.guarded",
         "BarMixin.mixin_missing",
     ])
 

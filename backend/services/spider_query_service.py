@@ -117,14 +117,14 @@ class SpiderQueryService:
 
         未绑 tenant_id → 不查库，0 行（FR-13）。绑定后仍 exclude marketplace。
         """
+        logger.info(
+            f"公开结果查询: spider={spider_name}, tenant_id={tenant_id}, "
+            f"page={page}, start={start_time}, end={end_time}"
+        )
         if tenant_id is None:
             logger.info(f"公开结果查询拒绝: 钥匙未绑定企业 spider={spider_name}")
             return [], 0
         bound_tid = int(tenant_id)
-        logger.info(
-            f"公开结果查询: spider={spider_name}, tenant_id={bound_tid}, "
-            f"page={page}, start={start_time}, end={end_time}"
-        )
         with tenant_scope(bound_tid):
             return await self.result_repo.query_by_spider(
                 spider_name=spider_name,

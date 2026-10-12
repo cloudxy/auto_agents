@@ -91,6 +91,7 @@ class AlertService:
         task_info: {"task_id": int, "spider_name": str, "status": str,
                     "result_count": int, "duration_seconds": float}
         """
+        logger.debug(f"评估告警规则 | task={task_info.get('task_id')} status={task_info.get('status')}")
         try:
             rules = await self.repo.list_active()
             for rule in rules:

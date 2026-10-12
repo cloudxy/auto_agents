@@ -27,6 +27,7 @@ class RetentionService:
         self._task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
+        logger.info("启动 retention 执行器")
         if "pytest" in sys.modules:
             logger.info("retention 测试态不启动")
             return

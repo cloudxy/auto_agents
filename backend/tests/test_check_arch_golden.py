@@ -1,26 +1,9 @@
-"""E3：R10 规则黄金样例（违规 vs 干净）；I2 宣称锚点文件存在。"""
-import re
+"""I2：docs/claims.md 宣称锚点文件存在。
+
+R10 黄金样例已移到 test_check_arch_r10.py——那里直接抽取并执行 arch.sh 里的真实检查块，
+此前这里的逐行正则只是测试文件自己的简化实现，测不到真实规则。
+"""
 from pathlib import Path
-
-
-def _r10_hits(source: str) -> list[str]:
-    lines = source.splitlines()
-    hits = []
-    for i, line in enumerate(lines):
-        if re.match(r"^(async )?def [a-z]", line):
-            nxt = lines[i + 1] if i + 1 < len(lines) else ""
-            if "logger." not in nxt:
-                hits.append(line)
-    return hits
-
-
-def test_r10_flags_missing_logger():
-    hits = _r10_hits("def create_thing():\n    return 1\n")
-    assert any("create_thing" in h for h in hits)
-
-
-def test_r10_clean_when_logger_first():
-    assert _r10_hits("def create_thing():\n    logger.info('x')\n    return 1\n") == []
 
 
 def test_claims_anchor_files_exist():

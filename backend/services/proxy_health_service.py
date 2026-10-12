@@ -49,6 +49,7 @@ class ProxyHealthService:
 
     async def start(self):
         """启动健康探测循环（随 FastAPI lifespan 调用）"""
+        logger.info("启动代理健康管理")
         if not settings.get("PROXY_HEALTH.ENABLED", False):
             logger.info("代理健康管理已禁用（PROXY_HEALTH.ENABLED=false）")
             return
