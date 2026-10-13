@@ -1,7 +1,7 @@
 ---
 name: check-arch
 description: >-
-  Runs tools/check/arch.sh (R1–R13 + B1–B3) and reports file:line violations.
+  Runs tools/check/arch.sh (R1–R13 + B1–B4 + FR-14 + PL + SZ) and reports file:line violations.
   Use when 架构检查, 硬编码密钥, 分层边界, 提交前, PR, or after verify.
 ---
 
@@ -34,7 +34,7 @@ Arch:
 - [ ] 直到退出码 0
 ```
 
-通过时打印：`✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥 + PL 插件引用，全部通过）`。
+通过时打印：`✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥 + PL 插件引用 + SZ 规模约定，全部通过）`。
 
 ## 完成时回复
 

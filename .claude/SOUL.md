@@ -1,6 +1,6 @@
 # 项目性格（SOUL）
 
-> SOUL 是 rules 之外的"风格倾向"。rules 是 `scripts/check-arch.sh` 能机械检查的硬约束，SOUL 是回答时的软偏好。
+> SOUL 是 rules 之外的"风格倾向"。rules 是 `tools/check/arch.sh` 能机械检查的硬约束，SOUL 是回答时的软偏好。
 > 当 rules 没说怎么办时，按 SOUL 走。
 
 ## 1. 悲观验证（Pessimistic by default）
