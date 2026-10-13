@@ -5,6 +5,7 @@ Seam（工单预确认）：SkillImportService.import_url 公共方法（注入 
 import io
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import yaml
@@ -12,6 +13,9 @@ import yaml
 import backend.services.skill_import_service as svc
 from backend.services.skill_import_service import SkillImportService
 from platform_core.exceptions import ValidationException
+
+if TYPE_CHECKING:
+    import httpx
 
 SKILL_MD = """---
 name: imported-skill

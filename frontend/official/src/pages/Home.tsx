@@ -4,7 +4,8 @@
  * 说明：Hero/功能介绍/定价入口为静态诚实文案；能力精选依赖公开列表；管理后台地址经环境变量注入
  */
 import React from 'react'
-import { Button, message } from 'antd'
+import { Button } from 'antd'
+import { message } from '../feedback'
 import {
   RocketOutlined,
   LinkOutlined,

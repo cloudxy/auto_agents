@@ -84,6 +84,53 @@ def resolve_config_from_settings() -> LlmRuntimeConfig:
     ))
 
 
+async def _tenant_active_row(session: AsyncSession, tenant_id) -> Optional[LlmProvider]:
+    """当前租户的激活且启用行（软删行不参与运行时解析）"""
+    return (await session.execute(
+        select(LlmProvider).where(
+            LlmProvider.is_active == True,  # noqa: E712
+            LlmProvider.enabled == True,  # noqa: E712
+            LlmProvider.tenant_id == tenant_id,
+            LlmProvider.deleted_at.is_(None),  # 软删行不参与运行时解析
+        )
+    )).scalar_one_or_none()
+
+
+async def _platform_public_row(session: AsyncSession) -> Optional[LlmProvider]:
+    """平台公共供应商（tenant_id NULL、启用、未软删）中 id 最小的一行"""
+    return (await session.execute(
+        select(LlmProvider).where(
+            LlmProvider.enabled == True,  # noqa: E712
+            LlmProvider.tenant_id.is_(None),
+            LlmProvider.deleted_at.is_(None),
+        ).order_by(LlmProvider.id.asc())
+    )).scalars().first()
+
+
+def _row_credentials(active, decrypt: Callable[[Optional[str]], str]) -> tuple[str, str, str]:
+    """激活行 → (明文 api_key, 规范化 base_url, model)；任一为空即配置不完整"""
+    api_key = decrypt(getattr(active, "api_key_encrypted", None))
+    base_url = str(active.base_url or "").rstrip("/")
+    model = str(active.model or "")
+    return api_key, base_url, model
+
+
+def _row_config(active, api_key: str, base_url: str, model: str) -> LlmRuntimeConfig:
+    """激活行 → provider 路径运行时配置快照（source=provider:<id>）"""
+    return LlmRuntimeConfig(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        temperature=float(active.temperature),
+        timeout=float(active.timeout),
+        max_retries=max(1, int(active.max_retries)),
+        enabled=True,
+        source=f"provider:{active.id}",
+        provider_id=int(active.id),
+        protocol=str(active.provider_type or "openai_compatible"),
+    )
+
+
 async def resolve_runtime_config(
     session: AsyncSession,
     *,
@@ -105,42 +152,16 @@ async def resolve_runtime_config(
 
     tenant_id = current_tenant_id()
     if tenant_id is not None:
-        active = (await session.execute(
-            select(LlmProvider).where(
-                LlmProvider.is_active == True,  # noqa: E712
-                LlmProvider.enabled == True,  # noqa: E712
-                LlmProvider.tenant_id == tenant_id,
-                LlmProvider.deleted_at.is_(None),  # 软删行不参与运行时解析
-            )
-        )).scalar_one_or_none()
+        active = await _tenant_active_row(session, tenant_id)
         if active is None:
             # 平台公共供应商兜底（免费档语义：配额约束在 S3 检查点执行）
-            active = (await session.execute(
-                select(LlmProvider).where(
-                    LlmProvider.enabled == True,  # noqa: E712
-                    LlmProvider.tenant_id.is_(None),
-                    LlmProvider.deleted_at.is_(None),
-                ).order_by(LlmProvider.id.asc())
-            )).scalars().first()
+            active = await _platform_public_row(session)
     else:
         active = await repo.get_active()
     if active is not None and bool(active.enabled):
-        api_key = decrypt(getattr(active, "api_key_encrypted", None))
-        base_url = str(active.base_url or "").rstrip("/")
-        model = str(active.model or "")
+        api_key, base_url, model = _row_credentials(active, decrypt)
         if api_key and base_url and model:
-            return apply_proxy_route(LlmRuntimeConfig(
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                temperature=float(active.temperature),
-                timeout=float(active.timeout),
-                max_retries=max(1, int(active.max_retries)),
-                enabled=True,
-                source=f"provider:{active.id}",
-                provider_id=int(active.id),
-                protocol=str(active.provider_type or "openai_compatible"),
-            ))
+            return apply_proxy_route(_row_config(active, api_key, base_url, model))
         logger.warning(
             "激活的 LLM 供应商配置不完整（密钥缺失/解密失败/base_url/model 为空），"
             f"回退 yml/env 兜底: provider_id={getattr(active, 'id', None)}"
@@ -164,34 +185,14 @@ async def resolve_own_tenant_config(
     tenant_id = current_tenant_id()
     if tenant_id is None:
         return None
-    active = (await session.execute(
-        select(LlmProvider).where(
-            LlmProvider.is_active == True,  # noqa: E712
-            LlmProvider.enabled == True,  # noqa: E712
-            LlmProvider.tenant_id == tenant_id,
-            LlmProvider.deleted_at.is_(None),
-        )
-    )).scalar_one_or_none()
+    active = await _tenant_active_row(session, tenant_id)
     if active is None or not bool(active.enabled):
         return None
-    api_key = decrypt(getattr(active, "api_key_encrypted", None))
-    base_url = str(active.base_url or "").rstrip("/")
-    model = str(active.model or "")
+    api_key, base_url, model = _row_credentials(active, decrypt)
     if not (api_key and base_url and model):
         logger.warning(
             "本企业激活供应商配置不完整，改走平台网关: "
             f"provider_id={getattr(active, 'id', None)}"
         )
         return None
-    return LlmRuntimeConfig(
-        base_url=base_url,
-        api_key=api_key,
-        model=model,
-        temperature=float(active.temperature),
-        timeout=float(active.timeout),
-        max_retries=max(1, int(active.max_retries)),
-        enabled=True,
-        source=f"provider:{active.id}",
-        provider_id=int(active.id),
-        protocol=str(active.provider_type or "openai_compatible"),
-    )
+    return _row_config(active, api_key, base_url, model)

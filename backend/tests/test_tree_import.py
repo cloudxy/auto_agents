@@ -6,7 +6,7 @@ GWT 锚：07.1 正常、07.2 取消零写入、07.3 upsert、07.4 空态、07.5 
 
 夹具口径：multipart 每个 part 的 filename = 前端 webkitRelativePath（含顶层目录
 名）。confirm 会真落盘，**所有 confirm 用例必须先把 SKILLS.AGENTS_ROOT 指到
-tmp_path**，否则会写进仓库真 .agents。
+tmp_path**，否则会写进仓库下的默认 hub 根（D2 后 runtime/agents-hub）。
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ SKILL_MD = "---\nname: {name}\ndescription: {name} 的说明\n---\n\n# {name}\n�
 
 @pytest.fixture
 def agents_root(tmp_path):
-    """把落盘根钉到临时目录——confirm 绝不能写进仓库真 .agents。"""
+    """把落盘根钉到临时目录——confirm 绝不能写进仓库下的默认 hub 根。"""
     from config import settings
 
     root = tmp_path / "agents-root" / ".agents"

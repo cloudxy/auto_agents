@@ -24,8 +24,8 @@ jest.mock('../store/useAuthStore', () => ({
     sel({ user: mockUserState.current, logout: mockLogout }),
 }));
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd');
+jest.mock('../feedback', () => {
+  const actual = jest.requireActual('../feedback');
   return {
     ...actual,
     message: {
@@ -37,7 +37,7 @@ jest.mock('antd', () => {
   };
 });
 
-import { message } from 'antd';
+import { message } from '../feedback';
 import Members from './Members';
 
 const OWNER_USER = { tenant_id: 1, tenant_role: 'owner', is_platform_admin: false };

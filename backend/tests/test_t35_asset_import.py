@@ -35,8 +35,9 @@ def import_env(tmp_path: Path):
     """库根 + 沙箱根都收进 tmp_path（逃逸断言可快照整个 tmp 区）"""
     from config import settings
 
-    # AD-4c/OQ-2：legacy 导入落盘根已由 capability-library 统一切到 .agents，
-    # 故本夹具钉的是 SKILLS.AGENTS_ROOT；LIBRARY_ROOT 一并钉住，防止旧路径残留
+    # AD-4c/OQ-2：legacy 导入落盘根已由 capability-library 统一切到产品 hub 根
+    # （SKILLS.AGENTS_ROOT，D2 后默认 runtime/agents-hub），故本夹具钉的是
+    # SKILLS.AGENTS_ROOT；LIBRARY_ROOT 一并钉住，防止旧路径残留
     # 写到仓库真库根（逃逸断言仍可快照整个 tmp 区）。
     library = tmp_path / "library" / ".agents"
     sandbox = tmp_path / "_sandbox"

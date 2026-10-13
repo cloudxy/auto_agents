@@ -9,9 +9,10 @@ import React, { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDateTime, TIER_COLORS } from '@auto-agents/frontend-shared'
 import {
-  Alert, Button, Drawer, Form, Input, InputNumber, message, Modal, Select,
+  Alert, Button, Drawer, Form, Input, InputNumber, Modal, Select,
   Space, Table, Tabs, Tag, Typography,
 } from 'antd'
+import { message } from '../feedback'
 import { ReloadOutlined, SyncOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 

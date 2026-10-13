@@ -13,9 +13,9 @@
 
 | 项 | 值 |
 |----|----|
-| 前端 | `FROM node:20`；`npm ci`；先 `npm run build -w @auto-agents/frontend-shared`，再 admin / official |
-| 后端 | `FROM python:3.13-slim` + `uv`；`uv sync --package auto-agents-backend --no-dev` |
-| 启动 | `uv run python -m scripts.runlib.backend --no-reload` |
+| 前端 | `FROM node:24`；`npm ci`；先 `npm run build -w @auto-agents/frontend-shared`，再 admin / official（Vite，产物在各自 `build/`） |
+| 后端 | `FROM python:3.13-slim` + `uv`；`uv sync --locked --package auto-agents-backend --no-dev` |
+| 启动 | `uv run python -m scripts.runlib.backend --no-reload`；镜像设 `UV_NO_SYNC=1`，运行期不按根项目重新同步（否则启动即联网补装爬虫包与 dev 组） |
 | 端口 | `EXPOSE 9111` |
 | 健康检查 | `http://127.0.0.1:9111/api/v1/health/deep` |
 | 依赖 | `pyproject.toml` + `uv.lock` |
@@ -30,7 +30,7 @@
 | redis | `redis:7-alpine` | 6379 |
 | backend | `build: .` | 9111 |
 
-backend command：`uv run python -m scripts.runlib.backend --no-reload --env local`。开发默认密码对齐 `init_project.sh`。
+backend command：`uv run python -m scripts.runlib.backend --no-reload --env local`。开发默认密码对齐 `init_project.sh`。命名卷 `agents_hub` 挂 `/app/runtime/agents-hub`（能力市场 hub 根；`.dockerignore` 排除 `runtime/`，不挂卷则导入内容随容器重建丢失）。
 
 ## 环境变量
 

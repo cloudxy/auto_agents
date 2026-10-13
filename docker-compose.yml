@@ -6,7 +6,7 @@
 #   docker compose down -v         # 停止并清除数据卷
 #
 # 注意：密码为开发默认值（与 config/local/.env 对齐），严禁用于生产
-# 生产部署（镜像 tag 规范/迁移顺序/回滚步骤/验证清单）：docs/ops/deploy.md
+# 生产部署（镜像 tag 规范/迁移顺序/回滚步骤/验证清单）：docs/ops/runbook.md
 
 services:
   mysql:
@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
     deploy:
       resources:
-        limits: # dev 联调量级；跑大迁移 OOM-kill 时按 docs/ops/deploy.md 上调
+        limits: # dev 联调量级；跑大迁移 OOM-kill 时按 docs/ops/runbook.md §2 上调
           memory: 512m
           cpus: "1.0"
     # T11: 日志必须有上限（json-file 默认无限制，可写满宿主磁盘）
@@ -94,12 +94,16 @@ services:
     healthcheck:
       # T11 深探测：/api/v1/health/deep = MySQL SELECT 1 + Redis PING，
       # 任一失败返回 503 → urllib 抛错 → 探测失败。旧浅探测 /api/v1/health
-      # 恒 200，依赖挂掉也"健康"（见 docs/ops/incident-2026-08-backend-freeze.md）
+      # 恒 200，依赖挂掉也"健康"（背景见 docs/ops/runbook.md §5）
       test: ["CMD-SHELL", "python -c \"import urllib.request, os; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('AUTO_AGENTS_API__PORT', '9111') + '/api/v1/health/deep', timeout=3)\""]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 30s
+    volumes:
+      # 能力市场 hub 根（D2：SKILLS.AGENTS_ROOT 缺省 runtime/agents-hub，相对 /app 解析）。
+      # .dockerignore 排除 runtime/，不挂卷时导入的资产随容器重建丢失
+      - agents_hub:/app/runtime/agents-hub
     depends_on:
       mysql:
         condition: service_healthy
@@ -108,6 +112,7 @@ services:
 
 volumes:
   mysql_data:
+  agents_hub:
 
 # T-14: LiteLLM Proxy is an independent fault domain (deploy/litellm).
 # Root must not declare a litellm service (ADR-0010 / SH-01).

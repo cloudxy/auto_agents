@@ -52,6 +52,24 @@ async def record_register_attempt(client_ip: str):
     await record_attempt(redis, REGISTER_ATTEMPT_POLICY, client_ip)
 
 
+async def _login_payload(db: AsyncSession, user_data: dict, session_pair: dict) -> dict:
+    """登录响应体：令牌对 + 身份快照"""
+    return {
+        "access_token": session_pair["access_token"],
+        "refresh_token": session_pair["refresh_token"],
+        "expires_in": session_pair["expires_in"],
+        "token_type": session_pair["token_type"],
+        "username": user_data["username"],
+        "is_admin": bool(user_data.get("is_admin", False)),
+        "role": user_data.get("role", "operator"),
+        "tenant_id": user_data.get("tenant_id"),
+        "tenant_role": user_data.get("tenant_role"),
+        "is_platform_admin": bool(user_data.get("is_platform_admin", False)),
+        # 决策 D21：企业负责人待验证邮箱时为 true（前端据此提示验证 / 重发）
+        "email_verify_pending": await company_verify_pending(db, user_data.get("tenant_id")),
+    }
+
+
 @router.post("/login", response_model=ApiResponse)
 async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db)):
     """用户登录
@@ -85,24 +103,7 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_async_db))
     from backend.services.session_service import issue_session
 
     session_pair = issue_session(user_data, remember=request.remember_me)
-    
-    return ok(
-        data={
-            "access_token": session_pair["access_token"],
-            "refresh_token": session_pair["refresh_token"],
-            "expires_in": session_pair["expires_in"],
-            "token_type": session_pair["token_type"],
-            "username": user_data["username"],
-            "is_admin": bool(user_data.get("is_admin", False)),
-            "role": user_data.get("role", "operator"),
-            "tenant_id": user_data.get("tenant_id"),
-            "tenant_role": user_data.get("tenant_role"),
-            "is_platform_admin": bool(user_data.get("is_platform_admin", False)),
-            # 决策 D21：企业负责人待验证邮箱时为 true（前端据此提示验证 / 重发）
-            "email_verify_pending": await company_verify_pending(db, user_data.get("tenant_id")),
-        },
-        message="登录成功"
-    )
+    return ok(data=await _login_payload(db, user_data, session_pair), message="登录成功")
 
 
 
@@ -205,35 +206,42 @@ async def get_dynamic_menus(
         if not rows:
             return ok(data=[])
         perms = set(await _permissions_of(session, user.role))
-        nodes = {}
-        tree = []
-        for m in rows:
-            if m["permission"] and m["permission"] not in perms:
-                continue
-            nodes[m["id"]] = {"key": m["path"] or f"grp-{m['id']}", "label": m["name"],
-                              "icon": m["icon"], "permission": m["permission"],
-                              "tenantOnly": m["path"] in ("/members", "/usage"), "children": []}
-        for m in rows:
-            node = nodes.get(m["id"])
-            if node is None:
-                continue
-            if m["parent_id"] and m["parent_id"] in nodes:
-                nodes[m["parent_id"]]["children"].append(node)
-            else:
-                tree.append(node)
-        # 剔除空分组
-        def prune(ns):
-            out = []
-            for n in ns:
-                if n["children"]:
-                    n["children"] = prune(n["children"])
-                if n["children"] or n["permission"] or not n["key"].startswith("grp-"):
-                    out.append(n)
-            return out
-        return ok(data=prune(tree))
+        return ok(data=_prune_empty_groups(_build_menu_tree(rows, perms)))
     except Exception as e:  # noqa: BLE001 菜单故障不阻断登录链路
         logger.warning(f"动态菜单读取失败，回退前端静态配置: {e}")
         return ok(data=[])
+
+
+def _build_menu_tree(rows: list[dict], perms: set) -> list[dict]:
+    """菜单行 → 树（无权限的节点不入树；父节点不可见则子节点提升为根）"""
+    nodes = {}
+    tree = []
+    for m in rows:
+        if m["permission"] and m["permission"] not in perms:
+            continue
+        nodes[m["id"]] = {"key": m["path"] or f"grp-{m['id']}", "label": m["name"],
+                          "icon": m["icon"], "permission": m["permission"],
+                          "tenantOnly": m["path"] in ("/members", "/usage"), "children": []}
+    for m in rows:
+        node = nodes.get(m["id"])
+        if node is None:
+            continue
+        if m["parent_id"] and m["parent_id"] in nodes:
+            nodes[m["parent_id"]]["children"].append(node)
+        else:
+            tree.append(node)
+    return tree
+
+
+def _prune_empty_groups(ns: list[dict]) -> list[dict]:
+    """剔除空分组"""
+    out = []
+    for n in ns:
+        if n["children"]:
+            n["children"] = _prune_empty_groups(n["children"])
+        if n["children"] or n["permission"] or not n["key"].startswith("grp-"):
+            out.append(n)
+    return out
 
 
 async def _permissions_of(session, role: str) -> list[str]:

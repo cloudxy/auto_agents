@@ -14,7 +14,7 @@
 | `config/**`、`scrapy/settings.py` | `uv run python run.py restart <服务>` + health | 启动且 health OK |
 | `Dockerfile`、`docker-compose.yml` | `docker compose config --quiet`；Dockerfile 有改再 `docker build -t _verify .` | 退出码 0 |
 | `.github/workflows/**` | 对照 `.github/workflows/ci.yml` 五阶段 | job 绿 |
-| `frontend/**` | `npm run build:shared`；`bash tools/check/frontend.sh`；`CI= npm run build -w admin`；`CI= npm run build -w official`（依赖变则先 `npm ci`）。改了 UI/布局/路由/状态：构建之外按真实路径点一遍（点击/输入/提交/跳转）；只截图不算。无浏览器则写明哪条路径没点到 | 退出码 0；UI 改动要行为一致 |
+| `frontend/**` | `npm run build:shared`；`bash tools/check/frontend.sh`（F-2~F-8，含 ESLint）；`npm run build -w admin`；`npm run build -w official`（build = `tsc --noEmit` + `vite build`；依赖变则先 `npm ci`）；`npm test -w admin` / `-w official`。改了 UI/布局/路由/状态：构建之外按真实路径点一遍（点击/输入/提交/跳转）；只截图不算。无浏览器则写明哪条路径没点到 | 退出码 0；UI 改动要行为一致 |
 | `pyproject.toml`、`uv.lock` | `uv lock --check` + pytest | 锁一致 + 测试绿 |
 | `init_project.sh`、`scripts/**`、`run.py` | `uv run pytest -x -q backend/tests/test_run_orchestrator.py` | 退出码 0 |
 | `tools/check/**` | 跑被改的脚本 | 退出码符合预期 |

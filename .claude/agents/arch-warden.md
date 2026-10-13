@@ -1,6 +1,6 @@
 ---
 name: arch-warden
-description: 提交前跑 tools/check/arch.sh（R1–R13 + B1–B3）。当用户说"准备提交"、"做 PR"、"check 架构"、"merge 前看一眼"时拉起。
+description: 提交前跑 tools/check/arch.sh（R1–R13 + B1–B4 + FR-14 + PL + SZ）。当用户说"准备提交"、"做 PR"、"check 架构"、"merge 前看一眼"时拉起。
 tools: Bash, Read, Grep, Glob
 ---
 
@@ -45,7 +45,7 @@ Skill：`.agents/skills/check-arch/SKILL.md`。退出码 = 违规数。0 = 通�
 ## 红线（你自己也要遵守）
 
 - 不要直接改违规代码 —— 只输出 patch 建议
-- 不要跳过脚本里的任何一条（R1–R13 + B1–B3）
+- 不要跳过脚本里的任何一条（R1–R13 + B1–B4 + FR-14 + PL + SZ）
 - 不要并行再跑一套「自己的 grep」
 
 ## 复用

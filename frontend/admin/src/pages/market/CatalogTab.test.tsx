@@ -9,8 +9,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 
 import type { AssetRow } from '../../services/capabilities'
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd')
+jest.mock('../../feedback', () => {
+  const actual = jest.requireActual('../../feedback')
   return {
     ...actual,
     message: { error: jest.fn(), success: jest.fn(), warning: jest.fn(), info: jest.fn() },
@@ -32,11 +32,13 @@ jest.mock('../../hooks/usePermission', () => ({
   usePermission: () => perm,
 }))
 
-import { ConfigProvider, message } from 'antd'
+import { ConfigProvider } from 'antd'
+import { message } from '../../feedback'
 import CatalogTab from './CatalogTab'
 import {
   EXAMPLES_LIMIT_COPY, EXAMPLES_EMPTY, EXAMPLES_LOAD_FAIL,
 } from './ExamplesModal'
+import { PRUNE_ZERO_HINT } from './PruneConfirmModal'
 import {
   fetchPublicCapability, listAssets, patchExamples, patchFeatured, pruneMissingAssets,
 } from '../../services/capabilities'
@@ -159,7 +161,7 @@ test('T-15 零失源空态：「当前无失源资产」+ 确认清理禁用 + �
   fireEvent.click(await screen.findByRole('button', { name: '清理失源资产' }))
   const modal = await waitFor(() => document.querySelector('.ant-modal') as HTMLElement)
   expect(await within(modal).findByText('当前无失源资产')).toBeInTheDocument()
-  expect(within(modal).getByText('存活资产与 .agents 磁盘内容一致，无需清理')).toBeInTheDocument()
+  expect(within(modal).getByText(PRUNE_ZERO_HINT)).toBeInTheDocument()
   expect(within(modal).queryByRole('button', { name: '确认清理' })).not.toBeInTheDocument()
   expect(within(modal).getByRole('button', { name: '关闭' })).toBeInTheDocument()
 })

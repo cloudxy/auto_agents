@@ -6,7 +6,8 @@
  * - 表单未覆盖的扩展键（store_to/render_js 等）以原 params 为基底 merge，不丢失。
  */
 import React, { useState } from 'react'
-import { Modal, Form, Radio, Select, Switch, message, Alert, Button } from 'antd'
+import { Modal, Form, Radio, Select, Switch, Alert, Button } from 'antd'
+import { message } from '../../feedback'
 import { useNavigate } from 'react-router-dom'
 import type { SpiderRegistry, TaskTemplate, SpiderMap, Task } from './types'
 import { renderParamFields, collectParams, paramsToFormValues, parseParamsJson } from './formUtils'

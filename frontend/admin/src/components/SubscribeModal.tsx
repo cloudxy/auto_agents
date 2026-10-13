@@ -3,7 +3,8 @@
  * 四宿主位始终在。零项名单 = 全禁用，不是空弹窗。错误按 code 分支。
  */
 import React, { useEffect, useState } from 'react'
-import { Alert, Button, Modal, Radio, Space, Typography, message } from 'antd'
+import { Alert, Button, Modal, Radio, Space, Typography } from 'antd'
+import { message } from '../feedback'
 
 import {
   fetchPublicCapability,

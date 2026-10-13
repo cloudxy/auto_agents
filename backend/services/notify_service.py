@@ -75,6 +75,7 @@ class NotifyService:
         error_message: Optional[str] = None,
     ) -> None:
         """任务终态通知入口（吞掉所有异常）"""
+        logger.info(f"任务终态通知 | task_id={task_id} spider={spider_name} status={status}")
         if not self._enabled:
             return
         payload = {
@@ -169,65 +170,65 @@ class NotifyService:
         与 notify_task_finished 共享渠道配置（NOTIFY.CHANNELS/WEBHOOK_URL/EMAIL/DINGTALK/
         WECHAT_WORK），但载荷为通用 {event, text}，不复用任务终态文案渲染。
         """
+        logger.info(f"文本通知 | event={event}")
         if not self._enabled:
             return
         full = f"[{event}] {text}"
         for channel in await self._effective_channels():
             try:
-                if channel == "log":
-                    logger.info(full)
-                elif channel == "webhook":
-                    url = await self._channel_url("webhook")
-                    if not url:
-                        continue
-                    async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
-                        resp = await client.post(
-                            url, json={"event": event, "text": text}
-                        )
-                        if resp.status_code >= 400:
-                            logger.warning(
-                                f"webhook 通知返回异常状态: event={event}, http={resp.status_code}"
-                            )
-                elif channel == "dingtalk":
-                    url = await self._channel_url("dingtalk")
-                    if not url:
-                        continue
-                    async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
-                        await client.post(
-                            url, json={"msgtype": "text", "text": {"content": full}}
-                        )
-                elif channel == "wechat_work":
-                    url = await self._channel_url("wechat_work")
-                    if not url:
-                        continue
-                    async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
-                        await client.post(
-                            url,
-                            json={"msgtype": "markdown", "markdown": {"content": full}},
-                        )
-                elif channel == "email" and self._email_host and self._email_to:
-                    msg = EmailMessage()
-                    msg["From"] = self._email_from or self._email_user
-                    msg["To"] = ", ".join(self._email_to)
-                    msg["Subject"] = f"[爬虫平台] {event}"
-                    msg.set_content(text)
-                    smtp = aiosmtplib.SMTP(
-                        hostname=self._email_host,
-                        port=self._email_port,
-                        use_tls=self._email_ssl,
-                        timeout=self._timeout,
-                    )
-                    await smtp.connect()
-                    try:
-                        if self._email_user:
-                            await smtp.login(self._email_user, self._email_password)
-                        await smtp.send_message(msg)
-                    finally:
-                        smtp.close()
-                elif channel not in ("log", "webhook", "dingtalk", "wechat_work", "email"):
-                    logger.warning(f"未知通知渠道，已跳过: channel={channel}")
+                await self._send_text(channel, event, text, full)
             except Exception as e:  # noqa: BLE001 通知失败不影响主流程
                 logger.error(f"通知渠道执行失败: channel={channel}, event={event}, error={e}")
+
+    async def _send_text(self, channel: str, event: str, text: str, full: str) -> None:
+        """notify_text 的单渠道发送（异常由调用方吞掉）；URL / SMTP 未配置的渠道静默跳过"""
+        if channel == "log":
+            logger.info(full)
+        elif channel in ("webhook", "dingtalk", "wechat_work"):
+            await self._post_text(channel, event, text, full)
+        elif channel == "email" and self._email_host and self._email_to:
+            await self._send_email(f"[爬虫平台] {event}", text)
+        elif channel not in ("log", "webhook", "dingtalk", "wechat_work", "email"):
+            logger.warning(f"未知通知渠道，已跳过: channel={channel}")
+
+    async def _post_text(self, channel: str, event: str, text: str, full: str) -> None:
+        """webhook {event, text} / 钉钉 text / 企业微信 markdown；只有 webhook 检查回包状态"""
+        url = await self._channel_url(channel)
+        if not url:
+            return
+        if channel == "webhook":
+            body: dict = {"event": event, "text": text}
+        elif channel == "dingtalk":
+            body = {"msgtype": "text", "text": {"content": full}}
+        else:
+            body = {"msgtype": "markdown", "markdown": {"content": full}}
+        async with httpx.AsyncClient(trust_env=False, timeout=self._timeout) as client:
+            resp = await client.post(url, json=body)
+            if channel == "webhook" and resp.status_code >= 400:
+                logger.warning(
+                    f"webhook 通知返回异常状态: event={event}, http={resp.status_code}"
+                )
+
+    async def _send_email(self, subject: str, content: str) -> None:
+        """SMTP 发一封纯文本邮件（aiosmtplib）；SMTP_HOST / MAIL_TO 是否配置由调用方判断"""
+        msg = EmailMessage()
+        msg["From"] = self._email_from or self._email_user
+        msg["To"] = ", ".join(self._email_to)
+        msg["Subject"] = subject
+        msg.set_content(content)
+        smtp = aiosmtplib.SMTP(
+            hostname=self._email_host,
+            port=self._email_port,
+            use_tls=self._email_ssl,
+            timeout=self._timeout,
+        )
+        await smtp.connect()
+        try:
+            if self._email_user:
+                await smtp.login(self._email_user, self._email_password)
+            await smtp.send_message(msg)
+        finally:
+            smtp.close()
 
     def _notify_log(self, payload: dict) -> None:
         """日志渠道：failed 走 error 级别便于告警检索，其余 info"""
@@ -274,24 +275,9 @@ class NotifyService:
         if not self._email_host or not self._email_to:
             logger.debug("NOTIFY.EMAIL 未配置 SMTP_HOST/MAIL_TO，跳过 email 渠道")
             return
-        msg = EmailMessage()
-        msg["From"] = self._email_from or self._email_user
-        msg["To"] = ", ".join(self._email_to)
-        msg["Subject"] = f"[爬虫平台] 任务 #{payload['task_id']} {payload['status']}"
-        msg.set_content(_render_text(payload))
-        smtp = aiosmtplib.SMTP(
-            hostname=self._email_host,
-            port=self._email_port,
-            use_tls=self._email_ssl,
-            timeout=self._timeout,
+        await self._send_email(
+            f"[爬虫平台] 任务 #{payload['task_id']} {payload['status']}", _render_text(payload),
         )
-        await smtp.connect()
-        try:
-            if self._email_user:
-                await smtp.login(self._email_user, self._email_password)
-            await smtp.send_message(msg)
-        finally:
-            smtp.close()
         logger.info(f"email 通知已发送: task_id={payload['task_id']}, to={self._email_to}")
 
     async def _notify_dingtalk(self, payload: dict) -> None:

@@ -22,7 +22,8 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import TYPE_CHECKING, Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +55,22 @@ def planning_is_open() -> bool:
     """智能规划是否对提交开放（LLM.ENABLED；与网关可达/BYOK 分家）。"""
     logger.debug("读取智能规划开关")
     return bool(_seam().settings.get("LLM.ENABLED", False))
+
+
+@dataclass
+class _TestRun:
+    """试采循环的可变本地状态（commit 会 expire ORM：开跑前一次性从 plan 提取）；
+    flow_dict 恒为规划产物（修复迭代只更新 plan_json["flow"] / params_dict）"""
+    target_url: str
+    plan_json: dict
+    params_dict: dict
+    iteration: int
+    history: list
+    html_sample: str
+    flow_dict: dict
+    max_iterations: int
+    spider_svc: Any
+    owner_id: int
 
 
 class AiPlannerService:
@@ -94,6 +111,7 @@ class AiPlannerService:
         self, skip: int = 0, limit: int = 20, status: Optional[str] = None
     ) -> AiPlanListResponse:
         """分页列表（可按状态过滤）"""
+        logger.debug(f"查询 AI 采集计划列表 | skip={skip} limit={limit} status={status}")
         items = await self.repo.list_plans(skip=skip, limit=limit, status=status)
         total = await self.repo.count(status=status)
         return AiPlanListResponse(
@@ -102,6 +120,7 @@ class AiPlannerService:
 
     async def get_plan(self, plan_id: int) -> AiPlanResponse:
         """单条计划快照"""
+        logger.debug(f"查询 AI 采集计划 | plan_id={plan_id}")
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")
@@ -109,6 +128,7 @@ class AiPlannerService:
 
     async def delete_plan(self, plan_id: int) -> dict:
         """删除计划（规划/试采进行中拒绝，防后台任务写空）"""
+        logger.info(f"删除 AI 采集计划 | plan_id={plan_id}")
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")
@@ -157,6 +177,7 @@ class AiPlannerService:
 
     async def launch_plan(self, plan_id: int) -> AiPlanResponse:
         """触发后台规划：原子抢断置 planning → asyncio.create_task 执行，立即返回快照"""
+        logger.info(f"触发 AI 后台规划 | plan_id={plan_id}")
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")
@@ -179,6 +200,7 @@ class AiPlannerService:
 
     async def launch_test(self, plan_id: int) -> AiPlanResponse:
         """触发后台试采：spawn 前原子抢断置 testing，立即返回快照"""
+        logger.info(f"触发 AI 后台试采 | plan_id={plan_id}")
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")
@@ -251,50 +273,13 @@ class AiPlannerService:
     # 试采（后台执行：flow_generic 低优先级试采 + 自动修复迭代）
     # ------------------------------------------------------------------
     async def _execute_test(self, plan_id: int) -> None:
-        plan = await self.repo.get_by_id(plan_id)
-        if plan is None:
-            raise NotFoundException("AI 采集计划")
-        if not plan.generated_params:
-            raise BusinessException("计划缺少生成的任务参数，请先执行规划")
-        target_url = plan.target_url
-        plan_json = dict(plan.plan_json or {})
-        params_dict = dict(plan.generated_params)
-        iteration = int(plan.iteration_count or 0)
-        history = [dict(h) for h in (plan_json.get("test_history") or [])]
-        html_sample = str(plan_json.get("html_sample") or "")
-        flow_dict = dict(plan_json.get("flow") or {})
-        max_iterations = max(0, int(_seam().settings.get("LLM.MAX_ITERATIONS", 2)))
-        spider_svc = _seam().SpiderService(self.session)
-        owner_id = require_enqueue_tenant(getattr(plan, "tenant_id", None))
-
+        run = await self._load_test_run(plan_id)
         try:
             while True:
-                params_str = json.dumps(params_dict, ensure_ascii=False)
-                task = await spider_svc.enqueue(
-                    spider_name="flow_generic", params=params_str, priority="low",
-                    tenant_id=owner_id,
-                )
-                await self.repo.update(plan_id, test_task_id=task.id)
-                await self.repo.update_status(plan_id, "testing", error_message=None,
-                                              test_task_id=task.id)
-                await self.session.commit()
-                logger.info(
-                    f"AI 试采任务已入队: plan_id={plan_id}, task_id={task.id}, iteration={iteration}"
-                )
-
-                final_task = await self._wait_task_final(spider_svc, task.id)
-                passed, reason = await self._judge_test(spider_svc, final_task)
-                history.append({
-                    "iteration": iteration,
-                    "task_id": task.id,
-                    "status": final_task.status,
-                    "result_count": int(final_task.result_count or 0),
-                    "passed": passed,
-                    "reason": reason,
-                })
-                plan_json["test_history"] = history
-                await self.repo.update(plan_id, plan_json=plan_json, test_task_id=task.id)
-                await self.session.commit()
+                task = await self._enqueue_test_round(plan_id, run)
+                final_task = await self._wait_task_final(run.spider_svc, task.id)
+                passed, reason = await self._judge_test(run.spider_svc, final_task)
+                await self._record_test_round(plan_id, run, task.id, final_task, passed, reason)
 
                 if passed:
                     # 审计 BUG-18：试采通过进入 tested（非忙碌态）——原先停在 testing，
@@ -305,31 +290,89 @@ class AiPlannerService:
                     logger.info(f"AI 试采通过: plan_id={plan_id}, task_id={task.id}, reason={reason}")
                     return
 
-                if iteration < max_iterations:
-                    iteration += 1
-                    await self.repo.update(plan_id, iteration_count=iteration)
-                    await self.session.commit()
-                    logger.warning(
-                        f"AI 试采未通过，自动修复迭代 {iteration}/{max_iterations}: "
-                        f"plan_id={plan_id}, reason={reason}"
-                    )
-                    flow = await self._repair_flow(target_url, flow_dict, reason, html_sample)
-                    params_dict = _seam()._build_generated_params(target_url, flow)
-                    plan_json["flow"] = flow.model_dump()
-                    await self.repo.update(
-                        plan_id, generated_params=params_dict, plan_json=plan_json
-                    )
-                    await self.session.commit()
+                if run.iteration < run.max_iterations:
+                    await self._repair_round(plan_id, run, reason)
                     continue  # 重新入队试采
 
                 await self._fail(
-                    plan_id, f"试采未通过（自动修复迭代已达上限 {max_iterations} 次）: {reason}"
+                    plan_id, f"试采未通过（自动修复迭代已达上限 {run.max_iterations} 次）: {reason}"
                 )
                 return
         except BusinessException as e:
             await self._fail(plan_id, str(e))
         except Exception as e:  # noqa: BLE001
             await self._fail(plan_id, f"试采异常: {e}")
+
+    async def _load_test_run(self, plan_id: int) -> _TestRun:
+        """读计划并提取试采本地状态（计划不存在 / 缺生成参数直接抛，不进失败兜底）"""
+        plan = await self.repo.get_by_id(plan_id)
+        if plan is None:
+            raise NotFoundException("AI 采集计划")
+        if not plan.generated_params:
+            raise BusinessException("计划缺少生成的任务参数，请先执行规划")
+        plan_json = dict(plan.plan_json or {})
+        return _TestRun(
+            target_url=plan.target_url,
+            plan_json=plan_json,
+            params_dict=dict(plan.generated_params),
+            iteration=int(plan.iteration_count or 0),
+            history=[dict(h) for h in (plan_json.get("test_history") or [])],
+            html_sample=str(plan_json.get("html_sample") or ""),
+            flow_dict=dict(plan_json.get("flow") or {}),
+            max_iterations=max(0, int(_seam().settings.get("LLM.MAX_ITERATIONS", 2))),
+            spider_svc=_seam().SpiderService(self.session),
+            owner_id=require_enqueue_tenant(getattr(plan, "tenant_id", None)),
+        )
+
+    async def _enqueue_test_round(self, plan_id: int, run: _TestRun):
+        """入队一轮 flow_generic 低优先级试采并置 testing（落库提交），返回任务"""
+        params_str = json.dumps(run.params_dict, ensure_ascii=False)
+        task = await run.spider_svc.enqueue(
+            spider_name="flow_generic", params=params_str, priority="low",
+            tenant_id=run.owner_id,
+        )
+        await self.repo.update(plan_id, test_task_id=task.id)
+        await self.repo.update_status(plan_id, "testing", error_message=None,
+                                      test_task_id=task.id)
+        await self.session.commit()
+        logger.info(
+            f"AI 试采任务已入队: plan_id={plan_id}, task_id={task.id}, iteration={run.iteration}"
+        )
+        return task
+
+    async def _record_test_round(
+        self, plan_id: int, run: _TestRun, task_id: int, final_task: _TaskSnapshot,
+        passed: bool, reason: str,
+    ) -> None:
+        """本轮判定追加进 test_history 并落库提交"""
+        run.history.append({
+            "iteration": run.iteration,
+            "task_id": task_id,
+            "status": final_task.status,
+            "result_count": int(final_task.result_count or 0),
+            "passed": passed,
+            "reason": reason,
+        })
+        run.plan_json["test_history"] = run.history
+        await self.repo.update(plan_id, plan_json=run.plan_json, test_task_id=task_id)
+        await self.session.commit()
+
+    async def _repair_round(self, plan_id: int, run: _TestRun, reason: str) -> None:
+        """未通过且未达上限：迭代计数 +1 → LLM 修复 selectors → 重建任务参数落库"""
+        run.iteration += 1
+        await self.repo.update(plan_id, iteration_count=run.iteration)
+        await self.session.commit()
+        logger.warning(
+            f"AI 试采未通过，自动修复迭代 {run.iteration}/{run.max_iterations}: "
+            f"plan_id={plan_id}, reason={reason}"
+        )
+        flow = await self._repair_flow(run.target_url, run.flow_dict, reason, run.html_sample)
+        run.params_dict = _seam()._build_generated_params(run.target_url, flow)
+        run.plan_json["flow"] = flow.model_dump()
+        await self.repo.update(
+            plan_id, generated_params=run.params_dict, plan_json=run.plan_json
+        )
+        await self.session.commit()
 
     async def _repair_flow(
         self, target_url: str, flow_dict: dict, reason: str, html_sample: str
@@ -378,6 +421,7 @@ class AiPlannerService:
     # 注册（同步执行：校验最近试采通过 → create_definition(source=ai_generated)）
     # ------------------------------------------------------------------
     async def register(self, plan_id: int) -> AiPlanResponse:
+        logger.info(f"注册 AI 计划为爬虫定义 | plan_id={plan_id}")
         plan = await self.repo.get_by_id(plan_id)
         if plan is None:
             raise NotFoundException("AI 采集计划")
@@ -395,6 +439,18 @@ class AiPlannerService:
         if not generated_params:
             raise BusinessException("计划缺少生成的任务参数，请先执行规划")
 
+        definition = await self._create_ai_definition(target_url, plan_id, generated_params)
+        plan_json["registered_definition"] = definition.name
+        await self.repo.update(plan_id, plan_json=plan_json)
+        await self.repo.update_status(
+            plan_id, "registered", error_message=None, test_task_id=test_task_id
+        )
+        await self.session.commit()
+        logger.info(f"AI 计划已注册为爬虫定义: plan_id={plan_id}, definition={definition.name}")
+        return await self.get_plan(plan_id)
+
+    async def _create_ai_definition(self, target_url: str, plan_id: int, generated_params):
+        """建爬虫定义（source=ai_generated，带试采通过的参数）；同名 AI 注册产物已存在时幂等续走"""
         name = _seam()._derive_spider_name(target_url, plan_id)
         payload = DefinitionCreateRequest(
             name=name,
@@ -407,7 +463,7 @@ class AiPlannerService:
         # 按方案运行时缺 urls 直接失败或卡住
         definition_params = dict(generated_params) if isinstance(generated_params, dict) else None
         try:
-            definition = await spider_svc.create_definition(
+            return await spider_svc.create_definition(
                 payload, source="ai_generated", params=definition_params,
             )
         except BusinessException as e:
@@ -424,16 +480,7 @@ class AiPlannerService:
             )
             if definition_params and not existing.params:
                 existing.params = definition_params
-            definition = existing
-
-        plan_json["registered_definition"] = definition.name
-        await self.repo.update(plan_id, plan_json=plan_json)
-        await self.repo.update_status(
-            plan_id, "registered", error_message=None, test_task_id=test_task_id
-        )
-        await self.session.commit()
-        logger.info(f"AI 计划已注册为爬虫定义: plan_id={plan_id}, definition={definition.name}")
-        return await self.get_plan(plan_id)
+            return existing
 
     # ------------------------------------------------------------------
     # 失败兜底：置 failed + error_message（状态机可追溯）

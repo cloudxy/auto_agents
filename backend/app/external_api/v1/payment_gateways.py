@@ -20,6 +20,8 @@ CAS 状态机，避免真实网关接入把状态转移逻辑重写一遍带出�
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,6 +58,40 @@ async def _configured_secrets(session: AsyncSession, channel: str):
     return plain, str(row.merchant_no or "")
 
 
+def _alipay_ack() -> Response:
+    """支付宝协议回执：纯文本 success（验真失败 / 忽略时同样回复，避免重试风暴）"""
+    return Response(content="success", media_type="text/plain")
+
+
+def _alipay_gateway(secrets) -> AlipayGateway:
+    """按 PAYMENT.ALIPAY.SANDBOX 选网关地址构造支付宝网关"""
+    from config import settings
+
+    sandbox = bool(settings.get("PAYMENT.ALIPAY.SANDBOX", False))
+    gateway_url = str(settings.get(
+        "PAYMENT.ALIPAY.SANDBOX_GATEWAY" if sandbox else "PAYMENT.ALIPAY.GATEWAY", "",
+    ))
+    return AlipayGateway(secrets, gateway_url=gateway_url)
+
+
+def _alipay_status(trade_status: str) -> str:
+    """支付宝交易状态 → 闭集 success / cancel；非闭集返回空串（忽略）"""
+    if trade_status in _ALIPAY_SUCCESS_STATUSES:
+        return "success"
+    if trade_status in _ALIPAY_FAIL_STATUSES:
+        return "cancel"
+    return ""
+
+
+def _alipay_amount_cents(form: dict) -> int:
+    """total_amount（元，字符串）→ 分；不可解析记 0"""
+    yuan = str(form.get("total_amount") or "0")
+    try:
+        return int(round(float(yuan) * 100))
+    except ValueError:
+        return 0
+
+
 @router.post("/alipay/notify")
 async def alipay_notify(
     request: Request, session: AsyncSession = Depends(get_async_db),
@@ -67,35 +103,22 @@ async def alipay_notify(
     logger.info(f"alipay.notify 收到 | out_trade_no={order_no}")
     plain, _merchant_hint = await _configured_secrets(session, "alipay")
     if not plain or not order_no:
-        return Response(content="success", media_type="text/plain")
+        return _alipay_ack()
     try:
         secrets = parse_alipay_secrets(plain)
     except Exception as exc:  # noqa: BLE001 — 密钥包格式异常不应让通知端点炸 500
         logger.warning(f"alipay.notify 商户密钥解析失败 | err={exc}")
-        return Response(content="success", media_type="text/plain")
-    from config import settings
-
-    sandbox = bool(settings.get("PAYMENT.ALIPAY.SANDBOX", False))
-    gateway_url = str(settings.get(
-        "PAYMENT.ALIPAY.SANDBOX_GATEWAY" if sandbox else "PAYMENT.ALIPAY.GATEWAY", "",
-    ))
-    gw = AlipayGateway(secrets, gateway_url=gateway_url)
+        return _alipay_ack()
+    gw = _alipay_gateway(secrets)
     if not gw.verify_notify(form):
         logger.warning(f"alipay.notify 验签失败 | out_trade_no={order_no}")
-        return Response(content="success", media_type="text/plain")
+        return _alipay_ack()
     trade_status = str(form.get("trade_status") or "")
-    if trade_status in _ALIPAY_SUCCESS_STATUSES:
-        mapped_status = "success"
-    elif trade_status in _ALIPAY_FAIL_STATUSES:
-        mapped_status = "cancel"
-    else:
+    mapped_status = _alipay_status(trade_status)
+    if not mapped_status:
         logger.info(f"alipay.notify 非闭集状态，忽略 | trade_status={trade_status}")
-        return Response(content="success", media_type="text/plain")
-    yuan = str(form.get("total_amount") or "0")
-    try:
-        amount_cents = int(round(float(yuan) * 100))
-    except ValueError:
-        amount_cents = 0
+        return _alipay_ack()
+    amount_cents = _alipay_amount_cents(form)
     notify_svc = PaymentNotifyService(session)
     await notify_svc.handle_verified_fields(
         "alipay",
@@ -103,7 +126,31 @@ async def alipay_notify(
         amount_cents=amount_cents, trade_status=mapped_status,
         channel_trade_no=str(form.get("trade_no") or "") or None,
     )
-    return Response(content="success", media_type="text/plain")
+    return _alipay_ack()
+
+
+def _wechat_verified(secrets, request: Request, body: bytes) -> Optional[dict]:
+    """构造微信网关并验签解密；初始化失败或验真失败返回 None（端点照旧回 SUCCESS）"""
+    from config import settings
+
+    cert_dir = str(settings.get("PAYMENT.WECHAT.CERT_DIR", "storage/wechat_certs"))
+    try:
+        gw = WechatGateway(secrets, cert_dir=cert_dir)
+    except Exception as exc:  # noqa: BLE001 — 网关初始化异常（证书/网络）不应让通知端点炸 500
+        logger.warning(f"wechat.notify 网关初始化失败 | err={exc}")
+        return None
+    result = gw.verify_and_decrypt_notify(dict(request.headers), body)
+    if not result:
+        logger.warning("wechat.notify 验签/解密失败")
+        return None
+    return result
+
+
+def _wechat_status(trade_state: str) -> str:
+    """微信交易状态 → 闭集 success / cancel；非闭集返回空串（忽略）"""
+    if trade_state == "SUCCESS":
+        return "success"
+    return "cancel" if trade_state in ("CLOSED", "REVOKED", "PAYERROR") else ""
 
 
 @router.post("/wechat/notify")
@@ -126,26 +173,15 @@ async def wechat_notify(
     except Exception as exc:  # noqa: BLE001 — 密钥包格式异常不应让通知端点炸 500
         logger.warning(f"wechat.notify 商户密钥解析失败 | err={exc}")
         return ok_resp
-    from config import settings
-
-    cert_dir = str(settings.get("PAYMENT.WECHAT.CERT_DIR", "storage/wechat_certs"))
-    try:
-        gw = WechatGateway(secrets, cert_dir=cert_dir)
-    except Exception as exc:  # noqa: BLE001 — 网关初始化异常（证书/网络）不应让通知端点炸 500
-        logger.warning(f"wechat.notify 网关初始化失败 | err={exc}")
-        return ok_resp
-    result = gw.verify_and_decrypt_notify(dict(request.headers), body)
+    result = _wechat_verified(secrets, request, body)
     if not result:
-        logger.warning("wechat.notify 验签/解密失败")
         return ok_resp
     resource = result.get("resource") or {}
     order_no = str(resource.get("out_trade_no") or "")
     trade_state = str(resource.get("trade_state") or "")
     amount = resource.get("amount") or {}
     amount_cents = int(amount.get("total") or 0)
-    mapped_status = "success" if trade_state == "SUCCESS" else (
-        "cancel" if trade_state in ("CLOSED", "REVOKED", "PAYERROR") else ""
-    )
+    mapped_status = _wechat_status(trade_state)
     if not order_no or not mapped_status:
         logger.info(f"wechat.notify 非闭集状态，忽略 | trade_state={trade_state}")
         return ok_resp

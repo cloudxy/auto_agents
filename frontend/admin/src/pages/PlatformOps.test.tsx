@@ -8,7 +8,7 @@
  * - 产品事实 Tab 失败/真 0 同走 FR-84 句族（不空表冒充无事件）。
  */
 import React from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from '../store/useAuthStore'
 import App from '../App'

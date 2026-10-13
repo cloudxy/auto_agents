@@ -3,7 +3,8 @@
  */
 import React, { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Alert, Button, Card, Form, Input, Space, Typography, message } from 'antd'
+import { Alert, Button, Card, Form, Input, Space, Typography } from 'antd'
+import { message } from '../feedback'
 import { CheckCircleOutlined } from '@ant-design/icons'
 import { FREE_TIER_FEATURE_COPY } from '@auto-agents/frontend-shared'
 import { getAnonymousId } from '../services/beacon'

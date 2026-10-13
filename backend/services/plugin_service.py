@@ -1,8 +1,9 @@
 """插件资产域服务（P6 C3）：plugin.json 解析 + 插件详情 + MCP 验证
 
 feat-agents-market AD-1：破坏性扫描入口 scan_plugins / _retract_missing_plugins
-已退役（.agents 软删 bug 根因，FR-01 验收线 = 不存在能造成软删的扫描入口）。
-扫描/同步统一走 power_market.agents_hub（.agents 真相源，非破坏 upsert）。
+已退役（软删 bug 根因，FR-01 验收线 = 不存在能造成软删的扫描入口）。
+扫描/同步统一走 power_market.agents_hub（产品 hub 根 SKILLS.AGENTS_ROOT 为真相源，非破坏 upsert；
+D2 后缺省 runtime/agents-hub，不再是开发中枢 .agents）。
 """
 import re
 from datetime import datetime, timezone
@@ -90,9 +91,9 @@ class PluginService:
 
     async def get_plugin_detail(self, name: str) -> dict:
         """插件详情（asset + detail 投影；mcp_servers 的 env/headers 值一律脱敏，审计 BUG-45）"""
+        logger.info(f"查询插件详情 | name={name}")
         from backend.services.capability_lookup import find_named_asset
 
-        logger.info(f"查询插件详情 | name={name}")
         asset = await find_named_asset(self.session, "plugin", name)
         if asset is None:
             raise NotFoundException(resource=f"插件 {name}")
@@ -120,21 +121,10 @@ class PluginService:
 
     async def verify_plugin(self, name: str) -> dict:
         """插件验证管线（ADR-0001）：MCP 连接→list→抽样 call→健康落库"""
+        logger.info(f"插件验证 | plugin={name}")
         from backend.services.mcp_bridge import verify_plugin_server
 
-        logger.info(f"插件验证 | plugin={name}")
-        asset = (await self.session.execute(
-            select(CapabilityAsset).where(
-                CapabilityAsset.asset_type == "plugin", CapabilityAsset.name == name
-            )
-        )).scalar_one_or_none()
-        if asset is None:
-            raise NotFoundException(resource=f"插件 {name}")
-        detail = (await self.session.execute(
-            select(CapabilityPlugin).where(CapabilityPlugin.asset_id == asset.id)
-        )).scalar_one_or_none()
-        if detail is None:
-            raise NotFoundException(resource=f"插件详情 {name}")
+        detail = await self._require_plugin_detail(name)
 
         servers = detail.mcp_servers or {}
         if not servers:
@@ -164,3 +154,19 @@ class PluginService:
         await self.session.flush()
         await self.session.commit()
         return {"health": overall, "detail": results}
+
+    async def _require_plugin_detail(self, name: str) -> CapabilityPlugin:
+        """按名取插件详情行；资产或详情缺失均 404"""
+        asset = (await self.session.execute(
+            select(CapabilityAsset).where(
+                CapabilityAsset.asset_type == "plugin", CapabilityAsset.name == name
+            )
+        )).scalar_one_or_none()
+        if asset is None:
+            raise NotFoundException(resource=f"插件 {name}")
+        detail = (await self.session.execute(
+            select(CapabilityPlugin).where(CapabilityPlugin.asset_id == asset.id)
+        )).scalar_one_or_none()
+        if detail is None:
+            raise NotFoundException(resource=f"插件详情 {name}")
+        return detail

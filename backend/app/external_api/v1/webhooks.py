@@ -50,6 +50,14 @@ def verify_webhook_signature(
     return hmac.compare_digest(expected, signature)
 
 
+def _parse_callback_body(raw_body: bytes):
+    """解析回调 JSON 体（签名已通过之后）；非法 JSON / 非 UTF-8 → 400"""
+    try:
+        return json.loads(raw_body)
+    except (UnicodeDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+
 @router.post("/spider/callback")
 async def spider_callback(
     request: Request,
@@ -65,11 +73,7 @@ async def spider_callback(
         logger.warning("爬虫回调签名校验失败，已拒绝")
         raise HTTPException(status_code=401, detail="Invalid signature")
 
-    try:
-        body = json.loads(raw_body)
-    except (UnicodeDecodeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-
+    body = _parse_callback_body(raw_body)
     task_id = body.get("task_id")
     status = body.get("status")
     logger.info(f"收到爬虫回调: task_id={task_id}, status={status}")

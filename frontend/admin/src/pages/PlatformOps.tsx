@@ -4,8 +4,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag,
-  Typography, message,
+  Typography,
 } from 'antd'
+import { message, modal } from '../feedback'
 import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { Dayjs } from 'dayjs'
@@ -228,7 +229,7 @@ const DeadItemsTab: React.FC = () => {
   }
 
   const onClear = () => {
-    Modal.confirm({
+    modal.confirm({
       title: `确认清空全部 ${total} 条死信？`,
       content: '死信是结果回流留档（缺 task_id 等无法归属的载荷），清空后不可恢复。',
       okText: '清空', okButtonProps: { danger: true }, cancelText: '取消',
@@ -306,7 +307,7 @@ const DeadItemsTab: React.FC = () => {
         okText="确认开通"
         cancelText="取消"
         okButtonProps={{ loading: grantSubmitting }}
-        maskClosable={false}
+        mask={{ closable: false }}
       >
         <Alert type="info" showIcon style={{ marginBottom: 12 }}
                title="成交后开通：记一笔线下已收款订单（合同金额），按期数开通套餐；企业档附带中转。" />
@@ -338,7 +339,7 @@ const DeadItemsTab: React.FC = () => {
         cancelText="取消"
         okButtonProps={{ danger: true, loading: disableSubmitting }}
         cancelButtonProps={{ disabled: disableSubmitting }}
-        maskClosable={false}
+        mask={{ closable: false }}
       >
         <Alert type="warning" showIcon style={{ marginBottom: 12 }}
                title="禁用后该企业全部成员将无法登录后台；可随时重新启用。" />

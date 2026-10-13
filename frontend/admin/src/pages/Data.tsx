@@ -10,8 +10,9 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import {
   Card, Col, Row, Statistic, Table, Button, Space, Select, Input, DatePicker,
-  Tooltip, Typography, message, Popconfirm,
+  Tooltip, Typography, Popconfirm,
 } from 'antd'
+import { message } from '../feedback'
 import {
   ReloadOutlined, SearchOutlined, DownloadOutlined, DeleteOutlined, EyeOutlined,
 } from '@ant-design/icons'

@@ -12,8 +12,8 @@ import React from 'react'
 import { ConfigProvider } from 'antd'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd')
+jest.mock('../../feedback', () => {
+  const actual = jest.requireActual('../../feedback')
   return {
     ...actual,
     message: { error: jest.fn(), success: jest.fn(), warning: jest.fn(), info: jest.fn() },
@@ -25,7 +25,7 @@ jest.mock('../../services/capabilities', () => ({
   confirmTreeImport: jest.fn(),
 }))
 
-import { message } from 'antd'
+import { message } from '../../feedback'
 import ImportTreePicker, {
   TREE_CANCEL_TOAST, TREE_EMPTY_TITLE, TREE_OVER_LIMIT, TREE_SELECT_DIR, TREE_START_PARSE,
   TREE_USE_SERVER,
@@ -69,11 +69,11 @@ const TREE = ['up/alpha/SKILL.md', 'up/beta/SKILL.md', 'up/myplug/plugin.json']
 
 const previewPayload = (over: Record<string, unknown> = {}) => ({
   assets: [
-    { asset_type: 'skill', name: 'alpha', action: 'create', origin_path: '.agents/skills/alpha' },
-    { asset_type: 'skill', name: 'beta', action: 'update', origin_path: '.agents/skills/beta' },
+    { asset_type: 'skill', name: 'alpha', action: 'create', origin_path: 'agents-hub/skills/alpha' },
+    { asset_type: 'skill', name: 'beta', action: 'update', origin_path: 'agents-hub/skills/beta' },
     {
       asset_type: 'plugin', name: 'myplug', action: 'create',
-      origin_path: '.agents/plugins/myplug',
+      origin_path: 'agents-hub/plugins/myplug',
       bundled: [{ asset_type: 'skill', name: 'myplug__s1', action: 'create' }],
     },
   ],

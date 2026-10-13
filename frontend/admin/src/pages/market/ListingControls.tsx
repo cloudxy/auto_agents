@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { Modal, Radio, Space, Typography, message } from 'antd'
+import { Modal, Radio, Space, Typography } from 'antd'
+import { message } from '../../feedback'
 
 import { patchListing, type AssetRow } from '../../services/capabilities'
 import { apiErrorMessage } from '../../utils/errorMessage'

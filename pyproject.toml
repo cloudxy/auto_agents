@@ -57,12 +57,13 @@ exclude_lines = [
 ]
 
 [tool.ruff]
-# 最小 lint 范围：语法错误 + 未使用导入（存量代码逐步收紧）
+# lint 范围：全仓 Python（backend / platform_core / scrapy / scripts / tools / config / capability-library）
+# 规则：E9 语法错误 + 全部 pyflakes（F：未定义名 / 重复定义 / 未使用导入与变量 / 非法 noqa 等）
 target-version = "py313"
 extend-exclude = [".venv", "node_modules", "runtime", "logs"]
 
 [tool.ruff.lint]
-select = ["E9", "F401"]
+select = ["E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
 # 各包 __init__.py 的导出性导入不视为未使用

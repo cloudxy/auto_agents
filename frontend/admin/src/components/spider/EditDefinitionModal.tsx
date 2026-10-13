@@ -8,7 +8,8 @@
  * 保存成功提示「已保存。后续新任务将使用新定义。」
  */
 import React, { useEffect, useState } from 'react'
-import { Button, Form, Input, Modal, Space, Typography, message } from 'antd'
+import { Button, Form, Input, Modal, Space, Typography } from 'antd'
+import { message } from '../../feedback'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { updateDefinitionMeta } from '../../services/spiders'
 import { apiErrorMessage, isFormValidateError } from '../../utils/errorMessage'

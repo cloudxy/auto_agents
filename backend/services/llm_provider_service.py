@@ -4,16 +4,17 @@
 - 加解密/SSRF 守卫 → llm_secret_vault.py（安全关注点一处收口）
 - 保存前探测/入库连通测试 → llm_probe_engine.py
 - 运行时配置形状与两段解析 → llm_common（公共下沉层；本模块 re-export 并委托）
+- 模型 diff / 逐模型测试 / 入库连通测试编排 → llm_provider_health.py
+  （LlmProviderHealthMixin，本类继承；方法名与调用面不变）
 
-本模块保留：CRUD/激活/多模型集全量替换/模型 diff/运行时配置解析编排
+本模块保留：CRUD/激活/多模型集全量替换/运行时配置解析编排
 （激活供应商优先，兜底 yml/env；llm_client.llm_chat 消费）。
 
 T6 依赖方向（与 ai_planner 域的环已消除）：
 - 本模块 → llm_common（LlmRuntimeConfig / 兜底解析 / 三段解析实现）单向；
 - 本模块 → ai_planner.llm_client（client 缓存失效）/ ai_planner._cooldown
-  （连通成功清冷却）单向——反向（llm_client → 本模块）已不存在。
+  （连通成功清冷却，经 llm_provider_health）单向——反向（llm_client → 本模块）已不存在。
 """
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,12 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.repositories.llm_provider_repository import LlmProviderRepository
 from backend.services import llm_common
 from backend.services.ai_planner import llm_client as _llm_client
-from backend.services.ai_planner._cooldown import clear as _cooldown_clear
 from backend.services.llm_common import (  # noqa: F401 — 兼容存量 import 面（re-export）
     LlmRuntimeConfig,
     resolve_config_from_settings,
 )
 from backend.services.llm_probe_engine import LlmProbeEngine
+from backend.services.llm_provider_health import LlmProviderHealthMixin
 from backend.services.llm_secret_vault import LlmSecretVault
 from platform_core.exceptions import (
     AuthorizationException,
@@ -37,13 +38,11 @@ from platform_core.exceptions import (
 from platform_core.models.llm_provider_model import LlmProviderModel
 from sqlalchemy import delete, select
 
-from backend.services.llm_protocol import ProtocolError, execute_json, get_adapter
 from platform_core.logger import get_logger
 from platform_core.timeutil import utc_iso
 from platform_core.schemas.llm_provider import (
     LlmProviderCreate,
     LlmProviderResponse,
-    LlmProviderTestResponse,
     LlmProviderUpdate,
     mask_api_key,
 )
@@ -59,8 +58,7 @@ async def _invalidate_llm_clients(provider_id: Optional[int] = None) -> None:
         logger.warning(f"LLM 共享 client 缓存清理失败（忽略）: {e}")
 
 
-
-class LlmProviderService:
+class LlmProviderService(LlmProviderHealthMixin):
     """LLM 供应商管理编排（CRUD / 激活 / 测试 / 运行时配置解析）"""
 
     def __init__(self, session: AsyncSession):
@@ -109,10 +107,12 @@ class LlmProviderService:
 
     @staticmethod
     def encrypt_api_key(plain: Optional[str]) -> str:
+        logger.debug("加密 LLM 供应商密钥")
         return LlmSecretVault.encrypt_api_key(plain)
 
     @staticmethod
     def decrypt_api_key(encrypted: Optional[str]) -> str:
+        logger.debug("解密 LLM 供应商密钥")
         return LlmSecretVault.decrypt_api_key(encrypted)
 
     # ------------------------------------------------------------------
@@ -131,11 +131,13 @@ class LlmProviderService:
     # ------------------------------------------------------------------
     async def list_providers(self) -> list[LlmProviderResponse]:
         """全量列表（api_key 全部掩码；量级小，无分页）"""
+        logger.debug("查询 LLM 供应商列表")
         items = await self.repo.list_providers()
         return [await self._to_response(i) for i in items]
 
     async def get_provider(self, provider_id: int) -> LlmProviderResponse:
         """单条快照（api_key 掩码）"""
+        logger.debug(f"查询 LLM 供应商 | id={provider_id}")
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
@@ -143,6 +145,7 @@ class LlmProviderService:
 
     async def get_active_provider(self) -> LlmProviderResponse:
         """当前激活供应商（无激活行 404，前端可提示走 yml/env 兜底）"""
+        logger.debug("查询激活的 LLM 供应商")
         item = await self.repo.get_active()
         if item is None:
             raise NotFoundException("激活的 LLM 供应商")
@@ -150,6 +153,7 @@ class LlmProviderService:
 
     async def create_provider(self, payload: LlmProviderCreate) -> LlmProviderResponse:
         """创建供应商（名称唯一；api_key 可选，配置了则必须可加密落库）"""
+        logger.info(f"创建 LLM 供应商 | name={payload.name} type={payload.provider_type}")
         existing = await self.repo.get_by_name(payload.name)
         if existing is not None:
             raise BusinessException(f"LLM 供应商 '{payload.name}' 已存在")
@@ -178,26 +182,29 @@ class LlmProviderService:
         new_id = int(item.id)
         # B-M2 向导流：models[] 一并落子表（父行 model 取 is_default 行，缺省取首行）
         if payload.models:
-            defaults = [m for m in payload.models if m.is_default]
-            if len(defaults) > 1:
-                raise ValidationException(message="默认模型至多一个（is_default 多行）", field="models")
-            for entry in payload.models:
-                self.session.add(
-                    LlmProviderModel(
-                        provider_id=new_id,
-                        model_id=entry.model_id,
-                        alias=entry.alias or "",
-                        model_tier=entry.model_tier or "basic",
-                        priority=int(entry.priority or 100),
-                        is_default=bool(entry.is_default),
-                        enabled=bool(entry.enabled if entry.enabled is not None else True),
-                    )
-                )
-            chosen = defaults[0].model_id if defaults else payload.models[0].model_id
-            item.model = chosen
+            item.model = self._add_wizard_models(new_id, payload.models)
         await self.session.commit()
         logger.info(f"创建 LLM 供应商: id={new_id}, name={payload.name}")
         return await self.get_provider(new_id)
+
+    def _add_wizard_models(self, provider_id: int, models) -> str:
+        """向导流 models[] 落子表（默认至多一行，多行 422），返回父行 model 冗余值"""
+        defaults = [m for m in models if m.is_default]
+        if len(defaults) > 1:
+            raise ValidationException(message="默认模型至多一个（is_default 多行）", field="models")
+        for entry in models:
+            self.session.add(
+                LlmProviderModel(
+                    provider_id=provider_id,
+                    model_id=entry.model_id,
+                    alias=entry.alias or "",
+                    model_tier=entry.model_tier or "basic",
+                    priority=int(entry.priority or 100),
+                    is_default=bool(entry.is_default),
+                    enabled=bool(entry.enabled if entry.enabled is not None else True),
+                )
+            )
+        return defaults[0].model_id if defaults else models[0].model_id
 
     async def update_provider(
         self, provider_id: int, payload: LlmProviderUpdate,
@@ -205,6 +212,7 @@ class LlmProviderService:
         actor_id: int | None = None, actor_name: str = "",
     ) -> LlmProviderResponse:
         """更新供应商（PATCH 语义；api_key：未提交/空串均不修改，非空重新加密落库）"""
+        logger.info(f"更新 LLM 供应商 | id={provider_id} actor={actor_id}")
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
@@ -242,6 +250,7 @@ class LlmProviderService:
         actor_id: int | None = None, actor_name: str = "",
     ) -> dict:
         """删除供应商（激活位随行删除；无激活行时 resolve_runtime_config 自动走兜底）"""
+        logger.info(f"删除 LLM 供应商 | id={provider_id} actor={actor_id}")
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
@@ -264,6 +273,7 @@ class LlmProviderService:
         actor_id: int | None = None, actor_name: str = "",
     ) -> LlmProviderResponse:
         """单激活热切换（activate_exclusive 单语句互斥；旧激活行的共享连接全清失效）"""
+        logger.info(f"激活 LLM 供应商 | id={provider_id} actor={actor_id}")
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
@@ -283,6 +293,7 @@ class LlmProviderService:
         actor_id: int | None = None, actor_name: str = "",
     ) -> LlmProviderResponse:
         """取消激活（全部下线：运行时解析回退 yml/env 兜底；行保留可再激活）"""
+        logger.info(f"取消激活 LLM 供应商 | id={provider_id} actor={actor_id}")
         item = await self.repo.get_by_id(provider_id)
         if item is None:
             raise NotFoundException("LLM 供应商")
@@ -298,89 +309,14 @@ class LlmProviderService:
         logger.info(f"LLM 供应商已取消激活: id={provider_id}")
         return await self.get_provider(provider_id)
 
-    # ------------------------------------------------------------------
-    # 连通性测试（一次性 client，10s 超时，1-token 请求，不落库）
-    # ------------------------------------------------------------------
-    # ---------- B-M2-2 fetch diff + 逐模型健康 ----------
-
-    async def fetch_models_diff(self, provider_id: int) -> dict:
-        """远端列表 vs 本地子表三分类（new/existing/vanished）——不直写"""
-        provider = await self.repo.get_by_id(provider_id)
-        if provider is None:
-            raise NotFoundException(resource=f"LLM 供应商 {provider_id}")
-        await LlmSecretVault.assert_outbound_base_url(provider.base_url)
-        api_key = self.decrypt_api_key(provider.api_key_encrypted)
-        adapter = get_adapter(provider.provider_type or "openai_compatible")
-        remote = await adapter.list_models(provider.base_url, api_key)
-        remote_ids = set(remote.ids())
-        local_ids = set(
-            (await self.session.execute(
-                select(LlmProviderModel.model_id).where(LlmProviderModel.provider_id == provider_id)
-            )).scalars()
-        )
-        return {
-            "new": sorted(remote_ids - local_ids),
-            "existing": sorted(remote_ids & local_ids),
-            "vanished": sorted(local_ids - remote_ids),
-        }
-
-    async def test_model(self, provider_id: int, model_id: str, *, commit: bool = True) -> dict:
-        """单模型 1-token 测试（落库行持久化健康态；未落库行一次性测试即回）：200→healthy / 401·403→down / 其余→degraded
-
-        ADR-0007 D3：默认自持事务（API 直调）；被巡检等批量场景组合时传
-        commit=False，由外层统一提交（中途提交会 expire 循环内 ORM 行）。
-        """
-        import time
-
-        logger.info(f"模型连通测试 | provider={provider_id} model={model_id}")
-        provider = await self.repo.get_by_id(provider_id)
-        if provider is None:
-            raise NotFoundException(resource=f"LLM 供应商 {provider_id}")
-        row = (await self.session.execute(
-            select(LlmProviderModel).where(
-                LlmProviderModel.provider_id == provider_id,
-                LlmProviderModel.model_id == model_id,
-            )
-        )).scalar_one_or_none()
-
-        await LlmSecretVault.assert_outbound_base_url(provider.base_url)
-        api_key = self.decrypt_api_key(provider.api_key_encrypted)
-        adapter = get_adapter(provider.provider_type or "openai_compatible")
-        request = adapter.build_chat(
-            provider.base_url, api_key, model_id,
-            [{"role": "user", "content": "ping"}], max_tokens=16,
-        )
-        started = time.perf_counter()
-        try:
-            data = await execute_json(None, "POST", request.url, request.headers, request.json_payload)
-            if not adapter.parse_chat(data):
-                raise ProtocolError("HTTP 200 响应缺少文本内容")
-            ok, error, status = True, "", "healthy"
-        except ProtocolError as exc:
-            ok, error = False, str(exc)
-            status = "down" if any(f"HTTP {code}" in str(exc) for code in (401, 403)) else "degraded"
-        latency_ms = int((time.perf_counter() - started) * 1000)
-
-        if row is not None:
-            # feat-llm-cooldown：连通成功立即清除冷却
-            if ok:
-                await _cooldown_clear(provider_id, model_id)
-            row.health_status = status
-            row.last_latency_ms = latency_ms
-            row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            await self.session.flush()
-        else:
-            # 未落库模型（导入新增的预览测试）：一次性测试，结果即回不落库——
-            # 保存（put_models）后再次测试才持久化健康态
-            logger.debug(f"模型未落库，一次性测试 | provider={provider_id} model={model_id}")
-        if commit and row is not None:
-            await self.session.commit()
-        return {"ok": ok, "latency_ms": latency_ms, "model": model_id, "error": error, "health_status": status}
+    # 连通性 / 模型健康（fetch_models_diff / test_model / test_connectivity）
+    # → llm_provider_health.LlmProviderHealthMixin（继承）
 
     # ---------- B-M2-1 多模型（全量替换 + 默认冗余同步） ----------
 
     async def get_models(self, provider_id: int) -> list[dict]:
         """列供应商全部模型（含健康态）"""
+        logger.debug(f"查询供应商模型列表 | provider={provider_id}")
         rows = (
             await self.session.execute(
                 select(LlmProviderModel)
@@ -420,6 +356,18 @@ class LlmProviderService:
                 message="默认模型至多一个（is_default 多行）", field="models"
             )
 
+        await self._replace_model_rows(provider_id, entries)
+        if defaults:
+            provider.model = defaults[0]["model_id"]  # 冗余快照：消费路径零改动的前提
+        elif entries:
+            provider.model = entries[0]["model_id"]
+        await self.session.flush()
+        await self.session.commit()
+        await _invalidate_llm_clients(provider_id)
+        return await self.get_models(provider_id)
+
+    async def _replace_model_rows(self, provider_id: int, entries: list[dict]) -> None:
+        """删除该供应商全部子表行后按 entries 重建（同事务，不提交）"""
         await self.session.execute(
             delete(LlmProviderModel).where(LlmProviderModel.provider_id == provider_id)
         )
@@ -435,65 +383,20 @@ class LlmProviderService:
                     enabled=bool(entry.get("enabled", True)),
                 )
             )
-        if defaults:
-            provider.model = defaults[0]["model_id"]  # 冗余快照：消费路径零改动的前提
-        elif entries:
-            provider.model = entries[0]["model_id"]
-        await self.session.flush()
-        await self.session.commit()
-        await _invalidate_llm_clients(provider_id)
-        return await self.get_models(provider_id)
 
     # ---------- B-M1 探测（保存前；key 仅本次请求使用，不落库不落日志不回显） ----------
 
     # 探测 → llm_probe_engine（B2）；同名薄委托兼容存量调用面
     @staticmethod
     async def probe_models(provider_type: str, base_url: str, api_key: str) -> dict:
+        logger.debug(f"委托模型列表探测 | type={provider_type}")
         return await LlmProbeEngine.probe_models(provider_type, base_url, api_key)
 
     @staticmethod
     async def probe_test(provider_type: str, base_url: str, api_key: str, model: str) -> dict:
+        logger.debug(f"委托模型连通探测 | type={provider_type} model={model}")
         return await LlmProbeEngine.probe_test(provider_type, base_url, api_key, model)
 
-
-    async def test_connectivity(
-        self, provider_id: int,
-        *, actor_is_platform_admin: bool | None = None,
-        actor_id: int | None = None, actor_name: str = "",
-    ) -> LlmProviderTestResponse:
-        """入库连通测试（测该行地址；平台行对非超管拒绝）"""
-        logger.info(f"测试 LLM 供应商连通 | id={provider_id}")
-        item = await self.repo.get_by_id(provider_id)
-        if item is None:
-            raise NotFoundException("LLM 供应商")
-        await self._guard_platform_provider_write(
-            item, actor_is_platform_admin=actor_is_platform_admin,
-            actor_id=actor_id, actor_name=actor_name,
-        )
-        result = await LlmProbeEngine.test_connectivity(self.repo, provider_id)
-        # feat-llm-cooldown（QA-7）：连通成功清除默认模型冷却
-        if result.ok and result.model:
-            await _cooldown_clear(provider_id, result.model)
-        try:
-            row = (await self.session.execute(
-                select(LlmProviderModel).where(
-                    LlmProviderModel.provider_id == provider_id,
-                    LlmProviderModel.model_id == result.model,
-                )
-            )).scalar_one_or_none()
-            if row is not None:
-                row.health_status = "healthy" if result.ok else "down"
-                if result.latency_ms is not None:
-                    row.last_latency_ms = result.latency_ms
-                from datetime import datetime, timezone
-
-                row.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                await self.session.commit()
-        except Exception as e:  # noqa: BLE001 健康态同步失败不影响测试结果返回
-            logger.warning(f"连通测试健康态同步失败: provider={provider_id}, error={e}")
-        return result
-
-    
     # ------------------------------------------------------------------
     # 运行时配置解析（激活供应商优先，兜底 yml/env；_llm_chat 消费）
     # ------------------------------------------------------------------
@@ -504,7 +407,7 @@ class LlmProviderService:
         repo/decrypt——存量单测对 svc.repo / svc.decrypt_api_key 的实例级
         patch 语义不变。无租户上下文（legacy/后台）保持原语义：任一激活行优先。
         """
+        logger.debug("解析 LLM 运行时配置")
         return await llm_common.resolve_runtime_config(
             self.session, repo=self.repo, decrypt=self.decrypt_api_key
         )
-

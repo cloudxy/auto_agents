@@ -170,6 +170,26 @@ async def reconcile_tokens(
     stats = {"blocked": 0, "unblocked": 0, "failed": 0}
     if not rows:
         return stats
+    sku_rows, groups, tenant_usage, now = await _reconcile_context(session, rows)
+    for row in rows:
+        tid = int(row.tenant_id)
+        group = groups.get(int(row.group_id))
+        used, limit = tenant_usage[tid]
+        want = desired_block_reason(
+            row, sku_status=sku_effective_status(sku_rows.get(tid), now),
+            group_status=str(group.status) if group is not None else None,
+            tenant_used=used, tenant_limit=limit,
+        )
+        if want != row.blocked_reason:
+            await _align_token(row, want, stats, strict=strict)
+    await session.flush()
+    return stats
+
+
+async def _reconcile_context(
+    session: AsyncSession, rows: list[RelayToken],
+) -> tuple[dict[int, RelaySkuEntitlement], dict[int, RelayGroup], dict[int, tuple[int, int]], datetime]:
+    """批量取判定上下文：各企业 SKU 行、令牌所属渠道组、企业当月中转（用量, 额度）、当前时刻"""
     tenant_ids = {int(t.tenant_id) for t in rows}
     sku_rows = {
         int(r.tenant_id): r for r in (await session.execute(
@@ -191,36 +211,29 @@ async def reconcile_tokens(
         tenant_usage[tid] = (
             await tenant_month_relay_used(session, tid, year_month), tenant_relay_limit(tenant),
         )
-    for row in rows:
-        tid = int(row.tenant_id)
-        group = groups.get(int(row.group_id))
-        used, limit = tenant_usage[tid]
-        want = desired_block_reason(
-            row, sku_status=sku_effective_status(sku_rows.get(tid), now),
-            group_status=str(group.status) if group is not None else None,
-            tenant_used=used, tenant_limit=limit,
+    return sku_rows, groups, tenant_usage, now
+
+
+async def _align_token(row: RelayToken, want: Optional[str], stats: dict[str, int], *, strict: bool) -> None:
+    """单令牌网关 block / unblock 并回写 blocked_reason；失败计入 stats，strict 时抛出"""
+    tid = int(row.tenant_id)
+    have = row.blocked_reason
+    try:
+        if want is not None and have is None:
+            await gateway_admin.block_key(str(row.key_hash))
+            stats["blocked"] += 1
+        elif want is None and have is not None:
+            await gateway_admin.unblock_key(str(row.key_hash))
+            stats["unblocked"] += 1
+        row.blocked_reason = want
+        logger.info(f"令牌网关封禁对齐 | tenant={tid} token={row.id} {have} → {want}")
+    except httpx.HTTPError as exc:
+        stats["failed"] += 1
+        logger.warning(
+            f"网关封禁对齐失败 | tenant={tid} token={row.id} want={want} err={type(exc).__name__}"
         )
-        have = row.blocked_reason
-        if want == have:
-            continue
-        try:
-            if want is not None and have is None:
-                await gateway_admin.block_key(str(row.key_hash))
-                stats["blocked"] += 1
-            elif want is None and have is not None:
-                await gateway_admin.unblock_key(str(row.key_hash))
-                stats["unblocked"] += 1
-            row.blocked_reason = want
-            logger.info(f"令牌网关封禁对齐 | tenant={tid} token={row.id} {have} → {want}")
-        except httpx.HTTPError as exc:
-            stats["failed"] += 1
-            logger.warning(
-                f"网关封禁对齐失败 | tenant={tid} token={row.id} want={want} err={type(exc).__name__}"
-            )
-            if strict:
-                raise GatewayEnforcementError(str(exc)) from exc
-    await session.flush()
-    return stats
+        if strict:
+            raise GatewayEnforcementError(str(exc)) from exc
 
 
 async def reconcile_tenant(session: AsyncSession, tenant_id: int, *, strict: bool = False) -> dict[str, int]:
@@ -249,6 +262,7 @@ class RelayEnforcementService:
         self._task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
+        logger.info("启动中转执法巡检")
         if "pytest" in sys.modules:
             logger.info("中转执法巡检测试态不启动")
             return
@@ -260,6 +274,7 @@ class RelayEnforcementService:
         logger.info("中转执法巡检已启动")
 
     async def stop(self) -> None:
+        logger.info("停止中转执法巡检")
         self._running = False
         if self._task is not None:
             self._task.cancel()

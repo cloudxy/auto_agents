@@ -65,6 +65,7 @@ class TenantSettingsService:
 
     async def get_delivery_config(self, tenant_id: int) -> tuple[str | None, str | None]:
         """(url, 签名密钥)；未配置返回 (None, None)"""
+        logger.debug(f"读取交付配置 | tenant={tenant_id}")
         tenant = await self._tenant(tenant_id)
         quota = tenant.quota if isinstance(tenant.quota, dict) else {}
         url = quota.get(_URL_KEY)
@@ -72,6 +73,7 @@ class TenantSettingsService:
         return (str(url) if url else None), (str(secret) if secret else None)
 
     async def get_delivery_view(self, tenant_id: int) -> dict:
+        logger.debug(f"读取交付配置视图 | tenant={tenant_id}")
         tenant = await self._tenant(tenant_id)
         return self._view(tenant.quota if isinstance(tenant.quota, dict) else {})
 

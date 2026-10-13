@@ -73,20 +73,7 @@ class StorePipeline:
         # 缺失时回退活跃任务集合（唯一成员才归属，多成员置 None 防误关联）
         task_id = item.pop("task_id", None)
         if task_id is None:
-            try:
-                members = self.redis.smembers(ACTIVE_TASK_KEY.format(spider_name=spider.name))
-            except Exception as e:  # noqa: BLE001 Redis 抖动：本条结果不归属，不阻断采集
-                logger.warning(f"读取活跃任务集合失败: {spider.name}, error={e}")
-                members = set()
-            if len(members) == 1:
-                try:
-                    task_id = int(next(iter(members)))
-                except (TypeError, ValueError):
-                    task_id = None
-            elif len(members) > 1:
-                logger.warning(
-                    f"活跃任务集合多成员，结果不归属: {spider.name}, members={sorted(members)}"
-                )
+            task_id = self._task_id_from_active_set(spider)
 
         message = json.dumps(
             {
@@ -112,6 +99,24 @@ class StorePipeline:
                 logger.error("Redis 结果队列持续不可用，停止采集防止继续静默丢数据")
                 raise CloseSpider("redis_push_failed")
         return item
+
+    def _task_id_from_active_set(self, spider):
+        """活跃任务集合回退归属：唯一成员才归属，多成员 / 读取失败返回 None"""
+        try:
+            members = self.redis.smembers(ACTIVE_TASK_KEY.format(spider_name=spider.name))
+        except Exception as e:  # noqa: BLE001 Redis 抖动：本条结果不归属，不阻断采集
+            logger.warning(f"读取活跃任务集合失败: {spider.name}, error={e}")
+            members = set()
+        if len(members) == 1:
+            try:
+                return int(next(iter(members)))
+            except (TypeError, ValueError):
+                return None
+        if len(members) > 1:
+            logger.warning(
+                f"活跃任务集合多成员，结果不归属: {spider.name}, members={sorted(members)}"
+            )
+        return None
 
     def _push_with_retry(self, message: str, task_id) -> bool:
         """带退避的消息重投：成功返回 True，重投耗尽返回 False（不抛出）"""

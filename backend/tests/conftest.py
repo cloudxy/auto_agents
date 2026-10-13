@@ -194,14 +194,6 @@ def admin_client(app, client, _reset_auth_override):
 
 
 @pytest.fixture
-def platform_admin_client(app, client, _reset_auth_override):
-    """平台超管 TestClient（require_platform_admin 放行）"""
-    _set_auth_override(app, "platform_admin")
-    yield client
-    _set_auth_override(app, None)
-
-
-@pytest.fixture
 def operator_client(app, client, _reset_auth_override):
     """operator 特权 TestClient（require_login/require_operator 放行，admin 拒绝）"""
     _set_auth_override(app, "operator")
@@ -337,6 +329,29 @@ def make_tenant_owner_headers(db_session, *, slug: str = "co-a") -> tuple[dict, 
 # ---------------------------------------------------------------------------
 
 _MYSQL_FIDELITY_DB_PREFIX = "test_auto_agents"
+
+
+def clear_redis_keys(*keys: str) -> None:
+    """尽力删除 Redis 计数键（登录失败 / 注册尝试等跨轮次存活的限流计数）。
+
+    本机没起 Redis 时直接跳过：计数本就写不进去，不需要清；连不上也不能让整份测试
+    文件在 setup 阶段报错（原先 autouse fixture 直连 Redis，无 Redis 环境 20 例 ERROR）。
+    """
+    if not keys:
+        return
+    import asyncio
+
+    from redis.exceptions import RedisError
+
+    from platform_core.redis_async import get_async_redis
+
+    async def _clear() -> None:
+        await asyncio.wait_for(get_async_redis().delete(*keys), timeout=1.0)
+
+    try:
+        asyncio.run(_clear())
+    except (RedisError, OSError, TimeoutError):
+        pass
 
 
 def mysql_fidelity_enabled() -> bool:

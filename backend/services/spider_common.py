@@ -155,19 +155,30 @@ def _read_task_log_sync(
     """
     if offset is None:
         return []
-    with open(log_path, "rb") as f:
-        size = os.fstat(f.fileno()).st_size
-        start = offset if 0 <= offset <= size else size
-        stop = end if end is not None and start <= end <= size else size
-        f.seek(start)
-        lines = f.read(stop - start).decode("utf-8", errors="replace").splitlines()
+    lines = _read_log_window(log_path, offset, end)
 
     if task_marker is not None:
         import re
 
         pattern = re.compile(rf"(\[task={int(task_marker)}\]|task_id={int(task_marker)}\b)")
         lines = [ln for ln in lines if pattern.search(ln)]
+    return _filter_log_lines(lines, tail, keyword, level)
 
+
+def _read_log_window(log_path: str, offset: int, end: int | None) -> list[str]:
+    """读日志文件 [offset, end) 字节窗口并按行切分（越界的起止偏移收敛到文件尾）"""
+    with open(log_path, "rb") as f:
+        size = os.fstat(f.fileno()).st_size
+        start = offset if 0 <= offset <= size else size
+        stop = end if end is not None and start <= end <= size else size
+        f.seek(start)
+        return f.read(stop - start).decode("utf-8", errors="replace").splitlines()
+
+
+def _filter_log_lines(
+    lines: list[str], tail: int, keyword: str | None, level: str | None,
+) -> list[str]:
+    """按日志级别（| 分隔的第 2 段）与关键字（不区分大小写）过滤，取末尾 tail 行"""
     if not keyword and not level:
         return lines[-tail:]
 

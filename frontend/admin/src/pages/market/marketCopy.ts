@@ -54,8 +54,8 @@ export const catalogFocusCopy = (name: string): string => `已定位短名 ${nam
 export const VERIFY = '验证'
 export const DETAIL = '详情'
 
-/** T-02（FR-01，edge-states §7.6 钉句）：同步 .agents 四态文案 */
-export const SYNC_AGENTS = '同步 .agents'
+/** T-02（FR-01，edge-states §7.6 钉句）：同步能力库四态文案（D2 后同步源是 hub 根 SKILLS.AGENTS_ROOT，不再是开发中枢 .agents） */
+export const SYNC_AGENTS = '同步能力库'
 export const SYNCING = '同步中…'
 export const syncDoneCopy = (added: number, updated: number, unchanged: number): string =>
   `同步完成：新增 ${added} · 更新 ${updated} · 无变化 ${unchanged}`

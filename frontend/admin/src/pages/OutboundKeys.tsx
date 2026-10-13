@@ -9,8 +9,9 @@
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Alert, Button, Card, Form, Input, Modal, Space, Table, Tag, Typography, message,
+  Alert, Button, Card, Form, Input, Modal, Space, Table, Tag, Typography,
 } from 'antd'
+import { message } from '../feedback'
 import { ReloadOutlined } from '@ant-design/icons'
 
 import TenantSpaceOnly from '../components/TenantSpaceOnly'

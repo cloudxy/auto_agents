@@ -45,11 +45,13 @@ class ApiKeyService:
         return ApiKeyCreated(**base.model_dump(), plaintext=plaintext)
 
     async def list_keys(self, tenant_id: int) -> list[ApiKeyOut]:
+        logger.debug(f"查询 API Key 列表 | tenant={tenant_id}")
         stmt = select(ApiKey).where(ApiKey.tenant_id == tenant_id, ApiKey.deleted_at.is_(None))
         rows = (await self.session.execute(stmt)).scalars().all()
         return [ApiKeyOut.model_validate(r) for r in rows]
 
     async def revoke(self, tenant_id: int, key_id: int) -> ApiKeyOut:
+        logger.info(f"吊销 API Key | tenant={tenant_id} key_id={key_id}")
         row = await self.repo.get_by_id(key_id)
         if row is None or row.tenant_id != tenant_id:
             raise NotFoundException("API Key")
@@ -60,6 +62,7 @@ class ApiKeyService:
 
     async def authenticate(self, plaintext: str) -> Optional[int]:
         """命中返回 tenant_id；无效/过期/吊销返回 None。"""
+        logger.debug("API Key 鉴权")
         if not plaintext:
             return None
         digest = _hash_key(plaintext)

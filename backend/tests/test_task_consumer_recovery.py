@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import backend.tasks.consumer as consumer_mod
+import backend.tasks.consumer_recovery as recovery_mod
 from backend.tasks.consumer import SpiderTaskConsumer
 from platform_core.queues import ACTIVE_TASK_KEY
 from stubs import FakeRedis, fake_settings
@@ -51,9 +52,9 @@ async def test_recover_fails_orphans_and_spares_active():
         _FakeTask(1, "spider_a"), _FakeTask(2, "spider_b"), _FakeTask(3, "spider_c"),
     ])
     fail = AsyncMock()
-    with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
-         patch.object(consumer_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
-         patch.object(consumer_mod, "AsyncSession", _FakeSessionCtx), \
+    with patch.object(recovery_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
+         patch.object(recovery_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
+         patch.object(recovery_mod, "AsyncSession", _FakeSessionCtx), \
              patch.object(__import__("backend.tasks.consumer", fromlist=["SpiderTaskConsumer"]).SpiderTaskConsumer, "_engine",
                    staticmethod(lambda: object())), \
          patch.object(svc, "_fail_task", fail):
@@ -70,8 +71,8 @@ async def test_recover_fails_orphans_and_spares_active():
 async def test_recover_disabled_when_zero_hours():
     """STALE_TASK_HOURS=0：功能关闭，完全不触 DB"""
     svc = _consumer(FakeRedis())
-    with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 0})), \
-         patch.object(consumer_mod, "AsyncSession",
+    with patch.object(recovery_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 0})), \
+         patch.object(recovery_mod, "AsyncSession",
                       MagicMock(side_effect=AssertionError("关闭态不应查库"))):
         await svc._recover_stale_once()  # 直接返回，不抛
 
@@ -87,9 +88,9 @@ async def test_recover_conservative_when_redis_error():
     repo = MagicMock()
     repo.find_stale_running = AsyncMock(return_value=[_FakeTask(9, "spider_x")])
     fail = AsyncMock()
-    with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
-         patch.object(consumer_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
-         patch.object(consumer_mod, "AsyncSession", _FakeSessionCtx), \
+    with patch.object(recovery_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
+         patch.object(recovery_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
+         patch.object(recovery_mod, "AsyncSession", _FakeSessionCtx), \
              patch.object(__import__("backend.tasks.consumer", fromlist=["SpiderTaskConsumer"]).SpiderTaskConsumer, "_engine",
                    staticmethod(lambda: object())), \
          patch.object(svc, "_fail_task", fail):
@@ -158,9 +159,9 @@ async def test_requeue_stale_pending_repushes_lost_messages():
     repo = MagicMock()
     repo.find_stale_pending = AsyncMock(return_value=[_FakePendingTask(11, "generic")])
     fail = AsyncMock()
-    with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
-         patch.object(consumer_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
-         patch.object(consumer_mod, "AsyncSession", _FakeSessionCtx), \
+    with patch.object(recovery_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
+         patch.object(recovery_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
+         patch.object(recovery_mod, "AsyncSession", _FakeSessionCtx), \
              patch.object(__import__("backend.tasks.consumer", fromlist=["SpiderTaskConsumer"]).SpiderTaskConsumer, "_engine",
                    staticmethod(lambda: object())), \
          patch.object(svc, "_fail_task", fail):
@@ -187,9 +188,9 @@ async def test_requeue_gives_up_after_max_attempts():
     repo = MagicMock()
     repo.find_stale_pending = AsyncMock(return_value=[_FakePendingTask(12, "generic")])
     fail = AsyncMock()
-    with patch.object(consumer_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
-         patch.object(consumer_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
-         patch.object(consumer_mod, "AsyncSession", _FakeSessionCtx), \
+    with patch.object(recovery_mod, "settings", fake_settings(**{"TASKS.STALE_TASK_HOURS": 6})), \
+         patch.object(recovery_mod, "SpiderTaskRepository", MagicMock(return_value=repo)), \
+         patch.object(recovery_mod, "AsyncSession", _FakeSessionCtx), \
              patch.object(__import__("backend.tasks.consumer", fromlist=["SpiderTaskConsumer"]).SpiderTaskConsumer, "_engine",
                    staticmethod(lambda: object())), \
          patch.object(svc, "_fail_task", fail):

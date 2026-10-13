@@ -222,7 +222,7 @@ def apply(conn, cols: list[dict], offset: int, cutoff: datetime | None = None) -
     return 0
 
 
-def main() -> int:
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("action", choices=["inventory", "apply"])
     parser.add_argument("--env", default=None, help="透传为 APP_ENV（默认沿用当前环境）")
@@ -231,40 +231,35 @@ def main() -> int:
                         help="旧时钟相对 UTC 的偏移（分钟）；缺省自动探测")
     parser.add_argument("--written-before", default=None,
                         help="新代码开始写库的时刻（UTC 读数，如 2026-09-29T01:00:00）；之后的行已是 UTC，不换算")
-    args = parser.parse_args()
-    if args.env:
-        os.environ["APP_ENV"] = args.env
-    cutoff = datetime.fromisoformat(args.written_before) if args.written_before else None
+    return parser.parse_args()
+
+
+def _parse_cutoff(written_before: str | None) -> datetime | None:
+    """--written-before → UTC naive（带时区的输入先换算到 UTC）"""
+    cutoff = datetime.fromisoformat(written_before) if written_before else None
     if cutoff is not None and cutoff.tzinfo is not None:
         cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
+    return cutoff
 
+
+def _resolve_offset(url: str, explicit: int | None) -> int | None:
+    """旧会话下探测偏移；显式 --offset-minutes 优先。库与宿主偏移不一致又未显式指定时返回 None"""
     from sqlalchemy import create_engine
 
-    from platform_core.timeutil import MYSQL_UTC_CONNECT_ARGS
-
-    url = _url()
     legacy_engine = create_engine(url)  # 刻意不带 +00:00：探测旧会话时区
     with legacy_engine.connect() as conn:
         db_offset, host_offset = detect_offsets(conn)
     legacy_engine.dispose()
-    offset = args.offset_minutes
-    if offset is None:
-        if db_offset != host_offset:
-            print(f"库时钟偏移 {db_offset} 与宿主偏移 {host_offset} 不一致，请用 --offset-minutes 指定")
-            return 2
-        offset = db_offset
-    engine = create_engine(url, connect_args=dict(MYSQL_UTC_CONNECT_ARGS))
-    if args.action == "inventory":
-        with engine.connect() as conn:
-            inventory(conn, offset, cutoff)
-            conn.rollback()
-        return 0
-    if offset == 0:
-        print("旧时钟就是 UTC，无需换算")
-        return 0
-    if not args.yes:
-        print("apply 会修改数据库：请先 inventory 核对，再加 --yes 重新执行")
-        return 2
+    if explicit is not None:
+        return explicit
+    if db_offset != host_offset:
+        print(f"库时钟偏移 {db_offset} 与宿主偏移 {host_offset} 不一致，请用 --offset-minutes 指定")
+        return None
+    return db_offset
+
+
+def _apply_in_transaction(engine, offset: int, cutoff: datetime | None) -> int:
+    """单事务换算：inventory → apply → 自检；任何一步失败整体回滚"""
     with engine.connect() as conn:
         trans = conn.begin()
         try:
@@ -279,6 +274,35 @@ def main() -> int:
             trans.rollback()
             raise
     return 0
+
+
+def main() -> int:
+    args = _parse_args()
+    if args.env:
+        os.environ["APP_ENV"] = args.env
+    cutoff = _parse_cutoff(args.written_before)
+
+    from sqlalchemy import create_engine
+
+    from platform_core.timeutil import MYSQL_UTC_CONNECT_ARGS
+
+    url = _url()
+    offset = _resolve_offset(url, args.offset_minutes)
+    if offset is None:
+        return 2
+    engine = create_engine(url, connect_args=dict(MYSQL_UTC_CONNECT_ARGS))
+    if args.action == "inventory":
+        with engine.connect() as conn:
+            inventory(conn, offset, cutoff)
+            conn.rollback()
+        return 0
+    if offset == 0:
+        print("旧时钟就是 UTC，无需换算")
+        return 0
+    if not args.yes:
+        print("apply 会修改数据库：请先 inventory 核对，再加 --yes 重新执行")
+        return 2
+    return _apply_in_transaction(engine, offset, cutoff)
 
 
 if __name__ == "__main__":

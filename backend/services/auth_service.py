@@ -101,6 +101,14 @@ class AuthService:
         else:
             candidates = await self.user_repo.get_by_username(identifier)
 
+        user = await self._match_credential(username, password, candidates)
+        if user is None:
+            return None
+        await self._assert_login_tenant_active(user)
+        return await self._complete_login(username, user)
+
+    async def _match_credential(self, username: str, password: str, candidates):
+        """候选行中按密码唯一命中者（None = 失败，已上报 login_failed）"""
         if not candidates:
             # 时序对齐（P1-9）：对不存在的用户做一次等代价哈希校验
             await asyncio.to_thread(verify_password, password, _DUMMY_HASH)
@@ -129,8 +137,10 @@ class AuthService:
                 self.session, reason="credential", tenant_id=_unique_tenant_id(candidates),
             )
             return None
-        user = matched[0]
-        # FR-08：密码命中后再查企业状态，凭证错误不得走到期句
+        return matched[0]
+
+    async def _assert_login_tenant_active(self, user) -> None:
+        """FR-08：密码命中后再查企业状态，凭证错误不得走到期句"""
         try:
             await assert_tenant_active(
                 self.session,
@@ -145,6 +155,8 @@ class AuthService:
             )
             raise
 
+    async def _complete_login(self, username: str, user) -> dict:
+        """固化身份快照 → 记登录时间 → 上报 login_succeeded → 提交"""
         from datetime import datetime, timezone
 
         role = getattr(user, "role", None)
@@ -181,15 +193,14 @@ class AuthService:
 
     async def create_token(self, user_data: dict) -> TokenResponse:
         """创建访问令牌"""
+        logger.info(f"生成 Token | user={user_data['username']}")
         # S1-3：claims 只承身份——tenant_id/tenant_role/is_platform_admin 随行携带；
         # role 仅为兼容存量消费方保留，权限判定一律 DB 快照重算
         from backend.services.session_service import access_claims
 
         # 与登录签发（session_service.issue_session）同一份 claims；tv = 会话版本（QA-B1-12）
         access_token = create_access_token(data=access_claims(user_data))
-        
-        logger.info(f"生成 Token | user={user_data['username']}")
-        
+
         return TokenResponse(
             access_token=access_token,
             token_type="bearer",
@@ -204,49 +215,16 @@ class AuthService:
         password: str,
         is_admin: bool = False
     ) -> dict:
-        """注册用户（T5 决策 B：挂 default 租户，不再产生 NULL 租户行）
+        """注册用户（T5 决策 B：挂 default 租户，不再产生 NULL 租户行），返回新用户信息 dict
 
         users.tenant_id 已收紧 NOT NULL（迁移 024）——公开注册一律归属
         default 租户（tenant_role=viewer），NULL 租户账号的历史放大器
         （NULL 兜底平台态）随之消灭。
-
-        Returns:
-            新用户信息 dict
         """
         logger.info(f"注册新用户: {username}")
-
-        # default 租户兜底归属（017 种子保证存在；缺失即环境未初始化）
-        from sqlalchemy import select
-
-        from platform_core.models.tenant import Tenant
-
-        tenant = (await self.session.execute(
-            select(Tenant).where(Tenant.slug == "default")
-        )).scalar_one_or_none()
-        if tenant is None:
-            logger.error("default 租户缺失，公开注册不可用（迁移 017 未执行？）")
-            raise BusinessException(
-                message="注册服务暂不可用，请稍后再试",
-                code="REGISTER_UNAVAILABLE",
-                status_code=503
-            )
-
-        # 1. 唯一性检查：username 按 (default 租户, username) 在册口径、email 全局
-        #    在册口径（042 唯一键在册化 / T-24 FR-93：软删行释放标识，查重与
-        #    DB 约束同口径——否则应用放行 DB 拒绝/应用误杀 DB 放行都会出现）
-        if await self.user_repo.exists_username_in_tenant(tenant.id, username):
-            raise BusinessException(
-                message=f"用户名已存在: {username}",
-                code="USERNAME_EXISTS",
-                status_code=409
-            )
-
-        if await self.user_repo.exists_by_email(email):
-            raise BusinessException(
-                message=f"邮箱已被注册: {email}",
-                code="EMAIL_EXISTS",
-                status_code=409
-            )
+        # 1. 归属 default 租户 + 唯一性检查（在册口径）
+        tenant = await self._default_register_tenant()
+        await self._assert_register_unique(tenant.id, username, email)
 
         # 2. 通过 Repository 创建用户（哈希计算转线程池，P1-9）
         hashed_password = await asyncio.to_thread(get_password_hash, password)
@@ -269,3 +247,40 @@ class AuthService:
             "username": new_user.username,
             "email": new_user.email
         }
+
+    async def _default_register_tenant(self):
+        """default 租户兜底归属（017 种子保证存在；缺失即环境未初始化）"""
+        from sqlalchemy import select
+
+        from platform_core.models.tenant import Tenant
+
+        tenant = (await self.session.execute(
+            select(Tenant).where(Tenant.slug == "default")
+        )).scalar_one_or_none()
+        if tenant is None:
+            logger.error("default 租户缺失，公开注册不可用（迁移 017 未执行？）")
+            raise BusinessException(
+                message="注册服务暂不可用，请稍后再试",
+                code="REGISTER_UNAVAILABLE",
+                status_code=503
+            )
+        return tenant
+
+    async def _assert_register_unique(self, tenant_id: int, username: str, email: str) -> None:
+        """唯一性检查：username 按 (default 租户, username) 在册口径、email 全局
+        在册口径（042 唯一键在册化 / T-24 FR-93：软删行释放标识，查重与
+        DB 约束同口径——否则应用放行 DB 拒绝/应用误杀 DB 放行都会出现）
+        """
+        if await self.user_repo.exists_username_in_tenant(tenant_id, username):
+            raise BusinessException(
+                message=f"用户名已存在: {username}",
+                code="USERNAME_EXISTS",
+                status_code=409
+            )
+
+        if await self.user_repo.exists_by_email(email):
+            raise BusinessException(
+                message=f"邮箱已被注册: {email}",
+                code="EMAIL_EXISTS",
+                status_code=409
+            )

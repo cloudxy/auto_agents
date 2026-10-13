@@ -1,14 +1,18 @@
-"""目录导入（FR-07 / AD-4）：无状态两段式 preview→confirm，落盘统一 .agents。
+"""目录导入（FR-07 / AD-4）：无状态两段式 preview→confirm，落盘统一产品 hub 根。
+
+D2：hub 根 = SKILLS.AGENTS_ROOT（默认 runtime/agents-hub，不是开发中枢 `.agents/`）；
+根不存在时落盘逐级创建（LandingJournal），撤回时一并删掉本次新建的空目录。
 
 设计要点（contract AD-4）：
 
 - **a 上传形态**：每个 part 的 filename = 前端 `webkitRelativePath`。相对路径是
   前端可控输入，服务端在判型/落盘**之前**强制清洗（QA-8）：`..` 分量、绝对路径
   形态（前导 `/` 或盘符）、任何反斜杠分量一律判非法路径入跳过清单。
-- **b 判型不另写一套**：把清洗后的树铺成 `.agents` 形状的暂存根，再交给
-  `collect_agents_hub` 判型——与同步通道同一份实现（禁止两份）。暂存根就叫
-  `.agents`，于是 `_repo_rel` 算出的 `file_path/origin_ref/logo/background`
-  天然等于落盘后的真实相对路径，confirm 不需要二次改写。
+- **b 判型不另写一套**：把清洗后的树铺成 hub 形状的暂存根，再交给
+  `collect_agents_hub` 判型——与同步通道同一份实现（禁止两份）。入库路径是相对
+  根的逻辑路径（hub_paths：`agents-hub/<rel>`），与暂存根 / 真实根的物理位置无关，
+  于是 `file_path/origin_ref/logo/background` 天然等于落盘后的真实路径，confirm
+  不需要二次改写。
 - **d 无状态**：preview 与 confirm 各自上传同一棵树，判型确定性 → 结果一致；
   服务端不存暂存态，取消 = 不发 confirm（GWT-07.2 天然成立）。
 - **e upsert**：同 asset_type+name 走 update（不是 legacy 的 skipped）；新建行
@@ -27,6 +31,7 @@ from uuid import uuid4
 
 from backend.services.power_market.agents_hub import _upsert_item_listing
 from backend.services.power_market.agents_hub_scan import HubItem, collect_agents_hub
+from backend.services.power_market.hub_paths import HUB_PATH_PREFIX
 from backend.services.plugin_service import _plugin_manifest_path
 from platform_core.exceptions import ValidationException
 from platform_core.fs_guard import LandingJournal, PathEscapeError, assert_contained
@@ -48,6 +53,7 @@ REASON_SKILL_MD_BIG = "SKILL.md 超过 1MB 上限"
 REASON_DUP = "同名资产已在本批次出现，跳过"
 
 _DRIVE = re.compile(r"^[A-Za-z]:")
+_STAGE_HUB = "hub"  # 暂存根目录名（stage/<_STAGE_HUB>，形状与真实 hub 根一致）
 
 
 @dataclass
@@ -145,8 +151,8 @@ def _copy_into(src: Path, dst: Path, skipped: list[dict], raw_root: Path) -> boo
 
 
 def _stage(raw_root: Path, stage_root: Path, skipped: list[dict]) -> Path:
-    """把 raw 树铺成 `.agents` 形状（判型与落盘共用同一形状）。"""
-    agents = stage_root / ".agents"
+    """把 raw 树铺成 hub 根形状（判型与落盘共用同一形状）。"""
+    agents = stage_root / _STAGE_HUB
     agents.mkdir(parents=True, exist_ok=True)
     plugins = _plugin_roots(raw_root)
     for pkg in plugins:
@@ -210,7 +216,7 @@ async def preview_tree_import(session, files: list[UploadedFile]) -> dict:
 
 
 async def confirm_tree_import(session, files: list[UploadedFile], *, agents_root) -> dict:
-    """确认：upsert 入库 + 落盘到真实 .agents 根（单项失败不整批回滚，GWT-07.5）。
+    """确认：upsert 入库 + 落盘到产品 hub 根（单项失败不整批回滚，GWT-07.5）。
 
     QA-10：contract §4 #4 要求响应带 batch_id 但实现之前没给——回执号不入库
     （db-spec §10 裁定），只是一次导入批次的关联令牌，随 import_completed
@@ -227,30 +233,13 @@ async def confirm_tree_import(session, files: list[UploadedFile], *, agents_root
     logger.info(f"hub_import.confirm | parts={len(files)} root={agents_root}")
     _guard_count(files)
     batch_id = uuid4().hex[:12]
-    created = updated = 0
-    failed: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="hub-import-") as tmp:
         items, skipped = _collect(Path(tmp), files)
-        staged = Path(tmp) / "stage" / ".agents"
+        staged = Path(tmp) / "stage" / _STAGE_HUB
         journal = LandingJournal(Path(tmp) / "backup")
-        for item in items:
-            mark = journal.mark()
-            try:
-                async with session.begin_nested():
-                    action = await _upsert_item_listing(session, item, listing="unlisted")
-                    _land(staged, Path(agents_root), item, journal)
-            except Exception as exc:  # noqa: BLE001 单项失败入清单，不中断整批
-                journal.rollback_to(mark)
-                failed.append({"name": item.name, "reason": str(exc)})
-                logger.warning(
-                    f"hub_import 单项失败 | type={item.asset_type} "
-                    f"name={item.name} err={exc}"
-                )
-                continue
-            if action == "inserted":
-                created += 1
-            elif action == "updated":
-                updated += 1
+        created, updated, failed = await _land_items(
+            session, items, staged, Path(agents_root), journal,
+        )
         try:
             await session.commit()
         except Exception:
@@ -263,8 +252,35 @@ async def confirm_tree_import(session, files: list[UploadedFile], *, agents_root
     }
 
 
+async def _land_items(
+    session, items: list[HubItem], staged: Path, real_root: Path, journal: LandingJournal,
+) -> tuple[int, int, list[dict]]:
+    """逐项 savepoint：先 upsert 再落盘；单项失败回滚本项 savepoint + 撤回本项文件。"""
+    created = updated = 0
+    failed: list[dict] = []
+    for item in items:
+        mark = journal.mark()
+        try:
+            async with session.begin_nested():
+                action = await _upsert_item_listing(session, item, listing="unlisted")
+                _land(staged, real_root, item, journal)
+        except Exception as exc:  # noqa: BLE001 单项失败入清单，不中断整批
+            journal.rollback_to(mark)
+            failed.append({"name": item.name, "reason": str(exc)})
+            logger.warning(
+                f"hub_import 单项失败 | type={item.asset_type} "
+                f"name={item.name} err={exc}"
+            )
+            continue
+        if action == "inserted":
+            created += 1
+        elif action == "updated":
+            updated += 1
+    return created, updated, failed
+
+
 def _collect(tmp: Path, files: list[UploadedFile]) -> tuple[list[HubItem], list[dict]]:
-    """清洗 → 铺 .agents 形状 → 复用同步通道判型。空批次 422（GWT-07.4）。"""
+    """清洗 → 铺 hub 形状 → 复用同步通道判型。空批次 422（GWT-07.4）。"""
     raw_root = tmp / "raw"
     raw_root.mkdir(parents=True, exist_ok=True)
     skipped = _materialize(files, raw_root)
@@ -276,21 +292,21 @@ def _collect(tmp: Path, files: list[UploadedFile]) -> tuple[list[HubItem], list[
 
 
 def _land(staged_agents: Path, real_agents: Path, item: HubItem, journal: LandingJournal) -> None:
-    """把该资产在暂存 .agents 下的产物复制到真实 .agents 同名位置（update 语义）。
+    """把该资产在暂存 hub 根下的产物复制到真实 hub 根同名位置（update 语义）。
 
-    QA-1 修复：落盘前经 `assert_contained` 做出口路径收容——`.agents/plugins/*`
-    在本仓库全部是指向仓外真实目录的符号链接（指针农场，"禁止复制内容"），入口
-    清洗（QA-8 的 `_clean_rel`）只保证相对路径字面量合法，不保证它落盘时不会
-    穿过既有符号链接写到仓库外；出口必须单独收容，两者不能互相替代。
-    QA-9 修复：不再 `rmtree` 后 `copytree`（会把真实 `.agents/<type>/<name>`
+    QA-1 修复：落盘前经 `assert_contained` 做出口路径收容——根下既有的符号链接
+    （例如运维把根指向开发中枢时 `.agents/plugins/*` 全是指向仓外的指针）可能把
+    写入带出根外，入口清洗（QA-8 的 `_clean_rel`）只保证相对路径字面量合法，
+    不保证它落盘时不会穿过既有符号链接写到根外；出口必须单独收容，两者不能互相替代。
+    QA-9 修复：不再 `rmtree` 后 `copytree`（会把真实 `<根>/<type>/<name>`
     下不在本次上传树里的文件，例如 049 迁移引入的 icon.png/background.png，
     一并静默删除）——改用 `dirs_exist_ok=True` 做增量合并式更新，只覆盖上传
     树里出现的文件。
     """
     rel = (item.file_path or "").strip()
-    if not rel.startswith(".agents/"):
+    if not rel.startswith(HUB_PATH_PREFIX):
         raise ValueError(f"落盘路径非法：{rel}")
-    tail = rel[len(".agents/"):]
+    tail = rel[len(HUB_PATH_PREFIX):]
     src = staged_agents / tail
     dst = real_agents / tail
     if not src.exists():

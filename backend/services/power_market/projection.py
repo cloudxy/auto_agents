@@ -2,14 +2,16 @@
 
 职责：行 → 公开 dict 的字段白名单投影 + 媒体 href + md 正文读取分流。
 新增投影位：persona_md（agent 侧行，WIP 缺陷 B）、gate_open（CTA 闸语义）。
-_read_skill_md 分流（WIP 缺陷 A 修复）：file_path 以 `.agents/` 开头 → 仓库根
-相对读取；否则 LIBRARY_ROOT 兜底（legacy 行）。
+_read_skill_md 分流（WIP 缺陷 A 修复）：file_path 带 hub 前缀（`agents-hub/` 或 D2 前的
+`.agents/`）→ 经 hub_paths 解析到产品 hub 根（legacy 前缀回落仓库 `.agents/`）；
+否则 LIBRARY_ROOT 兜底（legacy 行）。
 """
 from pathlib import Path
 from typing import Optional
 
 from platform_core.models.capability import CapabilityAsset, CapabilityCommand
 
+from backend.services.power_market.hub_paths import _resolve_hub_path
 from backend.services.power_market.installs import hosts_for_asset
 from backend.services.power_market.types import _to_public_asset_type
 from platform_core.timeutil import utc_iso
@@ -20,8 +22,6 @@ _PUBLIC_FIELDS = (
     "listing_state", "license",
     "featured",  # AD-6：综合序权重，随 items 外发（contract §4 #7）
 )
-
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _project(
@@ -69,8 +69,9 @@ def _read_skill_md(row: CapabilityAsset) -> str:
 
 
 def _md_path(rel: str) -> Path:
-    if rel.startswith(".agents/"):
-        return _REPO_ROOT / rel  # .agents 真相源：仓库根相对
+    hub = _resolve_hub_path(rel)
+    if hub is not None:
+        return hub  # hub 来源行：产品 hub 根（legacy `.agents/` 读兼容见 hub_paths）
     from backend.config_consts import SKILLS_LIBRARY_ROOT
     from config import settings
 

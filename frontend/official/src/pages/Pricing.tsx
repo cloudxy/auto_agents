@@ -5,7 +5,8 @@
  */
 import React from 'react'
 import { FREE_TIER_FEATURE_COPY, PRO_TIER_FEATURE_COPY, contactMailto, formatPlanPrice } from '@auto-agents/frontend-shared'
-import { Badge, Button, Card, Col, Row, Skeleton, Typography, message } from 'antd'
+import { Badge, Button, Card, Col, Row, Skeleton, Typography } from 'antd'
+import { message } from '../feedback'
 import { CheckOutlined } from '@ant-design/icons'
 import { trackCta } from '../services/beacon'
 import { usePublicPlans } from '../hooks/usePublicPlans'
