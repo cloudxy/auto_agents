@@ -199,3 +199,27 @@ def test_tracked_keys_reads_this_repo_index():
     if keys is None:
         pytest.skip("git 不可用或不是 git 检出")
     assert {"skills/verify", "skills/check-arch"} <= keys
+
+
+def test_env_flag_selects_config_layer_before_config_import(repo):
+    """--env 必须在 config 导入前生效：脚本顶层就链式导入 config，晚设 APP_ENV 会连到别的环境的库。
+    独立进程、不带 APP_ENV 环境变量运行，打印出的生效环境必须是 --env 指定的那个。"""
+    import os
+    import subprocess
+
+    env = {k: v for k, v in os.environ.items() if k != "APP_ENV"}
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--env", "dev", "--skip-db", "--repo", str(repo)],
+        cwd=_REPO, env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert "环境: dev" in proc.stdout, proc.stdout + proc.stderr
+
+
+def test_env_flag_mismatch_in_process_is_refused(repo, capsys):
+    """进程内调用（config 已按当前环境加载）且 --env 不同：拒绝执行，不碰任何文件与库。"""
+    import config
+
+    other = next(e for e in ("local", "dev", "prod") if e != config.APP_ENV)
+    assert _load().main(["--env", other, "--skip-db", "--repo", str(repo)]) == 2
+    assert "不一致" in capsys.readouterr().out
+    assert (repo / ".agents" / "skills" / "prodskill").is_dir()

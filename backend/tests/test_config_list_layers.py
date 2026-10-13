@@ -87,3 +87,29 @@ def test_cors_warnings_flag_risky_origins(origins, env, needle):
 def test_cors_warnings_match_hostnames_not_substrings():
     cors = {"ORIGINS": ["https://myexample.com", "https://notlocalhost.io"], "ALLOW_CREDENTIALS": True}
     assert cors_config_warnings(cors, "prod") == []
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("https://a.example.net", ["https://a.example.net"]),
+    ("https://a.example.net, https://b.example.net,", ["https://a.example.net", "https://b.example.net"]),
+    (["https://a.example.net"], ["https://a.example.net"]),
+    (None, []),
+])
+def test_as_str_list_never_splits_strings_into_characters(raw, expected):
+    from backend.app.cors_check import as_str_list
+
+    assert as_str_list(raw) == expected
+
+
+def test_bare_string_origins_env_still_allows_exact_origin_only():
+    """AUTO_AGENTS_CORS__ORIGINS=https://a,https://b（未写成 TOML 列表）：Dynaconf 给 str，
+    中间件不得把它拆成单字符（全部跨域被拒），也不得退回 str 子串匹配（https://a.co 放行）"""
+    from starlette.middleware.cors import CORSMiddleware
+
+    from backend.app.cors_check import as_str_list
+
+    origins = as_str_list("https://admin.foo.example.net,https://www.foo.example.net")
+    mw = CORSMiddleware(app=lambda *a: None, allow_origins=origins, allow_credentials=True)
+    assert mw.is_allowed_origin("https://admin.foo.example.net")
+    assert mw.is_allowed_origin("https://www.foo.example.net")
+    assert not mw.is_allowed_origin("https://admin.foo.example.ne")

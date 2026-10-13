@@ -38,6 +38,20 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+
+def _preparse_env(argv: list[str]) -> None:
+    """--env 必须在任何 config 导入之前写进 APP_ENV：config 在导入期就按 APP_ENV 选定配置层，
+    下面的 hub_paths 导入会链式导入 config——晚一步设 APP_ENV，迁移就连到别的环境的库。"""
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--env", choices=("local", "dev", "prod"))
+    env = pre.parse_known_args(argv)[0].env
+    if env:
+        os.environ["APP_ENV"] = env
+
+
+if __name__ == "__main__":
+    _preparse_env(sys.argv[1:])
+
 from backend.services.power_market.hub_paths import (  # noqa: E402
     HUB_PATH_PREFIX,
     LEGACY_HUB_PREFIX,
@@ -247,15 +261,36 @@ def _print_entries(entries: list[Entry], target: Path) -> None:
             print(f"[{e.action}] {LEGACY_HUB_PREFIX}{e.key}（{e.reason}）")
 
 
+def _env_mismatch(env: str | None) -> bool:
+    """进程内调用且 config 已按别的环境加载时拒绝执行，免得改错环境的库"""
+    import config
+
+    if env and config.APP_ENV != env:
+        print(f"--env {env} 与已加载的配置环境 {config.APP_ENV} 不一致：请以独立进程运行本脚本"
+              f"（或先 export APP_ENV={env}）")
+        return True
+    return False
+
+
+def _announce(args: argparse.Namespace, target: Path) -> None:
+    """先打印实际作用的环境 / 库 / hub 根，--apply 前核对（口令打码）"""
+    import config
+    from sqlalchemy.engine import make_url
+
+    db = "已跳过" if args.skip_db else make_url(args.db_url or _default_db_url()).render_as_string(hide_password=True)
+    print(f"环境: {config.APP_ENV} | 库: {db} | hub 根: {target}")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse(argv)
-    if args.env:
-        os.environ["APP_ENV"] = args.env
+    if _env_mismatch(args.env):
+        return 2
     repo = Path(args.repo).expanduser().resolve()
     target = _target_root(args.target, repo)
     if target.resolve() == (repo / DEV_HUB).resolve():
         print("hub 根就是开发中枢 .agents/（运维显式指定），无需迁移")
         return 2
+    _announce(args, target)
     tracked = _tracked_keys(repo)
     if tracked is None:
         print(f"git ls-files 失败（{repo} 不是 git 仓库？）：无法区分开发内容与产品内容，拒绝执行")

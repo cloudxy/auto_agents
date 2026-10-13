@@ -17,6 +17,17 @@ _PLACEHOLDER_HOSTS = ("your-domain.com", "example.com", "example.org")
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 
+def as_str_list(value: Any) -> list[str]:
+    """CORS 列表键归一：环境变量写成裸字符串（AUTO_AGENTS_CORS__ORIGINS=https://a.com 或
+    逗号分隔）时 Dynaconf 给的是 str——直接 list() 会拆成单个字符，所有跨域请求被拒且自检不报。
+    str 按逗号切分并去空白；None → []；其它可迭代逐项转 str。中间件与启动自检共用这一份。"""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return [str(item) for item in value]
+
+
 def _hosts_matching(origins: Iterable[str], hosts: tuple[str, ...]) -> list[str]:
     """来源的主机名等于或是 hosts 中某项的子域（按主机名比较，不做子串匹配）"""
     out = []
@@ -29,7 +40,7 @@ def _hosts_matching(origins: Iterable[str], hosts: tuple[str, ...]) -> list[str]
 
 def cors_config_warnings(cors: Any, app_env: str) -> list[str]:
     """按环境检查 CORS 配置，返回告警文案列表（空 = 无问题）"""
-    origins = [str(o) for o in (cors.get("ORIGINS") or [])]
+    origins = as_str_list(cors.get("ORIGINS"))
     credentials = bool(cors.get("ALLOW_CREDENTIALS", False))
     warnings: list[str] = []
     if "*" in origins and credentials:
@@ -49,6 +60,11 @@ def warn_cors_config(settings: Any) -> list[str]:
     app_env = (os.environ.get("APP_ENV") or "local").strip().lower()
     cors = settings.get("CORS", {}) or {}
     warnings = cors_config_warnings(cors, app_env)
+    if isinstance(cors.get("ORIGINS"), str):
+        logger.warning(
+            "CORS 配置自检: CORS.ORIGINS 是字符串，已按逗号切分；推荐写成列表 "
+            "AUTO_AGENTS_CORS__ORIGINS='[\"https://a.example\", \"https://b.example\"]'"
+        )
     for text in warnings:
         logger.warning(f"CORS 配置自检: {text}")
     if app_env == "prod" and not cors.get("ORIGINS"):

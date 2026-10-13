@@ -232,13 +232,15 @@ async def _lifespan(app: FastAPI):
 
 def _add_middlewares(app: FastAPI) -> None:
     """全局中间件（注册顺序即既定顺序：CORS → RequestID → TenantContext，勿调换）"""
-    # CORS 配置（从 web.yml 配置文件读取）
+    from backend.app.cors_check import as_str_list
+
+    # CORS 配置（web.yml / 环境变量；列表键经 as_str_list 归一，与启动自检同口径）
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=list(settings.get("CORS.ORIGINS", []) or []),
+        allow_origins=as_str_list(settings.get("CORS.ORIGINS")),
         allow_credentials=bool(settings.get("CORS.ALLOW_CREDENTIALS", False)),
-        allow_methods=list(settings.get("CORS.ALLOW_METHODS", ["GET"]) or ["GET"]),
-        allow_headers=list(settings.get("CORS.ALLOW_HEADERS", []) or []),
+        allow_methods=as_str_list(settings.get("CORS.ALLOW_METHODS")) or ["GET"],
+        allow_headers=as_str_list(settings.get("CORS.ALLOW_HEADERS")),
     )
 
     # 请求 ID 中间件（链路追踪）
