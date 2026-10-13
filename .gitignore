@@ -64,6 +64,7 @@ deploy/litellm/config.gen.yaml
 
 .lingma/*
 .gemini/*
+!.gemini/settings.json
 ai_tool/*
 .qoder/*
 .idea/*
