@@ -18,9 +18,12 @@ def spawn(svc: Service, env: str | None) -> bool:
         cmd += ["--env", env]
     logf = detect.log_path(svc.name).open("ab")
     print(f"正在启动 {svc.name} ...")
+    # stdin=DEVNULL：后台服务不得读启动它的终端——Vite 开发服务器会读 stdin 做快捷键，
+    # 继承终端时会吞掉用户在 shell 里敲的字，一行 q / r 还会让前端退出或重启
     proc = subprocess.Popen(
         cmd,
         cwd=ROOT,
+        stdin=subprocess.DEVNULL,
         stdout=logf,
         stderr=subprocess.STDOUT,
         start_new_session=True,

@@ -28,9 +28,10 @@ npm run build:shared   # 先构建 shared 的 dist
 
 ## 开发代理与环境变量
 
-- 开发态请求走同源 `/api/v1`，由 `vite.config.mts` 的 `server.proxy` 转给后端：
+- 开发态请求走同源 `/api/v1`，由 `vite.config.mts` 的 `server.proxy` 转给后端（只匹配 `/api` 路径段，`/api-keys` 之类前端路由不转发）：
   目标取 `API_PROXY_TARGET`，缺省 `http://127.0.0.1:9111`。
-- 源码读 `process.env.REACT_APP_*`（沿用 CRA 约定），构建期静态替换；来源与 CRA 相同：
-  `.env`、`.env.local`、`.env.[mode]`、`.env.[mode].local`（`npm start` 为 development，`build` 为 production），
-  同名进程环境变量优先。键说明见 `.env.example`。
+- 源码读 `process.env.REACT_APP_*`（沿用 CRA 约定），构建期静态替换。文件优先级（高 → 低）：
+  进程环境变量 > `.env.[mode].local` > `.env.[mode]` > `.env.local` > `.env`（`npm start` 为 development，
+  `build` 为 production）。**与 CRA 不同**：`.env.local` 压不过已提交的 `.env.development`，
+  本地开发覆盖请写 `.env.development.local`。键说明见 `.env.example`。
 - 只监听 `127.0.0.1`；需要局域网访问时临时用 `npm start -w admin -- --host 0.0.0.0`。

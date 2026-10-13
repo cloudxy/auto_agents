@@ -27,8 +27,11 @@ IDENTITY="$PROJECT_DIR/.claude/IDENTITY.md"
 MEMORY_DIR="$PROJECT_DIR/.claude/memory"
 MEMORY_INDEX="$PROJECT_DIR/.claude/MEMORY.md"
 
-# 体积上限（避免污染 context window）
-MAX_BYTES=1024
+# 体积预算（避免污染 context window）：身份段与记忆段分开计，闭合标签不参与截断。
+# 曾经整体一刀切 1024 字节：身份段一长就把记忆段挤掉，连 </recent-memory> 都被截断。
+IDENT_MAX=1200       # 身份头（Role + Mission，当前约 1.05 KB，留余量免得截在半句）
+MEMORY_LINE_MAX=240  # 单条记忆摘要
+MEMORY_MAX=600       # 记忆段合计（最多 3 条，放不下的整条丢弃，不截半条）
 
 # 按字节截断后丢掉被截断的半个 UTF-8 字符（head -c 会把中文切成非法字节序列）；
 # 没有 iconv 时退化为纯字节截断。iconv -c 丢弃字节时退出码为 1，必须吞掉：
@@ -45,7 +48,7 @@ OUT=""
 
 # 1) IDENTITY 头：取 Role + Mission 段（前 ~10 行非空内容）
 if [ -f "$IDENTITY" ]; then
-    HEAD=$(awk '/^## (Role|Mission)/{p=1} p && /^## /{c++; if(c>2) exit} p' "$IDENTITY" 2>/dev/null | utf8_head 900)
+    HEAD=$(awk '/^## (Role|Mission)/{p=1} p && /^## /{c++; if(c>2) exit} p' "$IDENTITY" 2>/dev/null | utf8_head "$IDENT_MAX")
     if [ -n "$HEAD" ]; then
         OUT="<project-identity>
 $HEAD
@@ -58,12 +61,19 @@ if [ -d "$MEMORY_DIR" ]; then
     RECENT=$(ls -t "$MEMORY_DIR"/*.md 2>/dev/null | grep -v README.md | head -3)
     if [ -n "$RECENT" ]; then
         SNIPPETS=""
+        USED=0
         for f in $RECENT; do
             DESC=$(grep -m1 "^description:" "$f" 2>/dev/null | sed 's/^description: *//')
             NAME=$(basename "$f" .md)
             if [ -n "$DESC" ]; then
-                SNIPPETS="${SNIPPETS}- ${NAME}: ${DESC}
+                LINE=$(printf '%s' "- ${NAME}: ${DESC}" | utf8_head "$MEMORY_LINE_MAX")
+                LEN=$(printf '%s\n' "$LINE" | wc -c | tr -d ' ')
+                if [ $((USED + LEN)) -gt "$MEMORY_MAX" ]; then
+                    break
+                fi
+                SNIPPETS="${SNIPPETS}${LINE}
 "
+                USED=$((USED + LEN))
             fi
         done
         if [ -n "$SNIPPETS" ]; then
@@ -75,9 +85,10 @@ $SNIPPETS</recent-memory>"
     fi
 fi
 
-# 3) 截断到 MAX_BYTES，输出到 stdout（被 Claude Code 注入为 additionalContext）
+# 3) 输出到 stdout（被 Claude Code 注入为 additionalContext）；各段已按预算截好，
+#    合计 ≤ IDENT_MAX + MEMORY_MAX + 标签，约 1.9 KB
 if [ -n "$OUT" ]; then
-    echo "$OUT" | utf8_head "$MAX_BYTES"
+    echo "$OUT"
 fi
 
 exit 0

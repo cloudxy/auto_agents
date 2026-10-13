@@ -33,19 +33,27 @@ def _in_scope(rel: str) -> bool:
 
 
 def tracked_python_files() -> list[str]:
-    out = subprocess.run(["git", "ls-files", "*.py"], cwd=ROOT, capture_output=True,
+    """-z：不转义中文 / 空格路径（默认 quotepath 会给出带引号的八进制串）；工作区里已删的跟踪文件跳过"""
+    out = subprocess.run(["git", "ls-files", "-z", "--", "*.py"], cwd=ROOT, capture_output=True,
                          text=True, check=True).stdout
-    return [p for p in out.split() if _in_scope(p)]
+    return [p for p in out.split("\0") if p and _in_scope(p) and (ROOT / p).is_file()]
 
 
 def file_violations(rel: str) -> list[str]:
     path = ROOT / rel
-    source = path.read_text(encoding="utf-8")
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"{rel}: 无法读取（{type(exc).__name__}）"]
     problems = []
     lines = len(source.splitlines())
     if lines > MAX_FILE_LINES:
         problems.append(f"{rel}: 文件 {lines} 行 > {MAX_FILE_LINES}")
-    for node in ast.walk(ast.parse(source, filename=rel)):
+    try:
+        tree = ast.parse(source, filename=rel)
+    except SyntaxError as exc:
+        return problems + [f"{rel}:{exc.lineno or 1}: 语法错误，无法统计（{exc.msg}）"]
+    for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             span = node.end_lineno - node.lineno + 1
             if span > MAX_FUNC_LINES:

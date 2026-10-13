@@ -103,3 +103,31 @@ def test_restart_stops_then_starts(runmod, monkeypatch):
     monkeypatch.setattr(runmod, "_spawn", lambda name, env: spawned.append(name) or True)
     assert runmod.cmd_restart(["backend"], env="local") == 0
     assert spawned == ["backend"]
+
+
+def test_spawn_detaches_stdin_from_terminal(tmp_path, monkeypatch):
+    """后台服务不读启动它的终端：Vite 开发服务器读 stdin 做快捷键，继承终端会吞掉 shell 输入，
+    一行 q 就让前端退出。spawn 必须把 stdin 接到 DEVNULL。"""
+    import subprocess
+
+    from scripts.runlib import detect, process
+    from scripts.runlib.catalog import Service
+
+    captured: dict = {}
+
+    class _Proc:
+        pid = 4321
+
+    def _popen(cmd, **kwargs):
+        captured.update(kwargs)
+        return _Proc()
+
+    monkeypatch.setattr(process.subprocess, "Popen", _popen)
+    monkeypatch.setattr(process, "ensure_run_dir", lambda: None)
+    monkeypatch.setattr(detect, "log_path", lambda name: tmp_path / f"{name}.log")
+    monkeypatch.setattr(detect, "write_pid", lambda name, pid: None)
+    monkeypatch.setattr(process, "wait_ready", lambda svc, proc: True)
+    svc = Service("admin", "scripts.runlib.frontend", ("--app", "admin"), 9112, "http://127.0.0.1:9112")
+    assert process.spawn(svc, None) is True
+    assert captured["stdin"] is subprocess.DEVNULL
+    assert captured["start_new_session"] is True

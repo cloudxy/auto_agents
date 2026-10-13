@@ -41,7 +41,9 @@ function processEnvDefine(env: Record<string, string>): Record<string, string> {
 }
 
 export default defineConfig(({ mode }) => {
-  // .env / .env.local / .env.[mode] / .env.[mode].local，进程环境变量优先（与 CRA 相同）
+  // 优先级（高 → 低）：进程环境变量 > .env.[mode].local > .env.[mode] > .env.local > .env。
+  // 注意与 CRA 不同：CRA 里 .env.local 压过 .env.development，Vite 里反过来——
+  // 本地开发要覆盖已提交的 .env.development，写进 .env.development.local。
   const env = loadEnv(mode, APP_DIR, ['REACT_APP_', 'PORT', 'API_PROXY_TARGET'])
   return {
     root: APP_DIR,
@@ -53,7 +55,9 @@ export default defineConfig(({ mode }) => {
       port: Number(env.PORT) || DEFAULT_PORT,
       strictPort: true,
       proxy: {
-        '/api': { target: env.API_PROXY_TARGET || DEFAULT_API_TARGET, changeOrigin: true },
+        // 只代理 /api 路径段（/api、/api/…、/api?…）：字符串键 '/api' 是前缀匹配，会把 /api-keys、
+        // /api_keys 这类前端路由也转给后端（CRA setupProxy 按路径段匹配，不会）
+        '^/api(?=/|\\?|$)': { target: env.API_PROXY_TARGET || DEFAULT_API_TARGET, changeOrigin: true },
       },
     },
     build: { outDir: 'build', target: BROWSER_TARGET },
