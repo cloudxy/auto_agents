@@ -18,7 +18,7 @@ pytestmark = pytest.mark.mysql_fidelity
 from platform_core.models.tenant import Tenant
 from platform_core.models.user import User
 from platform_core.queues import LOGIN_FAIL_PREFIX, REGISTER_ATTEMPT_PREFIX
-from platform_core.redis_async import get_async_redis
+from conftest import clear_redis_keys
 from backend.utils.auth import get_password_hash
 
 
@@ -100,13 +100,9 @@ _LOGIN_FAIL_USERS = (
 
 @pytest.fixture(autouse=True)
 def clear_login_fail_counters():
-    async def _clear() -> None:
-        redis = get_async_redis()
-        keys = [f"{LOGIN_FAIL_PREFIX}{u}" for u in _LOGIN_FAIL_USERS]
-        keys.append(f"{REGISTER_ATTEMPT_PREFIX}testclient")
-        await redis.delete(*keys)
-
-    asyncio.run(_clear())
+    keys = [f"{LOGIN_FAIL_PREFIX}{u}" for u in _LOGIN_FAIL_USERS]
+    keys.append(f"{REGISTER_ATTEMPT_PREFIX}testclient")
+    clear_redis_keys(*keys)
     yield
 
 

@@ -2,7 +2,8 @@
 
 约定：不连真实 MySQL/Redis，Repository/Redis 用 AsyncMock/MagicMock 桩；
 patch 点：各子 Service 真实模块路径（期 4 Facade 退役：
-task 域 backend.services.spider_task_service.* / query 域
+task 域 backend.services.spider_task_service.*（任务编辑的 Redis 调用在
+backend.services.spider_task_edit.*）/ query 域
 backend.services.spider_query_service.* / registry 域
 backend.services.spider_registry_service.*）。
 覆盖：
@@ -389,7 +390,7 @@ class TestUpdateTask:
         fake_redis = AsyncMock()
         fake_redis.lrem.return_value = 1
 
-        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+        with patch("backend.services.spider_task_edit.get_async_redis", return_value=fake_redis):
             resp = await svc.update_task(12, priority="high")
 
         assert resp.priority == "high"
@@ -408,7 +409,7 @@ class TestUpdateTask:
         fake_redis = AsyncMock()
         fake_redis.lrem.return_value = 0
 
-        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+        with patch("backend.services.spider_task_edit.get_async_redis", return_value=fake_redis):
             await svc.update_task(12, priority="high")
 
         fake_redis.rpush.assert_not_called()
@@ -430,7 +431,7 @@ class TestUpdateTask:
         due_score = time.time() + 5
         fake_redis.zsets["spider:retry_zset"] = {retry_msg: due_score}
 
-        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+        with patch("backend.services.spider_task_edit.get_async_redis", return_value=fake_redis):
             await svc.update_task(12, params=NEW_PARAMS, priority="high")
 
         zset = fake_redis.zsets["spider:retry_zset"]
@@ -450,7 +451,7 @@ class TestUpdateTask:
         svc.repo.update = AsyncMock(return_value=_task(id=12, priority="high"))
         fake_redis = _FakeQueueRedis()
 
-        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+        with patch("backend.services.spider_task_edit.get_async_redis", return_value=fake_redis):
             await svc.update_task(12, priority="high")
 
         assert fake_redis.items("spider:task_queue:high") == []
@@ -474,7 +475,7 @@ class TestUpdateTask:
         fake_redis = _FakeQueueRedis()
         fake_redis.queues["spider:task_queue:normal"] = [_msg(12, "example", OLD_PARAMS)]
 
-        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+        with patch("backend.services.spider_task_edit.get_async_redis", return_value=fake_redis):
             await svc.update_task(12, params=NEW_PARAMS)
 
         kwargs = svc.repo.update.call_args.kwargs
@@ -494,7 +495,7 @@ class TestUpdateTask:
         fake_redis = _FakeQueueRedis()
         fake_redis.queues["spider:task_queue:normal"] = [_msg(12, "example", OLD_PARAMS)]
 
-        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+        with patch("backend.services.spider_task_edit.get_async_redis", return_value=fake_redis):
             await svc.update_task(12, params=NEW_PARAMS, priority="high")
 
         assert fake_redis.items("spider:task_queue:normal") == []
@@ -511,7 +512,7 @@ class TestUpdateTask:
         fake_redis = _RpushBrokenRedis()
         fake_redis.queues["spider:task_queue:normal"] = [_msg(12, "example", OLD_PARAMS)]
 
-        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+        with patch("backend.services.spider_task_edit.get_async_redis", return_value=fake_redis):
             await svc.update_task(12, priority="high")
 
         # 旧消息回到原队列、新队列为空；补偿成功不置 failed（repo.update 仅编辑一次）
@@ -528,7 +529,7 @@ class TestUpdateTask:
         fake_redis = _CompensationBrokenRedis()
         fake_redis.queues["spider:task_queue:normal"] = [_msg(12, "example", OLD_PARAMS)]
 
-        with patch("backend.services.spider_task_service.get_async_redis", return_value=fake_redis):
+        with patch("backend.services.spider_task_edit.get_async_redis", return_value=fake_redis):
             with pytest.raises(BusinessException):
                 await svc.update_task(12, priority="high")
 

@@ -7,7 +7,7 @@ description: >-
 
 # Docker 部署配置
 
-约束：[references/docker-templates.md](references/docker-templates.md)。生产步骤：`docs/ops/deploy.md`（本地私有，可能不在 git）。
+约束：[references/docker-templates.md](references/docker-templates.md)。生产步骤（发布顺序 / 迁移 / 回滚 / 看门狗 / hub 根挂卷）：`docs/ops/runbook.md`。
 
 ## Route
 

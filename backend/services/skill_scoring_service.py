@@ -99,6 +99,7 @@ class SkillScoringService:
 
     async def consume_once(self) -> dict:
         """消费一条评分任务（rpop 一条；空队列返回 idle）"""
+        logger.debug("消费一条技能评分任务")
         redis = await get_async_redis()
         raw = await redis.rpop(SKILL_SCORE_QUEUE)
         if not raw:
@@ -118,20 +119,14 @@ class SkillScoringService:
 
     async def score_skill(self, name: str) -> dict:
         """单个技能评分：LLM → 校验（失败重试 1 次）→ 落库（AI 字段与 reviews(ai)）"""
-        from config import settings
-
+        logger.info(f"技能评分 | name={name}")
         row = (await self.session.execute(select(Skill).where(Skill.name == name))).scalar_one_or_none()
         if row is None:
             self._record_failure(name, "技能不存在")
             return {"status": "skipped", "reason": "not_found", "attempts": 0}
 
         skill_md = self._read_skill_md(row)
-        budget = int(settings.get("SKILLS.SCORING.MAX_TOKENS_BUDGET", 0) or 0)
-        model_pref = str(settings.get("SKILLS.SCORING.MODEL", "") or "")
-        if model_pref:
-            # D10 能力开关：指定专用模型依赖方案 B M2（llm_provider_models）；
-            # 未就绪前告警并回退当前激活供应商默认模型
-            logger.warning(f"SKILLS.SCORING.MODEL={model_pref} 依赖方案 B M2，暂回退默认模型")
+        budget = self._scoring_budget()
 
         last_error: Exception | None = None
         for attempt in (1, 2):
@@ -160,6 +155,19 @@ class SkillScoringService:
         self._record_failure(name, reason)
         await self.session.flush()
         return {"status": "failed", "attempts": 2, "error": reason}
+
+    @staticmethod
+    def _scoring_budget() -> int:
+        """评分专属预算（SKILLS.SCORING.MAX_TOKENS_BUDGET，0=不限）"""
+        from config import settings
+
+        budget = int(settings.get("SKILLS.SCORING.MAX_TOKENS_BUDGET", 0) or 0)
+        model_pref = str(settings.get("SKILLS.SCORING.MODEL", "") or "")
+        if model_pref:
+            # D10 能力开关：指定专用模型依赖方案 B M2（llm_provider_models）；
+            # 未就绪前告警并回退当前激活供应商默认模型
+            logger.warning(f"SKILLS.SCORING.MODEL={model_pref} 依赖方案 B M2，暂回退默认模型")
+        return budget
 
     async def _apply_result(self, row: Skill, result: SkillScoringResult, attempts: int) -> dict:
         """落库：只写 AI 建议字段与 reviews(ai)——score/rubric_human 永不被 AI 写"""

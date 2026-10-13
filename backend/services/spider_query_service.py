@@ -117,14 +117,14 @@ class SpiderQueryService:
 
         未绑 tenant_id → 不查库，0 行（FR-13）。绑定后仍 exclude marketplace。
         """
+        logger.info(
+            f"公开结果查询: spider={spider_name}, tenant_id={tenant_id}, "
+            f"page={page}, start={start_time}, end={end_time}"
+        )
         if tenant_id is None:
             logger.info(f"公开结果查询拒绝: 钥匙未绑定企业 spider={spider_name}")
             return [], 0
         bound_tid = int(tenant_id)
-        logger.info(
-            f"公开结果查询: spider={spider_name}, tenant_id={bound_tid}, "
-            f"page={page}, start={start_time}, end={end_time}"
-        )
         with tenant_scope(bound_tid):
             return await self.result_repo.query_by_spider(
                 spider_name=spider_name,
@@ -289,6 +289,7 @@ class SpiderQueryService:
 
     async def get_task_quality(self, task_id: int) -> TaskQualityReportResponse:
         """查询任务的质量报告：平均分/最低分/最高分/四档分布"""
+        logger.debug(f"查询任务质量报告 | task_id={task_id}")
         task = await self.repo.get_by_id(task_id)
         if task is None:
             raise NotFoundException("爬虫任务")
@@ -320,6 +321,7 @@ class SpiderQueryService:
 
         only_task_lines=True（租户视角）：只返回带本任务标记的行（审计 BUG-16）。
         """
+        logger.debug(f"读取任务日志 | task_id={task_id} lines={lines}")
         task = await self.repo.get_by_id(task_id)
         if task is None:
             raise NotFoundException("爬虫任务")

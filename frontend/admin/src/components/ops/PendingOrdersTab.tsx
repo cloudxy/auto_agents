@@ -7,7 +7,8 @@
  */
 import React from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Popconfirm, Table, Tag, Tooltip, message } from 'antd'
+import { Button, Popconfirm, Table, Tag, Tooltip } from 'antd'
+import { message } from '../../feedback'
 import { ReloadOutlined } from '@ant-design/icons'
 import {
   CHANNEL_LABEL, confirmOrder, listPendingOrders, retryFulfillment, type OrderRow,

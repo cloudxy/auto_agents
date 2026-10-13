@@ -108,21 +108,8 @@ async def _revoke_all(session: AsyncSession, user_id: int) -> None:
     await session.commit()
 
 
-async def rotate(session: AsyncSession, refresh_token: str) -> dict:
-    """用刷新令牌换一对新令牌（轮换）；任何不满足都抛 401"""
-    logger.info("刷新会话")
-    from backend.services.tenant_expiry_service import assert_tenant_active
-    from backend.services.user_service import load_auth_identity, token_version_matches
-
-    payload = _decode_refresh(refresh_token)
-    if payload is None:
-        raise AuthenticationException(message="登录已过期，请重新登录")
-    user_id = int(payload["user_id"])
-    now = _now_ts()
-    max_age = int(_jwt_cfg("SESSION_MAX_DAYS", 30)) * 86400
-    if now - float(payload.get("at") or payload.get("iat") or 0) > max_age:
-        raise AuthenticationException(message="登录已过期，请重新登录")
-
+async def _consume_refresh_jti(session: AsyncSession, payload: dict, user_id: int, now: float) -> None:
+    """登记刷新令牌 jti 已用：首次放行；已登出 / 超出宽限的重放拒绝（后者吊销全部会话）"""
     key = _USED_KEY.format(jti=payload["jti"])
     try:
         redis = get_async_redis()
@@ -140,6 +127,23 @@ async def rotate(session: AsyncSession, refresh_token: str) -> dict:
         if used_at is None or now - float(used_at) > grace:
             await _revoke_all(session, user_id)
             raise AuthenticationException(message="登录已失效，请重新登录")
+
+
+async def rotate(session: AsyncSession, refresh_token: str) -> dict:
+    """用刷新令牌换一对新令牌（轮换）；任何不满足都抛 401"""
+    logger.info("刷新会话")
+    from backend.services.tenant_expiry_service import assert_tenant_active
+    from backend.services.user_service import load_auth_identity, token_version_matches
+
+    payload = _decode_refresh(refresh_token)
+    if payload is None:
+        raise AuthenticationException(message="登录已过期，请重新登录")
+    user_id = int(payload["user_id"])
+    now = _now_ts()
+    max_age = int(_jwt_cfg("SESSION_MAX_DAYS", 30)) * 86400
+    if now - float(payload.get("at") or payload.get("iat") or 0) > max_age:
+        raise AuthenticationException(message="登录已过期，请重新登录")
+    await _consume_refresh_jti(session, payload, user_id, now)
 
     identity = await load_auth_identity(session, user_id)
     if identity is None or not identity.is_active:

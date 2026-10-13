@@ -4,7 +4,8 @@
  * 链接/二维码（channel 未选或未配置时仍走原有人工确认收款语义不变）。
  */
 import React, { useState } from 'react'
-import { Alert, Button, Popconfirm, Radio, Skeleton, Space, Typography, message } from 'antd'
+import { Alert, Button, Popconfirm, Radio, Skeleton, Space, Typography } from 'antd'
+import { message } from '../feedback'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 

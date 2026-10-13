@@ -53,6 +53,108 @@ KEYWORD_SEARCH_MAX_ROWS = 200
 EXPORT_BATCH_SIZE = 5000
 
 
+def _task_batch_stmt(task_id: int, last_id: int, fetch: int, exclude_source: Optional[str]):
+    """iter_by_task 单批语句：(task_id, id > last_id) 游标 + ORDER BY id ASC LIMIT fetch"""
+    conds = [
+        SpiderResult.task_id == task_id,
+        SpiderResult.id > last_id,
+    ]
+    if exclude_source is not None:
+        conds.append(owned_source_clause(exclude_source))
+    return (
+        select(SpiderResult)
+        .where(*conds)
+        .order_by(SpiderResult.id.asc())
+        .limit(fetch)
+    )
+
+
+def _spider_result_queries(
+    tenant_id: Optional[int],
+    spider_name: Optional[str],
+    keyword: Optional[str],
+    exclude_source: Optional[str],
+    start_time: Optional[datetime],
+    end_time: Optional[datetime],
+):
+    """query_by_spider 的 (结果查询, 计数查询)：两者 WHERE 条件与顺序一致"""
+    filters = []
+    if tenant_id is not None:
+        filters.append(SpiderResult.tenant_id == tenant_id)
+    if spider_name:
+        filters.append(SpiderResult.spider_name == spider_name)
+    if keyword:
+        kw = f"%{keyword}%"
+        filters.append(
+            SpiderResult.title.like(kw)
+            | SpiderResult.url.like(kw)
+            | SpiderResult.content.like(kw)
+        )
+    if exclude_source is not None:
+        filters.append(owned_source_clause(exclude_source))
+    if start_time:
+        filters.append(SpiderResult.created_at >= start_time)
+    if end_time:
+        filters.append(SpiderResult.created_at <= end_time)
+    query = select(SpiderResult)
+    count_query = select(func.count()).select_from(SpiderResult)
+    for cond in filters:
+        query = query.where(cond)
+        count_query = count_query.where(cond)
+    return query, count_query
+
+
+def _result_row_dict(r: SpiderResult) -> dict:
+    """结果行 → 列表项 dict（非 ORM 对象；created_at 转 UTC ISO 串）"""
+    return {
+        "id": r.id,
+        "task_id": r.task_id,
+        "spider_name": r.spider_name,
+        "url": r.url,
+        "title": r.title,
+        "content": r.content,
+        "source": r.source,
+        "item_type": r.item_type,
+        "quality_score": r.quality_score,
+        "content_hash": r.content_hash,
+        "created_at": utc_iso(r.created_at),
+    }
+
+
+def _quality_agg_stmt(task_id: int):
+    """quality_report 聚合语句：有质量分结果的 avg / min / max / count"""
+    return (
+        select(
+            func.avg(SpiderResult.quality_score),
+            func.min(SpiderResult.quality_score),
+            func.max(SpiderResult.quality_score),
+            func.count(SpiderResult.id),
+        )
+        .where(SpiderResult.task_id == task_id)
+        .where(SpiderResult.quality_score.isnot(None))
+    )
+
+
+def _score_bucket(cond):
+    """质量分档计数列：SUM(CASE WHEN cond THEN 1 ELSE 0 END)"""
+    return func.sum(case((cond, 1), else_=0))
+
+
+def _quality_dist_stmt(task_id: int):
+    """quality_report 四档分布语句：≥80 / [60,80) / [40,60) / <40"""
+    score = SpiderResult.quality_score
+    return (
+        select(
+            _score_bucket(score >= 80),
+            _score_bucket((score >= 60) & (score < 80)),
+            _score_bucket((score >= 40) & (score < 60)),
+            _score_bucket(score < 40),
+        )
+        .where(SpiderResult.task_id == task_id)
+        .where(SpiderResult.quality_score.isnot(None))
+    )
+
+
 class SpiderResultRepository(BaseRepository[SpiderResult]):
     """SpiderResult Repository —— 在 BaseRepository 之上扩展按任务查询/计数"""
 
@@ -148,18 +250,7 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
             if remaining is not None and remaining <= 0:
                 break
             fetch = batch_size if remaining is None else min(batch_size, remaining)
-            conds = [
-                SpiderResult.task_id == task_id,
-                SpiderResult.id > last_id,
-            ]
-            if exclude_source is not None:
-                conds.append(owned_source_clause(exclude_source))
-            stmt = (
-                select(SpiderResult)
-                .where(*conds)
-                .order_by(SpiderResult.id.asc())
-                .limit(fetch)
-            )
+            stmt = _task_batch_stmt(task_id, last_id, fetch, exclude_source)
             rows = (await self.session.execute(stmt)).scalars().all()
             if not rows:
                 break
@@ -251,36 +342,10 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
         KEYWORD_SEARCH_MAX_ROWS（与分页参数冲突时取 min）；超出窗口的翻页
         返回空列表（total 仍为真实计数），防止深分页全表扫描。
         """
-        filters = []
-        if tenant_id is not None:
-            filters.append(SpiderResult.tenant_id == tenant_id)
-        if spider_name:
-            filters.append(SpiderResult.spider_name == spider_name)
-        if keyword:
-            kw = f"%{keyword}%"
-            filters.append(
-                SpiderResult.title.like(kw)
-                | SpiderResult.url.like(kw)
-                | SpiderResult.content.like(kw)
-            )
-        if exclude_source is not None:
-            filters.append(owned_source_clause(exclude_source))
-        query = select(SpiderResult)
-        count_query = select(func.count()).select_from(SpiderResult)
-        for cond in filters:
-            query = query.where(cond)
-            count_query = count_query.where(cond)
-
-        if start_time:
-            query = query.where(SpiderResult.created_at >= start_time)
-            count_query = count_query.where(SpiderResult.created_at >= start_time)
-        if end_time:
-            query = query.where(SpiderResult.created_at <= end_time)
-            count_query = count_query.where(SpiderResult.created_at <= end_time)
-
-        total = (
-            await self.session.execute(count_query)
-        ).scalar() or 0
+        query, count_query = _spider_result_queries(
+            tenant_id, spider_name, keyword, exclude_source, start_time, end_time,
+        )
+        total = (await self.session.execute(count_query)).scalar() or 0
 
         offset = (page - 1) * page_size
         limit = page_size
@@ -290,89 +355,20 @@ class SpiderResultRepository(BaseRepository[SpiderResult]):
                 return [], total
             limit = min(limit, KEYWORD_SEARCH_MAX_ROWS - offset)
 
-        query = (
-            query.order_by(SpiderResult.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
+        query = query.order_by(SpiderResult.created_at.desc()).offset(offset).limit(limit)
         result = await self.session.execute(query)
         rows = result.scalars().all()
-
-        items = [
-            {
-                "id": r.id,
-                "task_id": r.task_id,
-                "spider_name": r.spider_name,
-                "url": r.url,
-                "title": r.title,
-                "content": r.content,
-                "source": r.source,
-                "item_type": r.item_type,
-                "quality_score": r.quality_score,
-                "content_hash": r.content_hash,
-                "created_at": utc_iso(r.created_at),
-            }
-            for r in rows
-        ]
-        return items, total
+        return [_result_row_dict(r) for r in rows], total
 
     async def quality_report(self, task_id: int) -> dict:
         """任务级数据质量原始聚合数据（供 Service 层构造响应）"""
         # 聚合查询
-        stmt = (
-            select(
-                func.avg(SpiderResult.quality_score),
-                func.min(SpiderResult.quality_score),
-                func.max(SpiderResult.quality_score),
-                func.count(SpiderResult.id),
-            )
-            .where(SpiderResult.task_id == task_id)
-            .where(SpiderResult.quality_score.isnot(None))
-        )
-        result = await self.session.execute(stmt)
+        result = await self.session.execute(_quality_agg_stmt(task_id))
         row = result.one()
         avg_score, min_score, max_score, total = row
 
         # 四档分布
-        dist_stmt = (
-            select(
-                func.sum(
-                    case(
-                        (SpiderResult.quality_score >= 80, 1),
-                        else_=0,
-                    )
-                ),
-                func.sum(
-                    case(
-                        (
-                            (SpiderResult.quality_score >= 60)
-                            & (SpiderResult.quality_score < 80),
-                            1,
-                        ),
-                        else_=0,
-                    )
-                ),
-                func.sum(
-                    case(
-                        (
-                            (SpiderResult.quality_score >= 40)
-                            & (SpiderResult.quality_score < 60),
-                            1,
-                        ),
-                        else_=0,
-                    )
-                ),
-                func.sum(
-                    case(
-                        (SpiderResult.quality_score < 40, 1),
-                        else_=0,
-                    )
-                ),
-            )
-            .where(SpiderResult.task_id == task_id)
-            .where(SpiderResult.quality_score.isnot(None))
-        )
-        dist_result = await self.session.execute(dist_stmt)
+        dist_result = await self.session.execute(_quality_dist_stmt(task_id))
         dist_row = dist_result.one()
         excellent, good, fair, poor = dist_row
 

@@ -4,7 +4,8 @@
  * 工具栏「清理失源资产」（仅超管）→ PruneConfirmModal 二段式确认。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Input, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Empty, Input, Select, Space, Table, Tag, Typography } from 'antd'
+import { message } from '../../feedback'
 import { DeleteOutlined, ReloadOutlined, StarFilled, StarOutlined } from '@ant-design/icons'
 
 import {
@@ -79,7 +80,7 @@ const CatalogTab: React.FC<Props> = ({
   }, [type, listing, page, keyword])
 
   // refreshKey（T-36 导入完成计数）为显式重载触发器，不参与 load 逻辑
-  useEffect(() => { load() }, [load, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [load, refreshKey])
 
   const replace = (next: AssetRow) => {
     setRows((cur) => cur.map((r) => (r.id === next.id ? { ...r, ...next } : r)))

@@ -6,6 +6,7 @@
 - update_definition：启停代码爬虫
 - list_nodes：Worker 节点心跳扫描
 - list/create/update/delete_template + create_task_from_template：模板管理
+  （SpiderTemplateMixin，见 spider_registry_templates；规模约定拆分）
 
 设计说明（期 4 Facade 退役后独立化）：
 - 自持 session / repo；模块级直引 settings / get_async_redis / Repository /
@@ -20,12 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.repositories.spider_definition_repository import SpiderDefinitionRepository
 from backend.repositories.spider_task_repository import SpiderTaskRepository
-from backend.repositories.task_template_repository import TaskTemplateRepository
 from backend.services.spider_common import (
     _INTERNAL_SPIDERS,
     _SPIDERS_DIR,
-    require_enqueue_tenant,
 )
+from backend.services.spider_registry_templates import SpiderTemplateMixin
 from config import settings
 from platform_core.exceptions import BusinessException, NotFoundException
 from platform_core.logger import get_logger
@@ -40,9 +40,7 @@ from platform_core.schemas.spider import (
     SpiderInfo,
     SpiderParamField,
     SpiderRegistryResponse,
-    SpiderTaskResponse,
     SpiderTypeInfo,
-    TaskTemplateResponse,
     WorkerActiveTask,
     WorkerNodeListResponse,
     WorkerNodeResponse,
@@ -51,7 +49,107 @@ from platform_core.schemas.spider import (
 logger = get_logger("api")
 
 
-class SpiderRegistryService:
+def _registry_types(types_cfg: dict) -> list[SpiderTypeInfo]:
+    """爬虫类型表单定义（配置 SPIDER_TYPES；_ 前缀键跳过）"""
+    types = []
+    for type_key, tcfg in types_cfg.items():
+        if type_key.startswith("_"):
+            continue
+        fields = [
+            SpiderParamField(
+                name=f.get("name"),
+                label=f.get("label") or f.get("name"),
+                kind=f.get("kind", "text"),
+                required=bool(f.get("required", False)),
+                default=f.get("default"),
+                help=f.get("help"),
+                options=f.get("options"),
+            )
+            for f in (tcfg.get("fields") or [])
+        ]
+        types.append(
+            SpiderTypeInfo(type=type_key, label=tcfg.get("label", type_key), fields=fields)
+        )
+    return types
+
+
+def _registry_seed_spiders(spiders_cfg: dict) -> list[SpiderInfo]:
+    """DB 读取失败时的配置种子爬虫清单"""
+    spiders = []
+    for name, scfg in spiders_cfg.items():
+        # 回退种子同口径过滤（GWT-104.1：demo/内部项不因兜底混入）
+        if name.startswith("_") or name in _INTERNAL_SPIDERS:
+            continue
+        spiders.append(
+            SpiderInfo(
+                name=name,
+                title=scfg.get("title", name),
+                type=scfg.get("type", "web"),
+                description=scfg.get("description", ""),
+            )
+        )
+    return spiders
+
+
+async def _collect_heartbeats(client, keys: list) -> tuple[list, set[int]]:
+    """第一遍：读心跳 + 收集各爬虫活跃 task_id（spider → task_ids）
+
+    返回 (nodes, all_task_ids)；nodes 元素为 (worker_id, 心跳数据, spiders, [(spider, task_ids)])。
+    """
+    nodes: list[tuple[str, dict, list[str], list[tuple[str, list[int]]]]] = []
+    all_task_ids: set[int] = set()
+    for key in keys:
+        data = await client.hgetall(key) or {}
+        worker_id = str(key).removeprefix(WORKER_HEARTBEAT_PREFIX)
+        spiders = [s for s in str(data.get("spiders", "")).split(",") if s]
+
+        spider_task_ids: list[tuple[str, list[int]]] = []
+        for spider_name in spiders:
+            task_ids = sorted(
+                int(v)
+                for v in await client.smembers(
+                    ACTIVE_TASK_KEY.format(spider_name=spider_name)
+                )
+            )
+            spider_task_ids.append((spider_name, task_ids))
+            all_task_ids.update(task_ids)
+        nodes.append((worker_id, data, spiders, spider_task_ids))
+    return nodes, all_task_ids
+
+
+def _node_response(
+    worker_id: str, data: dict, spiders: list[str],
+    spider_task_ids: list[tuple[str, list[int]]], tasks_map: dict,
+) -> WorkerNodeResponse:
+    """第二遍：心跳 + 批查任务状态 → 节点响应（无活跃任务的爬虫以 task_id=None 占位）"""
+    active_tasks: list[WorkerActiveTask] = []
+    for spider_name, task_ids in spider_task_ids:
+        if task_ids:
+            for task_id in task_ids:
+                task = tasks_map.get(task_id)
+                active_tasks.append(
+                    WorkerActiveTask(
+                        spider_name=spider_name,
+                        task_id=task_id,
+                        status=task.status if task else None,
+                    )
+                )
+        else:
+            active_tasks.append(
+                WorkerActiveTask(spider_name=spider_name, task_id=None, status=None)
+            )
+    return WorkerNodeResponse(
+        worker_id=worker_id,
+        pid=int(data["pid"]) if data.get("pid", "").isdigit() else None,
+        spiders=spiders,
+        started_at=data.get("started_at"),
+        respawn_count=int(data.get("respawn_count", 0) or 0),
+        online=True,
+        active_tasks=active_tasks,
+    )
+
+
+class SpiderRegistryService(SpiderTemplateMixin):
     """注册表 / 文件管理 / Worker 节点 / 模板"""
 
     def __init__(self, session: AsyncSession):
@@ -67,35 +165,22 @@ class SpiderRegistryService:
         logger.debug("构建爬虫注册表")
         types_cfg = settings.get("SPIDER_TYPES", {}) or {}
         spiders_cfg = settings.get("SPIDERS", {}) or {}
-
-        types = []
-        for type_key, tcfg in types_cfg.items():
-            if type_key.startswith("_"):
-                continue
-            fields = [
-                SpiderParamField(
-                    name=f.get("name"),
-                    label=f.get("label") or f.get("name"),
-                    kind=f.get("kind", "text"),
-                    required=bool(f.get("required", False)),
-                    default=f.get("default"),
-                    help=f.get("help"),
-                    options=f.get("options"),
-                )
-                for f in (tcfg.get("fields") or [])
-            ]
-            types.append(
-                SpiderTypeInfo(type=type_key, label=tcfg.get("label", type_key), fields=fields)
-            )
+        types = _registry_types(types_cfg)
 
         # 爬虫清单：DB 优先；查询失败回退配置种子（成功而可见方案为 0 → 空清单，
         # 不用种子充数——GWT-103.4/104.3 空态可达）
-        spiders: list[SpiderInfo] | None = None
+        spiders = await self._registry_db_spiders()
+        if spiders is None:
+            spiders = _registry_seed_spiders(spiders_cfg)
+        return SpiderRegistryResponse(types=types, spiders=spiders)
+
+    async def _registry_db_spiders(self) -> list[SpiderInfo] | None:
+        """DB 已启用定义 → 可调度爬虫清单；读取失败返回 None（调用方回退配置种子）"""
         try:
             definitions = await SpiderDefinitionRepository(self.session).list_enabled()
             # T-41 / FR-104：demo/收割器/flow 引擎伪爬虫不下发（只滤视图，行不动）
             definitions = [d for d in definitions if d.name not in _INTERNAL_SPIDERS]
-            spiders = [
+            return [
                 SpiderInfo(
                     name=d.name,
                     title=d.title,
@@ -107,22 +192,7 @@ class SpiderRegistryService:
             ]
         except Exception as e:  # noqa: BLE001
             logger.warning(f"注册表 DB 读取失败，回退配置: {e}")
-
-        if spiders is None:
-            spiders = []
-            for name, scfg in spiders_cfg.items():
-                # 回退种子同口径过滤（GWT-104.1：demo/内部项不因兜底混入）
-                if name.startswith("_") or name in _INTERNAL_SPIDERS:
-                    continue
-                spiders.append(
-                    SpiderInfo(
-                        name=name,
-                        title=scfg.get("title", name),
-                        type=scfg.get("type", "web"),
-                        description=scfg.get("description", ""),
-                    )
-                )
-        return SpiderRegistryResponse(types=types, spiders=spiders)
+            return None
 
     # ------------------------------------------------------------------
     # 代码爬虫文件管理（4.4）
@@ -380,24 +450,7 @@ class SpiderRegistryService:
             return WorkerNodeListResponse(total=0, items=[])
 
         # 第一遍：读心跳 + 收集各爬虫活跃 task_id（spider → task_ids）
-        nodes: list[tuple[str, dict, list[str], list[tuple[str, list[int]]]]] = []
-        all_task_ids: set[int] = set()
-        for key in keys:
-            data = await client.hgetall(key) or {}
-            worker_id = str(key).removeprefix(WORKER_HEARTBEAT_PREFIX)
-            spiders = [s for s in str(data.get("spiders", "")).split(",") if s]
-
-            spider_task_ids: list[tuple[str, list[int]]] = []
-            for spider_name in spiders:
-                task_ids = sorted(
-                    int(v)
-                    for v in await client.smembers(
-                        ACTIVE_TASK_KEY.format(spider_name=spider_name)
-                    )
-                )
-                spider_task_ids.append((spider_name, task_ids))
-                all_task_ids.update(task_ids)
-            nodes.append((worker_id, data, spiders, spider_task_ids))
+        nodes, all_task_ids = await _collect_heartbeats(client, keys)
 
         # 批查任务状态（一次 WHERE id IN，替代逐 task get_by_id 的 N+1 轮询路径）
         tasks_map: dict[int, object] = {}
@@ -406,114 +459,9 @@ class SpiderRegistryService:
             tasks_map = {t.id: t for t in tasks}
 
         # 第二遍：用批查结果构建响应
-        items: list[WorkerNodeResponse] = []
-        for worker_id, data, spiders, spider_task_ids in nodes:
-            active_tasks: list[WorkerActiveTask] = []
-            for spider_name, task_ids in spider_task_ids:
-                if task_ids:
-                    for task_id in task_ids:
-                        task = tasks_map.get(task_id)
-                        active_tasks.append(
-                            WorkerActiveTask(
-                                spider_name=spider_name,
-                                task_id=task_id,
-                                status=task.status if task else None,
-                            )
-                        )
-                else:
-                    active_tasks.append(
-                        WorkerActiveTask(spider_name=spider_name, task_id=None, status=None)
-                    )
-
-            items.append(
-                WorkerNodeResponse(
-                    worker_id=worker_id,
-                    pid=int(data["pid"]) if data.get("pid", "").isdigit() else None,
-                    spiders=spiders,
-                    started_at=data.get("started_at"),
-                    respawn_count=int(data.get("respawn_count", 0) or 0),
-                    online=True,
-                    active_tasks=active_tasks,
-                )
-            )
+        items: list[WorkerNodeResponse] = [
+            _node_response(worker_id, data, spiders, spider_task_ids, tasks_map)
+            for worker_id, data, spiders, spider_task_ids in nodes
+        ]
         items.sort(key=lambda n: n.worker_id)
         return WorkerNodeListResponse(total=len(items), items=items)
-
-    # ------------------------------------------------------------------
-    # 任务模板（C1）
-    # ------------------------------------------------------------------
-    async def list_templates(self) -> list[TaskTemplateResponse]:
-        """获取所有任务模板"""
-        logger.debug("获取任务模板列表")
-        repo = TaskTemplateRepository(self.session)
-        items = await repo.list_all()
-        return [TaskTemplateResponse.model_validate(item) for item in items]
-
-    async def create_template(
-        self, payload: dict, created_by: str | None = None, tenant_id: int | None = None,
-    ) -> TaskTemplateResponse:
-        """创建任务模板（名称唯一性校验）"""
-        logger.info(f"创建任务模板: name={payload.get('name')}")
-        owner_id = require_enqueue_tenant(tenant_id)
-        repo = TaskTemplateRepository(self.session)
-        existing = await repo.get_by_name(payload["name"])
-        if existing:
-            raise BusinessException(f"模板名称 '{payload['name']}' 已存在")
-        data = {k: v for k, v in payload.items() if k != "tenant_id"}
-        item = await repo.create(**data, created_by=created_by, tenant_id=owner_id)
-        await self.session.commit()
-        await self.session.refresh(item)
-        return TaskTemplateResponse.model_validate(item)
-
-    async def update_template(self, template_id: int, payload: dict) -> TaskTemplateResponse:
-        """更新任务模板"""
-        logger.info(f"更新任务模板: id={template_id}")
-        repo = TaskTemplateRepository(self.session)
-        item = await repo.get_by_id(template_id)
-        if item is None:
-            raise NotFoundException("任务模板")
-        if "name" in payload and payload["name"] != item.name:
-            existing = await repo.get_by_name(payload["name"])
-            if existing:
-                raise BusinessException(f"模板名称 '{payload['name']}' 已存在")
-        updated = await repo.update(template_id, **payload)
-        await self.session.commit()
-        await self.session.refresh(updated)
-        return TaskTemplateResponse.model_validate(updated)
-
-    async def delete_template(self, template_id: int) -> dict:
-        """删除任务模板"""
-        logger.info(f"删除任务模板: id={template_id}")
-        repo = TaskTemplateRepository(self.session)
-        item = await repo.get_by_id(template_id)
-        if item is None:
-            raise NotFoundException("任务模板")
-        await repo.delete(template_id)
-        await self.session.commit()
-        return {"id": template_id, "deleted": True}
-
-    async def create_task_from_template(
-        self, template_id: int, tenant_id: int | None = None,
-    ) -> SpiderTaskResponse:
-        """从模板创建并运行任务"""
-        logger.info(f"从模板创建任务: template_id={template_id}")
-        owner_id = require_enqueue_tenant(tenant_id)
-        repo = TaskTemplateRepository(self.session)
-        template = await repo.get_by_id(template_id)
-        if template is None:
-            raise NotFoundException("任务模板")
-        tmpl_tid = getattr(template, "tenant_id", None)
-        try:
-            tmpl_owner = int(tmpl_tid) if tmpl_tid is not None else None
-        except (TypeError, ValueError):
-            tmpl_owner = None
-        if tmpl_owner != owner_id:
-            raise NotFoundException("任务模板")
-        # 局部构造（无状态）：避免 registry → task 顶层互相依赖
-        from backend.services.spider_task_service import SpiderTaskService
-        return await SpiderTaskService(self.session).enqueue(
-            spider_name=template.spider_name,
-            params=template.params,
-            priority=template.priority or "normal",
-            tenant_id=owner_id,
-        )

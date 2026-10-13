@@ -106,9 +106,9 @@ class CapabilityService:
 
     async def get_asset(self, asset_type: str, name: str) -> CapabilityAsset:
         """按名取资产（存活行优先；孪生行不再 500，审计 B4-4）"""
+        logger.info(f"查询资产详情 | type={asset_type} name={name}")
         from backend.services.capability_lookup import find_named_asset
 
-        logger.info(f"查询资产详情 | type={asset_type} name={name}")
         row = await find_named_asset(self.session, asset_type, name)
         if row is None:
             raise NotFoundException(resource=f"{asset_type} {name}")
@@ -120,6 +120,7 @@ class CapabilityService:
         FR-88 软收可逆：源目录回归时复活镜像行（存活行优先；仅剩软收行则
         取最新清 deleted_at）——镜像行生死跟随源目录，不永久滞留 gone 态。
         """
+        logger.debug(f"同步技能目录行 | skill={skill.name}")
         existing = (await self.session.execute(
             select(CapabilityAsset).where(
                 CapabilityAsset.asset_type == "skill",
@@ -154,6 +155,7 @@ class CapabilityService:
         只动 detail_id 镜像行（本扫描创建）且未 attach 源的行——第三方源行
         的收回归 src_sync 单一归属，防两路互踩。
         """
+        logger.info(f"软收回技能目录镜像行 | names={len(names)}")
         if not names:
             return []
         rows = (await self.session.execute(

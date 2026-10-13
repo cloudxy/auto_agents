@@ -5,7 +5,8 @@
  * 三元组。取消零写入；失败可重试不自动重试；执行中禁 ×/取消/Esc。
  */
 import React, { useEffect, useState } from 'react'
-import { Alert, Button, Modal, Skeleton, Tag, Typography, message } from 'antd'
+import { Alert, Button, Modal, Skeleton, Tag, Typography } from 'antd'
+import { message } from '../../feedback'
 
 import { pruneMissingAssets, type PruneMissingResult } from '../../services/capabilities'
 import { apiErrorMessage } from '../../utils/errorMessage'
@@ -16,7 +17,10 @@ const { Text } = Typography
 export const PRUNE_TITLE = '清理失源资产'
 export const PRUNE_CHECKING = '正在核对失源资产…'
 export const PRUNE_ZERO = '当前无失源资产'
-export const PRUNE_ZERO_HINT = '存活资产与 .agents 磁盘内容一致，无需清理'
+export const PRUNE_ZERO_HINT = '存活资产与能力库磁盘内容一致，无需清理'
+export const PRUNE_ROOT_EMPTY = '能力库根目录为空或不存在，已跳过清理'
+export const PRUNE_ROOT_EMPTY_HINT =
+  '为防止根目录配错时把全部资产当作失源下线，服务端未下线任何资产。请确认 SKILLS.AGENTS_ROOT 配置并先同步能力库。'
 export const PRUNE_CONFIRM = '确认清理'
 export const PRUNE_RUNNING = '清理中…'
 export const PRUNE_CANCEL_TOAST = '已取消，未下线任何资产'
@@ -141,7 +145,16 @@ const PruneConfirmModal: React.FC<Props> = ({ open, onClose, onPruned }) => {
           <Text type="secondary">{PRUNE_CHECKING}</Text>
         </div>
       ) : null}
-      {zero ? (
+      {zero && preview?.skipped_reason === 'hub_root_empty' ? (
+        <Alert
+          data-testid="prune-root-empty"
+          type="warning"
+          showIcon
+          title={PRUNE_ROOT_EMPTY}
+          description={PRUNE_ROOT_EMPTY_HINT}
+        />
+      ) : null}
+      {zero && preview?.skipped_reason !== 'hub_root_empty' ? (
         <div data-testid="prune-zero">
           <p>{PRUNE_ZERO}</p>
           <Text type="secondary">{PRUNE_ZERO_HINT}</Text>

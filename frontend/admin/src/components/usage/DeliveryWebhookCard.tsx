@@ -6,7 +6,8 @@
  */
 import React, { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Card, Input, Popconfirm, Space, Typography, message } from 'antd'
+import { Alert, Button, Card, Input, Popconfirm, Space, Typography } from 'antd'
+import { message } from '../../feedback'
 import { fetchDeliveryWebhook, putDeliveryWebhook } from '../../services/usage'
 import { apiErrorMessage } from '../../utils/errorMessage'
 

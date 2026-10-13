@@ -649,7 +649,7 @@ def test_gwt_92_6_user_restored_event_fail_open(db_client, db_session, events_ch
     assert _t22_event_rows(db_session, "user_restored") == []
 
 
-def test_gwt_92_6_asset_imported_event_fail_open(db_client, db_session, import_env, events_channel_down):
+def test_gwt_92_6_asset_imported_event_fail_open(db_client, db_session, import_env, events_channel_down):  # noqa: F811 fixture 经模块导入注册
     """资产导入：事件通道故障 → 导入完成、资产已落库（GWT-92.6/92.9）"""
     from backend.tests.test_t35_asset_import import SKILL_MD, _post_zip, _zip
     from platform_core.models.capability import CapabilityAsset

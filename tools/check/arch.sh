@@ -7,9 +7,10 @@
 # 退出码：0 = 全部通过；非 0 = 违规总数（上限 255）
 # 与 /check-arch Skill 的检查命令保持一致，供 pre-commit 与 CI 复用。
 #
-# 规则分两组：
+# 规则分组：
 #   R1-R13  架构红线（配置/安全/反爬/模型/日志/异步 Redis/门面白名单/租户）
 #   B1-B4   核心代码边界（模块依赖方向 + 四柱域 import）
+#   FR-14   发布物密钥；PL 插件只能引用；SZ 规模约定（tools/check/size.py）
 
 set -uo pipefail
 # shellcheck source=common.sh
@@ -94,13 +95,76 @@ else
 fi
 
 # --- 日志即证据 ---
-# R10: 扫描 backend/services/**/*.py（含子包）。模块级公开函数（非 _ 前缀）
-# 的第一条语句（跳过 docstring）必须含 logger.。签名跨行与嵌套包一并覆盖。
+# R10: 扫描 backend/services/**/*.py（含子包），两类入口：
+#   1) 模块级公开函数（非 _ 前缀、小写开头）；
+#   2) 顶层类名以 Service / Mixin 结尾的类的公开方法（含 @staticmethod / @classmethod）。
+#      豁免：@property / @cached_property / @x.setter|getter|deleter 访问器；
+#      体内只有 docstring + `...` / `pass` 的抽象桩；继承 Protocol 的类（结构契约无实现）。
+# 判定：第一条语句（跳过 docstring）必须是含 logger. 的表达式语句——if / try / with 等复合语句
+#   不算（曾有 7 个方法只在 if 的禁用分支或 except 里打日志，正常路径没有入口日志也能过）。
+# 输出 path:line: def name / def Class.method。签名跨行与嵌套包一并覆盖。
 R10_OUTPUT="$(uv run python - <<'PYEOF' 2>/dev/null || echo "R10 递归扫描执行失败（uv/python 环境）"
 from __future__ import annotations
 
 import ast
 from pathlib import Path
+
+FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
+CLASS_SUFFIXES = ("Service", "Mixin")
+PROPERTY_DECORATORS = {"property", "cached_property"}
+ACCESSOR_ATTRS = {"setter", "getter", "deleter"}
+
+
+def is_public(name: str) -> bool:
+    return bool(name) and name[0] != "_" and name[0].islower()
+
+
+def strip_docstring(body: list) -> list:
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(getattr(body[0], "value", None), ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        return body[1:]
+    return body
+
+
+def is_stub(body: list) -> bool:
+    return all(
+        isinstance(s, ast.Pass)
+        or (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) and s.value.value is Ellipsis)
+        for s in body
+    )
+
+
+def is_accessor(fn) -> bool:
+    for dec in fn.decorator_list:
+        if isinstance(dec, ast.Name) and dec.id in PROPERTY_DECORATORS:
+            return True
+        if isinstance(dec, ast.Attribute) and (dec.attr in ACCESSOR_ATTRS or dec.attr in PROPERTY_DECORATORS):
+            return True
+    return False
+
+
+def is_protocol(cls: ast.ClassDef) -> bool:
+    for base in cls.bases:
+        target = base.value if isinstance(base, ast.Subscript) else base
+        if isinstance(target, ast.Name) and target.id == "Protocol":
+            return True
+        if isinstance(target, ast.Attribute) and target.attr == "Protocol":
+            return True
+    return False
+
+
+def lacks_entry_log(src: str, fn, *, allow_stub: bool) -> bool:
+    body = strip_docstring(list(fn.body))
+    if allow_stub and is_stub(body):
+        return False
+    if not body or not isinstance(body[0], ast.Expr):
+        return True
+    return "logger." not in (ast.get_source_segment(src, body[0]) or "")
+
 
 hits: list[str] = []
 for path in sorted(Path("backend/services").rglob("*.py")):
@@ -113,25 +177,17 @@ for path in sorted(Path("backend/services").rglob("*.py")):
         hits.append(f"{path}:1: syntax error {exc}")
         continue
     for node in tree.body:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(node, FUNC_TYPES):
+            if is_public(node.name) and lacks_entry_log(src, node, allow_stub=False):
+                hits.append(f"{path}:{node.lineno}: def {node.name}")
             continue
-        name = node.name
-        if not name or name[0] == "_" or not name[0].islower():
+        if not isinstance(node, ast.ClassDef) or not node.name.endswith(CLASS_SUFFIXES) or is_protocol(node):
             continue
-        body = list(node.body)
-        if (
-            body
-            and isinstance(body[0], ast.Expr)
-            and isinstance(getattr(body[0], "value", None), ast.Constant)
-            and isinstance(body[0].value.value, str)
-        ):
-            body = body[1:]
-        if not body:
-            hits.append(f"{path}:{node.lineno}: def {name}")
-            continue
-        seg = ast.get_source_segment(src, body[0]) or ""
-        if "logger." not in seg:
-            hits.append(f"{path}:{node.lineno}: def {name}")
+        for item in node.body:
+            if not isinstance(item, FUNC_TYPES) or not is_public(item.name) or is_accessor(item):
+                continue
+            if lacks_entry_log(src, item, allow_stub=True):
+                hits.append(f"{path}:{item.lineno}: def {node.name}.{item.name}")
 print("\n".join(hits), end="")
 PYEOF
 )"
@@ -181,8 +237,11 @@ R13_OUTPUT=""
 if ! grep -q "from platform_core import tenant_context\|import platform_core.tenant_context\|from platform_core import.*tenant_context" backend/app/__init__.py platform_core/__init__.py 2>/dev/null; then
     R13_OUTPUT="platform_core/__init__.py 缺 tenant_context 安装导入（隔离钩子可能未安装）"
 fi
-# bash 3.2 兼容：命令替换 + heredoc（不用进程替换）；python 失败本身即违规（fail-loud）
-R13_SYNC="$(uv run python - <<'PYEOF' 2>/dev/null || echo "R13 豁免同步校验执行失败（uv/python 环境）"
+# bash 3.2 兼容：命令替换 + heredoc（不用进程替换）；python 失败本身即违规（fail-loud）。
+# stderr 落临时文件：失败时把真实原因（如 JWT.SECRET_KEY 未配置导致 create_app 抛错）附在违规里，
+# 不再只报一句笼统的「uv/python 环境」。
+R13_ERR="$(mktemp "${TMPDIR:-/tmp}/arch-r13.XXXXXX")"
+R13_SYNC="$(uv run python - 2>"$R13_ERR" <<'PYEOF'
 from backend.app import create_app
 
 create_app()  # 显式经组装点（不依赖模块级 app 实例的存在）
@@ -208,6 +267,12 @@ for p in problems:
     print(p)
 PYEOF
 )"
+R13_RC=$?
+if [ "$R13_RC" -ne 0 ]; then
+    R13_SYNC="R13 豁免同步校验执行失败（create_app 组装或导入出错，exit=$R13_RC），原因：
+$(grep -vE '^warning: ' "$R13_ERR" | tail -n 5 | sed 's/^/    /')"
+fi
+rm -f "$R13_ERR"
 if [ -n "$R13_OUTPUT" ] && [ -n "$R13_SYNC" ]; then
     R13_OUTPUT="$R13_OUTPUT
 $R13_SYNC"
@@ -297,10 +362,16 @@ echo "--- 插件引用（PL）---"
 python3 -B tools/check/plugin_refs.py
 VIOLATIONS=$((VIOLATIONS + $?))
 
+# --- 规模约定（SZ：AGENTS.md「单文件 ≤ 500 行、单函数 ≤ 40 行」的机械化，口径见脚本头）---
+echo ""
+echo "--- 规模约定（SZ）---"
+python3 -B tools/check/size.py
+VIOLATIONS=$((VIOLATIONS + $?))
+
 # --- 汇总 ---
 echo ""
 if [ "$VIOLATIONS" -eq 0 ]; then
-    echo "✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥 + PL 插件引用，全部通过）"
+    echo "✓ 架构合规检查通过（13 红线 + 4 边界 + FR-14 发布物密钥 + PL 插件引用 + SZ 规模约定，全部通过）"
     exit 0
 else
     echo "共 $VIOLATIONS 处违规，请按 /check-arch Step 3 路由修复"

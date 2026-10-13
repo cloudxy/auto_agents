@@ -1,4 +1,10 @@
-"""扫描 .agents：skill / plugin / command / agent + icon/background 路径。"""
+"""扫描产品 hub 根：skill / plugin / command / agent + icon/background 路径。
+
+根 = SKILLS.AGENTS_ROOT（D2 后默认 runtime/agents-hub，不是开发中枢 `.agents/`）；
+入库路径格式见 hub_paths（`agents-hub/<相对根>`）。许可（D2）：插件取清单 `license`；
+skill/command/agent 先取自身 frontmatter `license`，插件内资产未声明时继承所属插件清单许可；
+都没有 = 空（未声明），**不再默认 MIT**——上架闸见 agents_hub._license_allows_listing。
+"""
 from __future__ import annotations
 
 import hashlib
@@ -6,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.services.plugin_service import _plugin_manifest_path
+from backend.services.power_market.hub_paths import _to_stored
 from backend.services.power_market.walk import (
     _fold_commands, _fold_skills, _parse_frontmatter, _read_manifest,
 )
@@ -33,12 +40,14 @@ class HubItem:
     content_hash: str
     logo: str | None
     background: str | None
-    license: str = "MIT"
+    license: str = ""  # 空 = 未声明（D2：不再默认 MIT）
     extra: dict = field(default_factory=dict)
 
 
 def collect_agents_hub(agents_root: Path) -> list[HubItem]:
     logger.info(f"agents_hub.collect | root={agents_root}")
+    if not agents_root.exists():
+        logger.info(f"agents_hub.collect | 根不存在，按空处理 root={agents_root}")
     root = agents_root.resolve() if agents_root.exists() else agents_root
     items: list[HubItem] = []
     items.extend(_scan_repo_skills(root))
@@ -56,10 +65,10 @@ def _scan_loose(root: Path) -> list[HubItem]:
     name 不带 `plugin__` 前缀（它不属于任何插件）。
     """
     items: list[HubItem] = []
-    items.extend(_scan_agents(root, root, None))
+    items.extend(_scan_agents(root, root, None, ""))
     if (root / "commands").is_dir():
         for raw in _fold_commands(root, {}):
-            items.append(_command_item(root, root, None, raw))
+            items.append(_command_item(root, root, None, raw, ""))
     # QA-15：游离资产没有 plugin__ 前缀这层唯一性保护，任何未来改动都可能
     # 重新引入 slug 撞车——遍历式兜底：同 (asset_type, name) 出现第二次就
     # 警告，不吞掉、不去重（去重会让某一份文件的内容悄悄消失，交给同步
@@ -71,17 +80,6 @@ def _scan_loose(root: Path) -> list[HubItem]:
             logger.warning(f"游离资产 slug 撞车 | type={item.asset_type} name={item.name}")
         seen.add(key)
     return items
-
-
-def _repo_rel(path: Path, agents_root: Path) -> str:
-    repo = agents_root.parent
-    try:
-        return path.relative_to(repo).as_posix()
-    except ValueError:
-        try:
-            return f".agents/{path.relative_to(agents_root).as_posix()}"
-        except ValueError:
-            return path.as_posix()
 
 
 def _pick_file(candidates: list[Path]) -> Path | None:
@@ -122,6 +120,11 @@ def _digest(paths: list[Path | None]) -> str:
     return hasher.hexdigest()
 
 
+def _license_of(meta: dict, inherited: str) -> str:
+    """资产许可：自身 frontmatter `license` 优先，其次所属插件清单许可；都没有 = 空。"""
+    return (str(meta.get("license") or "").strip() or inherited)[:64]
+
+
 def _plugin_dirs(agents_root: Path) -> list[Path]:
     plugins = agents_root / "plugins"
     if not plugins.is_dir():
@@ -148,12 +151,15 @@ def _scan_repo_skills(agents_root: Path) -> list[HubItem]:
         md = folder / "SKILL.md"
         if not folder.is_dir() or not md.is_file():
             continue
-        items.append(_skill_item(folder, md, agents_root, plugin=None, slug=folder.name))
+        items.append(_skill_item(
+            folder, md, agents_root, plugin=None, slug=folder.name, inherited_license="",
+        ))
     return items
 
 
 def _skill_item(
     folder: Path, md: Path, agents_root: Path, *, plugin: str | None, slug: str,
+    inherited_license: str,
 ) -> HubItem:
     meta = _parse_frontmatter(md.read_text(encoding="utf-8"))
     logo = _dir_icon(folder)
@@ -162,12 +168,13 @@ def _skill_item(
     desc = (meta.get("description") or "")[:1024]
     return HubItem(
         asset_type="skill", name=slug[:128], title=title[:256], description=desc,
-        category="skill", origin_ref=_repo_rel(folder, agents_root),
+        category="skill", origin_ref=_to_stored(folder, agents_root),
         origin_local_name=folder.name, origin_plugin_name=plugin,
-        file_path=_repo_rel(folder, agents_root),
+        file_path=_to_stored(folder, agents_root),
         content_hash=_digest([md, logo, bg]),
-        logo=_repo_rel(logo, agents_root) if logo else None,
-        background=_repo_rel(bg, agents_root) if bg else None,
+        logo=_to_stored(logo, agents_root) if logo else None,
+        background=_to_stored(bg, agents_root) if bg else None,
+        license=_license_of(meta, inherited_license),
     )
 
 
@@ -179,16 +186,20 @@ def _scan_plugin(pkg: Path, agents_root: Path) -> list[HubItem]:
     folded = _fold_skills(pkg)
     items = [_plugin_item(pkg, agents_root, manifest, bundled=folded)]
     plugin = pkg.name
+    plugin_license = items[0].license
     for raw in folded:
         folder = Path(raw["file_path"]) if raw.get("file_path") else pkg / raw["origin_ref"]
         md = folder / "SKILL.md"
         if not md.is_file():
             continue
         slug = f"{plugin}__{raw['origin_local_name']}"
-        items.append(_skill_item(folder, md, agents_root, plugin=plugin, slug=slug))
+        items.append(_skill_item(
+            folder, md, agents_root, plugin=plugin, slug=slug,
+            inherited_license=plugin_license,
+        ))
     for raw in _fold_commands(pkg, manifest):
-        items.append(_command_item(pkg, agents_root, plugin, raw))
-    items.extend(_scan_agents(pkg, agents_root, plugin))
+        items.append(_command_item(pkg, agents_root, plugin, raw, plugin_license))
+    items.extend(_scan_agents(pkg, agents_root, plugin, plugin_license))
     return items
 
 
@@ -197,15 +208,15 @@ def _plugin_item(pkg: Path, agents_root: Path, manifest: dict, *, bundled: list[
     bg = _dir_background(pkg)
     man_path = _plugin_manifest_path(pkg) or pkg / "plugin.json"
     desc = str(manifest.get("description") or pkg.name)[:1024]
-    license_id = str(manifest.get("license") or "MIT") or "MIT"
+    license_id = str(manifest.get("license") or "").strip()  # D2：缺失 = 未声明，不再假定 MIT
     return HubItem(
         asset_type="plugin", name=pkg.name[:128], title=pkg.name[:256],
         description=desc, category="plugin",
-        origin_ref=_repo_rel(pkg, agents_root), origin_local_name=pkg.name,
-        origin_plugin_name=None, file_path=_repo_rel(pkg, agents_root),
+        origin_ref=_to_stored(pkg, agents_root), origin_local_name=pkg.name,
+        origin_plugin_name=None, file_path=_to_stored(pkg, agents_root),
         content_hash=_digest([man_path, logo, bg]),
-        logo=_repo_rel(logo, agents_root) if logo else None,
-        background=_repo_rel(bg, agents_root) if bg else None,
+        logo=_to_stored(logo, agents_root) if logo else None,
+        background=_to_stored(bg, agents_root) if bg else None,
         license=license_id[:64],
         extra={
             "manifest": manifest,
@@ -214,10 +225,13 @@ def _plugin_item(pkg: Path, agents_root: Path, manifest: dict, *, bundled: list[
     )
 
 
-def _command_item(pkg: Path, agents_root: Path, plugin: str | None, raw: dict) -> HubItem:
+def _command_item(
+    pkg: Path, agents_root: Path, plugin: str | None, raw: dict, inherited_license: str,
+) -> HubItem:
     md = Path(raw["file_path"]) if raw.get("file_path") else pkg / raw["origin_ref"]
     folder = md.parent if md.suffix == ".md" else md
     stem = md.stem if md.suffix == ".md" else raw["origin_local_name"]
+    meta = _parse_frontmatter(raw.get("body_md") or "")
     logo = _dir_icon(folder, stem)
     bg = _dir_background(folder, stem)
     slug = (
@@ -227,10 +241,11 @@ def _command_item(pkg: Path, agents_root: Path, plugin: str | None, raw: dict) -
         asset_type="command", name=slug[:128], title=str(raw.get("title") or stem)[:256],
         description=str(raw.get("description") or "")[:1024], category="command",
         origin_ref=str(raw.get("origin_ref") or ""), origin_local_name=raw["origin_local_name"],
-        origin_plugin_name=plugin, file_path=_repo_rel(md if md.exists() else folder, agents_root),
+        origin_plugin_name=plugin, file_path=_to_stored(md if md.exists() else folder, agents_root),
         content_hash=_digest([md if md.exists() else None, logo, bg]),
-        logo=_repo_rel(logo, agents_root) if logo else None,
-        background=_repo_rel(bg, agents_root) if bg else None,
+        logo=_to_stored(logo, agents_root) if logo else None,
+        background=_to_stored(bg, agents_root) if bg else None,
+        license=_license_of(meta, inherited_license),
         extra={
             "slash": raw.get("slash") or raw["origin_local_name"],
             "body_md": raw.get("body_md") or "",
@@ -238,7 +253,9 @@ def _command_item(pkg: Path, agents_root: Path, plugin: str | None, raw: dict) -
     )
 
 
-def _scan_agents(pkg: Path, agents_root: Path, plugin: str | None) -> list[HubItem]:
+def _scan_agents(
+    pkg: Path, agents_root: Path, plugin: str | None, inherited_license: str,
+) -> list[HubItem]:
     agents_dir = pkg / "agents"
     if not agents_dir.is_dir():
         return []
@@ -246,11 +263,13 @@ def _scan_agents(pkg: Path, agents_root: Path, plugin: str | None) -> list[HubIt
     for md in sorted(agents_dir.glob("*.md")):
         if md.name.startswith(".") or md.name.lower() == "readme.md":
             continue
-        items.append(_agent_item(md, agents_dir, agents_root, plugin))
+        items.append(_agent_item(md, agents_dir, agents_root, plugin, inherited_license))
     return items
 
 
-def _agent_item(md: Path, agents_dir: Path, agents_root: Path, plugin: str | None) -> HubItem:
+def _agent_item(
+    md: Path, agents_dir: Path, agents_root: Path, plugin: str | None, inherited_license: str,
+) -> HubItem:
     text = md.read_text(encoding="utf-8")
     meta = _parse_frontmatter(text)
     body = text
@@ -274,11 +293,12 @@ def _agent_item(md: Path, agents_dir: Path, agents_root: Path, plugin: str | Non
     return HubItem(
         asset_type="agent", name=slug[:128], title=local[:256],
         description=str(meta.get("description") or "")[:1024], category="agent",
-        origin_ref=_repo_rel(md, agents_root), origin_local_name=local,
-        origin_plugin_name=plugin, file_path=_repo_rel(md, agents_root),
+        origin_ref=_to_stored(md, agents_root), origin_local_name=local,
+        origin_plugin_name=plugin, file_path=_to_stored(md, agents_root),
         content_hash=_digest([md, logo, bg]),
-        logo=_repo_rel(logo, agents_root) if logo else None,
-        background=_repo_rel(bg, agents_root) if bg else None,
+        logo=_to_stored(logo, agents_root) if logo else None,
+        background=_to_stored(bg, agents_root) if bg else None,
+        license=_license_of(meta, inherited_license),
         extra={"persona_md": body, "tools": tools},
     )
 

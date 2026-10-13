@@ -7,7 +7,8 @@
  */
 import React, { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Drawer, Skeleton, Tag, Typography, message } from 'antd'
+import { Button, Drawer, Skeleton, Tag, Typography } from 'antd'
+import { message } from '../../feedback'
 import { CloseOutlined, CopyOutlined } from '@ant-design/icons'
 
 import { fetchPublicCapability, type PublicCapabilityCard } from '../../services/capabilities'

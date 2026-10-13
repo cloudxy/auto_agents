@@ -7,7 +7,8 @@
  * 禁止写死出站拉数地址、禁止出现平台网关钥匙（master）。
  */
 import React from 'react'
-import { Typography, message } from 'antd'
+import { Typography } from 'antd'
+import { message } from '../../feedback'
 
 const { Text, Paragraph } = Typography
 

@@ -8,9 +8,12 @@
 - stdio 可执行文件白名单（config LLM.MCP_ALLOWED_EXECUTABLES，缺省 node/npx/python3/uvx）；
 - 全程超时（连接 5s / 调用 10s）；不 shell；hooks/commands 只登记不执行。
 """
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from platform_core.logger import get_logger
+
+if TYPE_CHECKING:
+    from mcp import StdioServerParameters
 
 logger = get_logger("service.mcp_bridge")
 

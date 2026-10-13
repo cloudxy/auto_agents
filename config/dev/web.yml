@@ -1,7 +1,8 @@
-# 开发环境 Web 配置（覆盖 default）
-# 只覆盖 CORS ORIGINS，其他配置继承 default
+# 开发环境 Web 配置（在 default 之上补齐 CORS 来源与允许头）
 
 CORS:
   ORIGINS:
     - "http://localhost:9112"      # 管理后台
     - "http://localhost:9113"      # 官方网站
+  ALLOW_HEADERS:
+    - "*"

@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""把 .agents 的 skill/plugin/command/agent 增量同步进能力市场。
+"""把产品 hub 根的 skill/plugin/command/agent 增量同步进能力市场。
 
-hash 未变则跳过；新项插入；有变动才更新。run.py start/restart 会调用。
+hub 根 = SKILLS.AGENTS_ROOT（D2 后默认 runtime/agents-hub，不入库）——**不是**开发协作
+中枢 `.agents/`：仓库自己的开发 SOP skill 与第三方插件指针不会被上架。根不存在按空处理
+（total=0，不报错）。hash 未变则跳过；新项插入；有变动才更新；许可缺失的新资产不自动上架。
+run.py start/restart 会调用。D2 前已入库的 `.agents/...` 行迁移见
+scripts/db/migrate_agents_hub_root.py。
 """
 from __future__ import annotations
 
@@ -36,9 +40,12 @@ async def _run(agents_root: Path) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="同步 .agents 到能力市场")
+    parser = argparse.ArgumentParser(description="同步产品 hub 根到能力市场（不扫开发中枢 .agents/）")
     parser.add_argument("--env", choices=["local", "dev", "prod"], default=None)
-    parser.add_argument("--root", default=None, help=".agents 目录（默认 SKILLS.AGENTS_ROOT）")
+    parser.add_argument(
+        "--root", default=None,
+        help="产品 hub 根目录（默认 SKILLS.AGENTS_ROOT=runtime/agents-hub；显式指向 .agents 才会扫开发中枢）",
+    )
     ns = parser.parse_args(argv)
     if ns.env:
         import os

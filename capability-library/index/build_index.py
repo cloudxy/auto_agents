@@ -40,12 +40,12 @@ def load_meta(path: Path) -> dict:
         return {}
 
 
-def build(root: Path) -> int:
-    skills_dir = root / "skills"
-    db_path = root / "index" / "index.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+def _s(v):
+    """yaml 会把裸日期解析成 date 对象，sqlite3 新版不再自动适配，统一转 str。"""
+    return str(v) if v is not None else None
 
-    conn = sqlite3.connect(db_path)
+
+def _create_table(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS skills")
     conn.execute(
         """
@@ -69,45 +69,54 @@ def build(root: Path) -> int:
         """
     )
 
+
+def _skill_row(skill_dir: Path) -> tuple:
+    """单个 skill 目录 → skills 表一行（列序与建表一致）"""
+    skill_md = skill_dir / "SKILL.md"
+    meta_yaml = skill_dir / "meta.yaml"
+    fm = parse_frontmatter(skill_md.read_text(encoding="utf-8")) if skill_md.is_file() else {}
+    meta = load_meta(meta_yaml)
+
+    cap = meta.get("capability", {}) or {}
+    source = meta.get("source", {}) or {}
+    return (
+        meta.get("name") or fm.get("name") or skill_dir.name,
+        fm.get("description"),
+        meta.get("category"),
+        json.dumps(meta.get("industries") or [], ensure_ascii=False),
+        cap.get("score"),
+        cap.get("ai_suggested_score"),
+        meta.get("status"),
+        json.dumps(meta.get("similar_to") or [], ensure_ascii=False),
+        source.get("url"),
+        source.get("author"),
+        _s(source.get("imported_at")),
+        source.get("content_hash"),
+        cap.get("reviewed_by"),
+        _s(cap.get("reviewed_at")),
+        cap.get("notes"),
+    )
+
+
+def build(root: Path) -> int:
+    skills_dir = root / "skills"
+    db_path = root / "index" / "index.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(db_path)
+    _create_table(conn)
+
     count = 0
     if skills_dir.is_dir():
         for skill_dir in sorted(skills_dir.iterdir()):
             if not skill_dir.is_dir():
                 continue
-            skill_md = skill_dir / "SKILL.md"
-            meta_yaml = skill_dir / "meta.yaml"
-            fm = parse_frontmatter(skill_md.read_text(encoding="utf-8")) if skill_md.is_file() else {}
-            meta = load_meta(meta_yaml)
-
-            cap = meta.get("capability", {}) or {}
-            source = meta.get("source", {}) or {}
-
-            def s(v):
-                """yaml 会把裸日期解析成 date 对象，sqlite3 新版不再自动适配，统一转 str。"""
-                return str(v) if v is not None else None
-
             conn.execute(
                 """
                 INSERT OR REPLACE INTO skills VALUES
                 (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
-                (
-                    meta.get("name") or fm.get("name") or skill_dir.name,
-                    fm.get("description"),
-                    meta.get("category"),
-                    json.dumps(meta.get("industries") or [], ensure_ascii=False),
-                    cap.get("score"),
-                    cap.get("ai_suggested_score"),
-                    meta.get("status"),
-                    json.dumps(meta.get("similar_to") or [], ensure_ascii=False),
-                    source.get("url"),
-                    source.get("author"),
-                    s(source.get("imported_at")),
-                    source.get("content_hash"),
-                    cap.get("reviewed_by"),
-                    s(cap.get("reviewed_at")),
-                    cap.get("notes"),
-                ),
+                _skill_row(skill_dir),
             )
             count += 1
 

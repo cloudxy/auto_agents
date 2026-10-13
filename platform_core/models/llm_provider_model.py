@@ -45,7 +45,7 @@ class LlmProviderModel(Base):
         return f"<LlmProviderModel {self.model_id} default={self.is_default}>"
 
 
-from platform_core.models.llm_provider import LlmProvider  # noqa: E402（置文件尾避免循环导入）
+from platform_core.models.llm_provider import LlmProvider  # noqa: E402 — 置文件尾避免循环导入
 
 LlmProvider.models = relationship(
     "LlmProviderModel",

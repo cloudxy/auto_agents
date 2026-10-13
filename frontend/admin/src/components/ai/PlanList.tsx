@@ -6,7 +6,8 @@
  */
 import React, { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Empty, Popconfirm, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Empty, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { message } from '../../feedback'
 import type { ColumnsType } from 'antd/es/table'
 import { DeleteOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import { AI_PLAN_STATUS_META, AI_PLAN_STATUS_OPTIONS, deleteAiPlan, fetchAiPlans } from '../../services/ai'

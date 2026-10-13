@@ -96,6 +96,20 @@ def _assert_can_assign(actor_role: str | None, tenant_role: str) -> None:
         _hierarchy_denied()
 
 
+def _member_credentials(payload: dict) -> tuple[str, str, str]:
+    """新成员登录名 / 邮箱 / 密码（去空白；必填与长度校验）"""
+    username = str(payload.get("username") or "").strip()
+    email = str(payload.get("email") or "").strip()
+    password = str(payload.get("password") or "")
+    if not username:
+        raise ValidationException(message=MSG_NEED_USERNAME, field="username")
+    if len(username) > _USERNAME_MAX:
+        raise ValidationException(message=MSG_USERNAME_LONG, field="username")
+    if not email or len(password) < 6:
+        raise ValidationException(message="username/email 必填，密码至少 6 位", field="payload")
+    return username, email, password
+
+
 def _to_dict(user: User) -> dict:
     return {
         "id": user.id, "username": user.username, "email": user.email,
@@ -129,32 +143,8 @@ class MemberService:
         if tenant_role not in TENANT_ROLES:
             raise ValidationException(message=f"租户角色不合法: {tenant_role}", field="tenant_role")
         _assert_can_assign(actor_role, tenant_role)
-        username = str(payload.get("username") or "").strip()
-        email = str(payload.get("email") or "").strip()
-        password = str(payload.get("password") or "")
-        if not username:
-            raise ValidationException(message=MSG_NEED_USERNAME, field="username")
-        if len(username) > _USERNAME_MAX:
-            raise ValidationException(message=MSG_USERNAME_LONG, field="username")
-        if not email or len(password) < 6:
-            raise ValidationException(message="username/email 必填，密码至少 6 位", field="payload")
-
-        # 唯一性检查含软删行（租户自助口径，与用户管理超管路径的「在册释放」
-        # 口径不同，test_deleted_member_not_operable_or_reusable 钉住）：.limit(1)
-        # 是 042 在册化后的多行护栏——同 username/email 可同时存在在册行与
-        # 已删行（用户管理侧释放/恢复所致），scalar_one_or_none 会抛
-        # MultipleResultsFound 500；limit(1) 只判「有无任一行」，语义不变
-        exists = (await self.session.execute(
-            select(User.id).where(User.tenant_id == tenant_id, User.username == username)
-            .limit(1)
-        )).scalar_one_or_none()
-        if exists is not None:
-            raise ValidationException(message=f"成员名已存在: {username}", field="username")
-        email_taken = (await self.session.execute(
-            select(User.id).where(User.email == email).limit(1)
-        )).scalar_one_or_none()
-        if email_taken is not None:
-            raise ValidationException(message=f"邮箱已注册: {email}", field="email")
+        username, email, password = _member_credentials(payload)
+        await self._assert_member_unique(tenant_id, username, email)
 
         hashed = await asyncio.to_thread(get_password_hash, password)
         user = User(
@@ -172,6 +162,25 @@ class MemberService:
         snapshot = _to_dict(user)
         await self.session.commit()
         return snapshot
+
+    async def _assert_member_unique(self, tenant_id: int, username: str, email: str) -> None:
+        """唯一性检查含软删行（租户自助口径，与用户管理超管路径的「在册释放」
+        口径不同，test_deleted_member_not_operable_or_reusable 钉住）：.limit(1)
+        是 042 在册化后的多行护栏——同 username/email 可同时存在在册行与
+        已删行（用户管理侧释放/恢复所致），scalar_one_or_none 会抛
+        MultipleResultsFound 500；limit(1) 只判「有无任一行」，语义不变
+        """
+        exists = (await self.session.execute(
+            select(User.id).where(User.tenant_id == tenant_id, User.username == username)
+            .limit(1)
+        )).scalar_one_or_none()
+        if exists is not None:
+            raise ValidationException(message=f"成员名已存在: {username}", field="username")
+        email_taken = (await self.session.execute(
+            select(User.id).where(User.email == email).limit(1)
+        )).scalar_one_or_none()
+        if email_taken is not None:
+            raise ValidationException(message=f"邮箱已注册: {email}", field="email")
 
     async def patch_member(self, tenant_id: int, member_id: int, payload: dict,
                            actor_role: str | None = None, actor_id: int | None = None) -> dict:
@@ -282,6 +291,17 @@ class MemberService:
         if actor_role != "owner":
             logger.warning(f"非负责人尝试转让被拒 | actor={actor_id} role={actor_role}")
             _hierarchy_denied()
+        await self._verify_transferring_owner(tenant_id, actor_id, password)
+        target = await self._transfer_target(tenant_id, member_id, actor_id)
+        await self._demote_owner(tenant_id, actor_id)
+        target.tenant_role = "owner"
+        target.role = derive_legacy_role("owner")
+        await self.session.commit()
+        logger.info(f"负责人已转让 | tenant={tenant_id} from={actor_id} to={member_id}")
+        return {"owner_id": int(member_id), "previous_owner_id": int(actor_id)}
+
+    async def _verify_transferring_owner(self, tenant_id: int, actor_id: int, password: str) -> None:
+        """转让发起人：本企业在册负责人 + 登录密码复核 + 邮箱已验证（D21 闸）"""
         actor = (await self.session.execute(
             select(User).where(User.tenant_id == tenant_id, User.id == actor_id,
                                User.tenant_role == "owner", User.deleted_at.is_(None))
@@ -297,6 +317,9 @@ class MemberService:
 
             raise BusinessException(message="请先验证负责人邮箱，再转让负责人。",
                                     code=EMAIL_NOT_VERIFIED, status_code=403)
+
+    async def _transfer_target(self, tenant_id: int, member_id: int, actor_id: int) -> User:
+        """转让目标：本企业在册、启用中的非平台成员，且不是自己"""
         target = (await self.session.execute(
             select(User).where(User.tenant_id == tenant_id, User.id == member_id,
                                User.deleted_at.is_(None))
@@ -307,7 +330,10 @@ class MemberService:
             raise ValidationException(message="你已经是负责人", field="member_id")
         if not target.is_active:
             raise ValidationException(message="该成员已停用，请先启用再转让", field="member_id")
+        return target
 
+    async def _demote_owner(self, tenant_id: int, actor_id: int) -> None:
+        """原负责人降为管理员并吊销其全部会话；条件更新（仍是 owner 才改）防并发双转让"""
         demoted = await self.session.execute(
             update(User)
             .where(User.id == actor_id, User.tenant_id == tenant_id, User.tenant_role == "owner")
@@ -317,11 +343,6 @@ class MemberService:
         if demoted.rowcount != 1:
             logger.warning(f"转让负责人并发冲突 | tenant={tenant_id} actor={actor_id}")
             _hierarchy_denied()
-        target.tenant_role = "owner"
-        target.role = derive_legacy_role("owner")
-        await self.session.commit()
-        logger.info(f"负责人已转让 | tenant={tenant_id} from={actor_id} to={member_id}")
-        return {"owner_id": int(member_id), "previous_owner_id": int(actor_id)}
 
     async def list_tenant_audit_logs(self, tenant_id: int, limit: int) -> list[dict]:
         """成员操作审计·租户视角（B6）：本租户成员的近期高危操作留痕

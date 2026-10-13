@@ -19,7 +19,7 @@ export const ENABLE_HOST = '启用到宿主'
 /** T-08（FR-03/04，edge-states §10 新增成品句） */
 export const TAB_EMPTY = '暂无该类资产'
 export const tabEmptyHint = (typeText: string): string =>
-  `同步 .agents 后，${typeText} 会出现在这里。`
+  `同步能力库后，${typeText} 会出现在这里。`
 export const SYNC_NOW = '立即同步'
 export const GO_GOVERNANCE = '去治理目录'
 export const NO_DESC = '暂无描述'

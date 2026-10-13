@@ -2,11 +2,14 @@
 
 拆分自 ai_planner_service.py（期4 结构治理），职责边界：
 - 共享 AsyncClient 缓存（provider 路径专用）：get_shared_client / invalidate_client_cache，
-  含连接池常量与缓存键
+  含连接池常量与缓存键（规模治理：实现位于叶子 llm_client_pool，本模块原样 re-export）
 - 运行时配置解析入口（激活供应商优先 / yml+env 兜底）：_resolve_llm_runtime_config
   （实现下沉 backend.services.llm_common——T6 解环：本模块不再依赖
   llm_provider_service，配置形状与两段解析均取自公共叶子层）
 - chat completions 调用（超时 / 指数退避重试 / token 预算熔断）：llm_chat
+  （规模治理拆出的叶子，本模块原样 re-export：直连请求构造与 usage 归一化
+  → llm_client_request；套餐闸与用户可见失败文案 → llm_client_quota；
+  候选链查询与降质告警 → llm_client_failover。编排 _failover 留在本模块）
 - 进程级 token 用量累计：_TOKEN_USAGE（跨请求熔断）
 
 Patch 兼容约定：存量单测 patch backend.services.ai_planner_service.<name>（门面路径），
@@ -14,15 +17,47 @@ Patch 兼容约定：存量单测 patch backend.services.ai_planner_service.<nam
 get_shared_client 等）一律经 llm_common.seam() 命名空间调用期取值（门面初始化完成
 后注入 seam；无文件末尾反向 import，import 图无环），使旧 patch 路径在运行时生效；
 httpx 为全局共享模块对象（patch httpx.AsyncClient 即全局生效），保留本地引用即可。
+patch 本模块路径的名字（get_month_used / record_usage / chat_completions /
+_candidate_chain / _RETRY_BASE_DELAY 等）均在本模块内经模块全局名调用。
 """
 import asyncio
-import hashlib
 from typing import Optional
 
 import httpx
-from sqlalchemy import select
 
 from backend.config_consts import LLM_DATA_PLANE
+from backend.services.ai_planner.llm_client_failover import (  # noqa: F401 — 拆出名兼容 re-export
+    _candidate_chain,
+    _notify_degrade,
+    _query_chain,
+)
+from backend.services.ai_planner.llm_client_pool import (  # noqa: F401 — 拆出名兼容 re-export
+    _CLIENT_CONNECT_TIMEOUT,
+    _CLIENT_KEEPALIVE_EXPIRY,
+    _CLIENT_MAX_CONNECTIONS,
+    _CLIENT_MAX_KEEPALIVE_CONNECTIONS,
+    _HTTP_CLIENT_OWNER,
+    _HTTP_CLIENTS,
+    _client_cache_key,
+    get_shared_client,
+    invalidate_client_cache,
+)
+from backend.services.ai_planner.llm_client_quota import (  # noqa: F401 — 拆出名兼容 re-export
+    _check_llm_tokens,
+    _enforce_tenant_token_quota,
+    _gateway_unreachable,
+    _no_platform_model,
+    _provider_error,
+)
+from backend.services.ai_planner.llm_client_request import (  # noqa: F401 — 拆出名兼容 re-export
+    _BUSINESS_MAX_TOKENS,
+    _DirectCall,
+    _assert_direct_config,
+    _normalize_usage,
+    _openai_content,
+    _prepare_direct_call,
+    _resolve_budget,
+)
 from backend.services.llm_common import (
     LlmRuntimeConfig,
     resolve_config_from_settings,
@@ -44,80 +79,9 @@ PLANNING_READONLY_COPY = "当前账号不能开始规划"
 # LLM 重试退避基数（指数：1s/2s/4s...）
 _RETRY_BASE_DELAY = 1.0
 
-# B-M3：anthropic/gemini 经适配器构造请求时对话 max_tokens 缺省（openai 兼容路径
-# 不注入该字段——保持与历史 payload 字节级一致）
-_BUSINESS_MAX_TOKENS = 4096
-
 # 进程级 token 用量累计（跨请求熔断；按 provider 维度计数，兜底路径统一记在
 # "config" 名下；单实例假设：多副本部署时预算无法跨进程聚合，需外部聚合方案）
 _TOKEN_USAGE: dict[str, int] = {}
-
-# ----------------------------------------------------------------------
-# 共享 AsyncClient 缓存（provider 路径专用；兜底路径保持现状的一次性 client）
-# ----------------------------------------------------------------------
-# key=(base_url, sha256(api_key)[:12])：Authorization 头在创建时固化，密钥轮换
-# 自然产生新条目；owner 记录归属供应商，热切换/变更/删除时由 invalidate 定向关闭
-_HTTP_CLIENTS: dict[tuple[str, str], httpx.AsyncClient] = {}
-_HTTP_CLIENT_OWNER: dict[tuple[str, str], int] = {}
-# 连接池与超时拆分：connect 上限 10s，读/写/取池跟随调用方超时
-_CLIENT_MAX_CONNECTIONS = 20
-_CLIENT_MAX_KEEPALIVE_CONNECTIONS = 10
-_CLIENT_KEEPALIVE_EXPIRY = 30.0
-_CLIENT_CONNECT_TIMEOUT = 10.0
-
-
-def _client_cache_key(base_url: str, api_key: str) -> tuple[str, str]:
-    """共享 client 缓存键：base_url + 密钥指纹（明文/完整哈希均不落内存键）"""
-    return (base_url.rstrip("/"), hashlib.sha256((api_key or "").encode("utf-8")).hexdigest()[:12])
-
-
-async def get_shared_client(base_url: str, api_key: str, timeout: float, provider_id: Optional[int] = None) -> httpx.AsyncClient:
-    logger.debug(f"获取共享 LLM client: provider_id={provider_id}, timeout={timeout}")
-    # 取（或建）共享 AsyncClient：连接池复用，Limits + connect/read 超时拆分
-    key = _client_cache_key(base_url, api_key)
-    client = _HTTP_CLIENTS.get(key)
-    if client is not None and not client.is_closed:
-        return client
-    if client is not None:  # 已被外部关闭的残留条目
-        _HTTP_CLIENTS.pop(key, None)
-        _HTTP_CLIENT_OWNER.pop(key, None)
-    limits = httpx.Limits(
-        max_connections=_CLIENT_MAX_CONNECTIONS,
-        max_keepalive_connections=_CLIENT_MAX_KEEPALIVE_CONNECTIONS,
-        keepalive_expiry=_CLIENT_KEEPALIVE_EXPIRY,
-    )
-    timeout_cfg = httpx.Timeout(
-        timeout,
-        connect=min(_CLIENT_CONNECT_TIMEOUT, timeout),
-        read=timeout, write=timeout, pool=timeout,
-    )
-    # trust_env=False：不读环境变量与系统代理（对齐 notify/newapi/llm_provider 约定，
-    # 规避本机代理软件如 Clash 劫持 httpx 请求返回 502 的陷阱）
-    client = httpx.AsyncClient(
-        timeout=timeout_cfg, limits=limits, follow_redirects=False, trust_env=False,
-    )
-    _HTTP_CLIENTS[key] = client
-    if provider_id is not None:
-        _HTTP_CLIENT_OWNER[key] = provider_id
-    return client
-
-
-async def invalidate_client_cache(provider_id: Optional[int] = None) -> None:
-    logger.debug(f"失效共享 LLM client 缓存: provider_id={provider_id}")
-    # 失效共享 client 缓存：provider_id 定向清理该供应商的连接，None 全清。
-    # 须在事件循环内 await 调用（供应商变更/热切换/删除后由 Service 层触发）；
-    # 飞行中的请求不受影响，下次重试自动建新 client。
-    keys = [k for k, owner in _HTTP_CLIENT_OWNER.items()
-            if provider_id is None or owner == provider_id]
-    for key in keys:
-        client = _HTTP_CLIENTS.pop(key, None)
-        _HTTP_CLIENT_OWNER.pop(key, None)
-        if client is None:
-            continue
-        try:
-            await client.aclose()
-        except Exception as e:  # noqa: BLE001 关闭失败仅记日志，不影响主流程
-            logger.warning(f"共享 LLM client 关闭失败（忽略）: {e}")
 
 
 # ----------------------------------------------------------------------
@@ -126,27 +90,6 @@ async def invalidate_client_cache(provider_id: Optional[int] = None) -> None:
 def _is_litellm_plane() -> bool:
     plane = str(_seam().settings.get("LLM.DATA_PLANE", LLM_DATA_PLANE) or LLM_DATA_PLANE)
     return plane == "litellm"
-
-
-def _gateway_unreachable(cause: Exception | None = None) -> BusinessException:
-    from backend.services.quota_service import GATEWAY_UNREACHABLE_USER
-
-    logger.warning(f"平台 LLM 网关不可达: {cause}")
-    return BusinessException(GATEWAY_UNREACHABLE_USER, code="LLM_GATEWAY_UNREACHABLE")
-
-
-def _no_platform_model() -> BusinessException:
-    from backend.services.quota_service import NO_MODEL_USER
-
-    logger.warning("平台网关未登记任何模型")
-    return BusinessException(NO_MODEL_USER, code="LLM_GATEWAY_NO_MODEL")
-
-
-def _provider_error(cause: Exception | None = None) -> BusinessException:
-    from backend.services.quota_service import PROVIDER_ERROR_USER
-
-    logger.warning(f"本企业供应商调用失败: {cause}")
-    return BusinessException(PROVIDER_ERROR_USER, code="LLM_PROVIDER_ERROR")
 
 
 def _gateway_runtime_config() -> LlmRuntimeConfig:
@@ -209,13 +152,16 @@ async def _probe_gateway_models(timeout: float) -> list[str]:
     return models
 
 
+# ----------------------------------------------------------------------
+# 预算闸 / 用量记账 / 重试公共步骤（网关路径与直连路径共用）
+# ----------------------------------------------------------------------
 async def _budget_guard(usage_dim: str, budget: int, tenant_id) -> int:
     """平台 token 预算闸（审计 R2-8 / R2-10 / P0-10：网关路径与供应商路径共用）
 
     读数优先月度 Redis 聚合（跨重启/多副本有效）；读数不可用时：
     - LLM.BUDGET_FAIL_CLOSED=true（prod）：拒绝调用——预算失去数据支撑宁可拒绝不可放行；
     - false（默认，测试/CI 无 Redis）：回退进程内存计数。
-    累计 >= budget 抛 LLM_COST_FUSE。返回当前累计值（日志用）。
+    累计 >= budget 抛 LLM_COST_FUSE；再过平台全局日上限闸。返回当前累计值（日志用）。
     """
     month_used = await get_month_used(usage_dim, tenant_id=tenant_id)
     if month_used is None:
@@ -232,24 +178,69 @@ async def _budget_guard(usage_dim: str, budget: int, tenant_id) -> int:
             f"平台 LLM 成本熔断：token 预算已耗尽（{usage_dim} 本月累计 {month_used} >= {budget}）",
             code="LLM_COST_FUSE",
         )
-    # 决策 D21：免费档也能用平台 LLM → 平台全局日预算上限（0 = 不设上限）
-    day_cap = int(_seam().settings.get("LLM.PLATFORM_DAILY_TOKEN_CAP", 0) or 0)
-    if day_cap > 0:
-        day_used = await get_platform_day_used()
-        if day_used is None:
-            if bool(_seam().settings.get("LLM.BUDGET_FAIL_CLOSED", False)):
-                logger.error("平台当日 LLM 用量读数不可用，fail-closed 拒绝")
-                raise BusinessException(
-                    "LLM token 预算读数不可用（Redis），fail-closed 拒绝调用: platform-day",
-                    code="LLM_BUDGET_UNAVAILABLE", status_code=503,
-                )
-        elif day_used >= day_cap:
-            logger.warning(f"平台今日 LLM 额度已用完 | used={day_used} cap={day_cap}")
-            raise BusinessException(
-                "平台今日 AI 额度已用完，请明天再试（或在「模型配置」接入自有模型）。",
-                code="LLM_PLATFORM_DAILY_CAP", status_code=429,
-            )
+    await _platform_day_cap_guard()
     return int(month_used)
+
+
+async def _platform_day_cap_guard() -> None:
+    """决策 D21：免费档也能用平台 LLM → 平台全局日预算上限（0 = 不设上限）
+
+    读数不可用时同样服从 LLM.BUDGET_FAIL_CLOSED；当日累计 >= 上限抛 LLM_PLATFORM_DAILY_CAP。
+    """
+    day_cap = int(_seam().settings.get("LLM.PLATFORM_DAILY_TOKEN_CAP", 0) or 0)
+    if day_cap <= 0:
+        return
+    day_used = await get_platform_day_used()
+    if day_used is None:
+        if bool(_seam().settings.get("LLM.BUDGET_FAIL_CLOSED", False)):
+            logger.error("平台当日 LLM 用量读数不可用，fail-closed 拒绝")
+            raise BusinessException(
+                "LLM token 预算读数不可用（Redis），fail-closed 拒绝调用: platform-day",
+                code="LLM_BUDGET_UNAVAILABLE", status_code=503,
+            )
+    elif day_used >= day_cap:
+        logger.warning(f"平台今日 LLM 额度已用完 | used={day_used} cap={day_cap}")
+        raise BusinessException(
+            "平台今日 AI 额度已用完，请明天再试（或在「模型配置」接入自有模型）。",
+            code="LLM_PLATFORM_DAILY_CAP", status_code=429,
+        )
+
+
+async def _account_usage(dim: str, budget: int, model: str, tenant_id, norm: dict[str, int]) -> None:
+    """用量记账（total 为 0 不记）：进程内存累计（熔断）+ P0-3 持久化
+    （Redis 日/月计数；内部失败不影响主路径；测试态为 no-op，保持纯内存语义）"""
+    used = norm["total"]
+    if not used:
+        return
+    _seam()._TOKEN_USAGE[dim] = _seam()._TOKEN_USAGE.get(dim, 0) + used
+    logger.info(
+        f"LLM token 用量: +{used}（{dim} 累计 "
+        f"{_seam()._TOKEN_USAGE[dim]}/{budget}）"
+    )
+    await record_usage(
+        dim=dim, model=model, tenant_id=tenant_id,
+        prompt_tokens=norm["prompt"], completion_tokens=norm["completion"],
+        total_tokens=used,
+    )
+
+
+def _raise_if_rejected(exc: httpx.HTTPStatusError, provider_id: Optional[int]) -> None:
+    """4xx（429 除外）不重试：供应商路径抛结构化供应商错误，其余抛拒绝业务异常"""
+    status = exc.response.status_code
+    if 400 <= status < 500 and status != 429:
+        if provider_id is not None:
+            raise _provider_error(exc)
+        raise BusinessException(f"LLM 请求被拒绝（HTTP {status}），不重试: {exc}")
+
+
+async def _retry_backoff(label: str, attempt: int, max_retries: int, last_error) -> None:
+    """指数退避（_RETRY_BASE_DELAY × 2^attempt）并记重试告警"""
+    delay = _RETRY_BASE_DELAY * (2 ** attempt)
+    logger.warning(
+        f"{label}（第 {attempt + 1}/{max_retries} 次），"
+        f"{delay:.1f}s 后重试: {last_error}"
+    )
+    await asyncio.sleep(delay)
 
 
 async def _llm_chat_gateway(
@@ -267,9 +258,7 @@ async def _llm_chat_gateway(
     models = await _probe_gateway_models(cfg.timeout)
     model = model_override or (cfg.model if cfg.model in models else models[0])
     payload = {"model": model, "messages": messages, "temperature": cfg.temperature}
-    budget = budget_override if budget_override is not None else int(
-        _seam().settings.get("LLM.MAX_TOKENS_BUDGET", 200000)
-    )
+    budget = _resolve_budget(budget_override)
     dim = usage_dim or "config"
     last_error: Exception | None = None
     from platform_core.tenant_context import current_tenant_id as _cur_tid
@@ -279,104 +268,20 @@ async def _llm_chat_gateway(
         await _budget_guard(dim, budget, _tid)
         try:
             data = await chat_completions(payload, timeout=cfg.timeout)
-            content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+            content = _openai_content(data)
             if not content:
                 raise ValueError("LLM 响应缺少 content")
-            norm = _normalize_usage("openai_compatible", data)
-            used = norm["total"]
-            if used:
-                _seam()._TOKEN_USAGE[dim] = _seam()._TOKEN_USAGE.get(dim, 0) + used
-                logger.info(
-                    f"LLM token 用量: +{used}（{dim} 累计 "
-                    f"{_seam()._TOKEN_USAGE[dim]}/{budget}）"
-                )
-                await record_usage(
-                    dim=dim, model=model, tenant_id=_tid,
-                    prompt_tokens=norm["prompt"], completion_tokens=norm["completion"],
-                    total_tokens=used,
-                )
+            await _account_usage(dim, budget, model, _tid, _normalize_usage("openai_compatible", data))
             return content
         except BusinessException:
             raise
         except httpx.HTTPStatusError as e:
-            status = e.response.status_code
-            if 400 <= status < 500 and status != 429:
-                raise BusinessException(f"LLM 请求被拒绝（HTTP {status}），不重试: {e}")
+            _raise_if_rejected(e, None)
             last_error = e
         except Exception as e:  # noqa: BLE001 超时/网络/解析失败均进入重试
             last_error = e
-        delay = _RETRY_BASE_DELAY * (2 ** attempt)
-        logger.warning(
-            f"平台网关调用失败（第 {attempt + 1}/{cfg.max_retries} 次），"
-            f"{delay:.1f}s 后重试: {last_error}"
-        )
-        await asyncio.sleep(delay)
+        await _retry_backoff("平台网关调用失败", attempt, cfg.max_retries, last_error)
     raise _gateway_unreachable(last_error)
-
-
-
-def _normalize_usage(protocol: str, data: dict) -> dict[str, int]:
-    """三协议 usage 归一化：openai {prompt/completion/total}；anthropic
-    {input_tokens/output_tokens}；gemini {usageMetadata{promptTokenCount/
-    candidatesTokenCount/totalTokenCount}} → 统一 {prompt, completion, total}"""
-    usage = data.get("usage") or {}
-    if protocol == "anthropic":
-        prompt = int(usage.get("input_tokens") or 0)
-        completion = int(usage.get("output_tokens") or 0)
-        return {"prompt": prompt, "completion": completion, "total": prompt + completion}
-    if protocol == "google_gemini":
-        meta = data.get("usageMetadata") or {}
-        prompt = int(meta.get("promptTokenCount") or 0)
-        completion = int(meta.get("candidatesTokenCount") or meta.get("candidateTokenCount") or 0)
-        total = int(meta.get("totalTokenCount") or (prompt + completion))
-        return {"prompt": prompt, "completion": completion, "total": total}
-    return {
-        "prompt": int(usage.get("prompt_tokens") or 0),
-        "completion": int(usage.get("completion_tokens") or 0),
-        "total": int(usage.get("total_tokens") or 0),
-    }
-
-
-
-async def _candidate_chain(provider_id: int, session=None):
-    """候选链：enabled 且 health != down，priority 升序，默认模型行首位
-
-    session 可注入（测试经 db_session）；缺省独立短事务（与 _resolve 同范式）。
-    查询失败返回空链（故障转移静默退化为单模型语义，不放大故障）。
-    """
-    try:
-        if session is not None:
-            return await _query_chain(session, provider_id)
-        manager = _seam().get_manager()
-        async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as s:
-            return await _query_chain(s, provider_id)
-    except Exception as exc:  # noqa: BLE001 候选链不可用不阻断主路径
-        logger.warning(f"候选链查询失败（跳过故障转移）: {exc}")
-        return []
-
-
-async def _query_chain(session, provider_id: int):
-    from platform_core.models.llm_provider_model import LlmProviderModel
-
-    rows = (await session.execute(
-        select(LlmProviderModel)
-        .where(
-            LlmProviderModel.provider_id == provider_id,
-            LlmProviderModel.enabled == True,  # noqa: E712
-            LlmProviderModel.health_status != "down",
-        )
-        .order_by(LlmProviderModel.priority.asc(), LlmProviderModel.id.asc())
-    )).scalars().all()
-    ordered = sorted(rows, key=lambda r: (not r.is_default,))
-    # feat-llm-cooldown：批量过滤冷却模型（单次 MGET，NFR-02）
-    from backend.services.ai_planner._cooldown import filter_cooled
-
-    all_ids = [r.model_id for r in ordered]
-    active_ids = set(await filter_cooled(provider_id, all_ids))
-    if len(active_ids) < len(all_ids):
-        skipped = [m for m in all_ids if m not in active_ids]
-        logger.info(f"候选链跳过冷却模型 | models={skipped}")
-    return [(r.model_id, r.model_tier) for r in ordered if r.model_id in active_ids]
 
 
 async def _failover(messages, *, usage_dim, budget_override, cfg, primary_error):
@@ -420,51 +325,90 @@ async def _failover(messages, *, usage_dim, budget_override, cfg, primary_error)
     raise _provider_error(primary_error)
 
 
-async def _notify_degrade(cfg, fallback_model: str) -> None:
-    """跨级降质告警（strong→basic 不静默）；通知失败仅记日志"""
-    try:
-        from backend.services.notify_service import NotifyService
-
-        await NotifyService().notify_text(
-            "llm.failover.degrade",
-            f"LLM 故障转移发生跨级降质（strong→basic）：{cfg.model} → {fallback_model}，"
-            "输出质量可能下降，请检查主模型可用性",
+# ----------------------------------------------------------------------
+# 直连路径（激活供应商 / yml+env 兜底）
+# ----------------------------------------------------------------------
+async def _post_direct(cfg: LlmRuntimeConfig, call: _DirectCall) -> dict:
+    """直连出站：provider 路径走共享 client，兜底路径每调用一次性 client"""
+    if cfg.provider_id is not None:
+        # provider 路径：模块级共享 client（连接池复用，变更时 invalidate 失效）
+        client = await _seam().get_shared_client(
+            cfg.base_url, cfg.api_key, cfg.timeout, cfg.provider_id
         )
-    except Exception as exc:  # noqa: BLE001 告警通道故障不影响业务
-        logger.warning(f"降质告警发送失败（忽略）: {exc}")
+        resp = await client.post(call.url, json=call.payload, headers=call.headers)
+        resp.raise_for_status()
+    else:
+        # 兜底路径：与现状完全一致（每调用一次性 client，yml/env 配置）；
+        # trust_env=False 不走系统代理（本机代理劫持陷阱，同 provider 路径约定）
+        async with httpx.AsyncClient(timeout=cfg.timeout, trust_env=False) as client:
+            resp = await client.post(call.url, json=call.payload, headers=call.headers)
+            resp.raise_for_status()
+    return resp.json()
 
 
-async def _check_llm_tokens(session, tenant_id: int, year_month: str) -> None:
-    from backend.services.quota_service import (
-        QuotaExceededException, QuotaService, wrap_quota_exceeded,
+async def _direct_once(cfg: LlmRuntimeConfig, call: _DirectCall) -> str:
+    """直连单次尝试：出站 → 解析 content → 记账（异常交由重试循环分类）"""
+    data = await _post_direct(cfg, call)
+    if call.adapter is None:
+        content = _openai_content(data)
+    else:
+        content = call.adapter.parse_chat(data)
+    if not content:
+        raise ValueError("LLM 响应缺少 content")
+    await _account_usage(
+        call.usage_dim, call.budget, call.model, call.tenant_id,
+        _normalize_usage(call.protocol, data),
     )
-
-    logger.debug(f"月度 token 闸 | tenant={tenant_id} month={year_month}")
-    try:
-        await QuotaService(session).check_llm_tokens_month(int(tenant_id), year_month)
-    except QuotaExceededException as exc:
-        raise wrap_quota_exceeded(exc) from exc
+    return content
 
 
-async def _enforce_tenant_token_quota() -> None:
-    """企业月度 token 闸：真正打模型 / 出站 HTTP 之前。无租户上下文跳过。"""
-    from backend.services.quota_service import shanghai_year_month
-    from platform_core.tenant_context import current_tenant_id as _cur_tid
+async def _direct_attempts(
+    cfg: LlmRuntimeConfig, call: _DirectCall,
+) -> tuple[Optional[str], Optional[Exception]]:
+    """直连重试循环：成功返回 (content, None)；重试耗尽返回 (None, 最后一次异常)"""
+    last_error: Exception | None = None
+    for attempt in range(cfg.max_retries):
+        # 平台预算闸（与网关路径同一实现）；企业月度 token 套餐闸已在出站前由
+        # _enforce_tenant_token_quota 按上海自然月执行一次（原此处重复的本地日期月度闸
+        # 口径不一致且吞掉基础设施异常，已删除——审计 R2-10）
+        await _budget_guard(call.usage_dim, call.budget, call.tenant_id)
+        try:
+            return await _direct_once(cfg, call), None
+        except BusinessException:
+            raise
+        except httpx.HTTPStatusError as e:
+            _raise_if_rejected(e, cfg.provider_id)
+            last_error = e
+        except Exception as e:  # noqa: BLE001 超时/网络/解析失败均进入重试
+            last_error = e
+            if cfg.provider_id and call.model:
+                from backend.services.ai_planner._cooldown import record_failure as _rec_fail
 
-    tid = _cur_tid()
-    if tid is None:
-        logger.debug("无租户上下文，跳过企业月度 token 闸")
-        return
-    year_month = shanghai_year_month()
-    logger.info(f"套餐闸检查企业月度 token | tenant={tid} month={year_month}")
-    factory = getattr(_seam(), "quota_session_factory", None)
-    if factory is not None:
-        async with factory() as session:
-            await _check_llm_tokens(session, int(tid), year_month)
-        return
-    manager = _seam().get_manager()
-    async with _seam().AsyncSession(manager.async_engines["DEFAULT"]) as session:
-        await _check_llm_tokens(session, int(tid), year_month)
+                await _rec_fail(cfg.provider_id, call.model)
+        await _retry_backoff("LLM 调用失败", attempt, cfg.max_retries, last_error)
+    return None, last_error
+
+
+async def _llm_chat_direct(
+    messages: list[dict],
+    cfg: LlmRuntimeConfig,
+    *,
+    usage_dim: Optional[str],
+    budget_override: Optional[int],
+    model_override: Optional[str],
+    no_failover: bool,
+) -> str:
+    """直连路径：重试循环 → 耗尽后按候选链故障转移（no_failover 时直接抛结构化失败）"""
+    call = _prepare_direct_call(messages, cfg, usage_dim, budget_override, model_override)
+    content, last_error = await _direct_attempts(cfg, call)
+    if content is not None:
+        return content
+    if not no_failover:
+        return await _failover(messages, usage_dim=call.usage_dim, budget_override=budget_override,
+                               cfg=cfg, primary_error=last_error)
+    if cfg.provider_id is not None:
+        raise _provider_error(last_error)
+    raise BusinessException(f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {last_error}")
 
 
 async def llm_chat(
@@ -490,128 +434,17 @@ async def llm_chat(
     cfg = await _seam()._resolve_llm_runtime_config()
     # ENABLED=false 须在网关探测前返回，避免与 74.1「平台 LLM 网关不可达」混句
     if not cfg.enabled:
-        raise BusinessException(
-            PLANNING_DISABLED_COPY,
-            code=PLANNING_DISABLED_CODE,
-            status_code=422,
-        )
+        raise BusinessException(PLANNING_DISABLED_COPY, code=PLANNING_DISABLED_CODE, status_code=422)
     if _is_litellm_plane() and cfg.source == "gateway":
         await _enforce_tenant_token_quota()
         return await _llm_chat_gateway(
             messages, cfg, usage_dim=usage_dim,
             budget_override=budget_override, model_override=model_override,
         )
-    if not cfg.base_url or not cfg.model:
-        raise BusinessException(
-            "LLM 配置不完整：请检查 LLM.BASE_URL / LLM.MODEL（或激活供应商的配置）"
-        )
-    if not cfg.api_key:
-        raise BusinessException(
-            "缺少 LLM API Key：请在 .env 配置 LLM_API_KEY（或为激活的供应商配置密钥）"
-        )
-
+    _assert_direct_config(cfg)
     # FR-12：套餐闸接到真正打模型的成功路径前、出站 HTTP 前（不切 LiteLLM）
     await _enforce_tenant_token_quota()
-
-    # token 预算：调用方独立预算优先，否则沿用全局 LLM.MAX_TOKENS_BUDGET
-    budget = budget_override if budget_override is not None else int(
-        _seam().settings.get("LLM.MAX_TOKENS_BUDGET", 200000)
+    return await _llm_chat_direct(
+        messages, cfg, usage_dim=usage_dim, budget_override=budget_override,
+        model_override=model_override, no_failover=_no_failover,
     )
-    protocol = getattr(cfg, "protocol", "openai_compatible") or "openai_compatible"
-    effective_model = model_override or cfg.model
-    if protocol == "openai_compatible":
-        # 历史路径原样构造（零回归硬约束：payload 不新增字段）
-        payload = {"model": effective_model, "messages": messages, "temperature": cfg.temperature}
-        headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}
-        url = f"{cfg.base_url}/chat/completions"
-        adapter = None
-    else:
-        from backend.services.llm_protocol import get_adapter as _get_adapter
-
-        adapter = _get_adapter(protocol)
-        _req = adapter.build_chat(
-            cfg.base_url, cfg.api_key, effective_model, messages, max_tokens=_BUSINESS_MAX_TOKENS
-        )
-        url, headers, payload = _req.url, _req.headers, _req.json_payload
-    # token 用量按 provider 维度计数（兜底路径统一记在 "config" 名下）；调用方可覆盖维度
-    dim = f"provider:{cfg.provider_id}" if cfg.provider_id is not None else "config"
-    usage_dim = usage_dim or dim
-    last_error: Exception | None = None
-
-    from platform_core.tenant_context import current_tenant_id as _cur_tid
-
-    _tid = _cur_tid()
-    for attempt in range(cfg.max_retries):
-        # 平台预算闸（与网关路径同一实现）；企业月度 token 套餐闸已在出站前由
-        # _enforce_tenant_token_quota 按上海自然月执行一次（原此处重复的本地日期月度闸
-        # 口径不一致且吞掉基础设施异常，已删除——审计 R2-10）
-        await _budget_guard(usage_dim, budget, _tid)
-        try:
-            if cfg.provider_id is not None:
-                # provider 路径：模块级共享 client（连接池复用，变更时 invalidate 失效）
-                client = await _seam().get_shared_client(
-                    cfg.base_url, cfg.api_key, cfg.timeout, cfg.provider_id
-                )
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-            else:
-                # 兜底路径：与现状完全一致（每调用一次性 client，yml/env 配置）；
-                # trust_env=False 不走系统代理（本机代理劫持陷阱，同 provider 路径约定）
-                async with httpx.AsyncClient(timeout=cfg.timeout, trust_env=False) as client:
-                    resp = await client.post(url, json=payload, headers=headers)
-                    resp.raise_for_status()
-            data = resp.json()
-            if adapter is None:
-                content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
-            else:
-                content = adapter.parse_chat(data)
-            if not content:
-                raise ValueError("LLM 响应缺少 content")
-            norm = _normalize_usage(protocol, data)
-            used = norm["total"]
-            if used:
-                _seam()._TOKEN_USAGE[usage_dim] = _seam()._TOKEN_USAGE.get(usage_dim, 0) + used
-                logger.info(
-                    f"LLM token 用量: +{used}（{usage_dim} 累计 "
-                    f"{_seam()._TOKEN_USAGE[usage_dim]}/{budget}）"
-                )
-                # P0-3 用量持久化：Redis 日/月计数（内部失败不影响主路径；
-                # 测试态为 no-op，保持纯内存语义）
-                await record_usage(
-                    dim=usage_dim,
-                    model=effective_model,
-                    tenant_id=_tid,
-                    prompt_tokens=norm["prompt"],
-                    completion_tokens=norm["completion"],
-                    total_tokens=used,
-                )
-            return content
-        except BusinessException:
-            raise
-        except httpx.HTTPStatusError as e:
-            status = e.response.status_code
-            if 400 <= status < 500 and status != 429:
-                if cfg.provider_id is not None:
-                    raise _provider_error(e)
-                raise BusinessException(f"LLM 请求被拒绝（HTTP {status}），不重试: {e}")
-            last_error = e
-        except Exception as e:  # noqa: BLE001 超时/网络/解析失败均进入重试
-            last_error = e
-            if cfg.provider_id and effective_model:
-                from backend.services.ai_planner._cooldown import record_failure as _rec_fail
-
-                await _rec_fail(cfg.provider_id, effective_model)
-        delay = _RETRY_BASE_DELAY * (2 ** attempt)
-        logger.warning(
-            f"LLM 调用失败（第 {attempt + 1}/{cfg.max_retries} 次），"
-            f"{delay:.1f}s 后重试: {last_error}"
-        )
-        await asyncio.sleep(delay)
-
-    if not _no_failover:
-        return await _failover(messages, usage_dim=usage_dim, budget_override=budget_override,
-                               cfg=cfg, primary_error=last_error)
-    if cfg.provider_id is not None:
-        raise _provider_error(last_error)
-    raise BusinessException(f"LLM 调用失败（已重试 {cfg.max_retries} 次）: {last_error}")
-

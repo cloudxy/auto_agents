@@ -49,6 +49,7 @@ class ProxyHealthService:
 
     async def start(self):
         """启动健康探测循环（随 FastAPI lifespan 调用）"""
+        logger.info("启动代理健康管理")
         if not settings.get("PROXY_HEALTH.ENABLED", False):
             logger.info("代理健康管理已禁用（PROXY_HEALTH.ENABLED=false）")
             return
@@ -65,6 +66,7 @@ class ProxyHealthService:
 
     async def stop(self):
         """优雅停止"""
+        logger.info("停止代理健康管理")
         self._running = False
         if self._loop_task is not None:
             self._loop_task.cancel()
@@ -107,14 +109,25 @@ class ProxyHealthService:
         probe_timeout = int(settings.get("PROXY_HEALTH.PROBE_TIMEOUT", 10) or 10)
         score_decay = 0.1
 
+        low_score_proxies = await self._low_score_proxies(threshold)
+        if not low_score_proxies:
+            return
+
+        logger.info(f"开始探测 {len(low_score_proxies)} 个低分代理")
+
+        for proxy in low_score_proxies:
+            await self._probe_proxy(proxy, probe_url, probe_timeout, recover_score, score_decay)
+
+    async def _low_score_proxies(self, threshold: float) -> list[str]:
+        """读取 spider:proxy:scores，筛出评分 < threshold 的代理（读取失败 / 无评分 / 无低分 → 空列表）"""
         try:
             scores_raw = await self._redis.hgetall(PROXY_SCORES_KEY)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"读取代理评分失败: {e}")
-            return
+            return []
 
         if not scores_raw:
-            return
+            return []
 
         low_score_proxies = [
             proxy for proxy, score_str in scores_raw.items()
@@ -123,29 +136,31 @@ class ProxyHealthService:
 
         if not low_score_proxies:
             logger.debug("无低分代理，跳过本轮探测")
-            return
+        return low_score_proxies
 
-        logger.info(f"开始探测 {len(low_score_proxies)} 个低分代理")
-
-        for proxy in low_score_proxies:
-            try:
-                async with _build_probe_client(proxy, probe_timeout) as client:
-                    resp = await client.head(probe_url)
-                if resp.status_code < 500:
-                    # 探测成功：恢复评分
-                    await self._redis.hset(
-                        PROXY_SCORES_KEY, proxy, str(recover_score)
-                    )
-                    # 更新 stats 的 last_check
-                    await self._update_last_check(proxy)
-                    logger.info(
-                        f"代理探测成功，恢复评分: {proxy} → {recover_score}"
-                    )
-                else:
-                    await self._decay_score(proxy, score_decay)
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"代理探测失败: {proxy} | {e}")
+    async def _probe_proxy(
+        self, proxy: str, probe_url: str, probe_timeout: int,
+        recover_score: float, score_decay: float,
+    ) -> None:
+        """探测单个低分代理：HEAD 状态码 < 500 恢复评分，否则 / 异常继续降分"""
+        try:
+            async with _build_probe_client(proxy, probe_timeout) as client:
+                resp = await client.head(probe_url)
+            if resp.status_code < 500:
+                # 探测成功：恢复评分
+                await self._redis.hset(
+                    PROXY_SCORES_KEY, proxy, str(recover_score)
+                )
+                # 更新 stats 的 last_check
+                await self._update_last_check(proxy)
+                logger.info(
+                    f"代理探测成功，恢复评分: {proxy} → {recover_score}"
+                )
+            else:
                 await self._decay_score(proxy, score_decay)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"代理探测失败: {proxy} | {e}")
+            await self._decay_score(proxy, score_decay)
 
     async def _decay_score(self, proxy: str, decay: float) -> None:
         """降低代理评分（最低 0.0）"""
@@ -191,6 +206,7 @@ class ProxyHealthService:
             ...
         ]
         """
+        logger.debug("查询代理健康评分排行")
         # 读接口统一走异步门面（P2-16/17 修复：不再每请求新建连接再关闭；
         # 门面实例由门面管理生命周期，调用方禁止 close）
         redis = get_async_redis()
@@ -200,23 +216,28 @@ class ProxyHealthService:
         result = []
         all_proxies = set(scores_raw.keys()) | set(stats_raw.keys())
         for proxy in all_proxies:
-            score = float(scores_raw.get(proxy, 0.0))
-            stats = {}
-            raw = stats_raw.get(proxy)
-            if raw:
-                try:
-                    stats = json.loads(raw)
-                except (json.JSONDecodeError, TypeError):
-                    stats = {}
-            result.append({
-                "proxy": proxy,
-                "score": round(score, 4),
-                "success": stats.get("success", 0),
-                "fail": stats.get("fail", 0),
-                "avg_latency": round(stats.get("avg_latency", 0.0) or 0.0, 3),
-                "last_check": stats.get("last_check", ""),
-            })
+            result.append(self._health_entry(proxy, scores_raw, stats_raw))
 
         # 按评分降序排列
         result.sort(key=lambda x: x["score"], reverse=True)
         return result
+
+    @staticmethod
+    def _health_entry(proxy: str, scores_raw: dict, stats_raw: dict) -> dict:
+        """单个代理的评分排行条目（stats 缺失 / 非法 JSON 按空统计处理）"""
+        score = float(scores_raw.get(proxy, 0.0))
+        stats = {}
+        raw = stats_raw.get(proxy)
+        if raw:
+            try:
+                stats = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                stats = {}
+        return {
+            "proxy": proxy,
+            "score": round(score, 4),
+            "success": stats.get("success", 0),
+            "fail": stats.get("fail", 0),
+            "avg_latency": round(stats.get("avg_latency", 0.0) or 0.0, 3),
+            "last_check": stats.get("last_check", ""),
+        }

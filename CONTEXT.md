@@ -20,13 +20,15 @@
 | **MCP 工具桥**（MCP tool bridge） | 平台消费插件的运行时：MCP client（官方 Python SDK，stdio/HTTP）→ tools/list 登记 + tools/call 调用。双重用途：插件验证基座 + 平台 LLM 工具面。 |
 | **插件验证**（plugin verification） | 含 MCP 时：安装→连接→tools/list→抽样 tools/call→health 落库。无 MCP → `unknown`，允许上架，不代替 enable-host。 |
 | **候选**（candidate） | 市场采集产出的待审条目（spider_results.source=marketplace），人工闸门（approve/reject）后转正式资产。 |
+| **产品 hub 根**（hub root） | 能力市场的运行时内容根：`SKILLS.AGENTS_ROOT`，默认 `runtime/agents-hub/`（不入库）。同步 / 目录导入 / legacy 导入 / 失源清理只认它；入库路径写 `agents-hub/<相对根>`，D2 前的 `.agents/...` 行只读兼容（迁移：`scripts/db/migrate_agents_hub_root.py`）。**不是**开发协作中枢 `.agents/`（决策 D2「分离」）。 |
+| **许可闸**（license gate） | 公开读模型只放行许可 ∈ 默认允许集（MIT / Apache-2.0 / BSD / ISC / CC0 / Unlicense）或超管 `public_license_override=1` 的行。hub 同步按同一口径决定是否自动上架；许可缺失 = 未声明（NULL），**不再默认 MIT**。资产先读自身 frontmatter `license`，插件内资产未声明时继承插件清单 `license`。 |
 | **适配器**（adapter） | 入站：索引外部树。出站：把已治理资产投影到宿主（技能安装 / 插件 symlink / 智能体导出如 `~/.claude/agents/*.md`）。开发工作区里：`.grok/plugins` / `.claude/plugins` 是启用子集；`capability-library/plugins` 是整农场扫描入口。 |
 
 ## 仓库协作层（开发者工作区，不是产品运行时）
 
 | 术语 | 含义 |
 |---|---|
-| **开发协作中枢** | `.agents/`：本仓库写代码时加载的项目 skill 与第三方插件指针。契约见 `.agents/README.md`。 |
+| **开发协作中枢** | `.agents/`：本仓库写代码时加载的项目 skill 与第三方插件指针。契约见 `.agents/README.md`。能力市场不扫描它（D2），产品内容在产品 hub 根。 |
 | **产品目录** | `capability-library/`：能力市场扫描/治理的内容树。与中枢分开，不要把产品目录当成 IDE 技能库。 |
 | **插件锁** | 仓库根 `plugins-lock.json`：启用插件的唯一清单（git 来源 + 固定 commit + 宿主）。目前只有 `sdlc-workflow`；链接由 `scripts/agents_plugins.py sync` 维护。 |
 
@@ -54,7 +56,7 @@
 | 术语 | 含义 |
 |---|---|
 | **OpenAPI golden** | `backend/tests/openapi_routes_golden.txt`。增删 HTTP 路由必须改此文件，否则 `test_openapi_routes_golden.py` 红。 |
-| **admin Playwright 冒烟** | 登录 → 仪表盘 → 用量 → 成员。先 `CI= npm run build -w admin`，再 `CI=1 npm run e2e -w admin`。端口 / `NO_PROXY` / 记住我见 `.claude/memory/playwright-admin-e2e.md`。 |
+| **admin Playwright 冒烟** | 登录 → 仪表盘 → 用量 → 成员。先 `npm run build -w admin`，再 `CI=1 npm run e2e -w admin`。端口 / `NO_PROXY` / 记住我见 `.claude/memory/playwright-admin-e2e.md`。 |
 
 ## 既有域（速览）
 

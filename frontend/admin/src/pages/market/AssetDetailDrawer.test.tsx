@@ -9,8 +9,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import type { PublicCapabilityCard } from '../../services/capabilities'
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd')
+jest.mock('../../feedback', () => {
+  const actual = jest.requireActual('../../feedback')
   return {
     ...actual,
     message: { error: jest.fn(), success: jest.fn(), warning: jest.fn(), info: jest.fn() },
@@ -21,7 +21,7 @@ jest.mock('../../services/capabilities', () => ({
   fetchPublicCapability: jest.fn(),
 }))
 
-import { message } from 'antd'
+import { message } from '../../feedback'
 import AssetDetailDrawer, {
   DRAWER_DETAIL_FAIL, DRAWER_EMPTY_MD, DRAWER_EMPTY_MD_HINT, DRAWER_GATE_CLOSED,
   EXAMPLES_TITLE,
@@ -77,7 +77,7 @@ test('GWT-05.1 正常：banner/头像/标签/示例区/md 正文（表格与代�
     origin_plugin_name: 'sdlc-workflow',
     featured: 1,
   }))
-  const { container } = renderDrawer()
+  renderDrawer()
   await waitFor(() => expect(screen.getByTestId('asset-drawer')).toBeInTheDocument())
   // Drawer 渲染进 body portal：查 document 而非 render container
   expect(document.querySelector('.markdown-body table')).toBeTruthy()

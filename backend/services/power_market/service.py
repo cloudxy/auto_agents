@@ -174,6 +174,16 @@ def _row_is_fr33(row: CapabilityAsset, *, allow_unlisted: bool = False) -> bool:
     return _license_ok(row)
 
 
+def _finish_list_payload(payload: dict, *, preview: bool, gate_open: bool) -> dict:
+    if preview:  # AD-5c：管理员预览态跳闸，payload 带实际闸值
+        payload["preview"] = True
+        payload["gate_open"] = gate_open
+    if payload["total"] == 0:
+        payload["empty"] = True
+        payload["message"] = MSG_EMPTY_SHELF
+    return payload
+
+
 class PowerMarketService:
     """商店读模型：FR-33 查询侧闸；GET 详情 miss 由路由套商店不存在句。"""
 
@@ -228,19 +238,11 @@ class PowerMarketService:
             "page": page,
             "page_size": page_size,
             "has_more": (page * page_size) < total,
-            "items": [
-                self._project(row, command=sides.get(row.id)) for row in rows
-            ],
+            "items": [self._project(row, command=sides.get(row.id)) for row in rows],
             "market_closed": False,
             "sort_applied": applied,
         }
-        if preview:  # AD-5c：管理员预览态跳闸，payload 带实际闸值
-            payload["preview"] = True
-            payload["gate_open"] = gate_open
-        if total == 0:
-            payload["empty"] = True
-            payload["message"] = MSG_EMPTY_SHELF
-        return payload
+        return _finish_list_payload(payload, preview=preview, gate_open=gate_open)
 
     async def get_public(
         self, asset_type: Optional[str], name: str, *, default: Optional[str] = None,

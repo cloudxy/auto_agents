@@ -243,7 +243,7 @@ def test_gwt_50_16_two_fixture_pendings_both_paid_no_quota_stack(
     _seed_plans(db_session)
     owner, tid = make_tenant_owner_headers(db_session, slug="t02-516")
     pa = make_platform_admin_headers(db_session)
-    first = _submit_pro(db_client, owner)
+    _submit_pro(db_client, owner)  # 第一张 pending（正常结账入口）
     pro_id = _pro_plan_id(db_client)
 
     async def _insert_second_pending():

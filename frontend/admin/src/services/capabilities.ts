@@ -127,7 +127,7 @@ export const syncSource = (name: string): Promise<{ succeeded: number; failed: n
   api.post(`/capabilities/sources/${encodeURIComponent(name)}/sync`)
     .then((r) => unwrap<{ succeeded: number; failed: number }>(r))
 
-/** T-02（FR-01）：同步 .agents——非破坏单通道，替代已退役的 scan-plugins。 */
+/** T-02（FR-01）：同步能力库（hub 根）——非破坏单通道，替代已退役的 scan-plugins。 */
 export interface AgentsHubSyncResult {
   inserted: number
   updated: number
@@ -150,6 +150,8 @@ export interface PruneMissingResult {
   live_total: number
   reconcile_total: number
   disk_total: number
+  /** D2 空根护栏：hub 根为空或不存在时服务端不剪除任何行，原因 = 'hub_root_empty' */
+  skipped_reason?: string | null
 }
 
 export const pruneMissingAssets = (dryRun = false): Promise<PruneMissingResult> =>

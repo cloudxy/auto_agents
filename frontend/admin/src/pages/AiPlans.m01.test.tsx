@@ -6,7 +6,7 @@ import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { message } from 'antd'
+import { message } from '../feedback'
 
 jest.mock('../hooks/usePermission', () => ({
   usePermission: () => mockPerm,

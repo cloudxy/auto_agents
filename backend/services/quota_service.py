@@ -223,6 +223,7 @@ class QuotaService:
 
     async def check_task_concurrency(self, tenant_id: int) -> None:
         """任务入队前：本租户 running/pending 任务数 < task_concurrency"""
+        logger.info(f"配额检查·任务并发 | tenant={tenant_id}")
         tenant = await self._tenant(tenant_id)
         limit = int(quota_of(tenant)["task_concurrency"])
         async def _count_active() -> int:
@@ -264,6 +265,7 @@ class QuotaService:
 
     async def check_llm_tokens_month(self, tenant_id: int, year_month: str) -> None:
         """LLM 调用前：本租户当月 total_tokens 合计 < llm_tokens_month"""
+        logger.debug(f"配额检查·LLM 月度 | tenant={tenant_id} month={year_month}")
         tenant = await self._tenant(tenant_id)
         limit = int(quota_of(tenant)["llm_tokens_month"])
         from backend.services.llm_usage_service import get_tenant_month_used
@@ -324,21 +326,10 @@ class QuotaService:
             "limit_tokens": tenant_relay_limit(tenant),
         }
 
-    async def usage_overview(self, tenant_id: int, year_month: str) -> dict:
-        """用量看板数据（S3-2 消费）：三指标当前值 vs 配额 + 成员分摊"""
-        tenant = await self._tenant(tenant_id)
-        quota = quota_of(tenant)
-        active_tasks = (await self.session.execute(
-            select(func.count()).select_from(SpiderTask).where(
-                SpiderTask.tenant_id == tenant_id,
-                SpiderTask.status.in_(("pending", "running")),
-            )
-        )).scalar_one()
-        stored_results = await SpiderResultRepository(self.session).count_owned_by_tenant(
-            tenant_id
-        )
+    async def _llm_month_by_provider(self, tenant_id: int, year_month: str) -> list:
+        """当月 LLM 用量按 provider 聚合（tokens / cost 两列）"""
         month_prefix = f"{year_month}-"
-        tokens_row = (await self.session.execute(
+        return (await self.session.execute(
             select(
                 LlmTokenUsage.provider_name,
                 func.sum(LlmTokenUsage.total_tokens).label("tokens"),
@@ -350,6 +341,22 @@ class QuotaService:
             )
             .group_by(LlmTokenUsage.provider_name)
         )).all()
+
+    async def usage_overview(self, tenant_id: int, year_month: str) -> dict:
+        """用量看板数据（S3-2 消费）：三指标当前值 vs 配额 + 成员分摊"""
+        logger.debug(f"用量看板 | tenant={tenant_id} month={year_month}")
+        tenant = await self._tenant(tenant_id)
+        quota = quota_of(tenant)
+        active_tasks = (await self.session.execute(
+            select(func.count()).select_from(SpiderTask).where(
+                SpiderTask.tenant_id == tenant_id,
+                SpiderTask.status.in_(("pending", "running")),
+            )
+        )).scalar_one()
+        stored_results = await SpiderResultRepository(self.session).count_owned_by_tenant(
+            tenant_id
+        )
+        tokens_row = await self._llm_month_by_provider(tenant_id, year_month)
         tokens_total = sum(int(r.tokens or 0) for r in tokens_row)
         cost_by_provider = {r.provider_name: int(r.cost or 0) for r in tokens_row}
         usage = {

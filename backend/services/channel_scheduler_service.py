@@ -117,6 +117,7 @@ class ChannelSchedulerService:
 
     async def start(self) -> None:
         """启动调度循环（幂等；无 DSN）。"""
+        logger.info("启动渠道调度器")
         if self._running:
             return
         if not settings.get("RELAY.SCHEDULER_ENABLED", RELAY_SCHEDULER_ENABLED):
@@ -137,6 +138,7 @@ class ChannelSchedulerService:
 
     async def stop(self) -> None:
         """优雅停止（不关闭共享 Redis）。"""
+        logger.info("停止渠道调度器")
         self._running = False
         if self._loop_task is not None:
             self._loop_task.cancel()

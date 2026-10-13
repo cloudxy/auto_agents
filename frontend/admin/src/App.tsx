@@ -7,6 +7,8 @@ import ErrorBoundary from './components/ErrorBoundary'
 import { registerNavigate } from './services/navigation'
 import { useAuthStore } from './store/useAuthStore'
 import { isPlatformWritePath } from './config/menuConfig'
+// NotFound 已被 ProtectedRoute / Members / MyInstalls / Settings 静态引用、本就在主包里，lazy 不会拆包（Vite INEFFECTIVE_DYNAMIC_IMPORT）
+import NotFound from './pages/NotFound'
 
 /**
  * 组织幽灵页（T-15 / GWT-82.3 / ADR-0021 决策 2）：不在 menuConfig 五组中。
@@ -44,7 +46,6 @@ const RelayGroups = React.lazy(() => import('./pages/RelayGroups'))
 const OutboundKeys = React.lazy(() => import('./pages/OutboundKeys'))
 const PaymentCredentials = React.lazy(() => import('./pages/PaymentCredentials'))
 const Unauthorized = React.lazy(() => import('./pages/Unauthorized'))
-const NotFound = React.lazy(() => import('./pages/NotFound'))
 const RbacManagement = React.lazy(() => import('./pages/RbacManagement'))
 const EnterpriseManagement = React.lazy(() => import('./pages/EnterpriseManagement'))
 

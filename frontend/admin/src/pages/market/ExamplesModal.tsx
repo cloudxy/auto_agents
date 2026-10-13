@@ -9,7 +9,8 @@
  * 没有示例」保存掉——读失败必须锁保存按钮，不能沉默退化成空列表。
  */
 import React, { useEffect, useState } from 'react'
-import { Alert, Button, Empty, Input, Modal, Space, Typography, message } from 'antd'
+import { Alert, Button, Empty, Input, Modal, Space, Typography } from 'antd'
+import { message } from '../../feedback'
 
 import {
   fetchPublicCapability, patchExamples, type AssetRow,
@@ -116,7 +117,7 @@ const ExamplesModal: React.FC<Props> = ({ open, asset, onClose, onSaved }) => {
           {!loadError && items.length === 0 ? (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={EXAMPLES_EMPTY} />
           ) : null}
-          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space orientation="vertical" style={{ width: '100%' }} size="middle">
             {items.map((text, i) => (
               <div key={`${i}`} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                 <Input.TextArea

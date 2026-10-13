@@ -6,7 +6,7 @@ Seam（工单预确认）：端点 + LlmProviderService.fetch_models_diff/test_m
 from sqlalchemy import select
 
 import backend.services.llm_protocol.adapters as adapters_mod
-import backend.services.llm_provider_service as svc_mod
+import backend.services.llm_provider_health as svc_mod  # test_model 出站真身所在（规模治理拆分）
 from platform_core.models.llm_provider_model import LlmProviderModel
 from backend.services.llm_protocol import ProtocolError
 
@@ -98,7 +98,7 @@ def test_model_test_writes_health_states(db_client, admin_client, db_engine, db_
 
 def test_model_test_unsaved_model_one_shot(db_client, admin_client, db_engine, monkeypatch):
     """导入新增的未落库模型：测试不 404，一次性结果即回（保存后才持久化）"""
-    import backend.services.llm_provider_service as svc_mod
+    import backend.services.llm_provider_health as svc_mod
     from backend.services.llm_protocol import ProtocolError
 
     provider_id = _setup(db_client)

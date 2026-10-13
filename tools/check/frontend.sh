@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # ============================================================================
 # check-frontend.sh — 前端工程门禁（工单 68，对齐 check-arch.sh 文化）
-# 规则随批次启用（F-2/F-3/F-4/F-5/F-6/F-7 已启用；F-1 由 service 归一承接）
+# 规则随批次启用（F-2~F-8 已启用；F-1 由 service 归一承接）
 # 退出码 = 违规数
 #
 # 已启用：
 #   F-2  错误提示统一：message.error 禁 instanceof/String(e)/response?.data 漂移写法
+#   F-3  轮询禁手写 setInterval
+#   F-4  设计令牌黑名单
 #   F-5  应用互引禁令：admin↔official 禁互引；shared 禁反向依赖应用
 #   F-6  ApiEnvelope 单源：信封接口仅准 shared 定义，应用内禁重复声明
-# 待启用（后续批次）：
-#   F-7 .tsx ≤ 400 行（F-1 pages 禁直调 api 已由工单 71 承接，grep 验收）
+#   F-7  业务 .tsx ≤ 400 行
+#   F-8  ESLint（各应用 eslint.config.mjs，接替 CRA 构建期 lint；只有 error 计违规）
+#        未装前端依赖时跳过并提示；CHECK_FRONTEND_LINT=0 关闭（CI 另有逐应用 lint 步骤）
 # ============================================================================
 set -u
 # shellcheck source=common.sh
@@ -132,7 +135,27 @@ f7() {
     done <<< "$hits"
 }
 
-echo "前端工程门禁（F-2/F-3/F-4/F-5/F-6/F-7 已启用；F-1 批次 2 已由 service 归一承接）"
+# ── F-8 ESLint：每个应用一次 eslint .（带缓存，pre-commit 反复跑也快）──
+f8() {
+    if [ "${CHECK_FRONTEND_LINT:-1}" = "0" ]; then
+        echo "  [F-8] 已按 CHECK_FRONTEND_LINT=0 跳过 ESLint"
+        return
+    fi
+    local eslint="$ROOT/node_modules/.bin/eslint"
+    if [ ! -x "$eslint" ]; then
+        echo "  [F-8] 跳过 ESLint：未安装前端依赖（仓库根先 npm ci）"
+        return
+    fi
+    local app
+    for app in admin official; do
+        if ! (cd "$ROOT/frontend/$app" && "$eslint" . --cache \
+                --cache-location "$ROOT/node_modules/.cache/eslint-$app/"); then
+            report "F-8" "ESLint 报错：frontend/$app（npm run lint -w $app 复现）"
+        fi
+    done
+}
+
+echo "前端工程门禁（F-2~F-8 已启用；F-1 批次 2 已由 service 归一承接）"
 echo "=============================================================="
 
 f2
@@ -141,6 +164,7 @@ f4
 f5
 f6
 f7
+f8
 
 if [ $VIOLATIONS -eq 0 ]; then
     echo -e "${GREEN}✓ 前端工程门禁通过${NC}"

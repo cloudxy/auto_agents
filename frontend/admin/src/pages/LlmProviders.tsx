@@ -9,9 +9,10 @@
  * activate/deactivate 端点不动（内部字段名可留，edge-states §LLM 配置）。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, message, Modal, Popconfirm, Select,
+import { Alert, Button, Modal, Popconfirm, Select,
   Space, Table, Tag, Tooltip, Typography,
 } from 'antd'
+import { message } from '../feedback'
 import {
   CheckCircleOutlined, CloudDownloadOutlined, EditOutlined, PlusOutlined,
   ReloadOutlined, ThunderboltOutlined,

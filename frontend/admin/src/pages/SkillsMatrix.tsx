@@ -4,7 +4,8 @@
  */
 import React, { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Checkbox, message, Space, Spin, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Checkbox, Space, Spin, Table, Tag, Typography } from 'antd'
+import { message } from '../feedback'
 import { SyncOutlined } from '@ant-design/icons'
 
 import { listManifests, syncAdapters, updateManifest } from '../services/skills'

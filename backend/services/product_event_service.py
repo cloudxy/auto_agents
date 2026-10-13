@@ -77,6 +77,21 @@ async def _fixture_snapshot(session: AsyncSession, tenant_id: int | None) -> boo
     return await InternalFixtureTenantRepository(session).exists(tenant_id=tenant_id)
 
 
+async def _shorten_lock_wait(extra: AsyncSession, dialect: str) -> None:
+    """独立会话撞主路径写锁时快速认输（走主会话兜底），不干等默认锁超时。"""
+    if dialect == "sqlite":
+        # 单写库不做长等：主路径持写锁时 250ms 内认输走下面的兜底，
+        # 而不是干等 connect_args 的 30s（CI 全量曾因此每次同步 +33s）。
+        await extra.execute(text("PRAGMA busy_timeout=250"))
+    elif dialect == "mysql":
+        # QA-7：MySQL 默认 innodb_lock_wait_timeout=50s，独立会话撞主
+        # 路径持有的行锁会同步阻塞 50 秒才失败——生产路径正常不会走到
+        # 这条分支（MySQL 多连接互不阻塞是常态），但一旦撞上就是 50s
+        # 同步卡死，与 SQLite 的 250ms 短等不对称。会话级设置，不影响
+        # 其他连接。
+        await extra.execute(text("SET SESSION innodb_lock_wait_timeout = 1"))
+
+
 async def _persist_event(session: AsyncSession, fields: dict[str, Any]) -> None:
     logger.debug(f"写入产品事件 | name={fields.get('event_name')}")
     # 独立短会话：主路径 rollback 不得带走已发生的事实。
@@ -90,17 +105,7 @@ async def _persist_event(session: AsyncSession, fields: dict[str, Any]) -> None:
     row = dict(fields)
     try:
         async with AsyncSession(bind, expire_on_commit=False) as extra:
-            if bind.dialect.name == "sqlite":
-                # 单写库不做长等：主路径持写锁时 250ms 内认输走下面的兜底，
-                # 而不是干等 connect_args 的 30s（CI 全量曾因此每次同步 +33s）。
-                await extra.execute(text("PRAGMA busy_timeout=250"))
-            elif bind.dialect.name == "mysql":
-                # QA-7：MySQL 默认 innodb_lock_wait_timeout=50s，独立会话撞主
-                # 路径持有的行锁会同步阻塞 50 秒才失败——生产路径正常不会走到
-                # 这条分支（MySQL 多连接互不阻塞是常态），但一旦撞上就是 50s
-                # 同步卡死，与 SQLite 的 250ms 短等不对称。会话级设置，不影响
-                # 其他连接。
-                await extra.execute(text("SET SESSION innodb_lock_wait_timeout = 1"))
+            await _shorten_lock_wait(extra, bind.dialect.name)
             row["is_internal_fixture"] = await _fixture_snapshot(extra, row.get("tenant_id"))
             extra.add(ProductEvent(**row))
             await extra.commit()

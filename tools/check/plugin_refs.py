@@ -41,6 +41,18 @@ def repo_checks(root: Path = ROOT) -> tuple[list[str], list[str]]:
         return [], [f"PL-0 {LOCK_NAME}：{p}" for p in problems]
     plugins = parse_lock(data)
     host_links = expected_host_links(plugins)
+    bad = _hub_problems(root, plugins)
+    bad += _host_link_problems(root, host_links)
+    bad += _claude_settings_problems(root, plugins)
+    bad += _codex_agent_problems(root, plugins)
+    cap = root / "capability-library" / "plugins"
+    if cap.exists() and not cap.is_symlink():
+        bad.append("PL-5 capability-library/plugins 不是符号链接（应整目录链到 ../.agents/plugins）")
+    return sorted(plugins), bad
+
+
+def _hub_problems(root: Path, plugins: dict) -> list[str]:
+    """PL-1：中枢 .agents/plugins 只放锁内插件的符号链接"""
     bad = []
     hub = root / HUB_DIR
     for entry in sorted(hub.iterdir()) if hub.is_dir() else []:
@@ -50,6 +62,12 @@ def repo_checks(root: Path = ROOT) -> tuple[list[str], list[str]]:
             bad.append(f"PL-1 {HUB_DIR}/{entry.name} 不是符号链接（中枢只放指针，正文在 ~/.zcode/local-plugins）")
         elif entry.name not in plugins:
             bad.append(f"PL-1 {HUB_DIR}/{entry.name} 不在 {LOCK_NAME} 内（跑 scripts/agents_plugins.py sync 清理）")
+    return bad
+
+
+def _host_link_problems(root: Path, host_links: dict) -> list[str]:
+    """PL-2 / PL-6：各宿主适配器目录只放指向中枢的链接，且锁内插件的适配器齐全"""
+    bad = []
     for d, _ in HOST_LINKS.values():
         base = root / d
         for entry in sorted(base.iterdir()) if base.is_dir() else []:
@@ -64,17 +82,30 @@ def repo_checks(root: Path = ROOT) -> tuple[list[str], list[str]]:
         for rel in sorted(k for k in host_links if k.startswith(d + "/")):
             if base.is_dir() and not (root / rel).is_symlink():
                 bad.append(f"PL-6 缺少 {rel}（跑 scripts/agents_plugins.py sync）")
+    return bad
+
+
+def _claude_settings_problems(root: Path, plugins: dict) -> list[str]:
+    """PL-3：.claude/settings.json 插件源必须原地加载锁内 claude 宿主插件"""
+    bad = []
     settings = root / ".claude" / "settings.json"
-    if settings.is_file():
-        claude = {p.name for p in plugins.values() if "claude" in p.hosts}
-        markets = json.loads(settings.read_text(encoding="utf-8")).get("extraKnownMarketplaces", {})
-        for key, spec in markets.items():
-            src = spec.get("source", {})
-            path = str(src.get("path", ""))
-            if src.get("source") != "directory" or not path.startswith(f"./{HUB_DIR}/"):
-                bad.append(f"PL-3 .claude/settings.json 插件源 {key} 必须是 directory + ./{HUB_DIR}/<name>（原地加载）")
-            elif path.rsplit("/", 1)[-1] not in claude:
-                bad.append(f"PL-3 .claude/settings.json 插件源 {key} 不在 {LOCK_NAME} 的 claude 宿主内")
+    if not settings.is_file():
+        return bad
+    claude = {p.name for p in plugins.values() if "claude" in p.hosts}
+    markets = json.loads(settings.read_text(encoding="utf-8")).get("extraKnownMarketplaces", {})
+    for key, spec in markets.items():
+        src = spec.get("source", {})
+        path = str(src.get("path", ""))
+        if src.get("source") != "directory" or not path.startswith(f"./{HUB_DIR}/"):
+            bad.append(f"PL-3 .claude/settings.json 插件源 {key} 必须是 directory + ./{HUB_DIR}/<name>（原地加载）")
+        elif path.rsplit("/", 1)[-1] not in claude:
+            bad.append(f"PL-3 .claude/settings.json 插件源 {key} 不在 {LOCK_NAME} 的 claude 宿主内")
+    return bad
+
+
+def _codex_agent_problems(root: Path, plugins: dict) -> list[str]:
+    """PL-4：Codex 子代理目录只放经中枢的链接，且所属插件启用了 codex 宿主"""
+    bad = []
     codex = {p.name for p in plugins.values() if "codex" in p.hosts}
     agents = root / CODEX_AGENTS_DIR
     for entry in sorted(agents.iterdir()) if agents.is_dir() else []:
@@ -82,10 +113,7 @@ def repo_checks(root: Path = ROOT) -> tuple[list[str], list[str]]:
             bad.append(f"PL-4 {CODEX_AGENTS_DIR}/{entry.name} 是复制品，应经 {HUB_DIR} 链接（sdlc-workflow 用 link-codex.py）")
         elif codex_agent_owner(os.readlink(entry)) not in codex:
             bad.append(f"PL-4 {CODEX_AGENTS_DIR}/{entry.name} 所属插件不在 {LOCK_NAME} 的 codex 宿主内")
-    cap = root / "capability-library" / "plugins"
-    if cap.exists() and not cap.is_symlink():
-        bad.append("PL-5 capability-library/plugins 不是符号链接（应整目录链到 ../.agents/plugins）")
-    return sorted(plugins), bad
+    return bad
 
 
 def local_checks(names: list[str]) -> list[str]:

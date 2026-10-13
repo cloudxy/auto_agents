@@ -132,10 +132,10 @@ class TestIngestMirror:
             "item": {"url": "https://a.b", "title": "t"}, "fetched_at": "2026-01-01T00:00:00Z",
         }
         with (
-            patch("backend.tasks.consumer.AsyncSession", return_value=session),
-            patch("backend.tasks.consumer.SpiderResultRepository", return_value=result_repo),
-            patch("backend.tasks.consumer.SpiderTaskRepository", return_value=task_repo),
-            patch("backend.tasks.consumer.settings") as fake_settings,
+            patch("backend.tasks.consumer_store.AsyncSession", return_value=session),
+            patch("backend.tasks.consumer_store.SpiderResultRepository", return_value=result_repo),
+            patch("backend.tasks.consumer_store.SpiderTaskRepository", return_value=task_repo),
+            patch("backend.tasks.consumer_store.settings") as fake_settings,
         ):
             fake_settings.get.return_value = 604800
             await consumer._ingest(msg)
@@ -166,9 +166,9 @@ class TestIngestMirror:
 
         msg = {"task_id": 4, "spider_name": "example", "item": {"url": "https://a.b"}}
         with (
-            patch("backend.tasks.consumer.AsyncSession", return_value=session),
-            patch("backend.tasks.consumer.SpiderResultRepository", return_value=result_repo),
-            patch("backend.tasks.consumer.SpiderTaskRepository", return_value=task_repo),
+            patch("backend.tasks.consumer_store.AsyncSession", return_value=session),
+            patch("backend.tasks.consumer_store.SpiderResultRepository", return_value=result_repo),
+            patch("backend.tasks.consumer_store.SpiderTaskRepository", return_value=task_repo),
         ):
             await consumer._ingest(msg)
 

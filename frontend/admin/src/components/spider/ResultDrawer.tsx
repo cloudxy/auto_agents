@@ -2,7 +2,8 @@
  * ResultDrawer - 结果查看抽屉（表格 + 导出 + 存储信息）
  */
 import React, { useEffect, useState } from 'react'
-import { Drawer, Table, Button, Space, Tag, Tooltip, Typography, message } from 'antd'
+import { Drawer, Table, Button, Space, Tag, Tooltip, Typography } from 'antd'
+import { message } from '../../feedback'
 import { STILL_RUNNING_COPY, ZERO_ITEMS_DONE_COPY } from './copy'
 import { DownloadOutlined } from '@ant-design/icons'
 import { fetchResults, exportResults, fetchTaskStore } from '../../services/spiders'
@@ -144,7 +145,7 @@ export const ResultDrawer: React.FC<ResultDrawerProps> = ({ task, spiderMap, onC
       }
       open={!!task}
       onClose={handleClose}
-      width={860}
+      size={860}
       footer={
         <Space style={{ float: 'right' }}>
           <Text type="secondary">单次最多 100 条</Text>

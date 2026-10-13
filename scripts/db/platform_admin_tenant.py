@@ -47,7 +47,7 @@ def _engine():
 
 
 def inventory(conn) -> dict:
-    from sqlalchemy import inspect, text
+    from sqlalchemy import text
 
     tenants = [dict(r._mapping) for r in conn.execute(text(
         "SELECT id, slug, name, status FROM tenants ORDER BY id"))]
@@ -58,22 +58,39 @@ def inventory(conn) -> dict:
     platform = next((t for t in tenants if t["slug"] == "platform"), None)
     report = {"default_id": default and default["id"], "platform_id": platform and platform["id"]}
     if default is not None:
-        print(f"\n== default 租户 #{default['id']} 业务数据 ==")
-        existing = set(inspect(conn).get_table_names())
-        for table in _TENANT_TABLES:
-            if table not in existing:
-                continue
-            n = conn.execute(text(f"SELECT COUNT(*) FROM {table} WHERE tenant_id = :t"),
-                             {"t": default["id"]}).scalar_one()
-            print(f"  {table:<22} {n}")
-        users = conn.execute(text(
-            "SELECT id, username, role, tenant_role, is_platform_admin, is_active, deleted_at "
-            "FROM users WHERE tenant_id = :t ORDER BY id"), {"t": default["id"]}).all()
-        print(f"\n== default 租户账号（{len(users)}）==")
-        for u in users:
-            flag = " [平台超管]" if u.is_platform_admin else ""
-            dead = " [已删]" if u.deleted_at else ""
-            print(f"  #{u.id:<4} {u.username:<20} role={u.role:<9} tenant_role={u.tenant_role}{flag}{dead}")
+        _print_default_tenant(conn, default["id"])
+    report["misplaced"] = _misplaced_admins(conn)
+    if platform is None:
+        print("\n!! 缺 platform 租户（迁移 024 未执行）")
+    return report
+
+
+def _print_default_tenant(conn, default_id: int) -> None:
+    """default 租户：各业务表行数（表不存在跳过）+ 账号清单"""
+    from sqlalchemy import inspect, text
+
+    print(f"\n== default 租户 #{default_id} 业务数据 ==")
+    existing = set(inspect(conn).get_table_names())
+    for table in _TENANT_TABLES:
+        if table not in existing:
+            continue
+        n = conn.execute(text(f"SELECT COUNT(*) FROM {table} WHERE tenant_id = :t"),
+                         {"t": default_id}).scalar_one()
+        print(f"  {table:<22} {n}")
+    users = conn.execute(text(
+        "SELECT id, username, role, tenant_role, is_platform_admin, is_active, deleted_at "
+        "FROM users WHERE tenant_id = :t ORDER BY id"), {"t": default_id}).all()
+    print(f"\n== default 租户账号（{len(users)}）==")
+    for u in users:
+        flag = " [平台超管]" if u.is_platform_admin else ""
+        dead = " [已删]" if u.deleted_at else ""
+        print(f"  #{u.id:<4} {u.username:<20} role={u.role:<9} tenant_role={u.tenant_role}{flag}{dead}")
+
+
+def _misplaced_admins(conn) -> list[dict]:
+    """不在 platform 租户下的平台超管（含与 platform 租户存活账号撞名标记）；打印并返回"""
+    from sqlalchemy import text
+
     misplaced = conn.execute(text(
         "SELECT u.id, u.username, u.tenant_id, u.deleted_at IS NULL AS alive, "
         "EXISTS (SELECT 1 FROM users p JOIN tenants pt ON pt.id = p.tenant_id "
@@ -83,14 +100,12 @@ def inventory(conn) -> dict:
         "LEFT JOIN tenants t ON t.id = u.tenant_id "
         "WHERE u.is_platform_admin = 1 AND (t.slug IS NULL OR t.slug <> 'platform') "
         "ORDER BY u.id")).all()
-    report["misplaced"] = [dict(r._mapping) for r in misplaced]
+    rows = [dict(r._mapping) for r in misplaced]
     print(f"\n== 不在 platform 租户的平台超管（{len(misplaced)}）==")
     for r in misplaced:
         clash = " [撞名：platform 租户已有同名存活账号，先改名]" if r.alive and r.clash else ""
         print(f"  #{r.id} {r.username} 当前 tenant_id={r.tenant_id}{clash}")
-    if platform is None:
-        print("\n!! 缺 platform 租户（迁移 024 未执行）")
-    return report
+    return rows
 
 
 def apply(conn, report: dict) -> int:

@@ -6,8 +6,9 @@
  */
 import React, { useMemo, useState } from 'react'
 import {
-  Button, Col, Form, Input, InputNumber, message, Modal, Radio, Row, Select, Space, Switch, Tag, Typography,
+  Button, Col, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Switch, Tag, Typography,
 } from 'antd'
+import { message } from '../../feedback'
 import { CloudDownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import {
   createLlmProvider, probeModels, probeTest, updateLlmProvider,

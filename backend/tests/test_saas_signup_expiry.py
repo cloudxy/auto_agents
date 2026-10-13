@@ -5,7 +5,6 @@ Seam（工单预确认）：/public/tenant/signup 端点 + 登录拒绝。
 决策 D22（2026-09-29）：账期到期不再自动把企业置 expired（改为提醒 → 宽限 → 降免费档，
 见 test_subscription_lifecycle.py）；运营台手动置为到期 / 停用的企业仍拒绝登录（本文件）。
 """
-import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
@@ -25,7 +24,7 @@ from platform_core.models.spider_task import SpiderTask
 from platform_core.models.tenant import Tenant
 from platform_core.models.user import User
 from platform_core.queues import LOGIN_FAIL_PREFIX
-from platform_core.redis_async import get_async_redis
+from conftest import clear_redis_keys
 
 _MEMBER_PASSWORD = "SuperSecret1!"
 _CREDENTIAL_MESSAGE = "用户名或密码错误"
@@ -51,11 +50,7 @@ def _clear_login_fail_counters():
         "dup", "hijack-co-owner",
     )
 
-    async def _clear() -> None:
-        redis = get_async_redis()
-        await redis.delete(*[f"{LOGIN_FAIL_PREFIX}{u}" for u in usernames])
-
-    asyncio.run(_clear())
+    clear_redis_keys(*[f"{LOGIN_FAIL_PREFIX}{u}" for u in usernames])
     yield
 
 

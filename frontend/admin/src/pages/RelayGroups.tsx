@@ -5,8 +5,9 @@
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Skeleton, Space, Table, Tag, Tooltip, Typography, message,
+  Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Skeleton, Space, Table, Tag, Tooltip, Typography,
 } from 'antd'
+import { message } from '../feedback'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 

@@ -48,9 +48,6 @@ class DBManager:
 
     def _init_mysql_all(self):
         """初始化所有 MySQL 实例（同步 + 异步引擎）"""
-        global_log = get_logger("global")
-        error_log = get_logger("error")
-        
         mysql_cfg = getattr(settings, "MYSQL", {})
         if not hasattr(mysql_cfg, "keys"):
             return
@@ -58,65 +55,84 @@ class DBManager:
         for key in mysql_cfg.keys():
             if key.startswith("_"):
                 continue
+            self._init_mysql_one(key, getattr(mysql_cfg, key))
 
-            cfg = getattr(mysql_cfg, key)
-            host = getattr(cfg, "HOST", "127.0.0.1")
-            port = getattr(cfg, "PORT", 3306)
-            user = getattr(cfg, "USER", "root")
-            dbname = getattr(cfg, "DB_NAME", "")
-            if _IN_PYTEST:
-                # 审计 BUG-44 / QA-B1-6：测试进程里惰性 init_all 曾用真实开发库引擎覆盖
-                # conftest 注入的测试引擎，审计行、事件被写进开发库。测试态：
-                # ① 已注入的键不覆盖；② 库名不是测试 schema（test_ 前缀）一律拒连
-                if key in self.async_engines:
-                    continue
-                if not str(dbname).startswith("test_"):
-                    global_log.warning(
-                        f"测试进程拒绝连接非测试库 MySQL [{key}]: db={dbname}（审计 BUG-44 护栏）"
-                    )
-                    continue
-            charset = getattr(cfg, "CHARSET", "utf8mb4")
-            password = self._get_password("MYSQL", key)
+    def _init_mysql_one(self, key: str, cfg) -> None:
+        """初始化单个 MySQL 实例；测试态护栏命中则跳过"""
+        global_log = get_logger("global")
+        error_log = get_logger("error")
 
-            encoded_pwd = quote_plus(password) if password else ""
-            sync_url = f"mysql+pymysql://{user}:{encoded_pwd}@{host}:{port}/{dbname}?charset={charset}"
-            async_url = f"mysql+aiomysql://{user}:{encoded_pwd}@{host}:{port}/{dbname}?charset={charset}"
+        host = getattr(cfg, "HOST", "127.0.0.1")
+        port = getattr(cfg, "PORT", 3306)
+        user = getattr(cfg, "USER", "root")
+        dbname = getattr(cfg, "DB_NAME", "")
+        if _IN_PYTEST and self._pytest_refuses(key, dbname):
+            return
+        charset = getattr(cfg, "CHARSET", "utf8mb4")
+        password = self._get_password("MYSQL", key)
 
-            try:
-                # 1. 同步引擎
-                # P1-13：统一 pool_pre_ping（与 channel_scheduler 自建引擎口径一致），
-                # MySQL wait_timeout 后的陈旧连接借一次往返探测自动重连，
-                # 消除非整点回收窗口的 "server has gone away"
-                # 审计 BUG-43：会话固定 UTC，NOW()/CURRENT_TIMESTAMP 与 Python utcnow() 同一时钟
-                engine = create_engine(
-                    sync_url, pool_size=5, max_overflow=10, pool_recycle=3600,
-                    pool_pre_ping=True, connect_args=dict(MYSQL_UTC_CONNECT_ARGS),
-                )
-                with engine.connect() as conn:
-                    conn.execute(text("SELECT 1"))
-                self.mysql[key] = sessionmaker(bind=engine)
+        encoded_pwd = quote_plus(password) if password else ""
+        sync_url = f"mysql+pymysql://{user}:{encoded_pwd}@{host}:{port}/{dbname}?charset={charset}"
+        async_url = f"mysql+aiomysql://{user}:{encoded_pwd}@{host}:{port}/{dbname}?charset={charset}"
 
-                # 2. 异步引擎（测试态用 NullPool，见模块头部说明）
-                async_engine_kwargs: Dict = {
-                    "pool_recycle": 3600,
-                    "pool_pre_ping": True,
-                    "echo": False,
-                    "connect_args": dict(MYSQL_UTC_CONNECT_ARGS),
-                }
-                if _IN_PYTEST:
-                    async_engine_kwargs["poolclass"] = NullPool
-                else:
-                    async_engine_kwargs.update(pool_size=5, max_overflow=10)
-                async_engine = create_async_engine(async_url, **async_engine_kwargs)
-                self._arm_mysql_rw_on_checkout(async_engine)
-                self.async_engines[key] = async_engine
-                
-                global_log.success(f"MySQL [{key}] OK: {host}:{port}/{dbname}")
-            except Exception as e:
-                error_msg = f"MySQL [{key}] FAIL: {e}"
-                global_log.error(error_msg)
-                error_log.error(error_msg)
-                raise
+        try:
+            self.mysql[key] = sessionmaker(bind=self._create_sync_engine(sync_url))
+            self.async_engines[key] = self._create_async_engine(async_url)
+            global_log.success(f"MySQL [{key}] OK: {host}:{port}/{dbname}")
+        except Exception as e:
+            error_msg = f"MySQL [{key}] FAIL: {e}"
+            global_log.error(error_msg)
+            error_log.error(error_msg)
+            raise
+
+    def _pytest_refuses(self, key: str, dbname) -> bool:
+        """测试态护栏：命中返回 True（跳过该实例）
+
+        审计 BUG-44 / QA-B1-6：测试进程里惰性 init_all 曾用真实开发库引擎覆盖
+        conftest 注入的测试引擎，审计行、事件被写进开发库。测试态：
+        ① 已注入的键不覆盖；② 库名不是测试 schema（test_ 前缀）一律拒连
+        """
+        if key in self.async_engines:
+            return True
+        if not str(dbname).startswith("test_"):
+            get_logger("global").warning(
+                f"测试进程拒绝连接非测试库 MySQL [{key}]: db={dbname}（审计 BUG-44 护栏）"
+            )
+            return True
+        return False
+
+    @staticmethod
+    def _create_sync_engine(sync_url: str):
+        """同步引擎（建好即 SELECT 1 探活）
+
+        P1-13：统一 pool_pre_ping（与 channel_scheduler 自建引擎口径一致），
+        MySQL wait_timeout 后的陈旧连接借一次往返探测自动重连，
+        消除非整点回收窗口的 "server has gone away"
+        审计 BUG-43：会话固定 UTC，NOW()/CURRENT_TIMESTAMP 与 Python utcnow() 同一时钟
+        """
+        engine = create_engine(
+            sync_url, pool_size=5, max_overflow=10, pool_recycle=3600,
+            pool_pre_ping=True, connect_args=dict(MYSQL_UTC_CONNECT_ARGS),
+        )
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return engine
+
+    def _create_async_engine(self, async_url: str) -> AsyncEngine:
+        """异步引擎（测试态用 NullPool，见模块头部说明）"""
+        async_engine_kwargs: Dict = {
+            "pool_recycle": 3600,
+            "pool_pre_ping": True,
+            "echo": False,
+            "connect_args": dict(MYSQL_UTC_CONNECT_ARGS),
+        }
+        if _IN_PYTEST:
+            async_engine_kwargs["poolclass"] = NullPool
+        else:
+            async_engine_kwargs.update(pool_size=5, max_overflow=10)
+        async_engine = create_async_engine(async_url, **async_engine_kwargs)
+        self._arm_mysql_rw_on_checkout(async_engine)
+        return async_engine
 
     def _init_redis_all(self):
         """初始化所有 Redis 实例"""

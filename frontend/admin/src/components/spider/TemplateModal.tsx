@@ -2,7 +2,8 @@
  * TemplateModal - 收藏为任务模板弹窗
  */
 import React, { useEffect, useState } from 'react'
-import { Modal, Form, Input, Typography, message } from 'antd'
+import { Modal, Form, Input, Typography } from 'antd'
+import { message } from '../../feedback'
 import { createTemplate } from '../../services/spiders'
 import { PRIORITY_META } from './types'
 import type { Task, SpiderMap } from './types'

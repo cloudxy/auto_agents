@@ -2,7 +2,7 @@
 # ============================================================================
 # watchdog.sh — 后端僵死看门狗（T11）
 #
-# 背景：2026-08 冻结事故（docs/ops/incident-2026-08-backend-freeze.md）——
+# 背景：2026-08 冻结事故（docs/ops/runbook.md §5）——
 # 进程僵死时既不崩溃也不退出，compose 的 restart 策略永不触发（它只覆盖
 # "进程退出"型故障）。本脚本轮询深探测健康端点（/api/v1/health/deep，
 # MySQL + Redis 任一失败返回 503），连续 N 次失败判定僵死嫌疑：
@@ -10,7 +10,7 @@
 # restart: unless-stopped 由编排器拉起，或按 WATCHDOG_RESTART 显式拉起）。
 #
 # 安全缺省：只告警不杀进程（WATCHDOG_RESTART=0）。开启自动处置的方式与
-# 风险说明见 docs/ops/deploy.md「看门狗」一节。
+# 风险说明见 docs/ops/runbook.md §5「看门狗」。
 #
 # 配置（全部环境变量外置，无硬编码端口/密钥）：
 #   WATCHDOG_URL          必填。健康端点完整 URL
@@ -37,7 +37,7 @@
 #   WATCHDOG_LOG          事件日志文件；缺省输出 stdout（由 docker/系统日志接管）
 #   WATCHDOG_WEBHOOK_URL  可选。告警 webhook（POST application/json，
 #                         尽力而为，投递失败不影响主流程）
-#                         payload（B4 规范化，字段断言见 docs/ops/deploy.md §4）：
+#                         payload（B4 规范化，字段见 docs/ops/runbook.md §5「告警 payload 契约」）：
 #                           event=watchdog.frozen-suspected / severity=P1 /
 #                           timestamp(ISO8601) / host / url / pid /
 #                           failures / action(kill+restart|alert-only) /
@@ -65,7 +65,7 @@ WEBHOOK_URL="${WATCHDOG_WEBHOOK_URL:-}"
 DRY_RUN="${WATCHDOG_DRY_RUN:-0}"
 URL="${WATCHDOG_URL:-}"
 
-RUNBOOK="处理指引：先看后端日志尾部与 MySQL/Redis 状态（docs/ops/deploy.md 看门狗一节）；复盘背景 docs/ops/incident-2026-08-backend-freeze.md"
+RUNBOOK="处理指引：先看后端日志尾部与 MySQL/Redis 状态（docs/ops/runbook.md §5 看门狗）"
 
 log() {
     # log <级别> <内容> —— 统一 ISO8601 时间戳；输出到 WATCHDOG_LOG 或 stdout
@@ -141,7 +141,7 @@ send_webhook() {
     # 告警动作（SRE 纪律：告警必须带处理指引，否则等于噪音）
     # 入参 $1 = 判定时解析到的目标 PID（可能为空 → JSON null）
     # payload 字段规范（B4）：severity/timestamp/host/url/pid/hint 为必带，
-    # 接收端断言见 docs/ops/deploy.md §4「告警 payload 契约」
+    # 字段契约见 docs/ops/runbook.md §5「告警 payload 契约」
     [ -z "$WEBHOOK_URL" ] && return 0
     command -v curl > /dev/null 2>&1 || return 0
     local pid="${1:-}"

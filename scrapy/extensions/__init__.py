@@ -108,8 +108,8 @@ class SpiderCloseWebhook:
         for task_id in task_ids:
             self._callback_one(task_id, spider.name, status, item_count, reason)
 
-    def _callback_one(self, task_id, spider_name, status, item_count, reason):
-        """向 Backend 回调单个任务的终态（重试 3 次，最终失败由活跃键 TTL 兜底清理）"""
+    def _signed_payload(self, task_id, spider_name, status, item_count, reason):
+        """回调请求体 + HMAC 签名头（签名算法见模块文档）"""
         body = json.dumps(
             {
                 "task_id": task_id,
@@ -130,6 +130,11 @@ class SpiderCloseWebhook:
             "X-Webhook-Timestamp": timestamp,
             "X-Webhook-Signature": signature,
         }
+        return body, headers
+
+    def _callback_one(self, task_id, spider_name, status, item_count, reason):
+        """向 Backend 回调单个任务的终态（重试 3 次，最终失败由活跃键 TTL 兜底清理）"""
+        body, headers = self._signed_payload(task_id, spider_name, status, item_count, reason)
 
         # 回调可能遭遇瞬时失败（如 Backend 短暂繁忙），重试 3 次兜底，
         # 最终失败由 ACTIVE_TASK_TTL 过期机制清理关联（避免永久卡死）

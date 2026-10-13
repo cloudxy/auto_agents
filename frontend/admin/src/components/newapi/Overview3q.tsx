@@ -12,8 +12,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Alert, Button, Card, Empty, Skeleton, Space, Statistic, Table, Tag, Tooltip, Typography, message,
+  Alert, Button, Card, Empty, Skeleton, Space, Statistic, Table, Tag, Tooltip, Typography,
 } from 'antd'
+import { message } from '../../feedback'
 import { CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import {
