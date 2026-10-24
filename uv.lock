@@ -311,7 +311,7 @@ requires-dist = [
     { name = "redis", specifier = ">=7.4.0" },
     { name = "scrapy", specifier = ">=2.15.0" },
     { name = "scrapy-redis", specifier = ">=0.9.1" },
-    { name = "selenium", specifier = ">=4.43.0" },
+    { name = "selenium", specifier = ">=4.51.0" },
     { name = "sqlalchemy", specifier = ">=2.0.49" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.44.0" },
     { name = "wechatpayv3", specifier = ">=2.0.4" },
@@ -353,7 +353,7 @@ requires-dist = [
     { name = "redis", specifier = ">=7.4.0" },
     { name = "scrapy", specifier = ">=2.15.0" },
     { name = "scrapy-redis", specifier = ">=0.9.1" },
-    { name = "selenium", specifier = ">=4.43.0" },
+    { name = "selenium", specifier = ">=4.51.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -2617,7 +2617,7 @@ wheels = [
 
 [[package]]
 name = "selenium"
-version = "4.44.0"
+version = "4.51.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -2627,9 +2627,9 @@ dependencies = [
     { name = "urllib3", extra = ["socks"] },
     { name = "websocket-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2d/4a/6d0a4f4a07e2a91511a51398203ee82bf6ce644a448aaa35c59b44aa9531/selenium-4.44.0.tar.gz", hash = "sha256:b03a831fcfcab9d912b4682f60718c48a04560d6c62f7496c16b7498c9a4427e", size = 993133, upload-time = "2026-05-12T22:48:19.246Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/d3/c925308af2c9b9a9ccf531cf23ffba4f38c0d750f088a06e560fb2ca0c59/selenium-4.51.0.tar.gz", hash = "sha256:6bec9bd8d9b6599f850b0f6e9fb06d44d2e4245adccd11ae02c9d5cde7596276", size = 1050794, upload-time = "2026-10-09T18:38:24.729Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/bc/885047e975e996cb317db31c4551caa915aafc6befea990f082c7233adc2/selenium-4.44.0-py3-none-any.whl", hash = "sha256:d01ea3e5ecad8149460a765f7cf5177194c21dcc0173093fc05427c289b1bf24", size = 9654291, upload-time = "2026-05-12T22:48:16.836Z" },
+    { url = "https://files.pythonhosted.org/packages/74/6d/2cae01adf4db83e2862e254bc053def829a9603a1c68431b7c9aae0ecba0/selenium-4.51.0-py3-none-any.whl", hash = "sha256:5531e99df3c60a298c4bef38de825aec4aa8ca238438ac21511d650b58dbdd87", size = 11794382, upload-time = "2026-10-09T18:38:21.957Z" },
 ]
 
 [[package]]
