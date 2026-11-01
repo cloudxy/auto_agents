@@ -25,7 +25,7 @@ COPY frontend/official/ frontend/official/
 RUN npm run build -w official && echo 'OFFICIAL_BUILD_OK'
 
 # ===== Stage 2: 后端运行时 =====
-FROM python:3.13-slim AS backend
+FROM python:3.15-slim AS backend
 
 RUN pip install --no-cache-dir uv
 
